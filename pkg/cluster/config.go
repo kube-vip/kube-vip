@@ -26,6 +26,9 @@ type Config struct {
 
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
+
+	// LoadBalancers is the various services we can load balance over
+	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 }
 
 // RaftPeer details the configuration of all cluster peers
@@ -38,6 +41,33 @@ type RaftPeer struct {
 
 	// Listening port of this peer instance
 	Port int `yaml:"port"`
+}
+
+// LoadBalancer contains the configuration of a load balancing instance
+type LoadBalancer struct {
+	// Name of a LoadBalancer
+	Name string `yaml:"name"`
+
+	// Type of LoadBalancer, either TCP of HTTP(s)
+	Type string `yaml:"type"`
+
+	// Listening frontend port of this LoadBalancer instance
+	Port int `yaml:"port"`
+
+	// BindToVip will bind the load balancer port to the VIP itself
+	BindToVip bool `yaml:"bindToVip"`
+
+	//Backends, is an array of backend servers
+	Backends []BackEnd `yaml:"backends"`
+}
+
+// BackEnd is a server we will load balance over
+type BackEnd struct {
+	// Backend Port to Load Balance to
+	Port int `yaml:"port"`
+
+	// Address of a server/service
+	Address string `yaml:"address"`
 }
 
 //OpenConfig will attempt to read a file and parse it's contents into a configuration
