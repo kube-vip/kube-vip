@@ -7,6 +7,8 @@ import (
 
 	"github.com/hashicorp/raft"
 	log "github.com/sirupsen/logrus"
+	"github.com/thebsdbox/kube-vip/pkg/kubevip"
+	"github.com/thebsdbox/kube-vip/pkg/loadbalancer"
 	"github.com/thebsdbox/kube-vip/pkg/vip"
 )
 
@@ -21,7 +23,7 @@ type Cluster struct {
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
-func InitCluster(c *Config) (*Cluster, error) {
+func InitCluster(c *kubevip.Config) (*Cluster, error) {
 
 	// TODO - Check for root (needed to netlink)
 
@@ -39,7 +41,7 @@ func InitCluster(c *Config) (*Cluster, error) {
 	return newCluster, nil
 }
 
-func startNetworking(c *Config) (*vip.Network, error) {
+func startNetworking(c *kubevip.Config) (*vip.Network, error) {
 	network, err := vip.NewConfig(c.VIP, c.Interface)
 	if err != nil {
 		// log.WithFields(log.Fields{"error": err}).Error("Network failure")
@@ -50,8 +52,8 @@ func startNetworking(c *Config) (*vip.Network, error) {
 	return &network, nil
 }
 
-// Start - Begins a running instance of the Raft cluster
-func (cluster *Cluster) Start(c *Config) error {
+// StartCluster - Begins a running instance of the Raft cluster
+func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 
 	// Create local configuration address
 	localAddress := fmt.Sprintf("%s:%d", c.LocalPeer.Address, c.LocalPeer.Port)
@@ -114,6 +116,26 @@ func (cluster *Cluster) Start(c *Config) error {
 	// leader log broadcast - this counter is used to stop flooding STDOUT with leader log entries
 	var leaderbroadcast int
 
+	// Start all NON-bindToVip Load Balancers
+
+	// Iterate through all Configurations
+	for x := range c.LoadBalancers {
+		// If the load balancer doesn't bind to the VIP
+		if c.LoadBalancers[x].BindToVip == false {
+			if c.LoadBalancers[x].Type == "tcp" {
+				// Bind to 0.0.0.0
+				loadbalancer.StartTCP(&c.LoadBalancers[x], ":1")
+			} else if c.LoadBalancers[x].Type == "http" {
+				// Bind to 0.0.0.0
+				loadbalancer.StartHTTP(&c.LoadBalancers[x], ":1")
+
+			} else {
+				// If the type isn't one of above then we don't understand it
+				log.Warnf("Load Balancer [%s] uses unknown type [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type)
+			}
+		}
+	}
+
 	go func() {
 		for {
 			// Broadcast the current leader on this node if it's the correct time (every leaderLogcount * time.Second)
@@ -134,6 +156,24 @@ func (cluster *Cluster) Start(c *Config) error {
 					err = cluster.network.AddIP()
 					if err != nil {
 						log.Warnf("%v", err)
+					}
+
+					// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+
+					// Iterate through all Configurations
+					for x := range c.LoadBalancers {
+						// If the load balancer doesn't bind to the VIP
+						if c.LoadBalancers[x].BindToVip == true {
+							// DO IT
+							if c.LoadBalancers[x].Type == "tcp" {
+								loadbalancer.StartTCP(&c.LoadBalancers[x], c.VIP)
+							} else if c.LoadBalancers[x].Type == "http" {
+								loadbalancer.StartHTTP(&c.LoadBalancers[x], c.VIP)
+							} else {
+								// If the type isn't one of above then we don't understand it
+								log.Warnf("Load Balancer [%s] uses unknown type [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type)
+							}
+						}
 					}
 
 					if c.GratuitousARP == true {

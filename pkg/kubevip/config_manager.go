@@ -1,4 +1,4 @@
-package cluster
+package kubevip
 
 import (
 	"fmt"
@@ -9,36 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// Config defines all of the settings for the Virtual IP / Load-balancer
-type Config struct {
-
-	// Peers are all of the peers within the RAFT cluster
-	Peers []RaftPeer `yaml:"peers"`
-
-	// LocalPeer is the configuration of this host
-	LocalPeer RaftPeer `yaml:"localPeer"`
-
-	// VIP is the Virtual IP address exposed for the cluster
-	VIP string `yaml:"vip"`
-
-	// GratuituosArp will broadcast an ARP update when the VIP changes host
-	GratuitousARP bool `yaml:"gratuitousARP"`
-
-	// Interface is the network interface to bind to (default: First Adapter)
-	Interface string `yaml:"interface,omitempty"`
-}
-
-// RaftPeer details the configuration of all cluster peers
-type RaftPeer struct {
-	// ID is the unique identifier a peer instance
-	ID string `yaml:"id"`
-
-	// IP Address of a peer instance
-	Address string `yaml:"address"`
-
-	// Listening port of this peer instance
-	Port int `yaml:"port"`
-}
+var endPointIndex int // Holds the previous endpoint (for determining decisions on next endpoint)
 
 //OpenConfig will attempt to read a file and parse it's contents into a configuration
 func OpenConfig(path string) (*Config, error) {
@@ -100,6 +71,29 @@ func SampleConfig() {
 		VIP: "192.168.0.100",
 		// Interface to bind to
 		Interface: "eth0",
+		// Load Balancer Configuration
+		LoadBalancers: []LoadBalancer{
+			LoadBalancer{
+				Name:      "Kubernetes Control Plane",
+				Type:      "http",
+				Port:      6443,
+				BindToVip: true,
+				Backends: []BackEnd{
+					BackEnd{
+						Address: "192.168.0.100",
+						Port:    6443,
+					},
+					BackEnd{
+						Address: "192.168.0.101",
+						Port:    6443,
+					},
+					BackEnd{
+						Address: "192.168.0.102",
+						Port:    6443,
+					},
+				},
+			},
+		},
 	}
 	b, _ := yaml.Marshal(c)
 
