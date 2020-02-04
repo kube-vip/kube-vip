@@ -8,22 +8,14 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/llb/pkg/config"
+	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
-// Start a TCP load balancer server
-func StartTCP() {
-	log.Infoln("Starting any tcp load balancing services")
-	for i := range config.Services {
-		if config.Services[i].ServiceType == "tcp" {
-			log.Debugf("Starting service [%s]", config.Services[i].Name)
-			startListener(&config.Services[i])
-		}
-	}
-}
+// StartTCP a TCP load balancer server instane
+func StartTCP(lb *kubevip.LoadBalancer, address string) error {
+	log.Infof("Starting TCP Load Balancer for service [%s]", lb.Name)
 
-func startListener(s *config.Service) error {
-	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.Address(), s.Port()))
+	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", address, lb.Port))
 	if err != nil {
 		log.Fatal("listen error:", err)
 	}
@@ -33,7 +25,7 @@ func startListener(s *config.Service) error {
 		if err != nil {
 			log.Fatal("accept error:", err)
 		}
-		go persistentConnection(fd, s)
+		go persistentConnection(fd, lb)
 	}
 }
 
@@ -46,7 +38,7 @@ func startListener(s *config.Service) error {
 //
 //
 
-func processRequests(frontendConnection net.Conn, s *config.Service) {
+func processRequests(lb *kubevip.LoadBalancer, frontendConnection net.Conn) {
 	for {
 		// READ FROM client
 		buf := make([]byte, 1024*1024)
@@ -58,7 +50,7 @@ func processRequests(frontendConnection net.Conn, s *config.Service) {
 		data := buf[0:datalen]
 
 		// Connect to Endpoint
-		ep := s.ReturnEndpointAddr()
+		ep := lb.ReturnEndpointAddr()
 
 		log.Debugf("Attempting endpoint [%s]", ep)
 

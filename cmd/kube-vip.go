@@ -9,6 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/thebsdbox/kube-vip/pkg/cluster"
+	"github.com/thebsdbox/kube-vip/pkg/kubevip"
+
 	appv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -70,7 +72,7 @@ var kubeVipSampleConfig = &cobra.Command{
 	Use:   "config",
 	Short: "Generate a Sample configuration",
 	Run: func(cmd *cobra.Command, args []string) {
-		cluster.SampleConfig()
+		kubevip.SampleConfig()
 	},
 }
 
@@ -142,7 +144,7 @@ var kubeVipStart = &cobra.Command{
 			log.Fatalln("No Configuration has been specified")
 		}
 		log.SetLevel(log.DebugLevel)
-		c, err := cluster.OpenConfig(configPath)
+		c, err := kubevip.OpenConfig(configPath)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -150,7 +152,7 @@ var kubeVipStart = &cobra.Command{
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
-		err = newCluster.Start(c)
+		err = newCluster.StartCluster(c)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}

@@ -5,8 +5,7 @@ import (
 	"net"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/cluster"
-
+	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
 // 1. Load balancer port is exposed
@@ -19,12 +18,12 @@ import (
 // 7. We write response to load balancer
 // [goto loop]
 
-func persistentConnection(frontendConnection net.Conn, s *cluster.Config) error {
+func persistentConnection(frontendConnection net.Conn, lb *kubevip.LoadBalancer) error {
 
 	var endpoint net.Conn
 	for {
 		// Connect to Endpoint
-		ep := s.ReturnEndpointAddr()
+		ep := lb.ReturnEndpointAddr()
 
 		log.Debugf("Attempting endpoint [%s]", ep)
 

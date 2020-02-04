@@ -7,27 +7,24 @@ import (
 	"net/url"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/cluster"
+	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
-//Start - begins the HTTP load balancer
-func StartHTTP() error {
-	log.Infoln("Starting any http load balancing services")
-	for i := range config.Services {
-		if config.Services[i].ServiceType == "http" {
-			log.Debugf("Starting service [%s]", config.Services[i].Name)
-			createHTTPHander(&config.Services[i])
-		}
-	}
-	return nil
-}
+//StartHTTP - begins the HTTP load balancer
+func StartHTTP(lb *kubevip.LoadBalancer, address string) error {
+	log.Infof("Starting TCP Load Balancer for service [%s]", lb.Name)
 
-func createHTTPHander(s *cluster.Config) error {
-	frontEnd := fmt.Sprintf("%s:%d", s.Address(), s.Port())
+	// Validate the back end URLS
+	err := kubevip.ValidateBackEndURLS(&lb.Backends)
+	if err != nil {
+		return err
+	}
+
+	frontEnd := fmt.Sprintf("%s:%d", address, lb.Port)
 
 	handler := func(w http.ResponseWriter, req *http.Request) {
 		// parse the url
-		url, _ := url.Parse(s.ReturnEndpointURL().String())
+		url, _ := url.Parse(lb.ReturnEndpointURL().String())
 
 		// create the reverse proxy
 		proxy := httputil.NewSingleHostReverseProxy(url)
