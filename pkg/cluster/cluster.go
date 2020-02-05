@@ -23,16 +23,19 @@ type Cluster struct {
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
-func InitCluster(c *kubevip.Config) (*Cluster, error) {
+func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 
 	// TODO - Check for root (needed to netlink)
+	var network *vip.Network
+	var err error
 
-	// Start the Virtual IP Networking configuration
-	network, err := startNetworking(c)
-	if err != nil {
-		return nil, err
+	if !disableVIP {
+		// Start the Virtual IP Networking configuration
+		network, err = startNetworking(c)
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	// Initialise the Cluster structure
 	newCluster := &Cluster{
 		network: network,
@@ -152,7 +155,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 					isLeader = true
 
 					log.Info("This node is assuming leadership of the cluster")
-
 					err = cluster.network.AddIP()
 					if err != nil {
 						log.Warnf("%v", err)

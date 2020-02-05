@@ -14,13 +14,16 @@ type Config struct {
 	// VIP is the Virtual IP address exposed for the cluster
 	VIP string `yaml:"vip"`
 
-	// GratuituosArp will broadcast an ARP update when the VIP changes host
+	// GratuitousARP will broadcast an ARP update when the VIP changes host
 	GratuitousARP bool `yaml:"gratuitousARP"`
+
+	// SingleNode will start the cluster as a single Node (Raft disabled)
+	SingleNode bool `yaml:"singleNode"`
 
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
 
-	// LoadBalancers is the various services we can load balance over
+	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 }
 

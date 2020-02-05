@@ -16,6 +16,8 @@ import (
 )
 
 var configPath string
+var disableVIP bool
+var logLevel uint32
 
 // Release - this struct contains the release information populated when building kube-vip
 var Release struct {
@@ -29,8 +31,13 @@ var kubeVipCmd = &cobra.Command{
 }
 
 func init() {
+
+	// Manage logging
+	kubeVipCmd.PersistentFlags().Uint32VarP(&logLevel, "log", "l", 4, "Set the level of logging")
+
 	// Get the configuration file
-	kubeVipStart.Flags().StringVarP(&configPath, "config", "c", "", "Path to a kube-vip server configuration")
+	kubeVipStart.Flags().StringVarP(&configPath, "config", "c", "", "Path to a kube-vip configuration")
+	kubeVipStart.Flags().BoolVarP(&disableVIP, "disableVIP", "d", false, "Disable the VIP functionality")
 
 	kubeVipCmd.AddCommand(kubeVipVersion)
 	kubeVipCmd.AddCommand(kubeVipSample)
@@ -139,22 +146,42 @@ var kubeVipStart = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Virtual IP / Load balancer",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
 		if configPath == "" {
 			cmd.Help()
 			log.Fatalln("No Configuration has been specified")
 		}
-		log.SetLevel(log.DebugLevel)
+
 		c, err := kubevip.OpenConfig(configPath)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
-		newCluster, err := cluster.InitCluster(c)
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
-		err = newCluster.StartCluster(c)
-		if err != nil {
-			log.Fatalf("%v", err)
+		var newCluster *cluster.Cluster
+
+		if c.SingleNode {
+			// If the Virtual IP isn't disabled then create the netlink configuration
+			newCluster, err = cluster.InitCluster(c, disableVIP)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
+			// Start a single node cluster
+			newCluster.StartSingleNode(c, disableVIP)
+		} else {
+			if disableVIP {
+				log.Fatalln("Cluster mode requires the Virtual IP to be enabled, use single node with no VIP")
+			}
+			// If the Virtual IP isn't disabled then create the netlink configuration
+			newCluster, err = cluster.InitCluster(c, disableVIP)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
+			// Start a multi-node (raft) cluster
+			err = newCluster.StartCluster(c)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
 		}
 
 		signalChan := make(chan os.Signal, 1)
