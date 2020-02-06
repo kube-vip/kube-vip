@@ -37,7 +37,7 @@ Each node in teh cluster can act as a load balancer, but also each VIP can be it
 - Require a seperate port to the service being load balanced
 
 
-## VIP LB
+#### VIP LB
 
 *PROS*
 
