@@ -28,8 +28,11 @@ Each node in teh cluster can act as a load balancer, but also each VIP can be it
 #### Per Node LB
 
 *PROS*
+
 - Simple and doesn't require a tear-up/tear-down approach
+
 *CONS*
+
 - Wasted LB instances that aren't being used
 - Require a seperate port to the service being load balanced
 
@@ -37,8 +40,11 @@ Each node in teh cluster can act as a load balancer, but also each VIP can be it
 ## VIP LB
 
 *PROS*
+
 - The VIP can use the same port as the underlying service without conflicting on the port
+
 *CONS*
+
 - Requires `kube-vip` to manage stopping and starting of LB services every election
 - Slightly complex design
 
