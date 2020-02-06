@@ -1,7 +1,7 @@
 # kube-vip (WIP)
 Kubernetes Control Plane Virtual IP and Load-Balancer
 
-* Use at your own risk *
+*Use at your own risk*
 
 The `kube-vip` application builds a multi-node cluster using [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
 
@@ -18,7 +18,29 @@ The leader within the cluster will assume the **vip** and will have it bound to 
 When the **vip** moves from one host to another any host that has been using the **vip** will retain the previous `vip <-> MAC address` mapping until the ARP (Address resolution protocol) expires the old entry (typically 30 seconds) and retrieves a new `vip <-> MAC` mapping. This can be improved using Gratuitous ARP broadcasts (when enabled), this is detailed below.
 
 ### ARP
+
 (Optional) The `kube-vip` can be configured to broadcast a [gratuitous arp](https://wiki.wireshark.org/Gratuitous_ARP) that will typically immediately notify all local hosts that the `vip <-> MAC` has changed.
+
+### Load Balancing
+
+Each node in teh cluster can act as a load balancer, but also each VIP can be its own load balancer. This provides various architectural options to how your cluster is designed.
+
+#### Per Node LB
+
+*PROS*
+- Simple and doesn't require a tear-up/tear-down approach
+*CONS*
+- Wasted LB instances that aren't being used
+- Require a seperate port to the service being load balanced
+
+
+## VIP LB
+
+*PROS*
+- The VIP can use the same port as the underlying service without conflicting on the port
+*CONS*
+- Requires `kube-vip` to manage stopping and starting of LB services every election
+- Slightly complex design
 
 ## Usage
 
