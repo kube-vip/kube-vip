@@ -12,21 +12,58 @@ import (
 )
 
 // StartTCP a TCP load balancer server instane
-func StartTCP(lb *kubevip.LoadBalancer, address string) error {
-	log.Infof("Starting TCP Load Balancer for service [%s]", lb.Name)
+func (lb *LBInstance) startTCP(bindAddress string) error {
+	log.Infof("Starting TCP Load Balancer for service [%s]", lb.instance.Name)
 
-	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", address, lb.Port))
-	if err != nil {
-		log.Fatal("listen error:", err)
+	//	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", bindAddress, lb.instance.Port))
+	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", bindAddress, lb.instance.Port))
+	if nil != err {
+		log.Errorln(err)
 	}
+	l, err := net.ListenTCP("tcp", laddr)
+	if nil != err {
+		// 	log.Fatalln(err)
+		// }
+		// if err != nil {
+		return fmt.Errorf("Unable to bind [%s]", err.Error())
+	}
+	// a:= net.ListenTCP()
+	go func() error {
+		for {
+			select {
 
-	for {
-		fd, err := l.Accept()
-		if err != nil {
-			log.Fatal("accept error:", err)
+			case <-lb.stop:
+				log.Debugln("Closing listener")
+
+				// We've closed the stop channel
+				err = l.Close()
+				if err != nil {
+					log.Errorf("Error closing listener [%s]", err)
+				}
+				// Close the stopped channel as the listener has been stopped
+				close(lb.stopped)
+				return nil
+			default:
+
+				log.Debugln("Waiting on TCP connections")
+				l.SetDeadline(time.Now().Add(1e9))
+				fd, err := l.Accept()
+				if err != nil {
+					// Check it it's an accept timeout
+					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+						continue
+					}
+					log.Errorf("TCP Accept error [%s]", err)
+
+				}
+
+				go persistentConnection(fd, lb.instance)
+			}
 		}
-		go persistentConnection(fd, lb)
-	}
+	}()
+	log.Infof("Load Balancer [%s] started", lb.instance.Name)
+
+	return nil
 }
 
 // user -> [LB]

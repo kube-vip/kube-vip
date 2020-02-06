@@ -20,26 +20,36 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
+	// Managers for Vip load balancers and none-vip loadbalancers
+	nonVipLB := loadbalancer.LBManager{}
+	VipLB := loadbalancer.LBManager{}
+
+	// Iterate through all Configurations
+	for x := range c.LoadBalancers {
+		// If the load balancer doesn't bind to the VIP
+		if c.LoadBalancers[x].BindToVip == false {
+			err := nonVipLB.Add("", &c.LoadBalancers[x])
+			if err != nil {
+				log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+			}
+
+		}
+	}
+
 	if !disableVIP {
 		err := cluster.network.AddIP()
 		if err != nil {
 			log.Warnf("%v", err)
 		}
-	}
-	// Once we have the VIP running, start the load balancer(s) that bind to the VIP
 
-	// Iterate through all Configurations
-	for x := range c.LoadBalancers {
-		// If the load balancer doesn't bind to the VIP
-		if c.LoadBalancers[x].BindToVip == true {
-			// DO IT
-			if c.LoadBalancers[x].Type == "tcp" {
-				loadbalancer.StartTCP(&c.LoadBalancers[x], c.VIP)
-			} else if c.LoadBalancers[x].Type == "http" {
-				loadbalancer.StartHTTP(&c.LoadBalancers[x], c.VIP)
-			} else {
-				// If the type isn't one of above then we don't understand it
-				log.Warnf("Load Balancer [%s] uses unknown type [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type)
+		// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+		for x := range c.LoadBalancers {
+
+			if c.LoadBalancers[x].BindToVip == true {
+				err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+				if err != nil {
+					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+				}
 			}
 		}
 	}
