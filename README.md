@@ -195,3 +195,17 @@ Request timeout for icmp_seq 150
 64 bytes from 192.168.0.75: icmp_seq=151 ttl=64 time=0.245 ms
 
 ```
+
+## Troubleshooting
+
+Enable debug logging by editing the `kube-vip.yaml` manifest and changing the `command:`:
+
+```
+  - command:
+    - /kube-vip
+    - start
+    - -c
+    - /vip.yaml
+    - -l
+    - "5"
+ ```
