@@ -87,13 +87,18 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 	// Cluster configuration
 	configuration := raft.Configuration{}
 
-	for x := range c.Peers {
+	// Add Local Peer
+	configuration.Servers = append(configuration.Servers, raft.Server{
+		ID:      raft.ServerID(c.LocalPeer.ID),
+		Address: raft.ServerAddress(fmt.Sprintf("%s:%d", c.LocalPeer.Address, c.LocalPeer.Port))})
+
+	for x := range c.RemotePeers {
 		// Build the address from the peer configuration
-		peerAddress := fmt.Sprintf("%s:%d", c.Peers[x].Address, c.Peers[x].Port)
+		peerAddress := fmt.Sprintf("%s:%d", c.RemotePeers[x].Address, c.RemotePeers[x].Port)
 
 		// Set this peer into the raft configuration
 		configuration.Servers = append(configuration.Servers, raft.Server{
-			ID:      raft.ServerID(c.Peers[x].ID),
+			ID:      raft.ServerID(c.RemotePeers[x].ID),
 			Address: raft.ServerAddress(peerAddress)})
 	}
 
