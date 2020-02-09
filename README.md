@@ -1,6 +1,12 @@
 # kube-vip (WIP)
 Kubernetes Control Plane Virtual IP and Load-Balancer
 
+The idea behind `kube-vip` is a small self-contained Highly-Available option for all environments, especially:
+
+- Bare-Metal
+- Edge (arm / Raspberry PI)
+- Pretty much anywhere else :)
+
 *Use at your own risk, although it's pretty stable :-) *
 
 ![](/overview.png)
