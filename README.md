@@ -1,7 +1,9 @@
 # kube-vip (WIP)
 Kubernetes Control Plane Virtual IP and Load-Balancer
 
-*Use at your own risk*
+*Use at your own risk, although it's pretty stable :-) *
+
+![](/overview.png)
 
 The `kube-vip` application builds a multi-node cluster using [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
 
@@ -50,28 +52,26 @@ Each node in teh cluster can act as a load balancer, but also each VIP can be it
 
 ## Usage
 
-### Configuration
+### Configuration 
 
 To generate the basic `yaml` configuration:
 
+**Without Docker**
 ```
 kube-vip sample config > config.yaml
 ```
 
-Modify the `localPeer` section to match this particular instance (local IP address/port etc..) and ensure that the `peers` section is correct for the current instance and all other instances in the cluster. Also ensure that the `interface` is the correct interface that teh `vip` will bind to.
-
-### Static pod
-(wip)
-
-To generate the basic Kubernetes static pod `yaml` configuration:
-
+**With Docker**
 ```
-kube-vip sample manifest > manifest.yaml
+sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample config | sudo tee /etc/kube-vip/config.yaml
 ```
 
-## Starting a cluster
+Modify the `localPeer` section to match this particular instance (local IP address/port etc..) and ensure that the `remotePeers` section is correct for the current instance and all other instances in the cluster. Also ensure that the `interface` is the correct interface that teh `vip` will bind to.
 
-To start `kube-vip` ensure the configuration for the `localPeers` and `peers` is correct for each instance and the cluster as a whole and start:
+
+## Starting a simple cluster
+
+To start `kube-vip` ensure the configuration for the `localPeers` and `remotePeers` is correct for each instance and the cluster as a whole and start:
 
 ```
 kube-vip start -c /config.yaml
@@ -92,6 +92,75 @@ INFO[0002] The Node [192.168.0.72:10000] is leading
 ```
 
 After a few seconds with additional nodes started a leader election will take place and the leader will assume the **vip**.
+
+## Load Balancing a Kubernetes Cluster (Control-Plane)
+
+### Generate the Static pod configuration
+
+Make sure that the Manifests directory exists: `sudo mkdir /etc/kubernetes/manifests/`
+
+To generate the basic Kubernetes static pod `yaml` configuration:
+
+**Without Docker**
+```
+sudo kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+**With Docker**
+```
+sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+### Modify the configuration
+
+Ensure that `image: plndr/kube-vip:latest` is modified to point to a specific version (`0.1` at the time of writing), refer to [docker hub](https://hub.docker.com/r/plndr/kube-vip/tags) for details. Also ensure that the `hostPath` points to the correct `kube-vip` configuration. For the Control-plane we will also be using the load balancer type `tcp` so modify the kubernetes load-balancer:
+
+```
+loadBalancers:
+- name: Kubernetes Control Plane
+  type: tcp
+```
+
+### First Node
+
+As a raft election wont happen unless multiple nodes are running, we will need to start the first node in `singleNode: true`. This means that the load balancer will be up and running and that `kubeadm` will be able to use it as expected.
+
+The **vip** is set to `192.168.0.77` and the cluster is in `singleNode` mode.
+
+`sudo kubeadm init --control-plane-endpoint "192.168.0.77:6444" --apiserver-bind-port 6443 --upload-certs --kubernetes-version "v1.17.0"`
+
+Once our `kubeadm` is completed and we have the first node initialised we can disable the `singleNode` configuration, we will need to restart the `kube-vip` container in the pod in order for it to pick up the new configuration changes. A `docker kill <kube-vip container id>` will mean that Kubernetes will recreate the pod correctly.  
+
+### Remaining Nodes
+
+Create the configuration as shown above, but ensure that teh `localPeer` and `remotePeers` sections are updated for each node and we can use the join command from the output of the first node. Also copy the `kube-vip` manifest from the first node to the remaining nodes into `/etc/kubernetes/manifests/`
+
+**Note**, we will need to add an ignore-preflight-error as we've added our file into this directory
+
+```
+  kubeadm join 192.168.0.77:6444 --token <tkn> \
+    --discovery-token-ca-cert-hash sha256:<hash> \
+    --control-plane --certificate-key <key> \
+    --ignore-preflight-errors=DirAvailable--etc-kubernetes-manifests
+```
+
+Once this node is added we will be able to see that the `kube-vip` pod is up and running as expected:
+
+```
+user@controlPlane01:~$ kubectl get pods -A | grep vip
+kube-system   kube-vip-controlplane01                  1/1     Running             1          96m
+kube-system   kube-vip-controlplane02                  1/1     Running             0          98m
+```
+
+If we look at the logs, we can see that the VIP is running on the second node and we're waiting for our third node to join the cluster:
+
+```
+$ kubectl logs kube-vip-controlplane02  -n kube-system
+time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.285Z [ERROR] raft: failed to appendEntries to: peer=\"{Voter server3 192.168.0.72:10000}\" error=\"dial tcp 192.168.0.72:10000: connect: connection refused\""
+time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.650Z [ERROR] raft: failed to heartbeat to: peer=192.168.0.72:10000 error=\"dial tcp 192.168.0.72:10000: connect: connection refused\""
+time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.724Z [DEBUG] raft: failed to contact: server-id=server3 time=1h36m39.06317018s"
+time="2020-02-09T15:33:09Z" level=info msg="The Node [192.168.0.71:10000] is leading"
+```
 
 ## Failover
 
