@@ -6,7 +6,7 @@ import "net/url"
 type Config struct {
 
 	// Peers are all of the peers within the RAFT cluster
-	Peers []RaftPeer `yaml:"peers"`
+	RemotePeers []RaftPeer `yaml:"remotePeers"`
 
 	// LocalPeer is the configuration of this host
 	LocalPeer RaftPeer `yaml:"localPeer"`

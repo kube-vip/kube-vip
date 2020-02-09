@@ -94,7 +94,8 @@ var kubeVipSampleManifest = &cobra.Command{
 				APIVersion: "v1",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "kube-vip",
+				Name:      "kube-vip",
+				Namespace: "kube-system",
 			},
 			Spec: appv1.PodSpec{
 				Containers: []appv1.Container{
@@ -110,7 +111,7 @@ var kubeVipSampleManifest = &cobra.Command{
 							},
 						},
 						Command: []string{
-							"/kube/vip",
+							"/kube-vip",
 							"start",
 							"-c",
 							"/vip.yaml",
@@ -128,7 +129,7 @@ var kubeVipSampleManifest = &cobra.Command{
 						Name: "config",
 						VolumeSource: appv1.VolumeSource{
 							HostPath: &appv1.HostPathVolumeSource{
-								Path: "/path/to/config",
+								Path: "/etc/kube-vip/config.yaml",
 							},
 						},
 					},

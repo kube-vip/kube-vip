@@ -45,7 +45,7 @@ func SampleConfig() {
 	// Generate Sample configuration
 	c := &Config{
 		// Generate sample peers
-		Peers: []RaftPeer{
+		RemotePeers: []RaftPeer{
 			RaftPeer{
 				ID:      "server1",
 				Address: "192.168.0.1",
