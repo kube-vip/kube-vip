@@ -47,11 +47,6 @@ func SampleConfig() {
 		// Generate sample peers
 		RemotePeers: []RaftPeer{
 			RaftPeer{
-				ID:      "server1",
-				Address: "192.168.0.1",
-				Port:    10000,
-			},
-			RaftPeer{
 				ID:      "server2",
 				Address: "192.168.0.2",
 				Port:    10000,
