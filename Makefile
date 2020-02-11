@@ -6,7 +6,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSION := 1.0.0
+VERSION := 0.1
 BUILD := `git rev-parse HEAD`
 
 # Operating System Default (LINUX)
@@ -18,7 +18,8 @@ LDFLAGS=-ldflags "-X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -s"
 # go source files, ignore vendor directory
 SRC = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 
-DOCKERTAG=latest
+DOCKERTAG=$(VERSION)
+REPOSITORY=plndr
 
 .PHONY: all build clean install uninstall fmt simplify check run
 
@@ -46,7 +47,7 @@ fmt:
 docker:
 	@GOOS=$(TARGETOS) make build
 	@mv $(TARGET) ./dockerfile
-	@docker build -t $(TARGET):$(DOCKERTAG) ./dockerfile/
+	@docker build -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) ./dockerfile/
 	@rm ./dockerfile/$(TARGET)
 	@echo New Docker image created
 
