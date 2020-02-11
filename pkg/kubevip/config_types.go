@@ -20,6 +20,9 @@ type Config struct {
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
 
+	// StartAsLeader, this will start this node as the leader before other nodes connect
+	StartAsLeader bool `yaml:"startAsLeader"`
+
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
 

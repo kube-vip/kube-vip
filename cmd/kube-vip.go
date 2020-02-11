@@ -17,6 +17,7 @@ import (
 
 var configPath string
 var disableVIP bool
+var singleNode, startAsLeader *bool
 var logLevel uint32
 
 // Release - this struct contains the release information populated when building kube-vip
@@ -33,11 +34,15 @@ var kubeVipCmd = &cobra.Command{
 func init() {
 
 	// Manage logging
-	kubeVipCmd.PersistentFlags().Uint32VarP(&logLevel, "log", "l", 4, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Get the configuration file
 	kubeVipStart.Flags().StringVarP(&configPath, "config", "c", "", "Path to a kube-vip configuration")
 	kubeVipStart.Flags().BoolVarP(&disableVIP, "disableVIP", "d", false, "Disable the VIP functionality")
+
+	// Pointers so we can see if they're nil (and not called)
+	singleNode = kubeVipStart.Flags().BoolP("singleNode", "s", false, "Start as a single node cluster (raft disabled)")
+	startAsLeader = kubeVipStart.Flags().BoolP("startAsLeader", "l", false, "Start this node as the leader")
 
 	kubeVipCmd.AddCommand(kubeVipVersion)
 	kubeVipCmd.AddCommand(kubeVipSample)
@@ -159,6 +164,19 @@ var kubeVipStart = &cobra.Command{
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+
+		// Check if these pointers are actually pointing to something (flags have been used)
+
+		// Check if singlenode was called
+		if cmd.Flags().Changed("singleNode") {
+			c.SingleNode = *singleNode
+		}
+
+		// Check if startAsLeader was called
+		if cmd.Flags().Changed("startAsLeader") {
+			c.StartAsLeader = *startAsLeader
+		}
+
 		var newCluster *cluster.Cluster
 
 		if c.SingleNode {
@@ -173,11 +191,13 @@ var kubeVipStart = &cobra.Command{
 			if disableVIP {
 				log.Fatalln("Cluster mode requires the Virtual IP to be enabled, use single node with no VIP")
 			}
+
 			// If the Virtual IP isn't disabled then create the netlink configuration
 			newCluster, err = cluster.InitCluster(c, disableVIP)
 			if err != nil {
 				log.Fatalf("%v", err)
 			}
+
 			// Start a multi-node (raft) cluster
 			err = newCluster.StartCluster(c)
 			if err != nil {

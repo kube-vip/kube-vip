@@ -92,14 +92,19 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 		ID:      raft.ServerID(c.LocalPeer.ID),
 		Address: raft.ServerAddress(fmt.Sprintf("%s:%d", c.LocalPeer.Address, c.LocalPeer.Port))})
 
-	for x := range c.RemotePeers {
-		// Build the address from the peer configuration
-		peerAddress := fmt.Sprintf("%s:%d", c.RemotePeers[x].Address, c.RemotePeers[x].Port)
+	// If we want to start a node as leader then we will not add any remote peers, this will leave this as a cluster of one
+	// The remotePeers will add themselves to the cluster as they're added
+	if c.StartAsLeader != true {
 
-		// Set this peer into the raft configuration
-		configuration.Servers = append(configuration.Servers, raft.Server{
-			ID:      raft.ServerID(c.RemotePeers[x].ID),
-			Address: raft.ServerAddress(peerAddress)})
+		for x := range c.RemotePeers {
+			// Build the address from the peer configuration
+			peerAddress := fmt.Sprintf("%s:%d", c.RemotePeers[x].Address, c.RemotePeers[x].Port)
+
+			// Set this peer into the raft configuration
+			configuration.Servers = append(configuration.Servers, raft.Server{
+				ID:      raft.ServerID(c.RemotePeers[x].ID),
+				Address: raft.ServerAddress(peerAddress)})
+		}
 	}
 
 	// Bootstrap cluster
@@ -116,7 +121,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 	ticker := time.NewTicker(time.Second)
-	isLeader := false
+	isLeader := c.StartAsLeader
 
 	// (attempt to) Remove the virtual IP, incase it already exists
 	cluster.network.DeleteIP()
