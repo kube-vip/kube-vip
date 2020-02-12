@@ -115,7 +115,7 @@ We first will need to create the `kube-vip` configuration that resides in `/etc/
 At this point **DON’T** generate the manifests, this is due to some bizarre `kubeadm/kubelet` behaviour.
 
 ```
-  kubeadm join 192.168.0.75:6444 --token <tkn> \
+  kubeadm join 192.168.0.75:6443 --token <tkn> \
     --discovery-token-ca-cert-hash sha256:<hash> \
     --control-plane --certificate-key <key> 
 
