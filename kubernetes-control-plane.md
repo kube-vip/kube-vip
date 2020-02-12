@@ -44,6 +44,7 @@ We will need to set our VIP address to `192.168.0.75` and to ensure all hosts ar
 **Load Balancer**
 We will configure the load balancer to sit on the standard API-Server port `6443` and we will configure the backends to point to the API-servers that will be configured to run on port `6444`. Also for the Kubernetes Control Plane we will configure the load balancer to be of `type: tcp`.
 
+We can also use `6443` for both the VIP and the API-Servers, in order to do this we need to specify that the api-server is bound to it's local IP. To do this we use the `--apiserver-advertise-address` flag as part of the `init`, this means that we can then bind the same port to the VIP and we wont have a port conflict.
 
 **config.yaml**
 
@@ -120,7 +121,7 @@ At this point **DON’T** generate the manifests, this is due to some bizarre `k
 
 ```
 
-**After** this node has been added to the cluster, we can add the manifest to also add this node as a `kibe-vip` member. (Adding the manifest afterwards doesn’t interfere with `kubeadm`). 
+**After** this node has been added to the cluster, we can add the manifest to also add this node as a `kube-vip` member. (Adding the manifest afterwards doesn’t interfere with `kubeadm`). 
 
 ```
 sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
