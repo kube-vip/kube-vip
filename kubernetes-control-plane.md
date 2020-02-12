@@ -21,7 +21,7 @@ The infrastructure for our example HA Kubernetes cluster is as follows:
 
 All nodes are running Ubuntu 18.04, Docker CE and will use Kubernetes 1.17.0.
 
-### Generate the `kibe-vip` configuration
+### Generate the `kube-vip` configuration
 
 Make sure that the config directory exists: `sudo mkdir -p /etc/kube-vip/`, this directory can be any directory however the `hostPath` in the manifest will need modifying to point to the correct path.
 
@@ -61,7 +61,7 @@ localPeer:
   id: server1
   address: 192.168.0.70
   port: 10000
-vip: 192.168.0.78
+vip: 192.168.0.75
 gratuitousARP: true
 singleNode: false
 startAsLeader: true
@@ -107,12 +107,12 @@ kube-system   kube-vip-controlplane01                  1/1     Running   0      
 
 ### Remaining Nodes
 
-We first will need to create the `kube-vip` configuration that resides in `/etc/kube-vip/config.yaml` or we can regenerate it from scratch using the above example. Ensure that the configuration is almost identical with the `localPeer` and `remotePeers` sections are updated for each node. 
+We first will need to create the `kube-vip` configuration that resides in `/etc/kube-vip/config.yaml` or we can regenerate it from scratch using the above example. Ensure that the configuration is almost identical with the `localPeer` and `remotePeers` sections are updated for each node. Finally, ensure that the remaining nodes will behave as standard cluster nodes by setting `startAsLeader: false`.
 
 At this point **DON’T** generate the manifests, this is due to some bizarre `kubeadm/kubelet` behaviour.
 
 ```
-  kubeadm join 192.168.0.77:6444 --token <tkn> \
+  kubeadm join 192.168.0.75:6444 --token <tkn> \
     --discovery-token-ca-cert-hash sha256:<hash> \
     --control-plane --certificate-key <key> 
 
