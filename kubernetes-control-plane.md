@@ -46,7 +46,9 @@ We will configure the load balancer to sit on the standard API-Server port `6443
 
 
 **config.yaml**
+
 `user@controlPlane01:/etc/kube-vip$ cat config.yaml`
+
 ...
 
 ``` 
