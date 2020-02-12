@@ -140,8 +140,7 @@ If we look at the logs, we can see that the VIP is running on the second node an
 
 ```
 $ kubectl logs kube-vip-controlplane02  -n kube-system
-time=“2020-02-09T15:33:09Z” level=info msg=“2020-02-09T15:33:09.285Z [ERROR] raft: failed to appendEntries to: peer=\”{Voter server3 192.168.0.72:10000}\” error=\”dial tcp 192.168.0.72:10000: connect: connection refused\””
-time=“2020-02-09T15:33:09Z” level=info msg=“2020-02-09T15:33:09.650Z [ERROR] raft: failed to heartbeat to: peer=192.168.0.72:10000 error=\”dial tcp 192.168.0.72:10000: connect: connection refused\””
-time=“2020-02-09T15:33:09Z” level=info msg=“2020-02-09T15:33:09.724Z [DEBUG] raft: failed to contact: server-id=server3 time=1h36m39.06317018s”
-time=“2020-02-09T15:33:09Z” level=info msg=“The Node [192.168.0.71:10000] is leading”
+time=“2020-02-12T15:33:09Z” level=info msg=“The Node [192.168.0.70:10000] is leading”
+time=“2020-02-12T15:33:09Z” level=info msg=“The Node [192.168.0.70:10000] is leading”
+
 ```
