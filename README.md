@@ -7,11 +7,30 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 - Edge (arm / Raspberry PI)
 - Pretty much anywhere else :)
 
-*Use at your own risk, although it's pretty stable :-) *
-
 ![](/overview.png)
 
 The `kube-vip` application builds a multi-node cluster using [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
+
+## Why?
+
+The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters, which at this time can involve a few components and configurations that all need to be managed. This was blogged about in detail by [thebsdbox](https://twitter.com/thebsdbox/) here -> [https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing](https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing).
+
+### Alternative HA Options
+
+`kibe-vip` provides both a floating or virtual IP address for your kubernetes cluster as well as load-balancing the incoming traffic to various control-plane replicas. At the current time to replicate this functionality a minimum of two pieces of tooling would be required:
+
+**VIP**:
+- [Keepalived](https://www.keepalived.org/)
+- [Ucarp](https://ucarp.wordpress.com/)
+- Hardware Load-balancer (functionality differs per vendor)
+
+
+**LoadBalancing**:
+- [HAProxy](http://www.haproxy.org/)
+- [Nginx](http://nginx.com)
+- Hardware Load-balancer(functionality differs per vendor)
+
+All of these would require a separate level of configuration and in some infrastructures multiple teams in order to implement. Also when considering the software components, they may require packaging into containers or if they’re pre-packaged then security and transparency may be an issue. Finally, in edge environments we may have limited room for hardware (no HW load-balancer) or packages solutions in the correct architectures might not exist (e.g. ARM). Luckily with `kibe-vip` being written in GO, it’s small(ish) and easy to build for multiple architectures, with the added security benefit of being the only thing needed in the container.
 
 ## Architecture
 
@@ -31,48 +50,55 @@ When the **vip** moves from one host to another any host that has been using the
 
 ### Load Balancing
 
-Each node in teh cluster can act as a load balancer, but also each VIP can be its own load balancer. This provides various architectural options to how your cluster is designed.
+Within the configuration of `kube-vip` multiple load-balancers can be created, below is the example load-balancer for a Kubernetes Control-plane:
 
-#### Per Node LB
+```
+loadBalancers:
+- name: Kubernetes Control Plane
+  type: tcp
+  port: 6443
+  bindToVip: true
+  backends:
+  - port: 6444
+    address: 192.168.0.70
+  - port: 6444
+    address: 192.168.0.71
+  - port: 6444
+    address: 192.168.0.72
+```
 
-*PROS*
+The above load balancer will create an instance that listens on port `6443` and will forward traffic to the array of backend addresses. If the load-balancer type is `tcp` then the backends will be IP addresses, however if the backend is set to `http` then the backends should be URLs:
 
-- Simple and doesn't require a tear-up/tear-down approach
+```
+  type: http
+  port: 6443
+  bindToVip: true
+  backends:
+  - port: 6444
+    address: https://192.168.0.70
+```
 
-*CONS*
+Additionally the load-balancing within `kibe-vip` has two modes of operation:
 
-- Wasted LB instances that aren't being used
-- Require a seperate port to the service being load balanced
+`bindToVip: false` - will result in every node in the cluster binding all load-balancer port(s) to all interfaces on the host itself
 
-
-#### VIP LB
-
-*PROS*
-
-- The VIP can use the same port as the underlying service without conflicting on the port
-
-*CONS*
-
-- Requires `kube-vip` to manage stopping and starting of LB services every election
-- Slightly complex design
+`bindToVip: true` - The load-balancer will only **bind** to the VIP address.
 
 ## Usage
 
-### Configuration 
+The usage of `kube-vip` can either be directly by taking the binary / building yourself (`make build`), or alternatively through a pre-built docker container which can be found in the plunder Docker Hub repository [https://hub.docker.com/r/plndr/kube-vip](https://hub.docker.com/r/plndr/kube-vip). For further 
+
+The main goal of this project is to provide HA and load-balancing for Kubernetes, the usage for that is in it’s own documentation available here -> [kubernetes-control-plane.md](kubernetes-control-plane.md)
+
+### Configuration
 
 To generate the basic `yaml` configuration:
 
-**Without Docker**
 ```
 kube-vip sample config > config.yaml
 ```
 
-**With Docker**
-```
-sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample config | sudo tee /etc/kube-vip/config.yaml
-```
-
-Modify the `localPeer` section to match this particular instance (local IP address/port etc..) and ensure that the `remotePeers` section is correct for the current instance and all other instances in the cluster. Also ensure that the `interface` is the correct interface that teh `vip` will bind to.
+Modify the `localPeer` section to match this particular instance (local IP address/port etc..) and ensure that the `remotePeers` section is correct for the current instance and all other instances in the cluster. Also ensure that the `interface` is the correct interface that the `vip` will bind to.
 
 
 ## Starting a simple cluster
@@ -99,74 +125,6 @@ INFO[0002] The Node [192.168.0.72:10000] is leading
 
 After a few seconds with additional nodes started a leader election will take place and the leader will assume the **vip**.
 
-## Load Balancing a Kubernetes Cluster (Control-Plane)
-
-### Generate the Static pod configuration
-
-Make sure that the Manifests directory exists: `sudo mkdir /etc/kubernetes/manifests/`
-
-To generate the basic Kubernetes static pod `yaml` configuration:
-
-**Without Docker**
-```
-sudo kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
-```
-
-**With Docker**
-```
-sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
-```
-
-### Modify the configuration
-
-Ensure that `image: plndr/kube-vip:latest` is modified to point to a specific version (`0.1` at the time of writing), refer to [docker hub](https://hub.docker.com/r/plndr/kube-vip/tags) for details. Also ensure that the `hostPath` points to the correct `kube-vip` configuration. For the Control-plane we will also be using the load balancer type `tcp` so modify the kubernetes load-balancer:
-
-```
-loadBalancers:
-- name: Kubernetes Control Plane
-  type: tcp
-```
-
-### First Node
-
-As a raft election wont happen unless multiple nodes are running, we will need to start the first node in `singleNode: true`. This means that the load balancer will be up and running and that `kubeadm` will be able to use it as expected.
-
-The **vip** is set to `192.168.0.77` and the cluster is in `singleNode` mode.
-
-`sudo kubeadm init --control-plane-endpoint "192.168.0.77:6444" --apiserver-bind-port 6443 --upload-certs --kubernetes-version "v1.17.0"`
-
-Once our `kubeadm` is completed and we have the first node initialised we can disable the `singleNode` configuration, we will need to restart the `kube-vip` container in the pod in order for it to pick up the new configuration changes. A `docker kill <kube-vip container id>` will mean that Kubernetes will recreate the pod correctly.  
-
-### Remaining Nodes
-
-Create the configuration as shown above, but ensure that teh `localPeer` and `remotePeers` sections are updated for each node and we can use the join command from the output of the first node. Also copy the `kube-vip` manifest from the first node to the remaining nodes into `/etc/kubernetes/manifests/`
-
-**Note**, we will need to add an ignore-preflight-error as we've added our file into this directory
-
-```
-  kubeadm join 192.168.0.77:6444 --token <tkn> \
-    --discovery-token-ca-cert-hash sha256:<hash> \
-    --control-plane --certificate-key <key> \
-    --ignore-preflight-errors=DirAvailable--etc-kubernetes-manifests
-```
-
-Once this node is added we will be able to see that the `kube-vip` pod is up and running as expected:
-
-```
-user@controlPlane01:~$ kubectl get pods -A | grep vip
-kube-system   kube-vip-controlplane01                  1/1     Running             1          96m
-kube-system   kube-vip-controlplane02                  1/1     Running             0          98m
-```
-
-If we look at the logs, we can see that the VIP is running on the second node and we're waiting for our third node to join the cluster:
-
-```
-$ kubectl logs kube-vip-controlplane02  -n kube-system
-time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.285Z [ERROR] raft: failed to appendEntries to: peer=\"{Voter server3 192.168.0.72:10000}\" error=\"dial tcp 192.168.0.72:10000: connect: connection refused\""
-time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.650Z [ERROR] raft: failed to heartbeat to: peer=192.168.0.72:10000 error=\"dial tcp 192.168.0.72:10000: connect: connection refused\""
-time="2020-02-09T15:33:09Z" level=info msg="2020-02-09T15:33:09.724Z [DEBUG] raft: failed to contact: server-id=server3 time=1h36m39.06317018s"
-time="2020-02-09T15:33:09Z" level=info msg="The Node [192.168.0.71:10000] is leading"
-```
 
 ## Failover
 
