@@ -97,7 +97,7 @@ Ensure that `image: plndr/kube-vip:<x>` is modified to point to a specific versi
 
 The **vip** is set to `192.168.0.75` and this first node will elect itself as leader, and as part of the `kubeadm init` it will use the VIP in order to speak back to the initialising api-server.
 
-`sudo kubeadm init --control-plane-endpoint “192.168.0.75:6444” --apiserver-bind-port 6443 --upload-certs --kubernetes-version “v1.17.0”`
+`sudo kubeadm init --control-plane-endpoint “192.168.0.75:6443” --apiserver-bind-port 6444 --upload-certs --kubernetes-version “v1.17.0”`
 
 Once this node is up and running we will be able to see the control-plane pods, including the `kube-vip` pod:
 
@@ -115,7 +115,7 @@ We first will need to create the `kube-vip` configuration that resides in `/etc/
 At this point **DON’T** generate the manifests, this is due to some bizarre `kubeadm/kubelet` behaviour.
 
 ```
-  kubeadm join 192.168.0.75:6444 --token <tkn> \
+  kubeadm join 192.168.0.75:6443 --token <tkn> \
     --discovery-token-ca-cert-hash sha256:<hash> \
     --control-plane --certificate-key <key> 
 
