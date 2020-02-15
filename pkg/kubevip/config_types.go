@@ -5,11 +5,11 @@ import "net/url"
 // Config defines all of the settings for the Virtual IP / Load-balancer
 type Config struct {
 
-	// Peers are all of the peers within the RAFT cluster
-	RemotePeers []RaftPeer `yaml:"remotePeers"`
-
 	// LocalPeer is the configuration of this host
 	LocalPeer RaftPeer `yaml:"localPeer"`
+
+	// Peers are all of the peers within the RAFT cluster
+	RemotePeers []RaftPeer `yaml:"remotePeers"`
 
 	// VIP is the Virtual IP address exposed for the cluster
 	VIP string `yaml:"vip"`
