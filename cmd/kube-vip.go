@@ -59,7 +59,7 @@ func init() {
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.GratuitousARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
 	kubeVipSampleConfig.Flags().StringVar(&cliLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
-	kubeVipSampleConfig.Flags().StringArrayVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
+	kubeVipSampleConfig.Flags().StringSliceVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
 	// Load Balancer flags
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfigLB.BindToVip, "lbBindToVip", false, "Bind example load balancer to VIP")
 	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
