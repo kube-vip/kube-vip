@@ -20,6 +20,11 @@ var disableVIP bool
 var singleNode, startAsLeader *bool
 var logLevel uint32
 
+var cliConfig kubevip.Config
+var cliConfigLB kubevip.LoadBalancer
+var cliLocalPeer string
+var cliRemotePeers, cliBackends []string
+
 // Release - this struct contains the release information populated when building kube-vip
 var Release struct {
 	Version string
@@ -47,6 +52,20 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipVersion)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipStart)
+
+	kubeVipSampleConfig.Flags().StringVar(&cliConfig.Interface, "interface", "eth0", "Name of the interface to bind to")
+	kubeVipSampleConfig.Flags().StringVar(&cliConfig.VIP, "vip", "192.168.0.1", "The Virtual IP addres")
+	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.SingleNode, "singleNode", false, "Start this instance as a single node")
+	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
+	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.GratuitousARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
+	kubeVipSampleConfig.Flags().StringVar(&cliLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
+	kubeVipSampleConfig.Flags().StringArrayVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
+	// Load Balancer flags
+	kubeVipSampleConfig.Flags().BoolVar(&cliConfigLB.BindToVip, "lbBindToVip", false, "Bind example load balancer to VIP")
+	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
+	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Name, "lbName", "Example Load Balancer", "The name of a load balancer instance")
+	kubeVipSampleConfig.Flags().IntVar(&cliConfigLB.Port, "lbPort", 8080, "Port that load balander will expose on")
+	kubeVipSampleConfig.Flags().StringSliceVar(&cliBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma seperated backends, format: address:port")
 
 	// Sample commands
 	kubeVipSample.AddCommand(kubeVipSampleConfig)
@@ -84,7 +103,37 @@ var kubeVipSampleConfig = &cobra.Command{
 	Use:   "config",
 	Short: "Generate a Sample configuration",
 	Run: func(cmd *cobra.Command, args []string) {
-		kubevip.SampleConfig()
+		//kubevip.SampleConfig()
+		// Parse localPeer
+		p, err := kubevip.ParsePeerConfig(cliLocalPeer)
+		if err != nil {
+			cmd.Help()
+			log.Fatalln(err)
+		}
+		cliConfig.LocalPeer = *p
+
+		// Parse remotePeers
+		//Iterate backends
+		for i := range cliRemotePeers {
+			p, err := kubevip.ParsePeerConfig(cliRemotePeers[i])
+			if err != nil {
+				cmd.Help()
+				log.Fatalln(err)
+			}
+			cliConfig.RemotePeers = append(cliConfig.RemotePeers, *p)
+		}
+
+		//Iterate backends
+		for i := range cliBackends {
+			b, err := kubevip.ParseBackendConfig(cliBackends[i])
+			if err != nil {
+				cmd.Help()
+				log.Fatalln(err)
+			}
+			cliConfigLB.Backends = append(cliConfigLB.Backends, *b)
+		}
+		cliConfig.LoadBalancers = append(cliConfig.LoadBalancers, cliConfigLB)
+		cliConfig.PrintConfig()
 	},
 }
 
