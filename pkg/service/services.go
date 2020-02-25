@@ -69,9 +69,10 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			}
 			// Generate new Virtual IP configuration
 			newVip := kubevip.Config{
-				VIP:        s.Services[x].Vip,
-				Interface:  "ens192",
-				SingleNode: true,
+				VIP:           s.Services[x].Vip,
+				Interface:     Interface,
+				SingleNode:    true,
+				GratuitousARP: EnableArp,
 			}
 			// Add Load Balancer Configuration
 			newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)

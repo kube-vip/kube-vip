@@ -26,6 +26,12 @@ import (
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
+// EnableArp - determines the use of ARP broadcasts
+var EnableArp bool
+
+// Interface - determines the interface that all Loadbalancers will bind too
+var Interface string
+
 type plndrServices struct {
 	Services []service `json:"services"`
 }

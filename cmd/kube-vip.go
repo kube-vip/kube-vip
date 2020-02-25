@@ -26,7 +26,7 @@ var disableVIP bool
 var singleNode, startAsLeader *bool
 
 // Run as a load balancer service (within a pod / kubernetes)
-//var service bool
+var serviceArp bool
 
 // ConfigMap name within a Kubernetes cluster
 var configMap string
@@ -66,7 +66,9 @@ func init() {
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "kube-vip", "The configuration map defined within the cluster")
+	kubeVipService.Flags().StringVarP(&service.Interface, "interface", "i", "ens192", "Name of the interface to bind to")
 	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+	kubeVipService.Flags().BoolVar(&service.EnableArp, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
 
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
