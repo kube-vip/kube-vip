@@ -37,7 +37,12 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	}
 
 	if !disableVIP {
-		err := cluster.network.AddIP()
+		err := cluster.network.DeleteIP()
+		if err != nil {
+			log.Warnf("Attempted to clean existing VIP => %v", err)
+		}
+
+		err = cluster.network.AddIP()
 		if err != nil {
 			log.Warnf("%v", err)
 		}
@@ -66,12 +71,33 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		for {
 			select {
 			case <-cluster.stop:
-				log.Info("Stopping this node")
+				log.Info("[LOADBALANCER] Stopping load balancers")
+
+				// Stop all load balancers associated with the VIP
+				err := VipLB.StopAll()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
+
+				// Stop all load balancers associated with the Host
+				err = nonVipLB.StopAll()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
+
+				if !disableVIP {
+
+					log.Info("[VIP] Releasing the Virtual IP")
+					err = cluster.network.DeleteIP()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
+				}
 				close(cluster.completed)
 				return
 			}
 		}
 	}()
-
+	log.Infoln("Started Load Balancer and Virtual IP")
 	return nil
 }
