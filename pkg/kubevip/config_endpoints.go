@@ -8,6 +8,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func init() {
+	// Start the index negative as it will be incrememnted of first approach
+	endPointIndex = -1
+}
+
 // ValidateBackEndURLS will run through the endpoints and ensure that they're a valid URL
 func ValidateBackEndURLS(endpoints *[]BackEnd) error {
 
@@ -39,8 +44,7 @@ func ValidateBackEndURLS(endpoints *[]BackEnd) error {
 
 // ReturnEndpointAddr - returns an endpoint
 func (lb LoadBalancer) ReturnEndpointAddr() string {
-
-	if endPointIndex != len(lb.Backends)-1 {
+	if endPointIndex < len(lb.Backends)-1 {
 		endPointIndex++
 	} else {
 		// reset the index to the beginning

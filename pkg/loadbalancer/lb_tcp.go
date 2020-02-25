@@ -45,7 +45,6 @@ func (lb *LBInstance) startTCP(bindAddress string) error {
 				return nil
 			default:
 
-				log.Debugln("Waiting on TCP connections")
 				l.SetDeadline(time.Now().Add(1e9))
 				fd, err := l.Accept()
 				if err != nil {

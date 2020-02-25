@@ -10,16 +10,31 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/thebsdbox/kube-vip/pkg/cluster"
 	"github.com/thebsdbox/kube-vip/pkg/kubevip"
+	"github.com/thebsdbox/kube-vip/pkg/service"
 
 	appv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Path to the configuration file
 var configPath string
+
+// Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
+
+// Start as a single node (no cluster), start as a leader in the cluster
 var singleNode, startAsLeader *bool
+
+// Run as a load balancer service (within a pod / kubernetes)
+//var service bool
+
+// ConfigMap name within a Kubernetes cluster
+var configMap string
+
+// Configure the level of loggin
 var logLevel uint32
 
+// [sample configuration] - flags
 var cliConfig kubevip.Config
 var cliConfigLB kubevip.LoadBalancer
 var cliLocalPeer string
@@ -49,9 +64,14 @@ func init() {
 	singleNode = kubeVipStart.Flags().BoolP("singleNode", "s", false, "Start as a single node cluster (raft disabled)")
 	startAsLeader = kubeVipStart.Flags().BoolP("startAsLeader", "l", false, "Start this node as the leader")
 
-	kubeVipCmd.AddCommand(kubeVipVersion)
+	// Service flags
+	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "kube-vip", "The configuration map defined within the cluster")
+	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+
 	kubeVipCmd.AddCommand(kubeVipSample)
+	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipStart)
+	kubeVipCmd.AddCommand(kubeVipVersion)
 
 	kubeVipSampleConfig.Flags().StringVar(&cliConfig.Interface, "interface", "eth0", "Name of the interface to bind to")
 	kubeVipSampleConfig.Flags().StringVar(&cliConfig.VIP, "vip", "192.168.0.1", "The Virtual IP addres")
@@ -261,5 +281,25 @@ var kubeVipStart = &cobra.Command{
 
 		newCluster.Stop()
 
+	},
+}
+
+var kubeVipService = &cobra.Command{
+	Use:   "service",
+	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
+	Run: func(cmd *cobra.Command, args []string) {
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		// Define the new service manager
+		mgr, err := service.NewManager(configMap)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+		// Start the service manager, this will watch the config Map and construct kube-vip services for it
+		err = mgr.Start()
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
 	},
 }
