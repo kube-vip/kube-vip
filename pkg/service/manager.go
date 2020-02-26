@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
@@ -25,6 +26,12 @@ import (
 
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
+
+// EnableArp - determines the use of ARP broadcasts
+var EnableArp bool
+
+// Interface - determines the interface that all Loadbalancers will bind too
+var Interface string
 
 type plndrServices struct {
 	Services []service `json:"services"`
@@ -114,46 +121,56 @@ func (sm *Manager) Start() error {
 	log.Infof("Beginning watching Kubernetes configMap [%s]", sm.configMap)
 
 	var svcs plndrServices
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		for event := range ch {
 
-	for event := range ch {
+			// We need to inspect the event and get ResourceVersion out of it
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				log.Debugf("ConfigMap [%s] has been Created or modified", sm.configMap)
+				cm, ok := event.Object.(*v1.ConfigMap)
+				if !ok {
+					log.Errorf("Unable to parse ConfigMap from watcher")
+					break
+				}
+				data := cm.Data["plndr-services"]
+				json.Unmarshal([]byte(data), &svcs)
+				log.Debugf("Found %d services defined in ConfigMap", len(svcs.Services))
 
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			log.Debugf("ConfigMap [%s] has been Created or modified", sm.configMap)
-			cm, ok := event.Object.(*v1.ConfigMap)
-			if !ok {
-				return fmt.Errorf("Unable to parse ConfigMap from watcher")
+				err = sm.syncServices(&svcs)
+				if err != nil {
+					log.Errorf("%v", err)
+				}
+			case watch.Deleted:
+				log.Debugf("ConfigMap [%s] has been Deleted", sm.configMap)
+
+			case watch.Bookmark:
+				// Un-used
+			case watch.Error:
+				log.Infoln("err")
+
+				// This round trip allows us to handle unstructured status
+				errObject := apierrors.FromObject(event.Object)
+				statusErr, ok := errObject.(*apierrors.StatusError)
+				if !ok {
+					log.Fatalf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+					// Retry unknown errors
+					//return false, 0
+				}
+
+				status := statusErr.ErrStatus
+				log.Errorf("%v", status)
+
+			default:
 			}
-			data := cm.Data["plndr-services"]
-			json.Unmarshal([]byte(data), &svcs)
-			log.Debugf("Found %d services defined in ConfigMap", len(svcs.Services))
-
-			err = sm.syncServices(&svcs)
-			if err != nil {
-				log.Errorf("%v", err)
-			}
-		case watch.Deleted:
-			log.Debugf("ConfigMap [%s] has been Deleted", sm.configMap)
-
-		case watch.Bookmark:
-			// Un-used
-		case watch.Error:
-			log.Infoln("err")
-
-			// This round trip allows us to handle unstructured status
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, ok := errObject.(*apierrors.StatusError)
-			if !ok {
-				log.Fatalf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-				// Retry unknown errors
-				//return false, 0
-			}
-
-			status := statusErr.ErrStatus
-			log.Errorf("%v", status)
-		default:
 		}
+	}()
+	<-signalChan
+	log.Infof("Shutting down Kube-Vip")
+	for x := range sm.serviceInstances {
+		sm.serviceInstances[x].cluster.Stop()
 	}
 
 	return nil

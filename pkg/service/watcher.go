@@ -50,7 +50,6 @@ func (sm *Manager) newWatcher(s *serviceInstance) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Endpoints from watcher")
 			}
-
 			s.vipConfig.LoadBalancers[0].Backends = rebuildEndpoints(*ep)
 
 			log.Debugf("Load-Balancer updated with [%d] backends", len(s.vipConfig.LoadBalancers[0].Backends))
@@ -105,7 +104,7 @@ func rebuildEndpoints(eps v1.Endpoints) []kubevip.BackEnd {
 		for y := range ports {
 			// Print out Backends if debug logging is enabled
 			if log.GetLevel() == log.DebugLevel {
-				fmt.Printf("Address: %s Port %d\n", addresses[x], ports[y])
+				fmt.Printf("-> Address: %s:%d \n", addresses[x], ports[y])
 			}
 			newBackend = append(newBackend, kubevip.BackEnd{
 				Address: addresses[x],

@@ -22,12 +22,17 @@ func persistentConnection(frontendConnection net.Conn, lb *kubevip.LoadBalancer)
 
 	var endpoint net.Conn
 	for {
-		// Connect to Endpoint
-		ep := lb.ReturnEndpointAddr()
+		// SOMETHING IS BROKE HERE
 
+		log.Infoln("hi")
+
+		// Connect to Endpoint
+		ep, err := lb.ReturnEndpointAddr()
+		if err != nil {
+			return err
+		}
 		log.Debugf("Attempting endpoint [%s]", ep)
 
-		var err error
 		endpoint, err = net.Dial("tcp", ep)
 		if err != nil {
 			log.Warnf("%v", err)

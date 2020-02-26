@@ -59,20 +59,24 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 		}
 		// This instance wasn't found, we need to add it to the manager
 		if foundInstance == false {
-			log.Infof("New Service being added [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
+			log.Infof("New VIP [%s] for [%s/%s] ", s.Services[x].Vip, s.Services[x].ServiceName, s.Services[x].UID)
+
 			// Generate Load Balancer configu
 			newLB := kubevip.LoadBalancer{
-				Name:      fmt.Sprintf("kube-vip generated for [%s]", s.Services[x].ServiceName),
+				Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
 				Port:      s.Services[x].Port,
 				Type:      "tcp",
 				BindToVip: true,
 			}
+
 			// Generate new Virtual IP configuration
 			newVip := kubevip.Config{
-				VIP:        s.Services[x].Vip,
-				Interface:  "ens192",
-				SingleNode: true,
+				VIP:           s.Services[x].Vip,
+				Interface:     Interface,
+				SingleNode:    true,
+				GratuitousARP: EnableArp,
 			}
+
 			// Add Load Balancer Configuration
 			newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)
 			// Create new Virtual IP service for Manager

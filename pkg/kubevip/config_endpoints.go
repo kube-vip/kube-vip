@@ -43,7 +43,10 @@ func ValidateBackEndURLS(endpoints *[]BackEnd) error {
 }
 
 // ReturnEndpointAddr - returns an endpoint
-func (lb LoadBalancer) ReturnEndpointAddr() string {
+func (lb LoadBalancer) ReturnEndpointAddr() (string, error) {
+	if len(lb.Backends) == 0 {
+		return "", fmt.Errorf("No Backends configured")
+	}
 	if endPointIndex < len(lb.Backends)-1 {
 		endPointIndex++
 	} else {
@@ -51,7 +54,7 @@ func (lb LoadBalancer) ReturnEndpointAddr() string {
 		endPointIndex = 0
 	}
 	// TODO - weighting, decision algorythmn
-	return fmt.Sprintf("%s:%d", lb.Backends[endPointIndex].Address, lb.Backends[endPointIndex].Port)
+	return fmt.Sprintf("%s:%d", lb.Backends[endPointIndex].Address, lb.Backends[endPointIndex].Port), nil
 }
 
 // ReturnEndpointURL - returns an endpoint
