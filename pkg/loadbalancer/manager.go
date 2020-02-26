@@ -12,6 +12,7 @@ type LBInstance struct {
 	stop     chan bool             // Asks LB to stop
 	stopped  chan bool             // LB is stopped
 	instance *kubevip.LoadBalancer // pointer to a LB instance
+	//	mux      sync.Mutex
 }
 
 //LBManager - will manage a number of load blancer instances

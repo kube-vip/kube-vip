@@ -13,22 +13,20 @@ import (
 
 // StartTCP a TCP load balancer server instane
 func (lb *LBInstance) startTCP(bindAddress string) error {
-	log.Infof("Starting TCP Load Balancer for service [%s]", lb.instance.Name)
+	fullAddress := fmt.Sprintf("%s:%d", bindAddress, lb.instance.Port)
+	log.Infof("Starting TCP Load Balancer for service [%s]", fullAddress)
 
 	//	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", bindAddress, lb.instance.Port))
-	laddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", bindAddress, lb.instance.Port))
+	laddr, err := net.ResolveTCPAddr("tcp", fullAddress)
 	if nil != err {
 		log.Errorln(err)
 	}
 	l, err := net.ListenTCP("tcp", laddr)
 	if nil != err {
-		// 	log.Fatalln(err)
-		// }
-		// if err != nil {
 		return fmt.Errorf("Unable to bind [%s]", err.Error())
 	}
 	// a:= net.ListenTCP()
-	go func() error {
+	go func() {
 		for {
 			select {
 
@@ -38,25 +36,32 @@ func (lb *LBInstance) startTCP(bindAddress string) error {
 				// We've closed the stop channel
 				err = l.Close()
 				if err != nil {
-					log.Errorf("Error closing listener [%s]", err)
+					return
+					//log.Errorf("Error closing listener [%s]", err)
 				}
 				// Close the stopped channel as the listener has been stopped
+				//lb.mux.Lock()
 				close(lb.stopped)
-				return nil
+				//lb.mux.Unlock()
+				//return
 			default:
 
-				l.SetDeadline(time.Now().Add(1e9))
+				err = l.SetDeadline(time.Now().Add(200 * time.Millisecond))
+				if err != nil {
+					log.Errorf("Error setting TCP deadline", err)
+				}
 				fd, err := l.Accept()
 				if err != nil {
 					// Check it it's an accept timeout
 					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 						continue
+					} else if err != io.EOF {
+						log.Errorf("TCP Accept error [%s]", err)
 					}
-					log.Errorf("TCP Accept error [%s]", err)
-
 				}
-
-				go persistentConnection(fd, lb.instance)
+				log.Debugf("Accepted from [%s]", fd.RemoteAddr())
+				//go persistentConnection(fd, lb.instance)
+				go processRequests(lb.instance, fd)
 			}
 		}
 	}()
@@ -86,8 +91,10 @@ func processRequests(lb *kubevip.LoadBalancer, frontendConnection net.Conn) {
 		data := buf[0:datalen]
 
 		// Connect to Endpoint
-		ep := lb.ReturnEndpointAddr()
-
+		ep, err := lb.ReturnEndpointAddr()
+		if err != nil {
+			log.Errorf("No Backends available")
+		}
 		log.Debugf("Attempting endpoint [%s]", ep)
 
 		endpoint, err := net.Dial("tcp", ep)
