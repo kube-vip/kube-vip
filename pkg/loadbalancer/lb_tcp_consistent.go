@@ -4,8 +4,8 @@ import (
 	"io"
 	"net"
 
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
 // 1. Load balancer port is exposed

@@ -45,11 +45,8 @@ fmt:
 	@gofmt -l -w $(SRC)
 
 docker:
-	@GOOS=$(TARGETOS) make build
-	@mv $(TARGET) ./dockerfile
-	@docker build -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) ./dockerfile/
-	@rm ./dockerfile/$(TARGET)
-	@echo New Docker image created
+	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New Multi Architecture Docker image created
 
 simplify:
 	@gofmt -s -l -w $(SRC)

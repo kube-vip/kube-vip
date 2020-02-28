@@ -6,11 +6,11 @@ import (
 	"os/signal"
 
 	"github.com/ghodss/yaml"
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/service"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/thebsdbox/kube-vip/pkg/cluster"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
-	"github.com/thebsdbox/kube-vip/pkg/service"
 
 	appv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

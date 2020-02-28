@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
-	"github.com/thebsdbox/kube-vip/pkg/loadbalancer"
-	"github.com/thebsdbox/kube-vip/pkg/vip"
 )
 
 const leaderLogcount = 5
