@@ -60,8 +60,8 @@ func (lb *LBInstance) startTCP(bindAddress string) error {
 					}
 				}
 				log.Debugf("Accepted from [%s]", fd.RemoteAddr())
-				//go persistentConnection(fd, lb.instance)
-				go processRequests(lb.instance, fd)
+				go persistentConnection(fd, lb.instance)
+				//go processRequests(lb.instance, fd)
 			}
 		}
 	}()

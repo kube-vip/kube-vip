@@ -21,12 +21,15 @@ func (sm *Manager) newWatcher(s *serviceInstance) error {
 	listOptions := metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", s.service.ServiceName),
 	}
-
+	ns, err := returnNameSpace()
+	if err != nil {
+		return err
+	}
 	// Watch function
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Endpoints("default").Watch(listOptions)
+			return sm.clientSet.CoreV1().Endpoints(ns).Watch(listOptions)
 		},
 	})
 	if err != nil {
