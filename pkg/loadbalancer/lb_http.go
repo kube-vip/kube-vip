@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
 func (lb *LBInstance) startHTTP(bindAddress string) error {

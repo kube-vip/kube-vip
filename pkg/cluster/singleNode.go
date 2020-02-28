@@ -3,9 +3,9 @@ package cluster
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
-	"github.com/thebsdbox/kube-vip/pkg/loadbalancer"
-	"github.com/thebsdbox/kube-vip/pkg/vip"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 )
 
 // StartSingleNode will start a single node cluster

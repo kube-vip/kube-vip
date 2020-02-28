@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,9 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/cluster"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -97,8 +96,6 @@ func NewManager(configMap string) (*Manager, error) {
 
 // Start will begin the ConfigMap watcher
 func (sm *Manager) Start() error {
-	// TODO - Needs changing to (with cancel)
-	ctx := context.TODO()
 
 	// Build a options structure to defined what we're looking for
 	listOptions := metav1.ListOptions{
@@ -108,7 +105,7 @@ func (sm *Manager) Start() error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().ConfigMaps("default").Watch(ctx, listOptions)
+			return sm.clientSet.CoreV1().ConfigMaps("default").Watch(listOptions)
 		},
 	})
 

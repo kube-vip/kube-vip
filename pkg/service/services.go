@@ -3,9 +3,9 @@ package service
 import (
 	"fmt"
 
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
-	"github.com/thebsdbox/kube-vip/pkg/cluster"
-	"github.com/thebsdbox/kube-vip/pkg/kubevip"
 )
 
 func (sm *Manager) stopService(uid string) error {

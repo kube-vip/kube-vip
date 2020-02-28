@@ -1,7 +1,0 @@
-#Start from Scratch
-FROM scratch
-#Copy binary
-COPY kube-vip kube-vip
-WORKDIR /tmp
-#Run binary
-CMD ["./kube-vip"]
