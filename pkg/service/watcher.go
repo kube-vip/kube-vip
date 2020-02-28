@@ -97,9 +97,8 @@ func rebuildEndpoints(eps v1.Endpoints) []kubevip.BackEnd {
 		}
 	}
 	var newBackend []kubevip.BackEnd
-	// Build endpoints
-	log.Debugf("Updating %d endpoints", len(addresses))
 
+	// Build endpoints
 	for x := range addresses {
 		for y := range ports {
 			// Print out Backends if debug logging is enabled
