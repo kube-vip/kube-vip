@@ -47,7 +47,7 @@ func (sm *Manager) deleteService(uid string) error {
 }
 
 func (sm *Manager) syncServices(s *plndrServices) error {
-	log.Debugf("Service Sync starting")
+	log.Debugf("[STARTING] Service Sync")
 	// Iterate through the synchronising services
 	for x := range s.Services {
 		foundInstance := false
@@ -103,6 +103,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			sm.serviceInstances = append(sm.serviceInstances, *newService)
 		}
 	}
+	log.Debugf("[COMPLETE] Service Sync")
 
 	return nil
 }

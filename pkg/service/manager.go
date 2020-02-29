@@ -3,9 +3,11 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
@@ -101,11 +103,17 @@ func (sm *Manager) Start() error {
 	listOptions := metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", sm.configMap),
 	}
+
+	ns, err := returnNameSpace()
+	if err != nil {
+		return err
+	}
+
 	// Watch function
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().ConfigMaps("default").Watch(listOptions)
+			return sm.clientSet.CoreV1().ConfigMaps(ns).Watch(listOptions)
 		},
 	})
 
@@ -171,4 +179,14 @@ func (sm *Manager) Start() error {
 	}
 
 	return nil
+}
+
+func returnNameSpace() (string, error) {
+	if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
+			return ns, nil
+		}
+		return "", err
+	}
+	return "", fmt.Errorf("Unable to find Namespace")
 }
