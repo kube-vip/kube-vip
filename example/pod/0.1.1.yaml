@@ -30,6 +30,7 @@ spec:
     - --log
     - "5"
     image: plndr/kube-vip:0.1.1
+    imagePullPolicy: Always
     name: kube-vip
     resources: {}
     securityContext:
