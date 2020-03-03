@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
@@ -127,7 +128,16 @@ func (sm *Manager) Start() error {
 
 	var svcs plndrServices
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
+
+	// Add Notification for Userland interrupt
+	signal.Notify(signalChan, syscall.SIGINT)
+
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGTERM)
+
+	// Add Notification for SIGKILL (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGKILL)
+
 	go func() {
 		for event := range ch {
 
@@ -172,6 +182,7 @@ func (sm *Manager) Start() error {
 			}
 		}
 	}()
+
 	<-signalChan
 	log.Infof("Shutting down Kube-Vip")
 	for x := range sm.serviceInstances {
