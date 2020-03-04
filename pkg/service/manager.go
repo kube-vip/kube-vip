@@ -120,7 +120,7 @@ func (sm *Manager) Start() error {
 	listOptions := metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("metadata.name=%s", sm.configMap),
 	}
-
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -186,8 +186,8 @@ func (sm *Manager) Start() error {
 				log.Infof("Beginning watching Kubernetes configMap [%s]", sm.configMap)
 
 				var svcs plndrServices
-				// signalChan := make(chan os.Signal, 1)
-				// signal.Notify(signalChan, os.Interrupt)
+				//signalChan := make(chan os.Signal, 1)
+				//signal.Notify(signalChan, os.Interrupt)
 				go func() {
 					for event := range ch {
 
@@ -232,6 +232,8 @@ func (sm *Manager) Start() error {
 						}
 					}
 				}()
+
+				<-leaderChan
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
@@ -251,7 +253,7 @@ func (sm *Manager) Start() error {
 		},
 	})
 
-	// <-signalChan
+	//<-signalChan
 	log.Infof("Shutting down Kube-Vip")
 
 	return nil
