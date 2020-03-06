@@ -1,4 +1,4 @@
-# kube-vip (WIP)
+# kube-vip
 
 Kubernetes Virtual IP and Load-Balancer for both control pane and Kubernetes services
 
@@ -12,11 +12,9 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 The `kube-vip` application builds a multi-node or multi-pod cluster to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
 
-When running out of cluster it will use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology 
+When running **out of cluster** it will use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology 
 
-When running in cluster it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
-
-For InCluster deployments follow the instructions [here](https://plndr.io/kube-vip/)
+When running **in cluster** it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
 
 ## Why?
 
@@ -55,7 +53,7 @@ When the **vip** moves from one host to another any host that has been using the
 
 (Optional) The `kube-vip` can be configured to broadcast a [gratuitous arp](https://wiki.wireshark.org/Gratuitous_ARP) that will typically immediately notify all local hosts that the `vip <-> MAC` has changed.
 
-### Load Balancing
+### Load Balancing (Out of Cluster)
 
 Within the configuration of `kube-vip` multiple load-balancers can be created, below is the example load-balancer for a Kubernetes Control-plane:
 
@@ -93,10 +91,11 @@ Additionally the load-balancing within `kibe-vip` has two modes of operation:
 
 ## Usage
 
+For In Cluster / Kubernetes `type:LoadBalancer` deployments follow the instructions [here](https://plndr.io/kube-vip/)
+
+For providing HA and load-balancing for Kubernetes the documentation available here -> [kubernetes-control-plane.md](kubernetes-control-plane.md)
+
 The usage of `kube-vip` can either be directly by taking the binary / building yourself (`make build`), or alternatively through a pre-built docker container which can be found in the plunder Docker Hub repository [https://hub.docker.com/r/plndr/kube-vip](https://hub.docker.com/r/plndr/kube-vip). For further 
-
-The main goal of this project is to provide HA and load-balancing for Kubernetes, the usage for that is in it’s own documentation available here -> [kubernetes-control-plane.md](kubernetes-control-plane.md)
-
 ### Configuration
 
 To generate the basic `yaml` configuration:
