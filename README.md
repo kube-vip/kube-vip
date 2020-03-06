@@ -1,5 +1,6 @@
 # kube-vip (WIP)
-Kubernetes Control Plane Virtual IP and Load-Balancer
+
+Kubernetes Virtual IP and Load-Balancer for both control pane and Kubernetes services
 
 The idea behind `kube-vip` is a small self-contained Highly-Available option for all environments, especially:
 
@@ -9,7 +10,13 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 ![](/overview.png)
 
-The `kube-vip` application builds a multi-node cluster using [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
+The `kube-vip` application builds a multi-node or multi-pod cluster to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
+
+When running out of cluster it will use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science)) clustering technology 
+
+When running in cluster it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
+
+For InCluster deployments follow the instructions [here](https://plndr.io/kube-vip/)
 
 ## Why?
 
