@@ -142,10 +142,17 @@ func (sm *Manager) Start() error {
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
-	leaderChan := make(chan os.Signal, 1)
-	signal.Notify(leaderChan, os.Interrupt, syscall.SIGTERM)
+	signalChan := make(chan os.Signal, 1)
+	// Add Notification for Userland interrupt
+	signal.Notify(signalChan, syscall.SIGINT)
+
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGTERM)
+
+	// Add Notification for SIGKILL (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGKILL)
 	go func() {
-		<-leaderChan
+		<-signalChan
 		log.Info("Received termination, signaling shutdown")
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
@@ -161,9 +168,9 @@ func (sm *Manager) Start() error {
 		// get elected before your background loop finished, violating
 		// the stated goal of the lease.
 		ReleaseOnCancel: true,
-		LeaseDuration:   60 * time.Second,
-		RenewDeadline:   15 * time.Second,
-		RetryPeriod:     5 * time.Second,
+		LeaseDuration:   10 * time.Second,
+		RenewDeadline:   5 * time.Second,
+		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// we're notified when we start
@@ -233,7 +240,7 @@ func (sm *Manager) Start() error {
 					}
 				}()
 
-				<-leaderChan
+				<-signalChan
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
