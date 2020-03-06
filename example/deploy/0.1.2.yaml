@@ -28,7 +28,7 @@ spec:
                   - kube-vip-cluster
             topologyKey: "kubernetes.io/hostname"
       containers:
-      - image: thebsdbox/kube-vip:test
+      - image: plndr/kube-vip:0.1.2
         imagePullPolicy: Always
         name: kube-vip
         command:
