@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: kube-vip-cluster
+  name: kube-vip-cluster
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kube-vip-cluster
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: kube-vip-cluster
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: "app"
+                  operator: In
+                  values:
+                  - kube-vip-cluster
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - image: thebsdbox/kube-vip:test
+        imagePullPolicy: Always
+        name: kube-vip
+        command:
+        - /kube-vip
+        - service
+        - --configMap
+        - plndr-configmap
+        - --arp
+        - --interface
+        - ens192
+        - --log
+        - "5"
+        resources: {}
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+      hostNetwork: true
+status: {}
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: lease-access
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "list", "put"]
+  - apiGroups: [""]
+    resources: ["configMap"]
+    verbs: ["get"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: lease-access
+subjects:
+  - kind: User
+    name: system:serviceaccount:default:default
+roleRef:
+  kind: Role
+  name: lease-access
+  apiGroup: rbac.authorization.k8s.io

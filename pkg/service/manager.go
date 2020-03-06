@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
@@ -18,13 +20,17 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	watchtools "k8s.io/client-go/tools/watch"
 
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
 )
+
+const plunderLock = "plunder-lock"
 
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
@@ -100,35 +106,43 @@ func NewManager(configMap string) (*Manager, error) {
 // Start will begin the ConfigMap watcher
 func (sm *Manager) Start() error {
 
-	// Build a options structure to defined what we're looking for
-	listOptions := metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", sm.configMap),
-	}
-
 	ns, err := returnNameSpace()
 	if err != nil {
 		return err
 	}
 
-	// Watch function
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().ConfigMaps(ns).Watch(listOptions)
-		},
-	})
-
+	id, err := os.Hostname()
 	if err != nil {
-		return fmt.Errorf("error creating watcher: %s", err.Error())
+		return err
 	}
 
-	ch := rw.ResultChan()
-	defer rw.Stop()
-	log.Infof("Beginning watching Kubernetes configMap [%s]", sm.configMap)
+	// Build a options structure to defined what we're looking for
+	listOptions := metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", sm.configMap),
+	}
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
+	// we use the Lease lock type since edits to Leases are less common
+	// and fewer objects in the cluster watch "all Leases".
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      plunderLock,
+			Namespace: ns,
+		},
+		Client: sm.clientSet.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: id,
+		},
+	}
 
-	var svcs plndrServices
+	// use a Go context so we can tell the leaderelection code when we
+	// want to step down
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
 	signalChan := make(chan os.Signal, 1)
-
 	// Add Notification for Userland interrupt
 	signal.Notify(signalChan, syscall.SIGINT)
 
@@ -137,57 +151,117 @@ func (sm *Manager) Start() error {
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGKILL)
-
 	go func() {
-		for event := range ch {
-
-			// We need to inspect the event and get ResourceVersion out of it
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				log.Debugf("ConfigMap [%s] has been Created or modified", sm.configMap)
-				cm, ok := event.Object.(*v1.ConfigMap)
-				if !ok {
-					log.Errorf("Unable to parse ConfigMap from watcher")
-					break
-				}
-				data := cm.Data["plndr-services"]
-				json.Unmarshal([]byte(data), &svcs)
-				log.Debugf("Found %d services defined in ConfigMap", len(svcs.Services))
-
-				err = sm.syncServices(&svcs)
-				if err != nil {
-					log.Errorf("%v", err)
-				}
-			case watch.Deleted:
-				log.Debugf("ConfigMap [%s] has been Deleted", sm.configMap)
-
-			case watch.Bookmark:
-				// Un-used
-			case watch.Error:
-				log.Infoln("err")
-
-				// This round trip allows us to handle unstructured status
-				errObject := apierrors.FromObject(event.Object)
-				statusErr, ok := errObject.(*apierrors.StatusError)
-				if !ok {
-					log.Fatalf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-					// Retry unknown errors
-					//return false, 0
-				}
-
-				status := statusErr.ErrStatus
-				log.Errorf("%v", status)
-
-			default:
-			}
-		}
+		<-signalChan
+		log.Info("Received termination, signaling shutdown")
+		// Cancel the context, which will in turn cancel the leadership
+		cancel()
 	}()
 
-	<-signalChan
+	// start the leader election code loop
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		Lock: lock,
+		// IMPORTANT: you MUST ensure that any code you have that
+		// is protected by the lease must terminate **before**
+		// you call cancel. Otherwise, you could have a background
+		// loop still running and another process could
+		// get elected before your background loop finished, violating
+		// the stated goal of the lease.
+		ReleaseOnCancel: true,
+		LeaseDuration:   10 * time.Second,
+		RenewDeadline:   5 * time.Second,
+		RetryPeriod:     1 * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				// we're notified when we start
+
+				// Watch function
+				// Use a restartable watcher, as this should help in the event of etcd or timeout issues
+				rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+					WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+						return sm.clientSet.CoreV1().ConfigMaps(ns).Watch(listOptions)
+					},
+				})
+
+				if err != nil {
+					log.Errorf("error creating watcher: %s", err.Error())
+					ctx.Done()
+				}
+
+				ch := rw.ResultChan()
+				defer rw.Stop()
+				log.Infof("Beginning watching Kubernetes configMap [%s]", sm.configMap)
+
+				var svcs plndrServices
+				//signalChan := make(chan os.Signal, 1)
+				//signal.Notify(signalChan, os.Interrupt)
+				go func() {
+					for event := range ch {
+
+						// We need to inspect the event and get ResourceVersion out of it
+						switch event.Type {
+						case watch.Added, watch.Modified:
+							log.Debugf("ConfigMap [%s] has been Created or modified", sm.configMap)
+							cm, ok := event.Object.(*v1.ConfigMap)
+							if !ok {
+								log.Errorf("Unable to parse ConfigMap from watcher")
+								break
+							}
+							data := cm.Data["plndr-services"]
+							json.Unmarshal([]byte(data), &svcs)
+							log.Debugf("Found %d services defined in ConfigMap", len(svcs.Services))
+
+							err = sm.syncServices(&svcs)
+							if err != nil {
+								log.Errorf("%v", err)
+							}
+						case watch.Deleted:
+							log.Debugf("ConfigMap [%s] has been Deleted", sm.configMap)
+
+						case watch.Bookmark:
+							// Un-used
+						case watch.Error:
+							log.Infoln("err")
+
+							// This round trip allows us to handle unstructured status
+							errObject := apierrors.FromObject(event.Object)
+							statusErr, ok := errObject.(*apierrors.StatusError)
+							if !ok {
+								log.Fatalf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+								// Retry unknown errors
+								//return false, 0
+							}
+
+							status := statusErr.ErrStatus
+							log.Errorf("%v", status)
+
+						default:
+						}
+					}
+				}()
+
+				<-signalChan
+			},
+			OnStoppedLeading: func() {
+				// we can do cleanup here
+				log.Infof("leader lost: %s", id)
+				for x := range sm.serviceInstances {
+					sm.serviceInstances[x].cluster.Stop()
+				}
+			},
+			OnNewLeader: func(identity string) {
+				// we're notified when new leader elected
+				if identity == id {
+					// I just got the lock
+					return
+				}
+				log.Infof("new leader elected: %s", identity)
+			},
+		},
+	})
+
+	//<-signalChan
 	log.Infof("Shutting down Kube-Vip")
-	for x := range sm.serviceInstances {
-		sm.serviceInstances[x].cluster.Stop()
-	}
 
 	return nil
 }
