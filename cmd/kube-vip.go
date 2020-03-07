@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"github.com/ghodss/yaml"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
@@ -292,6 +293,35 @@ var kubeVipService = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
+
+		// User Environment variables as an option to make manifest clearer
+		envInterface := os.Getenv("vip_interface")
+		if envInterface != "" {
+			service.Interface = envInterface
+		}
+
+		envConfigMap := os.Getenv("vip_configmap")
+		if envInterface != "" {
+			configMap = envConfigMap
+		}
+
+		envLog := os.Getenv("vip_loglevel")
+		if envLog != "" {
+			logLevel, err := strconv.Atoi(envLog)
+			if err != nil {
+				panic(fmt.Sprintf("Unable to parse environment variable [vip_loglevel], should be int"))
+			}
+			log.SetLevel(log.Level(logLevel))
+		}
+
+		envArp := os.Getenv("vip_arp")
+		if envArp != "" {
+			arpBool, err := strconv.ParseBool(envArp)
+			if err != nil {
+				panic(fmt.Sprintf("Unable to parse environment variable [arp], should be bool (true/false)"))
+			}
+			service.EnableArp = arpBool
+		}
 
 		// Define the new service manager
 		mgr, err := service.NewManager(configMap)

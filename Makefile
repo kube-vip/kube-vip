@@ -6,7 +6,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSION := 0.1.2
+VERSION := 0.1.3
 BUILD := `git rev-parse HEAD`
 
 # Operating System Default (LINUX)
@@ -18,8 +18,8 @@ LDFLAGS=-ldflags "-X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -s"
 # go source files, ignore vendor directory
 SRC = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 
-DOCKERTAG=$(VERSION)
-REPOSITORY=plndr
+DOCKERTAG ?= $(VERSION)
+REPOSITORY = plndr
 
 .PHONY: all build clean install uninstall fmt simplify check run
 
