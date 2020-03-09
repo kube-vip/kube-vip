@@ -68,7 +68,7 @@ spec:
           - name: vip_interface
             value: "ens192"
           - name: vip_configmap
-            value: "plndr-configmap" 
+            value: "plndr" 
           - name: vip_arp
             value: "true"
           - name: vip_loglevel
