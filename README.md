@@ -1,5 +1,10 @@
 # kube-vip
 
+
+**NOTE** All documentation of both usage and architecture are now available at [https://kube-vip.io](https://kube-vip.io)
+
+
+## Overview
 Kubernetes Virtual IP and Load-Balancer for both control pane and Kubernetes services
 
 The idea behind `kube-vip` is a small self-contained Highly-Available option for all environments, especially:
@@ -22,7 +27,7 @@ The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters,
 
 ### Alternative HA Options
 
-`kibe-vip` provides both a floating or virtual IP address for your kubernetes cluster as well as load-balancing the incoming traffic to various control-plane replicas. At the current time to replicate this functionality a minimum of two pieces of tooling would be required:
+`kube-vip` provides both a floating or virtual IP address for your kubernetes cluster as well as load-balancing the incoming traffic to various control-plane replicas. At the current time to replicate this functionality a minimum of two pieces of tooling would be required:
 
 **VIP**:
 - [Keepalived](https://www.keepalived.org/)
@@ -35,67 +40,13 @@ The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters,
 - [Nginx](http://nginx.com)
 - Hardware Load-balancer(functionality differs per vendor)
 
-All of these would require a separate level of configuration and in some infrastructures multiple teams in order to implement. Also when considering the software components, they may require packaging into containers or if they’re pre-packaged then security and transparency may be an issue. Finally, in edge environments we may have limited room for hardware (no HW load-balancer) or packages solutions in the correct architectures might not exist (e.g. ARM). Luckily with `kibe-vip` being written in GO, it’s small(ish) and easy to build for multiple architectures, with the added security benefit of being the only thing needed in the container.
+All of these would require a separate level of configuration and in some infrastructures multiple teams in order to implement. Also when considering the software components, they may require packaging into containers or if they’re pre-packaged then security and transparency may be an issue. Finally, in edge environments we may have limited room for hardware (no HW load-balancer) or packages solutions in the correct architectures might not exist (e.g. ARM). Luckily with `kube-vip` being written in GO, it’s small(ish) and easy to build for multiple architectures, with the added security benefit of being the only thing needed in the container.
 
-## Architecture
 
-### Cluster
-
-To achieve HA, `kube-vip` requires multiple nodes and will use RAFT concensus to elect a leader amongst them. In the event that the leader fails for any reason, then a new election will take place and a new leader will be elected as part of the cluster. 
-
-### Virtual IP
-
-The leader within the cluster will assume the **vip** and will have it bound to the selected interace that is declared within the configuration. When the leader changes it will evacuate the **vip** first or in failure scenarios the **vip** will be directly assumed by the next elected leader.
-
-When the **vip** moves from one host to another any host that has been using the **vip** will retain the previous `vip <-> MAC address` mapping until the ARP (Address resolution protocol) expires the old entry (typically 30 seconds) and retrieves a new `vip <-> MAC` mapping. This can be improved using Gratuitous ARP broadcasts (when enabled), this is detailed below.
-
-### ARP
-
-(Optional) The `kube-vip` can be configured to broadcast a [gratuitous arp](https://wiki.wireshark.org/Gratuitous_ARP) that will typically immediately notify all local hosts that the `vip <-> MAC` has changed.
-
-### Load Balancing (Out of Cluster)
-
-Within the configuration of `kube-vip` multiple load-balancers can be created, below is the example load-balancer for a Kubernetes Control-plane:
-
-```
-loadBalancers:
-- name: Kubernetes Control Plane
-  type: tcp
-  port: 6443
-  bindToVip: true
-  backends:
-  - port: 6444
-    address: 192.168.0.70
-  - port: 6444
-    address: 192.168.0.71
-  - port: 6444
-    address: 192.168.0.72
-```
-
-The above load balancer will create an instance that listens on port `6443` and will forward traffic to the array of backend addresses. If the load-balancer type is `tcp` then the backends will be IP addresses, however if the backend is set to `http` then the backends should be URLs:
-
-```
-  type: http
-  port: 6443
-  bindToVip: true
-  backends:
-  - port: 6444
-    address: https://192.168.0.70
-```
-
-Additionally the load-balancing within `kibe-vip` has two modes of operation:
-
-`bindToVip: false` - will result in every node in the cluster binding all load-balancer port(s) to all interfaces on the host itself
-
-`bindToVip: true` - The load-balancer will only **bind** to the VIP address.
-
-## Usage
-
-For In Cluster / Kubernetes `type:LoadBalancer` deployments follow the instructions [here](https://plndr.io/kube-vip/)
-
-For providing HA and load-balancing for Kubernetes the documentation available here -> [kubernetes-control-plane.md](kubernetes-control-plane.md)
+## Standalone Usage
 
 The usage of `kube-vip` can either be directly by taking the binary / building yourself (`make build`), or alternatively through a pre-built docker container which can be found in the plunder Docker Hub repository [https://hub.docker.com/r/plndr/kube-vip](https://hub.docker.com/r/plndr/kube-vip). For further 
+
 ### Configuration
 
 To generate the basic `yaml` configuration:
@@ -130,52 +81,3 @@ INFO[0002] The Node [192.168.0.72:10000] is leading
 ```
 
 After a few seconds with additional nodes started a leader election will take place and the leader will assume the **vip**.
-
-
-## Failover
-
-A new leader is elected typically within a second of the previous leader failing, external hosts will see the changes differently based upon configuration.
-
-### Without Gratuitous ARP
-
-The failover will take however long their ARP caches are configured for, on most Linux systems the `vip <-> MAC` will be updated within 30 seconds.
-
-### With Gratuitous ARP
-
-With this enabled then the changes will propogate in a few seconds, as shown during a failed leader (`192.168.0.70` was restarted):
-
-```
-64 bytes from 192.168.0.75: icmp_seq=146 ttl=64 time=0.258 ms
-64 bytes from 192.168.0.75: icmp_seq=147 ttl=64 time=0.240 ms
-92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
-Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
- 4  5  00 0054 bc98   0 0000  3f  01 3d16 192.168.0.95  192.168.0.75 
-
-Request timeout for icmp_seq 148
-92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
-Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
- 4  5  00 0054 75ff   0 0000  3f  01 83af 192.168.0.95  192.168.0.75 
-
-Request timeout for icmp_seq 149
-92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
-Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
- 4  5  00 0054 2890   0 0000  3f  01 d11e 192.168.0.95  192.168.0.75 
-
-Request timeout for icmp_seq 150
-64 bytes from 192.168.0.75: icmp_seq=151 ttl=64 time=0.245 ms
-
-```
-
-## Troubleshooting
-
-Enable debug logging by editing the `kube-vip.yaml` manifest and changing the `command:`:
-
-```
-  - command:
-    - /kube-vip
-    - start
-    - -c
-    - /vip.yaml
-    - -l
-    - "5"
- ```
