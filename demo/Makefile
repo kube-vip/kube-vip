@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 
 # The name of the executable (default is current directory name)
-TARGET := kube-vip
+TARGET := demo
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
@@ -43,12 +43,6 @@ uninstall: clean
 
 fmt:
 	@gofmt -l -w $(SRC)
-
-demo:
-	@cd demo
-	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
-	@echo New Multi Architecture Docker image created
-	@cd ..
 
 docker:
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .

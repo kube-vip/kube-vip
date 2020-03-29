@@ -34,6 +34,11 @@ func (lm *LBManager) Add(bindAddress string, lb *kubevip.LoadBalancer) error {
 		if err != nil {
 			return err
 		}
+	case "udp":
+		err := newLB.startUDP(bindAddress)
+		if err != nil {
+			return err
+		}
 	case "http":
 		err := newLB.startHTTP(bindAddress)
 		if err != nil {
