@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: kube-vip-demo
+  name: kube-vip-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kube-vip-demo
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: kube-vip-demo
+    spec:
+      containers:
+      - image: plndr/demo:0.1.3
+        imagePullPolicy: Always
+        name: kube-vip-demo
+        command:
+        - /demo
+        env:
+          - name: serverType
+            value: "udp"
+        resources: {}
+status: {}
