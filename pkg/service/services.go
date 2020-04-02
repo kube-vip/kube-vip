@@ -65,7 +65,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			newLB := kubevip.LoadBalancer{
 				Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
 				Port:      s.Services[x].Port,
-				Type:      "tcp",
+				Type:      s.Services[x].Type,
 				BindToVip: true,
 			}
 

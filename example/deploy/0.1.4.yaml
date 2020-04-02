@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vip
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: vip-role
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "list", "put"]
+  - apiGroups: [""]
+    resources: ["configmaps", "endpoints"]
+    verbs: ["watch", "get"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: vip-role-bind
+subjects:
+  - kind: ServiceAccount
+    name: vip 
+    apiGroup: ""
+roleRef:
+  kind: Role
+  name: vip-role
+  apiGroup: "" 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: kube-vip-cluster
+  name: kube-vip-cluster
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kube-vip-cluster
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: kube-vip-cluster
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: "app"
+                  operator: In
+                  values:
+                  - kube-vip-cluster
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - image: plndr/kube-vip:0.1.4
+        imagePullPolicy: Always
+        name: kube-vip
+        command:
+        - /kube-vip
+        - service
+        env:
+          - name: vip_interface
+            value: "ens192"
+          - name: vip_configmap
+            value: "plndr" 
+          - name: vip_arp
+            value: "true"
+          - name: vip_loglevel
+            value: "5"
+        resources: {}
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+      hostNetwork: true
+      serviceAccountName: vip
+status: {}

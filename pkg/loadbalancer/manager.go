@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -28,7 +29,7 @@ func (lm *LBManager) Add(bindAddress string, lb *kubevip.LoadBalancer) error {
 		instance: lb,
 	}
 
-	switch lb.Type {
+	switch strings.ToLower(lb.Type) {
 	case "tcp":
 		err := newLB.startTCP(bindAddress)
 		if err != nil {

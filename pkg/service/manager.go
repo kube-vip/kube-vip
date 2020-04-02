@@ -56,9 +56,11 @@ type serviceInstance struct {
 
 // TODO - call from a package (duplicated struct in the cloud-provider code)
 type service struct {
-	Vip         string `json:"vip"`
-	Port        int    `json:"port"`
-	UID         string `json:"uid"`
+	Vip  string `json:"vip"`
+	Port int    `json:"port"`
+	UID  string `json:"uid"`
+	Type string `json:"type"`
+
 	ServiceName string `json:"serviceName"`
 }
 
