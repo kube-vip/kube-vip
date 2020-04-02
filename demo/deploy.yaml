@@ -27,4 +27,7 @@ spec:
           - name: serverType
             value: "udp"
         resources: {}
+        ports:
+            - containerPort: 10001
+            - containerPort: 10002
 status: {}

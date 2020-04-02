@@ -20,29 +20,64 @@ func (lb *LBInstance) startUDP(bindAddress string) error {
 	if nil != err {
 		return fmt.Errorf("Unable to bind [%s]", err.Error())
 	}
-	stopListener := make(chan bool)
+	//stopListener := make(chan bool)
 
 	go func() {
-		<-lb.stop
-		log.Debugln("Closing listener")
+		for {
+			select {
 
-		// We've closed the stop channel
-		err = l.Close()
-		if err != nil {
-			return
+			case <-lb.stop:
+				log.Debugln("Closing listener")
+
+				// We've closed the stop channel
+				err = l.Close()
+				if err != nil {
+					return
+				}
+				// Close the stopped channel as the listener has been stopped
+				close(lb.stopped)
+			default:
+
+				// err = l.SetDeadline(time.Now().Add(200 * time.Millisecond))
+				// if err != nil {
+				// 	log.Errorf("Error setting TCP deadline", err)
+				// }
+				// fd, err := l.Accept()
+				// if err != nil {
+				// 	// Check it it's an accept timeout
+				// 	if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+				// 		continue
+				// 	} else if err != io.EOF {
+				// 		log.Errorf("TCP Accept error [%s]", err)
+				// 	}
+				// }
+				go persistentUDPConnection(l, lb.instance)
+			}
 		}
-		// Close the stopped channel as the listener has been stopped
-		close(stopListener)
 	}()
+	log.Infof("Load Balancer [%s] started", lb.instance.Name)
 
-	// Create a listener per CPU
-	// TODO - make this customisable?
+	// go func() {
+	// 	<-lb.stop
+	// 	log.Debugln("Closing listener")
 
-	//for i := 0; i < runtime.NumCPU(); i++ {
-	go persistentUDPConnection(l, lb.instance)
-	//}
+	// 	// We've closed the stop channel
+	// 	err = l.Close()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	// Close the stopped channel as the listener has been stopped
+	// 	close(stopListener)
+	// }()
 
-	<-stopListener // hang until an error
+	// // Create a listener per CPU
+	// // TODO - make this customisable?
+
+	// //for i := 0; i < runtime.NumCPU(); i++ {
+	// go persistentUDPConnection(l, lb.instance)
+	// //}
+
+	//<-stopListener // hang until an error
 
 	log.Infof("Load Balancer [%s] started", lb.instance.Name)
 
