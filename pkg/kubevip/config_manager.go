@@ -74,6 +74,38 @@ func (c *Config) PrintConfig() {
 	fmt.Printf(string(b))
 }
 
+//ParseFlags will write the current configuration to a specified [path]
+func (c *Config) ParseFlags(localPeer string, remotePeers, backends []string) error {
+	// Parse localPeer
+	p, err := ParsePeerConfig(localPeer)
+	if err != nil {
+		return err
+	}
+	c.LocalPeer = *p
+
+	// Parse remotePeers
+	//Iterate backends
+	for i := range remotePeers {
+		p, err := ParsePeerConfig(remotePeers[i])
+		if err != nil {
+			return err
+
+		}
+		c.RemotePeers = append(c.RemotePeers, *p)
+	}
+
+	//Iterate backends
+	for i := range backends {
+		b, err := ParseBackendConfig(backends[i])
+		if err != nil {
+			return err
+		}
+		c.LoadBalancers[0].Backends = append(c.LoadBalancers[0].Backends, *b)
+	}
+
+	return nil
+}
+
 //SampleConfig will create an example configuration and write it to the specified [path]
 func SampleConfig() {
 

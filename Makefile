@@ -1,5 +1,5 @@
 
-SHELL := /bin/bash
+SHELL := /bin/sh
 
 # The name of the executable (default is current directory name)
 TARGET := kube-vip
@@ -13,7 +13,7 @@ BUILD := `git rev-parse HEAD`
 TARGETOS=linux
 
 # Use linker flags to provide version/build settings to the target
-LDFLAGS=-ldflags "-X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -s"
+LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 
 # go source files, ignore vendor directory
 SRC = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
