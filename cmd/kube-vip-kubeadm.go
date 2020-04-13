@@ -4,11 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strconv"
-
-	"github.com/ghodss/yaml"
-	appv1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -39,7 +34,7 @@ func init() {
 	// Load Balancer flags
 	kubeKubeadmInit.Flags().BoolVar(&initLoadBalancer.BindToVip, "lbBindToVip", true, "Bind example load balancer to VIP")
 	kubeKubeadmInit.Flags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
-	kubeKubeadmInit.Flags().StringVar(&initLoadBalancer.Name, "lbName", "Example Load Balancer", "The name of a load balancer instance")
+	kubeKubeadmInit.Flags().StringVar(&initLoadBalancer.Name, "lbName", "Kubeadm Load Balancer", "The name of a load balancer instance")
 	kubeKubeadmInit.Flags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balander will expose on")
 	kubeKubeadmInit.Flags().IntVar(&initLoadBalancer.BackendPort, "lbBackEndPort", 6444, "A port that all backends may be using (optional)")
 
@@ -65,7 +60,7 @@ var kubeKubeadmInit = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
-		parseEnvironment(&initConfig)
+		kubevip.ParseEnvironment(&initConfig)
 		// TODO - check for certain things VIP/interfaces
 		if initConfig.Interface == "" {
 			cmd.Help()
@@ -76,7 +71,7 @@ var kubeKubeadmInit = &cobra.Command{
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := generateFromConfig(&initConfig, Release.Version)
+		cfg := kubevip.GenerateManifestFromConfig(&initConfig, Release.Version)
 
 		fmt.Println(cfg)
 	},
@@ -123,104 +118,4 @@ func autoGenLocalPeer() (*kubevip.RaftPeer, error) {
 		Port:    10000,
 	}, nil
 
-}
-
-// generateFromConfig will take a kube-vip config and generate a manifest
-func generateFromConfig(c *kubevip.Config, imageVersion string) string {
-
-	// build environment variables
-	newEnvironment := []appv1.EnvVar{
-		appv1.EnvVar{
-			Name:  vipArp,
-			Value: strconv.FormatBool(c.GratuitousARP),
-		},
-		appv1.EnvVar{
-			Name:  vipInterface,
-			Value: c.Interface,
-		},
-		appv1.EnvVar{
-			Name:  vipAddress,
-			Value: c.VIP,
-		},
-		appv1.EnvVar{
-			Name:  vipStartLeader,
-			Value: strconv.FormatBool(c.StartAsLeader),
-		},
-		appv1.EnvVar{
-			Name:  vipAddPeersToLB,
-			Value: strconv.FormatBool(c.AddPeersAsBackends),
-		},
-		appv1.EnvVar{
-			Name:  lbBackendPort,
-			Value: fmt.Sprintf("%d", c.LoadBalancers[0].Port),
-		},
-		appv1.EnvVar{
-			Name:  lbName,
-			Value: c.LoadBalancers[0].Name,
-		},
-		appv1.EnvVar{
-			Name:  lbType,
-			Value: c.LoadBalancers[0].Type,
-		},
-		appv1.EnvVar{
-			Name:  lbBindToVip,
-			Value: strconv.FormatBool(c.LoadBalancers[0].BindToVip),
-		},
-	}
-
-	// Parse peers into a comma seperated string
-	if len(c.RemotePeers) != 0 {
-		var peers string
-		for x := range c.RemotePeers {
-			if x != 0 {
-				peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-
-			} else {
-				peers = fmt.Sprintf("%s:%s:%d", c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-
-			}
-			fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-			fmt.Sprintf("", peers)
-		}
-		peerEnvirontment := appv1.EnvVar{
-			Name:  vipPeers,
-			Value: peers,
-		}
-		newEnvironment = append(newEnvironment, peerEnvirontment)
-	}
-
-	newManifest := &appv1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Pod",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kube-vip",
-			Namespace: "kube-system",
-		},
-		Spec: appv1.PodSpec{
-			Containers: []appv1.Container{
-				{
-					Name:            "kube-vip",
-					Image:           fmt.Sprintf("plndr/kube-vip:%s", imageVersion),
-					ImagePullPolicy: appv1.PullAlways,
-					SecurityContext: &appv1.SecurityContext{
-						Capabilities: &appv1.Capabilities{
-							Add: []appv1.Capability{
-								"NET_ADMIN",
-								"SYS_TIME",
-							},
-						},
-					},
-					Args: []string{
-						"start",
-					},
-					Env: newEnvironment,
-				},
-			},
-			HostNetwork: true,
-		},
-	}
-	b, _ := yaml.Marshal(newManifest)
-	return string(b)
 }

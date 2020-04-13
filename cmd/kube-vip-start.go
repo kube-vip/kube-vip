@@ -1,11 +1,8 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
@@ -41,168 +38,6 @@ func init() {
 	kubeVipStart.Flags().StringSliceVar(&startBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma seperated backends, format: address:port")
 }
 
-func parseEnvironment(c *kubevip.Config) error {
-
-	// Find interface
-	env := os.Getenv(vipInterface)
-	if env != "" {
-		c.Interface = env
-	}
-
-	// Find vip address
-	env = os.Getenv(vipAddress)
-	if env != "" {
-		// TODO - parse address net.Host()
-		c.VIP = env
-	}
-
-	// Find Single Node
-	env = os.Getenv(vipSingleNode)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.SingleNode = b
-	}
-
-	// Find Start As Leader
-	// TODO - does this need depricating?
-
-	// Find ARP
-	env = os.Getenv(vipArp)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.GratuitousARP = b
-	}
-
-	//Removal of seperate peer
-	env = os.Getenv(vipLocalPeer)
-	if env != "" {
-		// Parse the string in format <id>:<address>:<port>
-		peer, err := kubevip.ParsePeerConfig(env)
-		if err != nil {
-			return err
-		}
-		c.LocalPeer = *peer
-	}
-
-	env = os.Getenv(vipPeers)
-	if env != "" {
-		// TODO - perhaps make this optional?
-		// Remove existing peers
-		c.RemotePeers = []kubevip.RaftPeer{}
-
-		// Parse the remote peers (comma seperated)
-		s := strings.Split(env, ",")
-		if len(s) == 0 {
-			return fmt.Errorf("The Remote Peer List [%s] is unable to be parsed, should be in comma seperated format <id>:<address>:<port>", env)
-		}
-		for x := range s {
-			// Parse the each remote peer string in format <id>:<address>:<port>
-			peer, err := kubevip.ParsePeerConfig(s[x])
-			if err != nil {
-				return err
-			}
-
-			c.RemotePeers = append(c.RemotePeers, *peer)
-
-		}
-	}
-
-	// Find Add Peers as Backends
-
-	env = os.Getenv(vipAddPeersToLB)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.AddPeersAsBackends = b
-	}
-
-	// Load Balancer configuration
-	return parseEnvironmentLoadBalancer(c)
-}
-
-func parseEnvironmentLoadBalancer(c *kubevip.Config) error {
-	// Check if an existing load-balancer configuration already exists
-	if len(c.LoadBalancers) == 0 {
-		c.LoadBalancers = append(c.LoadBalancers, kubevip.LoadBalancer{})
-	}
-
-	// Find LoadBalancer Port
-	env := os.Getenv(lbPort)
-	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].Port = int(i)
-	}
-
-	// Find Type of LoadBalancer
-	env = os.Getenv(lbType)
-	if env != "" {
-		c.LoadBalancers[0].Type = env
-	}
-
-	// Find Type of LoadBalancer Name
-	env = os.Getenv(lbName)
-	if env != "" {
-		c.LoadBalancers[0].Name = env
-	}
-
-	// Find If LB should bind to Vip
-	env = os.Getenv(lbBindToVip)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].BindToVip = b
-	}
-
-	// Find global backendport
-	env = os.Getenv(lbBackendPort)
-	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].BackendPort = int(i)
-	}
-
-	// Parse backends
-	env = os.Getenv(lbBackends)
-	if env != "" {
-		// TODO - perhaps make this optional?
-		// Remove existing backends
-		c.LoadBalancers[0].Backends = []kubevip.BackEnd{}
-
-		// Parse the remote peers (comma seperated)
-		s := strings.Split(env, ",")
-		if len(s) == 0 {
-			return fmt.Errorf("The Backends List [%s] is unable to be parsed, should be in comma seperated format <address>:<port>", env)
-		}
-		for x := range s {
-			// Parse the each remote peer string in format <address>:<port>
-
-			be, err := kubevip.ParseBackendConfig(s[x])
-			if err != nil {
-				return err
-			}
-
-			c.LoadBalancers[0].Backends = append(c.LoadBalancers[0].Backends, *be)
-
-		}
-	}
-	return nil
-}
-
 var kubeVipStart = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Virtual IP / Load balancer",
@@ -222,7 +57,7 @@ var kubeVipStart = &cobra.Command{
 		}
 
 		// parse environment variables, these will overwrite anything loaded or flags
-		err = parseEnvironment(&startConfig)
+		err = kubevip.ParseEnvironment(&startConfig)
 		if err != nil {
 			log.Fatalln(err)
 		}

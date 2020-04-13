@@ -10,61 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Environment variables
-const (
-
-	//vipArp - defines if the arp broadcast should be enabled
-	vipArp = "vip_arp"
-
-	//vipLogLevel - defines the level of logging to produce (5 being the most verbose)
-	vipLogLevel = "vip_loglevel"
-
-	//vipInterface - defines the interface that the vip should bind too
-	vipInterface = "vip_interface"
-
-	//vipAddress - defines the address that the vip will expose
-	vipAddress = "vip_address"
-
-	//vipSingleNode - defines the vip start as a single node cluster
-	vipSingleNode = "vip_singlenode"
-
-	//vipStartLeader - will start this instance as the leader of the cluster
-	vipStartLeader = "vip_startleader"
-
-	//vipPeers defines the configuration of raft peer(s)
-	vipPeers = "vip_peers"
-
-	//vipLocalPeer defines the configuration of the local raft peer
-	vipLocalPeer = "vip_localpeer"
-
-	//vipRemotePeers defines the configuration of the local raft peer
-	vipRemotePeers = "vip_remotepeers"
-
-	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
-	vipAddPeersToLB = "vip_addpeerstolb"
-
-	//lbBindToVip defines if the load-balancer should bind ONLY to the virtual IP
-	lbBindToVip = "lb_bindtovip"
-
-	//lbName defines the name of load-balancer
-	lbName = "lb_name"
-
-	//lbType defines the type of load-balancer
-	lbType = "lb_type"
-
-	//lbPort defines the port of load-balancer
-	lbPort = "lb_port"
-
-	//lbBackendPort defines a port that ALL backends are using
-	lbBackendPort = "lb_backendport"
-
-	//lbBackends defines the backends of load-balancer
-	lbBackends = "lb_backends"
-
-	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
-	vipConfigMap = "vip_configmap"
-)
-
 // Path to the configuration file
 var configPath string
 
@@ -148,17 +93,17 @@ var kubeVipService = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 
 		// User Environment variables as an option to make manifest clearer
-		envInterface := os.Getenv(vipInterface)
+		envInterface := os.Getenv("vip_interface")
 		if envInterface != "" {
 			service.Interface = envInterface
 		}
 
-		envConfigMap := os.Getenv(vipConfigMap)
+		envConfigMap := os.Getenv("vip_configmap")
 		if envInterface != "" {
 			configMap = envConfigMap
 		}
 
-		envLog := os.Getenv(vipLogLevel)
+		envLog := os.Getenv("vip_loglevel")
 		if envLog != "" {
 			logLevel, err := strconv.Atoi(envLog)
 			if err != nil {

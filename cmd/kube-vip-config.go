@@ -76,7 +76,7 @@ var kubeVipSampleConfig = &cobra.Command{
 			log.Fatalln(err)
 		}
 
-		err = parseEnvironment(&cliConfig)
+		err = kubevip.ParseEnvironment(&cliConfig)
 		if err != nil {
 			cmd.Help()
 			log.Fatalln(err)
@@ -117,12 +117,12 @@ var kubeVipSampleManifest = &cobra.Command{
 							"start",
 						},
 						Env: []appv1.EnvVar{
-							appv1.EnvVar{},
+							{},
 						},
 					},
 				},
 				Volumes: []appv1.Volume{
-					appv1.Volume{
+					{
 						Name: "config",
 						VolumeSource: appv1.VolumeSource{
 							HostPath: &appv1.HostPathVolumeSource{

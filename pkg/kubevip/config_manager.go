@@ -113,12 +113,12 @@ func SampleConfig() {
 	c := &Config{
 		// Generate sample peers
 		RemotePeers: []RaftPeer{
-			RaftPeer{
+			{
 				ID:      "server2",
 				Address: "192.168.0.2",
 				Port:    10000,
 			},
-			RaftPeer{
+			{
 				ID:      "server3",
 				Address: "192.168.0.3",
 				Port:    10000,
@@ -135,21 +135,21 @@ func SampleConfig() {
 		Interface: "eth0",
 		// Load Balancer Configuration
 		LoadBalancers: []LoadBalancer{
-			LoadBalancer{
+			{
 				Name:      "Kubernetes Control Plane",
 				Type:      "http",
 				Port:      6443,
 				BindToVip: true,
 				Backends: []BackEnd{
-					BackEnd{
+					{
 						Address: "192.168.0.100",
 						Port:    6443,
 					},
-					BackEnd{
+					{
 						Address: "192.168.0.101",
 						Port:    6443,
 					},
-					BackEnd{
+					{
 						Address: "192.168.0.102",
 						Port:    6443,
 					},
