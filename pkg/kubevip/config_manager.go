@@ -74,6 +74,38 @@ func (c *Config) PrintConfig() {
 	fmt.Printf(string(b))
 }
 
+//ParseFlags will write the current configuration to a specified [path]
+func (c *Config) ParseFlags(localPeer string, remotePeers, backends []string) error {
+	// Parse localPeer
+	p, err := ParsePeerConfig(localPeer)
+	if err != nil {
+		return err
+	}
+	c.LocalPeer = *p
+
+	// Parse remotePeers
+	//Iterate backends
+	for i := range remotePeers {
+		p, err := ParsePeerConfig(remotePeers[i])
+		if err != nil {
+			return err
+
+		}
+		c.RemotePeers = append(c.RemotePeers, *p)
+	}
+
+	//Iterate backends
+	for i := range backends {
+		b, err := ParseBackendConfig(backends[i])
+		if err != nil {
+			return err
+		}
+		c.LoadBalancers[0].Backends = append(c.LoadBalancers[0].Backends, *b)
+	}
+
+	return nil
+}
+
 //SampleConfig will create an example configuration and write it to the specified [path]
 func SampleConfig() {
 
@@ -81,12 +113,12 @@ func SampleConfig() {
 	c := &Config{
 		// Generate sample peers
 		RemotePeers: []RaftPeer{
-			RaftPeer{
+			{
 				ID:      "server2",
 				Address: "192.168.0.2",
 				Port:    10000,
 			},
-			RaftPeer{
+			{
 				ID:      "server3",
 				Address: "192.168.0.3",
 				Port:    10000,
@@ -103,21 +135,21 @@ func SampleConfig() {
 		Interface: "eth0",
 		// Load Balancer Configuration
 		LoadBalancers: []LoadBalancer{
-			LoadBalancer{
+			{
 				Name:      "Kubernetes Control Plane",
 				Type:      "http",
 				Port:      6443,
 				BindToVip: true,
 				Backends: []BackEnd{
-					BackEnd{
+					{
 						Address: "192.168.0.100",
 						Port:    6443,
 					},
-					BackEnd{
+					{
 						Address: "192.168.0.101",
 						Port:    6443,
 					},
-					BackEnd{
+					{
 						Address: "192.168.0.102",
 						Port:    6443,
 					},

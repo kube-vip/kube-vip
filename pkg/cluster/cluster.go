@@ -128,7 +128,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 
 	// leader log broadcast - this counter is used to stop flooding STDOUT with leader log entries
 	var leaderbroadcast int
-
 	// Managers for Vip load balancers and none-vip loadbalancers
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
@@ -146,6 +145,15 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 
 	go func() {
 		for {
+			if c.AddPeersAsBackends == true {
+				// Get addresses and change backends
+
+				// c.LoadBalancers[0].Backends
+				// for x := range raftServer.GetConfiguration().Configuration().Servers {
+				// 	raftServer.GetConfiguration().Configuration().Servers[x].Address
+				// }
+
+			}
 			// Broadcast the current leader on this node if it's the correct time (every leaderLogcount * time.Second)
 			if leaderbroadcast == leaderLogcount {
 				log.Infof("The Node [%s] is leading", raftServer.Leader())

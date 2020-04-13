@@ -11,6 +11,9 @@ type Config struct {
 	// Peers are all of the peers within the RAFT cluster
 	RemotePeers []RaftPeer `yaml:"remotePeers"`
 
+	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
+	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
+
 	// VIP is the Virtual IP address exposed for the cluster
 	VIP string `yaml:"vip"`
 
@@ -55,6 +58,9 @@ type LoadBalancer struct {
 
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
+
+	//BackendPort, is a port that all backends are listening on (To be used to simplify building a list of backends)
+	BackendPort int `yaml:"backendPort"`
 
 	//Backends, is an array of backend servers
 	Backends []BackEnd `yaml:"backends"`
