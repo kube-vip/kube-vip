@@ -104,7 +104,7 @@ var kubeVipSampleManifest = &cobra.Command{
 				Containers: []appv1.Container{
 					{
 						Name:  "kube-vip",
-						Image: fmt.Sprintf("plndr/kube-vip:%s", Release.Version),
+						Image: fmt.Sprintf("docker.io/plndr/kube-vip:%s", Release.Version),
 						SecurityContext: &appv1.SecurityContext{
 							Capabilities: &appv1.Capabilities{
 								Add: []appv1.Capability{
@@ -113,11 +113,17 @@ var kubeVipSampleManifest = &cobra.Command{
 								},
 							},
 						},
-						Command: []string{
+						Args: []string{
 							"start",
+							"-c",
+							"/etc/kube-vip/config.yaml",
 						},
-						Env: []appv1.EnvVar{
-							{},
+						VolumeMounts: []appv1.VolumeMount{
+							{
+								Name: "config",
+								MountPath: "/etc/kube-vip/",
+							},
+
 						},
 					},
 				},
@@ -126,7 +132,7 @@ var kubeVipSampleManifest = &cobra.Command{
 						Name: "config",
 						VolumeSource: appv1.VolumeSource{
 							HostPath: &appv1.HostPathVolumeSource{
-								Path: "/etc/kube-vip/config.yaml",
+								Path: "/etc/kube-vip/",
 							},
 						},
 					},
