@@ -50,10 +50,10 @@ var kubeVipStart = &cobra.Command{
 
 		if configPath != "" {
 			c, err := kubevip.OpenConfig(configPath)
-			startConfig = *c
 			if err != nil {
 				log.Fatalf("%v", err)
 			}
+			startConfig = *c
 		}
 
 		// parse environment variables, these will overwrite anything loaded or flags
