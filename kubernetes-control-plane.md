@@ -26,7 +26,7 @@ All nodes are running Ubuntu 18.04, Docker CE and will use Kubernetes 1.17.0.
 Make sure that the config directory exists: `sudo mkdir -p /etc/kube-vip/`, this directory can be any directory however the `hostPath` in the manifest will need modifying to point to the correct path.
 
 ```
-sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample config | sudo tee /etc/kube-vip/config.yaml
+sudo docker run -it --rm plndr/kube-vip:0.1.5 sample config | sudo tee /etc/kube-vip/config.yaml
 ```
 
 ### Modify the configuration
@@ -90,10 +90,10 @@ To generate the basic Kubernetes static pod `yaml` configuration:
 Make sure that the manifest directory exists: `sudo mkdir -p /etc/kubernetes/manifests/`
 
 ```
-sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
+sudo docker run -it --rm plndr/kube-vip:0.1.5 sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
-Ensure that `image: plndr/kube-vip:<x>` is modified to point to a specific version (`0.1` at the time of writing), refer to [docker hub](https://hub.docker.com/r/plndr/kube-vip/tags) for details. Also ensure that the `hostPath` points to the correct `kube-vip` configuration, if it isn’t the above path. 
+Ensure that `image: plndr/kube-vip:<x>` is modified to point to a specific version (`0.1.5` at the time of writing), refer to [docker hub](https://hub.docker.com/r/plndr/kube-vip/tags) for details. Also ensure that the `hostPath` points to the correct `kube-vip` configuration, if it isn’t the above path.
 
 The **vip** is set to `192.168.0.75` and this first node will elect itself as leader, and as part of the `kubeadm init` it will use the VIP in order to speak back to the initialising api-server.
 
@@ -124,7 +124,7 @@ At this point **DON’T** generate the manifests, this is due to some bizarre `k
 **After** this node has been added to the cluster, we can add the manifest to also add this node as a `kube-vip` member. (Adding the manifest afterwards doesn’t interfere with `kubeadm`). 
 
 ```
-sudo docker run -it --rm plndr/kube-vip:0.1 /kube-vip sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
+sudo docker run -it --rm plndr/kube-vip:0.1.5 sample manifest | sudo tee /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
 Once this node is added we will be able to see that the `kube-vip` pod is up and running as expected:
