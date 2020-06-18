@@ -8,6 +8,10 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // kubeadm adds two subcommands for managing a vip during a kubeadm init/join
@@ -24,19 +28,19 @@ func init() {
 	}
 	initConfig.LocalPeer = *localpeer
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
-	kubeKubeadmInit.Flags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
-	kubeKubeadmInit.Flags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP addres")
-	kubeKubeadmInit.Flags().BoolVar(&initConfig.StartAsLeader, "startAsLeader", true, "Start this instance as the cluster leader")
+	kubeKubeadm.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
+	kubeKubeadm.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP addres")
+	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 
-	kubeKubeadmInit.Flags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "The Virtual IP addres")
-	kubeKubeadmInit.Flags().BoolVar(&initConfig.GratuitousARP, "arp", true, "Enable Arp for Vip changes")
+	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "The Virtual IP addres")
+	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.GratuitousARP, "arp", true, "Enable Arp for Vip changes")
 
 	// Load Balancer flags
-	kubeKubeadmInit.Flags().BoolVar(&initLoadBalancer.BindToVip, "lbBindToVip", true, "Bind example load balancer to VIP")
-	kubeKubeadmInit.Flags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
-	kubeKubeadmInit.Flags().StringVar(&initLoadBalancer.Name, "lbName", "Kubeadm Load Balancer", "The name of a load balancer instance")
-	kubeKubeadmInit.Flags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balander will expose on")
-	kubeKubeadmInit.Flags().IntVar(&initLoadBalancer.BackendPort, "lbBackEndPort", 6444, "A port that all backends may be using (optional)")
+	kubeKubeadm.PersistentFlags().BoolVar(&initLoadBalancer.BindToVip, "lbBindToVip", true, "Bind example load balancer to VIP")
+	kubeKubeadm.PersistentFlags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
+	kubeKubeadm.PersistentFlags().StringVar(&initLoadBalancer.Name, "lbName", "Kubeadm Load Balancer", "The name of a load balancer instance")
+	kubeKubeadm.PersistentFlags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balander will expose on")
+	kubeKubeadm.PersistentFlags().IntVar(&initLoadBalancer.BackendPort, "lbBackEndPort", 6444, "A port that all backends may be using (optional)")
 
 	kubeKubeadm.AddCommand(kubeKubeadmInit)
 	kubeKubeadm.AddCommand(kubeKubeadmJoin)
@@ -84,6 +88,68 @@ var kubeKubeadmJoin = &cobra.Command{
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
+		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
+		// TODO - A load of text detailing what's actually happening
+		kubevip.ParseEnvironment(&initConfig)
+		// TODO - check for certain things VIP/interfaces
+		if initConfig.Interface == "" {
+			cmd.Help()
+			log.Fatalln("No interface is specified for kube-vip to bind to")
+		}
+
+		if initConfig.VIP == "" {
+			cmd.Help()
+			log.Fatalln("No address is specified for kube-vip to expose services on")
+		}
+
+		//if  {
+
+		// We will use kubeconfig in order to find all the master nodes
+
+		// use the current context in kubeconfig
+		config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/admin.conf")
+		if err != nil {
+			panic(err.Error())
+		}
+
+		// create the clientset
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			panic(err.Error())
+		}
+
+		opts := metav1.ListOptions{}
+		opts.LabelSelector = "node-role.kubernetes.io/master"
+		nodes, err := clientset.CoreV1().Nodes().List(opts)
+		//var hosts string
+		for x := range nodes.Items {
+			// Get hostname and address
+			var nodeAddress, nodeHostname string
+			for y := range nodes.Items[x].Status.Addresses {
+				switch nodes.Items[x].Status.Addresses[y].Type {
+				case corev1.NodeHostName:
+					nodeHostname = nodes.Items[x].Status.Addresses[y].Address
+				case corev1.NodeInternalIP:
+					nodeAddress = nodes.Items[x].Status.Addresses[y].Address
+				}
+			}
+
+			newPeer, err := kubevip.ParsePeerConfig(fmt.Sprintf("%s:%s:%d", nodeHostname, nodeAddress, 10000))
+			if err != nil {
+				panic(err.Error())
+			}
+			initConfig.RemotePeers = append(initConfig.RemotePeers, *newPeer)
+			//
+			//fmt.Printf("%v\n", nodes.Items[x].Status.Hostname)
+			//hosts = fmt.Sprintf("%s%s,", hosts, nodes.Items[x].Status.Addresses[0].Address)
+		}
+
+		//}
+		cfg := kubevip.GenerateManifestFromConfig(&initConfig, Release.Version)
+
+		fmt.Println(cfg)
+
+		//fmt.Printf("Found [%d] master nodes [%s]\n", len(nodes.Items), hosts)
 		// TODO - A load of text detailing what's actually happening
 	},
 }
