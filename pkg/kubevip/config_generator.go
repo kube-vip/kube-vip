@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"github.com/ghodss/yaml"
 	appv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -94,6 +94,15 @@ func ParseEnvironment(c *Config) error {
 
 	// Find Start As Leader
 	// TODO - does this need depricating?
+	// Required when the host sets itself as leader before the state change
+	env = os.Getenv(vipStartLeader)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.StartAsLeader = b
+	}
 
 	// Find ARP
 	env = os.Getenv(vipArp)
@@ -287,7 +296,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 				peers = fmt.Sprintf("%s:%s:%d", c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
 
 			}
-			peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
+			//peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
 			//fmt.Sprintf("", peers)
 		}
 		peerEnvirontment := appv1.EnvVar{

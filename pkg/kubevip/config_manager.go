@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ghodss/yaml"
 	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
 )
 
 var endPointIndex int // Holds the previous endpoint (for determining decisions on next endpoint)

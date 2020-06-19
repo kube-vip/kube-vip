@@ -95,16 +95,22 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 	// If we want to start a node as leader then we will not add any remote peers, this will leave this as a cluster of one
 	// The remotePeers will add themselves to the cluster as they're added
 	if c.StartAsLeader != true {
-
 		for x := range c.RemotePeers {
-			// Build the address from the peer configuration
-			peerAddress := fmt.Sprintf("%s:%d", c.RemotePeers[x].Address, c.RemotePeers[x].Port)
+			// Make sure that we don't add in this server twice
+			if c.LocalPeer.Address != c.RemotePeers[x].Address {
 
-			// Set this peer into the raft configuration
-			configuration.Servers = append(configuration.Servers, raft.Server{
-				ID:      raft.ServerID(c.RemotePeers[x].ID),
-				Address: raft.ServerAddress(peerAddress)})
+				// Build the address from the peer configuration
+				peerAddress := fmt.Sprintf("%s:%d", c.RemotePeers[x].Address, c.RemotePeers[x].Port)
+
+				// Set this peer into the raft configuration
+				configuration.Servers = append(configuration.Servers, raft.Server{
+					ID:      raft.ServerID(c.RemotePeers[x].ID),
+					Address: raft.ServerAddress(peerAddress)})
+			}
 		}
+		log.Info("This node will attempt to start as Follower")
+	} else {
+		log.Info("This node will attempt to start as Leader")
 	}
 
 	// Bootstrap cluster
@@ -143,6 +149,10 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 		}
 	}
 
+	// On a cold start the node will sleep for 5 seconds to ensure that leader elections are complete
+	log.Infoln("This instance will wait approximately 5 seconds, from cold start to ensure cluster elections are complete")
+	time.Sleep(time.Second * 5)
+
 	go func() {
 		for {
 			if c.AddPeersAsBackends == true {
@@ -159,11 +169,33 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 				log.Infof("The Node [%s] is leading", raftServer.Leader())
 				// Reset the timer
 				leaderbroadcast = 0
+
+				// ensure that if this node is the leader, it is set as the leader
+				if localAddress == string(raftServer.Leader()) {
+					// Re-broadcast arp to ensure network stays up to date
+					if c.GratuitousARP == true {
+						// Gratuitous ARP, will broadcast to new MAC <-> IP
+						err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+						if err != nil {
+							log.Warnf("%v", err)
+						}
+					}
+					if !isLeader {
+						log.Infoln("This node is leading, but isnt the leader (correcting)")
+						isLeader = true
+					}
+				} else {
+					// (attempt to) Remove the virtual IP, incase it already exists to keep nodes clean
+					cluster.network.DeleteIP()
+					isLeader = false
+				}
+
 			}
 			leaderbroadcast++
 
 			select {
 			case leader := <-raftServer.LeaderCh():
+				log.Infoln("New Election event")
 				if leader {
 					isLeader = true
 
@@ -223,7 +255,9 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 				}
 
 			case <-ticker.C:
+
 				if isLeader {
+
 					result, err := cluster.network.IsSet()
 					if err != nil {
 						log.WithFields(log.Fields{"error": err, "ip": cluster.network.IP(), "interface": cluster.network.Interface()}).Error("Could not check ip")
