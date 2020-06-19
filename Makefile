@@ -50,13 +50,26 @@ demo:
 	@echo New Multi Architecture Docker image created
 	@cd ..
 
-# This is typically only for quick testing
+## Remote (push of images)
+
+# This build a local docker image (x86 only) for quick testing
 dockerx86:
 	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
 docker:
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New Multi Architecture Docker image created
+
+## Local (docker load of images)
+
+# This will build a local docker image (x86 only), use make dockerLocal for all architectures
+dockerx86Local:
+	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New Multi Architecture Docker image created
+
+dockerLocal:
+	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
 simplify:
