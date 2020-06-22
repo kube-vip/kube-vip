@@ -134,21 +134,25 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 
 	// leader log broadcast - this counter is used to stop flooding STDOUT with leader log entries
 	var leaderbroadcast int
+
 	// Managers for Vip load balancers and none-vip loadbalancers
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
 
-	// Iterate through all Configurations
-	for x := range c.LoadBalancers {
-		// If the load balancer doesn't bind to the VIP
-		if c.LoadBalancers[x].BindToVip == false {
-			err = nonVipLB.Add("", &c.LoadBalancers[x])
-			if err != nil {
-				log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+	// If the load balancer is enabled, configure the backends
+	if c.EnableLoadBalancer {
+
+		// Iterate through all Configurations
+		for x := range c.LoadBalancers {
+			// If the load balancer doesn't bind to the VIP
+			if c.LoadBalancers[x].BindToVip == false {
+				err = nonVipLB.Add("", &c.LoadBalancers[x])
+				if err != nil {
+					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+				}
 			}
 		}
 	}
-
 	// On a cold start the node will sleep for 5 seconds to ensure that leader elections are complete
 	log.Infoln("This instance will wait approximately 5 seconds, from cold start to ensure cluster elections are complete")
 	time.Sleep(time.Second * 5)
@@ -204,32 +208,33 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 					if err != nil {
 						log.Warnf("%v", err)
 					}
+					// If the load balancer is enabled, configure the backends
 
-					// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+					if c.EnableLoadBalancer {
+						// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+						for x := range c.LoadBalancers {
 
-					for x := range c.LoadBalancers {
-
-						if c.LoadBalancers[x].BindToVip == true {
-							err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
-							if err != nil {
-								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-								log.Errorf("Dropping Leadership to another node in the cluster")
-								raftServer.LeadershipTransfer()
-
-								// Stop all load balancers associated with the VIP
-								err = VipLB.StopAll()
+							if c.LoadBalancers[x].BindToVip == true {
+								err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
 								if err != nil {
-									log.Warnf("%v", err)
-								}
+									log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+									log.Errorf("Dropping Leadership to another node in the cluster")
+									raftServer.LeadershipTransfer()
 
-								err = cluster.network.DeleteIP()
-								if err != nil {
-									log.Warnf("%v", err)
+									// Stop all load balancers associated with the VIP
+									err = VipLB.StopAll()
+									if err != nil {
+										log.Warnf("%v", err)
+									}
+
+									err = cluster.network.DeleteIP()
+									if err != nil {
+										log.Warnf("%v", err)
+									}
 								}
 							}
 						}
 					}
-
 					if c.GratuitousARP == true {
 						// Gratuitous ARP, will broadcast to new MAC <-> IP
 						err = vip.ARPSendGratuitous(c.VIP, c.Interface)
@@ -270,17 +275,34 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 						if err != nil {
 							log.Warnf("%v", err)
 						}
-						// Once we have the VIP running, start the load balancer(s) that bind to the VIP
 
-						for x := range c.LoadBalancers {
+						if c.EnableLoadBalancer {
+							// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+							for x := range c.LoadBalancers {
 
-							if c.LoadBalancers[x].BindToVip == true {
-								err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
-								if err != nil {
-									log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+								if c.LoadBalancers[x].BindToVip == true {
+									err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+
+									if err != nil {
+										log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+										log.Errorf("Dropping Leadership to another node in the cluster")
+										raftServer.LeadershipTransfer()
+
+										// Stop all load balancers associated with the VIP
+										err = VipLB.StopAll()
+										if err != nil {
+											log.Warnf("%v", err)
+										}
+
+										err = cluster.network.DeleteIP()
+										if err != nil {
+											log.Warnf("%v", err)
+										}
+									}
 								}
 							}
 						}
+
 						if c.GratuitousARP == true {
 							// Gratuitous ARP, will broadcast to new MAC <-> IP
 							err = vip.ARPSendGratuitous(c.VIP, c.Interface)
@@ -293,18 +315,20 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config) error {
 
 			case <-cluster.stop:
 				log.Info("[RAFT] Stopping this node")
-				log.Info("[LOADBALANCER] Stopping load balancers")
+				if c.EnableLoadBalancer {
+					log.Info("[LOADBALANCER] Stopping load balancers")
 
-				// Stop all load balancers associated with the VIP
-				err = VipLB.StopAll()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
+					// Stop all load balancers associated with the VIP
+					err = VipLB.StopAll()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
 
-				// Stop all load balancers associated with the Host
-				err = nonVipLB.StopAll()
-				if err != nil {
-					log.Warnf("%v", err)
+					// Stop all load balancers associated with the Host
+					err = nonVipLB.StopAll()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
 				}
 
 				if isLeader {

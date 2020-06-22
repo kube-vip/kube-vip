@@ -44,6 +44,9 @@ const (
 	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
 	vipAddPeersToLB = "vip_addpeerstolb"
 
+	//lbEnable defines if the load-balancer should be enabled
+	lbEnable = "lb_enable"
+
 	//lbBindToVip defines if the load-balancer should bind ONLY to the virtual IP
 	lbBindToVip = "lb_bindtovip"
 
@@ -159,6 +162,16 @@ func ParseEnvironment(c *Config) error {
 		c.AddPeersAsBackends = b
 	}
 
+	// Enable the load-balancer
+	env = os.Getenv(lbEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableLoadBalancer = b
+	}
+
 	// Load Balancer configuration
 	return parseEnvironmentLoadBalancer(c)
 }
@@ -266,6 +279,10 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		{
 			Name:  vipLocalPeer,
 			Value: fmt.Sprintf("%s:%s:%d", c.LocalPeer.ID, c.LocalPeer.Address, c.LocalPeer.Port),
+		},
+		{
+			Name:  lbEnable,
+			Value: strconv.FormatBool(c.EnableLoadBalancer),
 		},
 		{
 			Name:  lbBackendPort,
