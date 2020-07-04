@@ -59,7 +59,7 @@ func NewManager(path string, inCluster bool) (*Manager, error) {
 			return nil, err
 		}
 
-		// TODO - we need to make the port configurable
+		// TODO - we need to make the host/port configurable
 
 		config.Host = fmt.Sprintf("%s:6443", id)
 		clientset, err = kubernetes.NewForConfig(config)
@@ -113,6 +113,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGKILL)
+
 	go func() {
 		<-signalChan
 		log.Info("Received termination, signaling shutdown")
@@ -251,7 +252,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	})
 
 	//<-signalChan
-	log.Infof("Shutting down Kube-Vip")
+	log.Infof("Shutting down Kube-Vip Leader Election cluster")
 
 	return nil
 }
