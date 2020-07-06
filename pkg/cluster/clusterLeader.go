@@ -101,6 +101,11 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// use a Go context so we can tell the arp loop code when we
+	// want to step down
+	ctxArp, cancelArp := context.WithCancel(context.Background())
+	defer cancelArp()
+
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -119,6 +124,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		log.Info("Received termination, signaling shutdown")
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
+		// Cancel the arp context, which will in turn stop any broadcasts
 	}()
 
 	// (attempt to) Remove the virtual IP, incase it already exists
@@ -156,8 +162,9 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
+
 				// we're notified when we start
-				log.Info("This node is assuming leadership of the cluster")
+				log.Info("This node is starting with leadership of the cluster")
 				err = cluster.network.AddIP()
 				if err != nil {
 					log.Warnf("%v", err)
@@ -187,17 +194,31 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				}
 
 				if c.GratuitousARP == true {
-					// Gratuitous ARP, will broadcast to new MAC <-> IP
-					err = vip.ARPSendGratuitous(c.VIP, c.Interface)
-					if err != nil {
-						log.Warnf("%v", err)
-					}
+					ctxArp, cancelArp = context.WithCancel(context.Background())
+
+					go func(ctx context.Context) {
+						for {
+							select {
+							case <-ctx.Done(): // if cancel() execute
+								return
+							default:
+								// Gratuitous ARP, will broadcast to new MAC <-> IP
+								err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+								if err != nil {
+									log.Warnf("%v", err)
+								}
+							}
+							time.Sleep(3 * time.Second)
+						}
+					}(ctxArp)
 				}
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("leader lost: %s", id)
 				log.Info("This node is becoming a follower within the cluster")
+
+				// Stop the Arp context if it is running
+				cancelArp()
 
 				// Stop all load balancers associated with the VIP
 				err = VipLB.StopAll()
@@ -209,50 +230,22 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				if err != nil {
 					log.Warnf("%v", err)
 				}
-
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected
+				log.Infof("Node [%s] is assuming leadership of the cluster", identity)
+
 				if identity == id {
-					result, err := cluster.network.IsSet()
-					if err != nil {
-						log.WithFields(log.Fields{"error": err, "ip": cluster.network.IP(), "interface": cluster.network.Interface()}).Error("Could not check ip")
-					}
-
-					if result == false {
-						log.Error("This node is leader and is adopting the virtual IP")
-
-						err = cluster.network.AddIP()
-						if err != nil {
-							log.Warnf("%v", err)
-						}
-						// Once we have the VIP running, start the load balancer(s) that bind to the VIP
-
-						for x := range c.LoadBalancers {
-
-							if c.LoadBalancers[x].BindToVip == true {
-								err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
-								if err != nil {
-									log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-								}
-							}
-						}
-						if c.GratuitousARP == true {
-							// Gratuitous ARP, will broadcast to new MAC <-> IP
-							err = vip.ARPSendGratuitous(c.VIP, c.Interface)
-							if err != nil {
-								log.Warnf("%v", err)
-							}
-						}
-					}
+					// We have the lock
 				}
-				log.Infof("new leader elected: %s", identity)
 			},
 		},
 	})
 
 	//<-signalChan
 	log.Infof("Shutting down Kube-Vip Leader Election cluster")
+	// Force a removal of the VIP (ignore the error if we don't have it)
+	cluster.network.DeleteIP()
 
 	return nil
 }
