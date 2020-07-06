@@ -17,6 +17,9 @@ const (
 	//vipArp - defines if the arp broadcast should be enabled
 	vipArp = "vip_arp"
 
+	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	vipLeaderElection = "vip_leaderelection"
+
 	//vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
 
@@ -73,6 +76,16 @@ func ParseEnvironment(c *Config) error {
 	env := os.Getenv(vipInterface)
 	if env != "" {
 		c.Interface = env
+	}
+
+	// Find Single Node
+	env = os.Getenv(vipLeaderElection)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableLeaderElection = b
 	}
 
 	// Find vip address
@@ -248,6 +261,10 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Value: strconv.FormatBool(c.GratuitousARP),
 		},
 		{
+			Name:  vipLeaderElection,
+			Value: strconv.FormatBool(c.EnableLeaderElection),
+		},
+		{
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
@@ -333,11 +350,28 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 						"start",
 					},
 					Env: newEnvironment,
+					VolumeMounts: []appv1.VolumeMount{
+						{
+							Name:      "kubeconfig",
+							MountPath: "/etc/kubernetes/admin.conf",
+						},
+					},
+				},
+			},
+			Volumes: []appv1.Volume{
+				{
+					Name: "kubeconfig",
+					VolumeSource: appv1.VolumeSource{
+						HostPath: &appv1.HostPathVolumeSource{
+							Path: "/etc/kubernetes/admin.conf",
+						},
+					},
 				},
 			},
 			HostNetwork: true,
 		},
 	}
+
 	b, _ := yaml.Marshal(newManifest)
 	return string(b)
 }
