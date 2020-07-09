@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/davecgh/go-spew v1.1.1
+	github.com/digineo/go-dhclient v1.0.2
 	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/raft v1.1.2
 	github.com/imdario/mergo v0.3.8 // indirect
