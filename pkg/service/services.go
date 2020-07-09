@@ -9,6 +9,7 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func (sm *Manager) stopService(uid string) error {
@@ -138,12 +139,12 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						// TODO - start VIP
 						c, err := cluster.InitCluster(&newService.vipConfig, false)
 						if err != nil {
-							log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
+							log.Errorf("Failed to add Service [%s] / [%s]", newService.service.ServiceName, newService.service.UID)
 							//return err
 						}
 						err = c.StartSingleNode(&newService.vipConfig, false)
 						if err != nil {
-							log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
+							log.Errorf("Failed to add Service [%s] / [%s]", newService.service.ServiceName, newService.service.UID)
 							//return err
 						}
 						newService.cluster = *c
@@ -154,6 +155,26 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						// Add new service to manager configuration
 						sm.serviceInstances = append(sm.serviceInstances, newService)
 
+						// Update the service
+						// listOptions := metav1.ListOptions{
+						// 	FieldSelector: fmt.Sprintf("metadata.uid=%s", newService.service.UID),
+						// }
+						ns, err := returnNameSpace()
+						if err != nil {
+							log.Errorf("Error finding Namespace")
+							return
+						}
+						dhcpService, err := sm.clientSet.CoreV1().Services(ns).Get(newService.service.ServiceName, metav1.GetOptions{})
+						if err != nil {
+							log.Errorf("Error finding Service [%s] : %v", newService.service.ServiceName, err)
+							return
+						}
+						dhcpService.Spec.LoadBalancerIP = newVip.VIP
+						_, err = sm.clientSet.CoreV1().Services(ns).Update(dhcpService)
+						if err != nil {
+							log.Errorf("Error updating Service [%s] : %v", newService.service.ServiceName, err)
+							return
+						}
 					},
 				}
 
