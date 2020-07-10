@@ -134,19 +134,21 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
 
-	// Iterate through all Configurations
-	if len(c.LoadBalancers) != 0 {
-		for x := range c.LoadBalancers {
-			// If the load balancer doesn't bind to the VIP
-			if c.LoadBalancers[x].BindToVip == false {
-				err = nonVipLB.Add("", &c.LoadBalancers[x])
-				if err != nil {
-					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+	if c.EnableLoadBalancer {
+
+		// Iterate through all Configurations
+		if len(c.LoadBalancers) != 0 {
+			for x := range c.LoadBalancers {
+				// If the load balancer doesn't bind to the VIP
+				if c.LoadBalancers[x].BindToVip == false {
+					err = nonVipLB.Add("", &c.LoadBalancers[x])
+					if err != nil {
+						log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+					}
 				}
 			}
 		}
 	}
-
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -157,8 +159,8 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		// get elected before your background loop finished, violating
 		// the stated goal of the lease.
 		ReleaseOnCancel: true,
-		LeaseDuration:   5 * time.Second,
-		RenewDeadline:   3 * time.Second,
+		LeaseDuration:   3 * time.Second,
+		RenewDeadline:   2 * time.Second,
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
@@ -170,24 +172,25 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					log.Warnf("%v", err)
 				}
 
-				// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+				if c.EnableLoadBalancer {
+					// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+					for x := range c.LoadBalancers {
 
-				for x := range c.LoadBalancers {
-
-					if c.LoadBalancers[x].BindToVip == true {
-						err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
-						if err != nil {
-							log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-
-							// Stop all load balancers associated with the VIP
-							err = VipLB.StopAll()
+						if c.LoadBalancers[x].BindToVip == true {
+							err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
 							if err != nil {
-								log.Warnf("%v", err)
-							}
+								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
 
-							err = cluster.network.DeleteIP()
-							if err != nil {
-								log.Warnf("%v", err)
+								// Stop all load balancers associated with the VIP
+								err = VipLB.StopAll()
+								if err != nil {
+									log.Warnf("%v", err)
+								}
+
+								err = cluster.network.DeleteIP()
+								if err != nil {
+									log.Warnf("%v", err)
+								}
 							}
 						}
 					}
