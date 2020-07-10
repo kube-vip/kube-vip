@@ -5,6 +5,9 @@ import "net/url"
 // Config defines all of the settings for the Virtual IP / Load-balancer
 type Config struct {
 
+	// EnableLeaderElection will use the Kubernetes leader election algorithim
+	EnableLeaderElection bool `yaml:"enableLeaderElection"`
+
 	// LocalPeer is the configuration of this host
 	LocalPeer RaftPeer `yaml:"localPeer"`
 

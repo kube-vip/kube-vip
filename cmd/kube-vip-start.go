@@ -13,8 +13,9 @@ import (
 // Start as a single node (no cluster), start as a leader in the cluster
 var startConfig kubevip.Config
 var startConfigLB kubevip.LoadBalancer
-var startLocalPeer string
+var startLocalPeer, startKubeConfigPath string
 var startRemotePeers, startBackends []string
+var inCluster bool
 
 func init() {
 	// Get the configuration file
@@ -36,6 +37,12 @@ func init() {
 	kubeVipStart.Flags().IntVar(&startConfigLB.Port, "lbPort", 8080, "Port that load balander will expose on")
 	kubeVipStart.Flags().IntVar(&startConfigLB.BackendPort, "lbBackEndPort", 6443, "A port that all backends may be using (optional)")
 	kubeVipStart.Flags().StringSliceVar(&startBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma seperated backends, format: address:port")
+
+	// Cluster configuration
+	kubeVipStart.Flags().StringVar(&startKubeConfigPath, "kubeConfig", "/etc/kubernetes/admin.conf", "The path of a kubernetes configuration file")
+	kubeVipStart.Flags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
+	kubeVipStart.Flags().BoolVar(&startConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
+
 }
 
 var kubeVipStart = &cobra.Command{
@@ -83,19 +90,33 @@ var kubeVipStart = &cobra.Command{
 				log.Fatalf("%v", err)
 			}
 
-			// Start a multi-node (raft) cluster
-			err = newCluster.StartCluster(&startConfig)
-			if err != nil {
-				log.Fatalf("%v", err)
+			if startConfig.EnableLeaderElection {
+				cm, err := cluster.NewManager(startKubeConfigPath, inCluster)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+
+				// Leader Cluster will block
+				err = newCluster.StartLeaderCluster(&startConfig, cm)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+			} else {
+
+				// // Start a multi-node (raft) cluster, this doesn't block so will wait on signal
+				err = newCluster.StartRaftCluster(&startConfig)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+				signalChan := make(chan os.Signal, 1)
+				signal.Notify(signalChan, os.Interrupt)
+
+				<-signalChan
+
+				newCluster.Stop()
 			}
+
 		}
-
-		signalChan := make(chan os.Signal, 1)
-		signal.Notify(signalChan, os.Interrupt)
-
-		<-signalChan
-
-		newCluster.Stop()
 
 	},
 }
