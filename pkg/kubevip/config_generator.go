@@ -47,6 +47,9 @@ const (
 	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
 	vipAddPeersToLB = "vip_addpeerstolb"
 
+	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
+	vipPacket = "vip_packet"
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
@@ -175,6 +178,16 @@ func ParseEnvironment(c *Config) error {
 		c.AddPeersAsBackends = b
 	}
 
+	// Enable the Packet API calls
+	env = os.Getenv(vipPacket)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnablePacket = b
+	}
+
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
@@ -278,12 +291,20 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Value: strconv.FormatBool(c.EnableLeaderElection),
 		},
 		{
+			Name:  vipPacket,
+			Value: strconv.FormatBool(c.EnablePacket),
+		},
+		{
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
 		{
 			Name:  vipAddress,
 			Value: c.VIP,
+		},
+		{
+			Name:  "PACKET_AUTH_TOKEN",
+			Value: c.PacketAPIKey,
 		},
 		{
 			Name:  vipStartLeader,
@@ -372,6 +393,11 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 							Name:      "kubeconfig",
 							MountPath: "/etc/kubernetes/admin.conf",
 						},
+						{
+							Name:      "ca-certs",
+							MountPath: "/etc/ssl/certs",
+							ReadOnly:  true,
+						},
 					},
 				},
 			},
@@ -381,6 +407,14 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 					VolumeSource: appv1.VolumeSource{
 						HostPath: &appv1.HostPathVolumeSource{
 							Path: "/etc/kubernetes/admin.conf",
+						},
+					},
+				},
+				{
+					Name: "ca-certs",
+					VolumeSource: appv1.VolumeSource{
+						HostPath: &appv1.HostPathVolumeSource{
+							Path: "/etc/ssl/certs",
 						},
 					},
 				},
