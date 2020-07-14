@@ -189,7 +189,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 						log.Println(p.ID, p.Name)
 
 						// Find our project
-						if p.Name == "test" {
+						if p.Name == c.PacketProject {
 							ips, _, _ := packetClient.ProjectIPs.List(p.ID)
 							for _, ip := range ips {
 

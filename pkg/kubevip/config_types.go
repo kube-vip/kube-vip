@@ -41,6 +41,9 @@ type Config struct {
 	// PacketAPIKey, is the API token used to authenticate to the API
 	PacketAPIKey string
 
+	// PacketProject, is the name of a particular defined project
+	PacketProject string
+
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 }
