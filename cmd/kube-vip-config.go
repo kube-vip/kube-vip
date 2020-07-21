@@ -22,7 +22,7 @@ func init() {
 	kubeVipSampleConfig.Flags().StringVar(&cliConfig.VIP, "vip", "192.168.0.1", "The Virtual IP addres")
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.SingleNode, "singleNode", false, "Start this instance as a single node")
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
-	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.GratuitousARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
+	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.GratuitousARP, "arp", true, "Use ARP broadcasts to improve VIP re-allocations")
 	kubeVipSampleConfig.Flags().StringVar(&cliLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
 	kubeVipSampleConfig.Flags().StringSliceVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
 	// Load Balancer flags
@@ -120,10 +120,9 @@ var kubeVipSampleManifest = &cobra.Command{
 						},
 						VolumeMounts: []appv1.VolumeMount{
 							{
-								Name: "config",
+								Name:      "config",
 								MountPath: "/etc/kube-vip/",
 							},
-
 						},
 					},
 				},
