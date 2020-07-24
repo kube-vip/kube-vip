@@ -43,7 +43,7 @@ func init() {
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "kube-vip", "The configuration map defined within the cluster")
-	kubeVipService.Flags().StringVarP(&service.Interface, "interface", "i", "ens192", "Name of the interface to bind to")
+	kubeVipService.Flags().StringVarP(&service.Interface, "interface", "i", "eth0", "Name of the interface to bind to")
 	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
 	kubeVipService.Flags().BoolVar(&service.EnableArp, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
 
