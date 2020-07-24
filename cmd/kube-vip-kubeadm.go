@@ -32,22 +32,22 @@ func init() {
 	initConfig.LocalPeer = *localpeer
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
 	kubeKubeadm.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
-	kubeKubeadm.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP addres")
+	kubeKubeadm.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 
-	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "The Virtual IP addres")
+	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "The Virtual IP address")
 	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.GratuitousARP, "arp", true, "Enable Arp for Vip changes")
 	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
 
 	// Load Balancer flags
 	kubeKubeadm.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "lbEnable", false, "Enable a load-balancer on the VIP")
 	kubeKubeadm.PersistentFlags().BoolVar(&initLoadBalancer.BindToVip, "lbBindToVip", true, "Bind example load balancer to VIP")
-	kubeKubeadm.PersistentFlags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (tcp/http)")
+	kubeKubeadm.PersistentFlags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (TCP/HTTP)")
 	kubeKubeadm.PersistentFlags().StringVar(&initLoadBalancer.Name, "lbName", "Kubeadm Load Balancer", "The name of a load balancer instance")
-	kubeKubeadm.PersistentFlags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balander will expose on")
+	kubeKubeadm.PersistentFlags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balancer will expose on")
 	kubeKubeadm.PersistentFlags().IntVar(&initLoadBalancer.BackendPort, "lbBackEndPort", 6444, "A port that all backends may be using (optional)")
 
-	kubeKubeadmJoin.Flags().StringVar(&kubeConfigPath, "config", "/etc/kubernetes/admin.conf", "The path of a kubernetes configuration file")
+	kubeKubeadmJoin.Flags().StringVar(&kubeConfigPath, "config", "/etc/kubernetes/admin.conf", "The path of a Kubernetes configuration file")
 
 	kubeKubeadm.AddCommand(kubeKubeadmInit)
 	kubeKubeadm.AddCommand(kubeKubeadmJoin)
