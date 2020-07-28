@@ -6,12 +6,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
 	"github.com/plunder-app/kube-vip/pkg/vip"
+
+	"github.com/packethost/packngo"
+
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -170,6 +174,53 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				err = cluster.network.AddIP()
 				if err != nil {
 					log.Warnf("%v", err)
+				}
+
+				if c.EnablePacket {
+					packetClient, err := packngo.NewClient()
+					if err != nil {
+						log.Error(err)
+					}
+					projects, _, err := packetClient.Projects.List(nil)
+					if err != nil {
+						log.Error(err)
+					}
+					for _, p := range projects {
+						log.Println(p.ID, p.Name)
+
+						// Find our project
+						if p.Name == c.PacketProject {
+							ips, _, _ := packetClient.ProjectIPs.List(p.ID)
+							for _, ip := range ips {
+
+								// Find the device id for our EIP
+								if ip.Address == c.VIP {
+									log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
+
+									if len(ip.Assignments) != 0 {
+										hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
+										packetClient.DeviceIPs.Unassign(hrefID)
+									}
+								}
+							}
+
+							// Go through devices
+							dev, _, _ := packetClient.Devices.List(p.ID, &packngo.ListOptions{})
+							for _, d := range dev {
+
+								if d.Hostname == id {
+									log.Infof("Assigning EIP to -> %s\n", d.Hostname)
+									_, _, err := packetClient.DeviceIPs.Assign(d.ID, &packngo.AddressStruct{
+										Address: c.VIP,
+									})
+									if err != nil {
+										log.Errorln(err)
+									}
+
+								}
+							}
+						}
+					}
 				}
 
 				if c.EnableLoadBalancer {

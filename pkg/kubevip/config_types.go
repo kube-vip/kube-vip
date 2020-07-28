@@ -35,6 +35,15 @@ type Config struct {
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
+	// EnablePacket, will use the packet API to update the EIP <-> VIP
+	EnablePacket bool `yaml:"enablePacket"`
+
+	// PacketAPIKey, is the API token used to authenticate to the API
+	PacketAPIKey string
+
+	// PacketProject, is the name of a particular defined project
+	PacketProject string
+
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 }
