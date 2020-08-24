@@ -1,6 +1,10 @@
 package kubevip
 
-import "net/url"
+import (
+	"net/url"
+
+	"github.com/plunder-app/kube-vip/pkg/bgp"
+)
 
 // Config defines all of the settings for the Virtual IP / Load-balancer
 type Config struct {
@@ -35,7 +39,14 @@ type Config struct {
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
-	// EnablePacket, will use the packet API to update the EIP <-> VIP
+	// EnableBGP, will use BGP to advertise the VIP address
+	EnableBGP bool `yaml:"enableBGP"`
+
+	// BGP Configuration
+	BGPConfig     bgp.Config
+	BGPPeerConfig bgp.Peer
+
+	// EnablePacket, will use the packet API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
 	EnablePacket bool `yaml:"enablePacket"`
 
 	// PacketAPIKey, is the API token used to authenticate to the API

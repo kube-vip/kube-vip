@@ -10,8 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
+	"github.com/plunder-app/kube-vip/pkg/packet"
+
 	"github.com/plunder-app/kube-vip/pkg/vip"
 
 	"github.com/packethost/packngo"
@@ -138,6 +141,15 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
 
+	// BGP server
+	var bgpServer *bgp.Server
+	// Defer a function to check if the bgpServer has been created and if so attempt to close it
+	defer func() {
+		if bgpServer != nil {
+			bgpServer.Close()
+		}
+	}()
+
 	if c.EnableLoadBalancer {
 
 		// Iterate through all Configurations
@@ -181,45 +193,67 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					if err != nil {
 						log.Error(err)
 					}
-					projects, _, err := packetClient.Projects.List(nil)
-					if err != nil {
-						log.Error(err)
-					}
-					for _, p := range projects {
-						log.Println(p.ID, p.Name)
 
-						// Find our project
-						if p.Name == c.PacketProject {
-							ips, _, _ := packetClient.ProjectIPs.List(p.ID)
-							for _, ip := range ips {
+					// We're using Packet with BGP
+					if c.EnableBGP {
+						log.Debugf("Looking up the BGP configuration from packet")
+						err = packet.BGPLookup(packetClient, c)
+						if err != nil {
+							log.Error(err)
+						}
+					} else {
 
-								// Find the device id for our EIP
-								if ip.Address == c.VIP {
-									log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
+						projects, _, err := packetClient.Projects.List(nil)
+						if err != nil {
+							log.Error(err)
+						}
+						for _, p := range projects {
+							log.Println(p.ID, p.Name)
 
-									if len(ip.Assignments) != 0 {
-										hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
-										packetClient.DeviceIPs.Unassign(hrefID)
+							// Find our project
+							if p.Name == c.PacketProject {
+								ips, _, _ := packetClient.ProjectIPs.List(p.ID)
+								for _, ip := range ips {
+
+									// Find the device id for our EIP
+									if ip.Address == c.VIP {
+										log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
+
+										if len(ip.Assignments) != 0 {
+											hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
+											packetClient.DeviceIPs.Unassign(hrefID)
+										}
 									}
 								}
-							}
 
-							// Go through devices
-							dev, _, _ := packetClient.Devices.List(p.ID, &packngo.ListOptions{})
-							for _, d := range dev {
+								// Go through devices
+								dev, _, _ := packetClient.Devices.List(p.ID, &packngo.ListOptions{})
+								for _, d := range dev {
 
-								if d.Hostname == id {
-									log.Infof("Assigning EIP to -> %s\n", d.Hostname)
-									_, _, err := packetClient.DeviceIPs.Assign(d.ID, &packngo.AddressStruct{
-										Address: c.VIP,
-									})
-									if err != nil {
-										log.Errorln(err)
+									if d.Hostname == id {
+										log.Infof("Assigning EIP to -> %s\n", d.Hostname)
+										_, _, err := packetClient.DeviceIPs.Assign(d.ID, &packngo.AddressStruct{
+											Address: c.VIP,
+										})
+										if err != nil {
+											log.Errorln(err)
+										}
+
 									}
-
 								}
 							}
 						}
+					}
+				}
+
+				if c.EnableBGP {
+					// Lets start BGP
+					bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
+
+					// Lets advertise the EIP over BGP
+					err = bgpServer.AddHost(c.VIP)
+					if err != nil {
+						log.Fatal(err)
 					}
 				}
 
@@ -273,6 +307,14 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 				// Stop the Arp context if it is running
 				cancelArp()
+
+				// Stop the BGP server
+				if bgpServer != nil {
+					err = bgpServer.Close()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
+				}
 
 				// Stop all load balancers associated with the VIP
 				err = VipLB.StopAll()

@@ -53,6 +53,17 @@ const (
 	//vipPacket defines which project within Packet to use
 	vipPacketProject = "vip_packetproject"
 
+	//bgpEnable defines if BGP should be enabled
+	bgpEnable = "bgp_enable"
+	//bgpRouterID defines the routerID for the BGP server
+	bgpRouterID = "bgp_routerID"
+	//bgpRouterAS defines the AS for the BGP server
+	bgpRouterAS = "bgp_as"
+	//bgpPeerAddress defines the address for a BGP peer
+	bgpPeerAddress = "bgp_peeraddress"
+	//bgpPeerAS defines the AS for a BGP peer
+	bgpPeerAS = "bgp_peeras"
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
@@ -171,7 +182,6 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find Add Peers as Backends
-
 	env = os.Getenv(vipAddPeersToLB)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -179,6 +189,46 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.AddPeersAsBackends = b
+	}
+
+	// BGP Server options
+	env = os.Getenv(bgpEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableBGP = b
+	}
+
+	// RouterID
+	env = os.Getenv(bgpRouterID)
+	if env != "" {
+		c.BGPConfig.RouterID = env
+	}
+	// AS
+	env = os.Getenv(bgpRouterAS)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.AS = uint32(u64)
+	}
+
+	// BGP Peer options
+	env = os.Getenv(bgpPeerAddress)
+	if env != "" {
+		c.BGPPeerConfig.Address = env
+	}
+	// Peer AS
+	env = os.Getenv(bgpPeerAS)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPPeerConfig.AS = uint32(u64)
 	}
 
 	// Enable the Packet API calls
@@ -301,14 +351,6 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Value: strconv.FormatBool(c.EnableLeaderElection),
 		},
 		{
-			Name:  vipPacket,
-			Value: strconv.FormatBool(c.EnablePacket),
-		},
-		{
-			Name:  vipPacketProject,
-			Value: c.PacketProject,
-		},
-		{
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
@@ -316,42 +358,97 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Name:  vipAddress,
 			Value: c.VIP,
 		},
-		{
-			Name:  "PACKET_AUTH_TOKEN",
-			Value: c.PacketAPIKey,
-		},
-		{
-			Name:  vipStartLeader,
-			Value: strconv.FormatBool(c.StartAsLeader),
-		},
-		{
-			Name:  vipAddPeersToLB,
-			Value: strconv.FormatBool(c.AddPeersAsBackends),
-		},
-		{
-			Name:  vipLocalPeer,
-			Value: fmt.Sprintf("%s:%s:%d", c.LocalPeer.ID, c.LocalPeer.Address, c.LocalPeer.Port),
-		},
-		{
-			Name:  lbEnable,
-			Value: strconv.FormatBool(c.EnableLoadBalancer),
-		},
-		{
-			Name:  lbBackendPort,
-			Value: fmt.Sprintf("%d", c.LoadBalancers[0].Port),
-		},
-		{
-			Name:  lbName,
-			Value: c.LoadBalancers[0].Name,
-		},
-		{
-			Name:  lbType,
-			Value: c.LoadBalancers[0].Type,
-		},
-		{
-			Name:  lbBindToVip,
-			Value: strconv.FormatBool(c.LoadBalancers[0].BindToVip),
-		},
+	}
+
+	if !c.EnableLeaderElection {
+		raft := []appv1.EnvVar{
+			{
+				Name:  vipStartLeader,
+				Value: strconv.FormatBool(c.StartAsLeader),
+			},
+			{
+				Name:  vipAddPeersToLB,
+				Value: strconv.FormatBool(c.AddPeersAsBackends),
+			},
+			{
+				Name:  vipLocalPeer,
+				Value: fmt.Sprintf("%s:%s:%d", c.LocalPeer.ID, c.LocalPeer.Address, c.LocalPeer.Port),
+			},
+		}
+		newEnvironment = append(newEnvironment, raft...)
+
+	}
+	if c.EnablePacket {
+		packet := []appv1.EnvVar{
+			{
+				Name:  vipPacket,
+				Value: strconv.FormatBool(c.EnablePacket),
+			},
+			{
+				Name:  vipPacketProject,
+				Value: c.PacketProject,
+			},
+			{
+				Name:  "PACKET_AUTH_TOKEN",
+				Value: c.PacketAPIKey,
+			},
+		}
+		newEnvironment = append(newEnvironment, packet...)
+
+	}
+
+	if c.EnableBGP {
+		bgp := []appv1.EnvVar{
+			{
+				Name:  bgpEnable,
+				Value: strconv.FormatBool(c.EnableBGP),
+			},
+			{
+				Name:  bgpRouterID,
+				Value: c.BGPConfig.RouterID,
+			},
+			{
+				Name:  bgpRouterAS,
+				Value: fmt.Sprintf("%d", c.BGPConfig.AS),
+			},
+			{
+				Name:  bgpPeerAddress,
+				Value: c.BGPPeerConfig.Address,
+			},
+			{
+				Name:  bgpPeerAS,
+				Value: fmt.Sprintf("%d", c.BGPPeerConfig.AS),
+			},
+		}
+		newEnvironment = append(newEnvironment, bgp...)
+
+	}
+
+	if c.EnableLoadBalancer {
+		lb := []appv1.EnvVar{
+			{
+				Name:  lbEnable,
+				Value: strconv.FormatBool(c.EnableLoadBalancer),
+			},
+			{
+				Name:  lbBackendPort,
+				Value: fmt.Sprintf("%d", c.LoadBalancers[0].Port),
+			},
+			{
+				Name:  lbName,
+				Value: c.LoadBalancers[0].Name,
+			},
+			{
+				Name:  lbType,
+				Value: c.LoadBalancers[0].Type,
+			},
+			{
+				Name:  lbBindToVip,
+				Value: strconv.FormatBool(c.LoadBalancers[0].BindToVip),
+			},
+		}
+
+		newEnvironment = append(newEnvironment, lb...)
 	}
 
 	// Parse peers into a comma seperated string
