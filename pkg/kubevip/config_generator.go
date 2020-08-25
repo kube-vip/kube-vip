@@ -29,6 +29,9 @@ const (
 	//vipAddress - defines the address that the vip will expose
 	vipAddress = "vip_address"
 
+	//vipCidr - defines the cidr that the vip will use
+	vipCidr = "vip_cidr"
+
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
 
@@ -56,7 +59,7 @@ const (
 	//bgpEnable defines if BGP should be enabled
 	bgpEnable = "bgp_enable"
 	//bgpRouterID defines the routerID for the BGP server
-	bgpRouterID = "bgp_routerID"
+	bgpRouterID = "bgp_routerid"
 	//bgpRouterAS defines the AS for the BGP server
 	bgpRouterAS = "bgp_as"
 	//bgpPeerAddress defines the address for a BGP peer
@@ -113,6 +116,13 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.VIP = env
+	}
+
+	// Find vip address cidr range
+	env = os.Getenv(c.VIPCIDR)
+	if env != "" {
+		// TODO - parse address net.Host()
+		c.VIPCIDR = env
 	}
 
 	// Find Single Node
@@ -360,6 +370,20 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		},
 	}
 
+	// If a CIDR is used add it to the manifest
+	if c.VIPCIDR != "" {
+		// build environment variables
+		cidr := []appv1.EnvVar{
+			{
+				Name:  vipCidr,
+				Value: c.VIPCIDR,
+			},
+		}
+		newEnvironment = append(newEnvironment, cidr...)
+
+	}
+
+	// If Leader election is enabled then add the configuration to the manifest
 	if !c.EnableLeaderElection {
 		raft := []appv1.EnvVar{
 			{
@@ -378,6 +402,8 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		newEnvironment = append(newEnvironment, raft...)
 
 	}
+
+	// If Packet is enabled then add it to the manifest
 	if c.EnablePacket {
 		packet := []appv1.EnvVar{
 			{
@@ -397,6 +423,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 
 	}
 
+	// If BGP is enabled then add it to the manifest
 	if c.EnableBGP {
 		bgp := []appv1.EnvVar{
 			{
@@ -424,6 +451,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 
 	}
 
+	// If the load-balancer is enabled then add the configuration to the manifest
 	if c.EnableLoadBalancer {
 		lb := []appv1.EnvVar{
 			{

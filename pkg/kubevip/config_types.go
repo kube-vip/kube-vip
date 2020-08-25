@@ -24,6 +24,9 @@ type Config struct {
 	// VIP is the Virtual IP address exposed for the cluster
 	VIP string `yaml:"vip"`
 
+	// VIPCIDR is cidr range for the VIP (primarily needed for BGP)
+	VIPCIDR string `yaml:"vipCidr"`
+
 	// GratuitousARP will broadcast an ARP update when the VIP changes host
 	GratuitousARP bool `yaml:"gratuitousARP"`
 

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -88,6 +87,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	if err != nil {
 		return err
 	}
+
 	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", namespace, plunderLock, id)
 
 	// we use the Lease lock type since edits to Leases are less common
@@ -202,58 +202,27 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 							log.Error(err)
 						}
 					} else {
-
-						projects, _, err := packetClient.Projects.List(nil)
+						// If not attempt to attach the EIP in the standard manner
+						log.Debugf("Attaching the Packet EIP through the API to this host")
+						err = packet.AttachEIP(packetClient, c, id)
 						if err != nil {
 							log.Error(err)
-						}
-						for _, p := range projects {
-							log.Println(p.ID, p.Name)
-
-							// Find our project
-							if p.Name == c.PacketProject {
-								ips, _, _ := packetClient.ProjectIPs.List(p.ID)
-								for _, ip := range ips {
-
-									// Find the device id for our EIP
-									if ip.Address == c.VIP {
-										log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
-
-										if len(ip.Assignments) != 0 {
-											hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
-											packetClient.DeviceIPs.Unassign(hrefID)
-										}
-									}
-								}
-
-								// Go through devices
-								dev, _, _ := packetClient.Devices.List(p.ID, &packngo.ListOptions{})
-								for _, d := range dev {
-
-									if d.Hostname == id {
-										log.Infof("Assigning EIP to -> %s\n", d.Hostname)
-										_, _, err := packetClient.DeviceIPs.Assign(d.ID, &packngo.AddressStruct{
-											Address: c.VIP,
-										})
-										if err != nil {
-											log.Errorln(err)
-										}
-
-									}
-								}
-							}
 						}
 					}
 				}
 
 				if c.EnableBGP {
 					// Lets start BGP
+					log.Debugf("Starting the BGP server to adverise VIP routes to VGP peers")
 					bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
 
-					// Lets advertise the EIP over BGP
-					err = bgpServer.AddHost(c.VIP)
+					// Lets advertise the EIP over BGP, the host needs to be passed using CIDR notation
+					cidrVip := fmt.Sprintf("%s/%s", c.VIP, c.VIPCIDR)
+					log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+
+					err = bgpServer.AddHost(cidrVip)
 					if err != nil {
-						log.Fatal(err)
+						log.Error(err)
 					}
 				}
 
@@ -340,6 +309,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 	//<-signalChan
 	log.Infof("Shutting down Kube-Vip Leader Election cluster")
+
 	// Force a removal of the VIP (ignore the error if we don't have it)
 	cluster.network.DeleteIP()
 
