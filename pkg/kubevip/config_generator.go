@@ -119,7 +119,7 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find vip address cidr range
-	env = os.Getenv(c.VIPCIDR)
+	env = os.Getenv(vipCidr)
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.VIPCIDR = env

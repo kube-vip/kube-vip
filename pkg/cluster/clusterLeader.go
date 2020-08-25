@@ -150,6 +150,33 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		}
 	}()
 
+	// If Packet is enabled then we can begin our preperation work
+	var packetClient *packngo.Client
+	if c.EnablePacket {
+		packetClient, err = packngo.NewClient()
+		if err != nil {
+			log.Error(err)
+		}
+
+		// We're using Packet with BGP, popuplate the Peer information from the API
+		if c.EnableBGP {
+			log.Infoln("Looking up the BGP configuration from packet")
+			err = packet.BGPLookup(packetClient, c)
+			if err != nil {
+				log.Error(err)
+			}
+		}
+	}
+
+	if c.EnableBGP {
+		// Lets start BGP
+		log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
+		if err != nil {
+			log.Error(err)
+		}
+	}
+
 	if c.EnableLoadBalancer {
 
 		// Iterate through all Configurations
@@ -189,20 +216,9 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				}
 
 				if c.EnablePacket {
-					packetClient, err := packngo.NewClient()
-					if err != nil {
-						log.Error(err)
-					}
-
-					// We're using Packet with BGP
-					if c.EnableBGP {
-						log.Debugf("Looking up the BGP configuration from packet")
-						err = packet.BGPLookup(packetClient, c)
-						if err != nil {
-							log.Error(err)
-						}
-					} else {
-						// If not attempt to attach the EIP in the standard manner
+					// We're not using Packet with BGP
+					if !c.EnableBGP {
+						// Attempt to attach the EIP in the standard manner
 						log.Debugf("Attaching the Packet EIP through the API to this host")
 						err = packet.AttachEIP(packetClient, c, id)
 						if err != nil {
@@ -212,11 +228,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				}
 
 				if c.EnableBGP {
-					// Lets start BGP
-					log.Debugf("Starting the BGP server to adverise VIP routes to VGP peers")
-					bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
-
-					// Lets advertise the EIP over BGP, the host needs to be passed using CIDR notation
+					// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 					cidrVip := fmt.Sprintf("%s/%s", c.VIP, c.VIPCIDR)
 					log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
 
