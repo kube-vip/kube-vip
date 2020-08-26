@@ -45,7 +45,7 @@ func (sm *Manager) newWatcher(s *serviceInstance) error {
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			log.Debugf("Endpoints for service [%s] have  been Created or modified", s.service.ServiceName)
+			log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 			ep, ok := event.Object.(*v1.Endpoints)
 			if !ok {
 				return fmt.Errorf("Unable to parse Endpoints from watcher")

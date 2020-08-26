@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	dhclient "github.com/digineo/go-dhclient"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -38,11 +39,17 @@ var OutSideCluster bool
 // EnableArp - determines the use of ARP broadcasts
 var EnableArp bool
 
-// Interface - determines the interface that all Loadbalancers will bind too
+// Interface - determines the interface that all Loadbalancers/macvlans will bind too
 var Interface string
 
 type plndrServices struct {
 	Services []service `json:"services"`
+}
+
+type dhcpService struct {
+	// dhcpClient (used DHCP for the vip)
+	dhcpClient    *dhclient.Client
+	dhcpInterface string
 }
 
 type serviceInstance struct {
@@ -52,6 +59,9 @@ type serviceInstance struct {
 	service service
 	// cluster instance
 	cluster cluster.Cluster
+
+	// Custom settings
+	dhcp *dhcpService
 }
 
 // TODO - call from a package (duplicated struct in the cloud-provider code)
