@@ -47,6 +47,15 @@ const (
 	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
 	vipAddPeersToLB = "vip_addpeerstolb"
 
+	//vipPacket defines that the packet API will be used tor EIP
+	vipPacket = "vip_packet"
+
+	//vipPacket defines which project within Packet to use
+	vipPacketProject = "vip_packetproject"
+
+	//lbEnable defines if the load-balancer should be enabled
+	lbEnable = "lb_enable"
+
 	//lbBindToVip defines if the load-balancer should bind ONLY to the virtual IP
 	lbBindToVip = "lb_bindtovip"
 
@@ -172,6 +181,33 @@ func ParseEnvironment(c *Config) error {
 		c.AddPeersAsBackends = b
 	}
 
+	// Enable the Packet API calls
+	env = os.Getenv(vipPacket)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnablePacket = b
+	}
+
+	// Find the Packet project name
+	env = os.Getenv(vipPacketProject)
+	if env != "" {
+		// TODO - parse address net.Host()
+		c.PacketProject = env
+	}
+
+	// Enable the load-balancer
+	env = os.Getenv(lbEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableLoadBalancer = b
+	}
+
 	// Load Balancer configuration
 	return parseEnvironmentLoadBalancer(c)
 }
@@ -265,12 +301,24 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Value: strconv.FormatBool(c.EnableLeaderElection),
 		},
 		{
+			Name:  vipPacket,
+			Value: strconv.FormatBool(c.EnablePacket),
+		},
+		{
+			Name:  vipPacketProject,
+			Value: c.PacketProject,
+		},
+		{
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
 		{
 			Name:  vipAddress,
 			Value: c.VIP,
+		},
+		{
+			Name:  "PACKET_AUTH_TOKEN",
+			Value: c.PacketAPIKey,
 		},
 		{
 			Name:  vipStartLeader,
@@ -283,6 +331,10 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		{
 			Name:  vipLocalPeer,
 			Value: fmt.Sprintf("%s:%s:%d", c.LocalPeer.ID, c.LocalPeer.Address, c.LocalPeer.Port),
+		},
+		{
+			Name:  lbEnable,
+			Value: strconv.FormatBool(c.EnableLoadBalancer),
 		},
 		{
 			Name:  lbBackendPort,
@@ -355,6 +407,11 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 							Name:      "kubeconfig",
 							MountPath: "/etc/kubernetes/admin.conf",
 						},
+						{
+							Name:      "ca-certs",
+							MountPath: "/etc/ssl/certs",
+							ReadOnly:  true,
+						},
 					},
 				},
 			},
@@ -364,6 +421,14 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 					VolumeSource: appv1.VolumeSource{
 						HostPath: &appv1.HostPathVolumeSource{
 							Path: "/etc/kubernetes/admin.conf",
+						},
+					},
+				},
+				{
+					Name: "ca-certs",
+					VolumeSource: appv1.VolumeSource{
+						HostPath: &appv1.HostPathVolumeSource{
+							Path: "/etc/ssl/certs",
 						},
 					},
 				},
