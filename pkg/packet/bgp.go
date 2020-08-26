@@ -6,6 +6,7 @@ import (
 	"github.com/packethost/packngo"
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	log "github.com/sirupsen/logrus"
 )
 
 // BGPLookup will use the Packet API functions to populate the BGP information
@@ -21,10 +22,25 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 	}
 
 	fmt.Printf("Querying BGP settings for [%s]", thisDevice.Hostname)
-	neighbours, _, _ := c.Devices.ListBGPNeighbors(thisDevice.ID, &packngo.ListOptions{})
-	if len(neighbours) > 1 {
-		return fmt.Errorf("There are [%d] neighbours, only designed to manage one", len(neighbours))
+	neighbours, _, err := c.Devices.ListBGPNeighbors(thisDevice.ID, &packngo.ListOptions{})
+	if err != nil {
+		return err
 	}
+	// Ensure neighbours exist (and it's enabled)
+	if len(neighbours) == 0 {
+		return fmt.Errorf("The server [%s]/[%s] has no BGP neighbours, ensure BGP is enabled", thisDevice.Hostname, thisDevice.ID)
+	}
+
+	// Add a warning (TODO)
+	if len(neighbours) > 1 {
+		log.Warnf("There are [%d] neighbours, only designed to manage one", len(neighbours))
+	}
+
+	// Ensure a peer exists
+	if len(neighbours[0].PeerIps) == 0 {
+		return fmt.Errorf("The server [%s]/[%s] has no BGP peers, ensure BGP is enabled", thisDevice.Hostname, thisDevice.ID)
+	}
+
 	k.BGPConfig.RouterID = neighbours[0].CustomerIP
 	k.BGPConfig.AS = uint32(neighbours[0].CustomerAs)
 
