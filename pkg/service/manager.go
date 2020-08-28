@@ -191,7 +191,7 @@ func (sm *Manager) Start() error {
 				// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 				rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 					WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-						return sm.clientSet.CoreV1().ConfigMaps(ns).Watch(listOptions)
+						return sm.clientSet.CoreV1().ConfigMaps(ns).Watch(context.TODO(), listOptions)
 					},
 				})
 
