@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -142,7 +143,7 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		opts := metav1.ListOptions{}
 		opts.LabelSelector = "node-role.kubernetes.io/master"
-		nodes, err := clientset.CoreV1().Nodes().List(opts)
+		nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), opts)
 
 		// Iterate over all nodes that are masters and find the details to build a peer list
 		for x := range nodes.Items {

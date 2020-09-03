@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -164,13 +165,13 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 							log.Errorf("Error finding Namespace")
 							return
 						}
-						dhcpService, err := sm.clientSet.CoreV1().Services(ns).Get(newService.service.ServiceName, metav1.GetOptions{})
+						dhcpService, err := sm.clientSet.CoreV1().Services(ns).Get(context.TODO(), newService.service.ServiceName, metav1.GetOptions{})
 						if err != nil {
 							log.Errorf("Error finding Service [%s] : %v", newService.service.ServiceName, err)
 							return
 						}
 						dhcpService.Spec.LoadBalancerIP = newVip.VIP
-						_, err = sm.clientSet.CoreV1().Services(ns).Update(dhcpService)
+						_, err = sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
 						if err != nil {
 							log.Errorf("Error updating Service [%s] : %v", newService.service.ServiceName, err)
 							return
