@@ -202,9 +202,9 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		// get elected before your background loop finished, violating
 		// the stated goal of the lease.
 		ReleaseOnCancel: true,
-		LeaseDuration:   3 * time.Second,
-		RenewDeadline:   2 * time.Second,
-		RetryPeriod:     1 * time.Second,
+		LeaseDuration:   time.Duration(c.LeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(c.RenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(c.RetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 

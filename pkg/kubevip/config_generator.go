@@ -20,6 +20,15 @@ const (
 	//vipLeaderElection - defines if the kubernetes algorithim should be used
 	vipLeaderElection = "vip_leaderelection"
 
+	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	vipLeaseDuration = "vip_leaseduration"
+
+	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	vipRenewDeadline = "vip_renewdeadline"
+
+	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	vipRetryPeriod = "vip_retryperiod"
+
 	//vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
 
@@ -101,7 +110,8 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
-	// Find Single Node
+	// Find Kubernetes Leader Election configuration
+
 	env = os.Getenv(vipLeaderElection)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -109,6 +119,34 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableLeaderElection = b
+	}
+
+	// Attempt to find the Lease configuration from teh environment variables
+	env = os.Getenv(vipLeaseDuration)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 8, 0)
+		if err != nil {
+			return err
+		}
+		c.LeaseDuration = int(i)
+	}
+
+	env = os.Getenv(vipRenewDeadline)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 8, 0)
+		if err != nil {
+			return err
+		}
+		c.RenewDeadline = int(i)
+	}
+
+	env = os.Getenv(vipRetryPeriod)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 8, 0)
+		if err != nil {
+			return err
+		}
+		c.RetryPeriod = int(i)
 	}
 
 	// Find vip address
@@ -357,10 +395,6 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Value: strconv.FormatBool(c.GratuitousARP),
 		},
 		{
-			Name:  vipLeaderElection,
-			Value: strconv.FormatBool(c.EnableLeaderElection),
-		},
-		{
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
@@ -384,7 +418,29 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest
-	if !c.EnableLeaderElection {
+	if c.EnableLeaderElection {
+		// Generate Kubernetes Leader Election configuration
+		leaderElection := []appv1.EnvVar{
+			{
+				Name:  vipLeaderElection,
+				Value: strconv.FormatBool(c.EnableLeaderElection),
+			},
+			{
+				Name:  vipLeaseDuration,
+				Value: fmt.Sprintf("%d", c.LeaseDuration),
+			},
+			{
+				Name:  vipRenewDeadline,
+				Value: fmt.Sprintf("%d", c.RenewDeadline),
+			},
+			{
+				Name:  vipRetryPeriod,
+				Value: fmt.Sprintf("%d", c.RetryPeriod),
+			},
+		}
+		newEnvironment = append(newEnvironment, leaderElection...)
+	} else {
+		// Generate Raft configuration
 		raft := []appv1.EnvVar{
 			{
 				Name:  vipStartLeader,
@@ -400,7 +456,6 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			},
 		}
 		newEnvironment = append(newEnvironment, raft...)
-
 	}
 
 	// If Packet is enabled then add it to the manifest
