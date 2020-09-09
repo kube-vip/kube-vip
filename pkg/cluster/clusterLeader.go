@@ -6,12 +6,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	leaderelection "github.com/plunder-app/kube-vip/pkg/leaderElection"
 	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
+	"github.com/plunder-app/kube-vip/pkg/packet"
+
 	"github.com/plunder-app/kube-vip/pkg/vip"
 
 	"github.com/packethost/packngo"
@@ -21,7 +24,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
@@ -85,6 +87,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	if err != nil {
 		return err
 	}
+
 	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", namespace, plunderLock, id)
 
 	// we use the Lease lock type since edits to Leases are less common
@@ -138,6 +141,42 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
 
+	// BGP server
+	var bgpServer *bgp.Server
+	// Defer a function to check if the bgpServer has been created and if so attempt to close it
+	defer func() {
+		if bgpServer != nil {
+			bgpServer.Close()
+		}
+	}()
+
+	// If Packet is enabled then we can begin our preperation work
+	var packetClient *packngo.Client
+	if c.EnablePacket {
+		packetClient, err = packngo.NewClient()
+		if err != nil {
+			log.Error(err)
+		}
+
+		// We're using Packet with BGP, popuplate the Peer information from the API
+		if c.EnableBGP {
+			log.Infoln("Looking up the BGP configuration from packet")
+			err = packet.BGPLookup(packetClient, c)
+			if err != nil {
+				log.Error(err)
+			}
+		}
+	}
+
+	if c.EnableBGP {
+		// Lets start BGP
+		log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
+		if err != nil {
+			log.Error(err)
+		}
+	}
+
 	if c.EnableLoadBalancer {
 
 		// Iterate through all Configurations
@@ -163,9 +202,9 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		// get elected before your background loop finished, violating
 		// the stated goal of the lease.
 		ReleaseOnCancel: true,
-		LeaseDuration:   3 * time.Second,
-		RenewDeadline:   2 * time.Second,
-		RetryPeriod:     1 * time.Second,
+		LeaseDuration:   time.Duration(c.LeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(c.RenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(c.RetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 
@@ -177,49 +216,25 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				}
 
 				if c.EnablePacket {
-					packetClient, err := packngo.NewClient()
-					if err != nil {
-						log.Error(err)
-					}
-					projects, _, err := packetClient.Projects.List(nil)
-					if err != nil {
-						log.Error(err)
-					}
-					for _, p := range projects {
-						log.Println(p.ID, p.Name)
-
-						// Find our project
-						if p.Name == c.PacketProject {
-							ips, _, _ := packetClient.ProjectIPs.List(p.ID)
-							for _, ip := range ips {
-
-								// Find the device id for our EIP
-								if ip.Address == c.VIP {
-									log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
-
-									if len(ip.Assignments) != 0 {
-										hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
-										packetClient.DeviceIPs.Unassign(hrefID)
-									}
-								}
-							}
-
-							// Go through devices
-							dev, _, _ := packetClient.Devices.List(p.ID, &packngo.ListOptions{})
-							for _, d := range dev {
-
-								if d.Hostname == id {
-									log.Infof("Assigning EIP to -> %s\n", d.Hostname)
-									_, _, err := packetClient.DeviceIPs.Assign(d.ID, &packngo.AddressStruct{
-										Address: c.VIP,
-									})
-									if err != nil {
-										log.Errorln(err)
-									}
-
-								}
-							}
+					// We're not using Packet with BGP
+					if !c.EnableBGP {
+						// Attempt to attach the EIP in the standard manner
+						log.Debugf("Attaching the Packet EIP through the API to this host")
+						err = packet.AttachEIP(packetClient, c, id)
+						if err != nil {
+							log.Error(err)
 						}
+					}
+				}
+
+				if c.EnableBGP {
+					// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
+					cidrVip := fmt.Sprintf("%s/%s", c.VIP, c.VIPCIDR)
+					log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+
+					err = bgpServer.AddHost(cidrVip)
+					if err != nil {
+						log.Error(err)
 					}
 				}
 
@@ -274,6 +289,14 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				// Stop the Arp context if it is running
 				cancelArp()
 
+				// Stop the BGP server
+				if bgpServer != nil {
+					err = bgpServer.Close()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
+				}
+
 				// Stop all load balancers associated with the VIP
 				err = VipLB.StopAll()
 				if err != nil {
@@ -298,6 +321,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 	//<-signalChan
 	log.Infof("Shutting down Kube-Vip Leader Election cluster")
+
 	// Force a removal of the VIP (ignore the error if we don't have it)
 	cluster.network.DeleteIP()
 

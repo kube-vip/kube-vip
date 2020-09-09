@@ -6,6 +6,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,7 +30,7 @@ func (sm *Manager) newWatcher(s *serviceInstance) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Endpoints(ns).Watch(listOptions)
+			return sm.clientSet.CoreV1().Endpoints(ns).Watch(context.TODO(), listOptions)
 		},
 	})
 	if err != nil {
@@ -45,7 +46,7 @@ func (sm *Manager) newWatcher(s *serviceInstance) error {
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			log.Debugf("Endpoints for service [%s] have  been Created or modified", s.service.ServiceName)
+			log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 			ep, ok := event.Object.(*v1.Endpoints)
 			if !ok {
 				return fmt.Errorf("Unable to parse Endpoints from watcher")
