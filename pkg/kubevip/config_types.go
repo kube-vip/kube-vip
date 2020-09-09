@@ -9,8 +9,8 @@ import (
 // Config defines all of the settings for the Virtual IP / Load-balancer
 type Config struct {
 
-	// EnableLeaderElection will use the Kubernetes leader election algorithim
-	EnableLeaderElection bool `yaml:"enableLeaderElection"`
+	// LeaderElection defines the settings around Kubernetes LeaderElection
+	LeaderElection
 
 	// LocalPeer is the configuration of this host
 	LocalPeer RaftPeer `yaml:"localPeer"`
@@ -60,6 +60,22 @@ type Config struct {
 
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
+}
+
+// LeaderElection defines all of the settings for Kubernetes LeaderElection
+type LeaderElection struct {
+
+	// EnableLeaderElection will use the Kubernetes leader election algorithim
+	EnableLeaderElection bool `yaml:"enableLeaderElection"`
+
+	// Lease Duration - length of time a lease can be held for
+	LeaseDuration int
+
+	// RenewDeadline - length of time a host can attempt to renew its lease
+	RenewDeadline int
+
+	// RetryPerion - Number of times the host will retry to hold a lease
+	RetryPeriod int
 }
 
 // RaftPeer details the configuration of all cluster peers
