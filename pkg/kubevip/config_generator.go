@@ -438,6 +438,21 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 				Value: fmt.Sprintf("%d", c.RetryPeriod),
 			},
 		}
+
+		// TODO - (for upgrade purposes), we'll set Kubernetes defaults if they're not already set
+		// (https://github.com/kubernetes/client-go/blob/f0b431a6e0bfce3c7c1d10b223d46875df3d1c29/tools/leaderelection/leaderelection.go#L128)
+		if c.LeaseDuration == 0 {
+			c.LeaseDuration = 15
+		}
+
+		if c.RenewDeadline == 0 {
+			c.RenewDeadline = 10
+		}
+
+		if c.RetryPeriod == 0 {
+			c.RetryPeriod = 2
+		}
+
 		newEnvironment = append(newEnvironment, leaderElection...)
 	} else {
 		// Generate Raft configuration
