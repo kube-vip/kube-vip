@@ -135,7 +135,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	}()
 
 	// (attempt to) Remove the virtual IP, incase it already exists
-	cluster.network.DeleteIP()
+	cluster.Network.DeleteIP()
 
 	// Managers for Vip load balancers and none-vip loadbalancers
 	nonVipLB := loadbalancer.LBManager{}
@@ -210,7 +210,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 				// we're notified when we start
 				log.Info("This node is starting with leadership of the cluster")
-				err = cluster.network.AddIP()
+				err = cluster.Network.AddIP()
 				if err != nil {
 					log.Warnf("%v", err)
 				}
@@ -229,7 +229,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 				if c.EnableBGP {
 					// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-					cidrVip := fmt.Sprintf("%s/%s", c.VIP, c.VIPCIDR)
+					cidrVip := fmt.Sprintf("%s/%s", cluster.Network.IP(), c.VIPCIDR)
 					log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
 
 					err = bgpServer.AddHost(cidrVip)
@@ -243,7 +243,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					for x := range c.LoadBalancers {
 
 						if c.LoadBalancers[x].BindToVip == true {
-							err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+							err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 							if err != nil {
 								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
 
@@ -253,7 +253,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 									log.Warnf("%v", err)
 								}
 
-								err = cluster.network.DeleteIP()
+								err = cluster.Network.DeleteIP()
 								if err != nil {
 									log.Warnf("%v", err)
 								}
@@ -272,7 +272,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 								return
 							default:
 								// Gratuitous ARP, will broadcast to new MAC <-> IP
-								err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+								err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 								if err != nil {
 									log.Warnf("%v", err)
 								}
@@ -303,7 +303,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					log.Warnf("%v", err)
 				}
 
-				err = cluster.network.DeleteIP()
+				err = cluster.Network.DeleteIP()
 				if err != nil {
 					log.Warnf("%v", err)
 				}
@@ -323,7 +323,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	log.Infof("Shutting down Kube-Vip Leader Election cluster")
 
 	// Force a removal of the VIP (ignore the error if we don't have it)
-	cluster.network.DeleteIP()
+	cluster.Network.DeleteIP()
 
 	return nil
 }

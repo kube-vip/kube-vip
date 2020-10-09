@@ -555,12 +555,12 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 	}
 
 	if c.Address != "" {
-		newEnvironment = append(newEnvironment, appv1.EnvVar{
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
 			Name:  address,
 			Value: c.Address,
 		})
 	} else {
-		newEnvironment = append(newEnvironment, appv1.EnvVar{
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
 			Name:  vipAddress,
 			Value: c.VIP,
 		})
