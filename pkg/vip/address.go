@@ -23,9 +23,11 @@ type Network interface {
 
 // network - This allows network configuration
 type network struct {
+	mu sync.Mutex
+
 	address *netlink.Addr
 	link    netlink.Link
-	mu      sync.Mutex
+	isDNS   bool
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
@@ -40,6 +42,7 @@ func NewConfig(address string, iface string) (Network, error) {
 
 	// try to resolve the address
 	ip, err := lookupHost(address)
+	result.isDNS = err == nil
 	if err != nil {
 		// fallback to the address being an IP
 		result.address, err = netlink.ParseAddr(address + "/32")
@@ -116,7 +119,7 @@ func (configurator *network) SetIP(ip string) error {
 	if err != nil {
 		return err
 	}
-	if configurator.address != nil  {
+	if configurator.address != nil && configurator.isDNS {
 		addr.ValidLft = defaultValidLft
 	}
 	configurator.address = addr
