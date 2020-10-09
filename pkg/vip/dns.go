@@ -13,8 +13,6 @@ type IPUpdater interface {
 }
 
 type ipUpdater struct {
-	// TODO: cache the latest entry to be able to update
-	// in case of lookup failures
 	dnsName string
 	vip     Network
 }
@@ -37,9 +35,11 @@ func (d *ipUpdater) Run(ctx context.Context) {
 			default:
 				ip, err := lookupHost(d.dnsName)
 				if err != nil {
-					log.Errorf("cannot lookup %s: %v", d.dnsName, err)
-					continue
+					log.Warnf("cannot lookup %s: %v", d.dnsName, err)
+					// fallback to renewing the existing IP
+					ip = d.vip.IP()
 				}
+
 				log.Infof("setting %s as an IP", ip)
 				d.vip.SetIP(ip)
 				d.vip.AddIP()
