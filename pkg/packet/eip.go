@@ -18,7 +18,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 		return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
 	}
 
-	ips, _, _ := c.ProjectIPs.List(proj.ID)
+	ips, _, _ := c.ProjectIPs.List(proj.ID, &packngo.ListOptions{})
 	for _, ip := range ips {
 
 		// Find the device id for our EIP

@@ -6,7 +6,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSION := 0.1.8
+VERSION := 0.1.9
 BUILD := `git rev-parse HEAD`
 
 # Operating System Default (LINUX)
@@ -55,7 +55,7 @@ demo:
 # This build a local docker image (x86 only) for quick testing
 dockerx86:
 	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
-	@echo New Multi Architecture Docker image created
+	@echo New single x86 Architecture Docker image created
 
 docker:
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
