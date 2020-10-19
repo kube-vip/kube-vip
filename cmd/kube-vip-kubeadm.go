@@ -50,7 +50,7 @@ var kubeKubeadmInit = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		if initConfig.VIP == "" && initConfig.Address == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
@@ -76,7 +76,7 @@ var kubeKubeadmJoin = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		if initConfig.VIP == "" && initConfig.Address == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}

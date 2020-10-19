@@ -37,12 +37,12 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	}
 
 	if !disableVIP {
-		err := cluster.network.DeleteIP()
+		err := cluster.Network.DeleteIP()
 		if err != nil {
 			log.Warnf("Attempted to clean existing VIP => %v", err)
 		}
 
-		err = cluster.network.AddIP()
+		err = cluster.Network.AddIP()
 		if err != nil {
 			log.Warnf("%v", err)
 		}
@@ -51,7 +51,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		for x := range c.LoadBalancers {
 
 			if c.LoadBalancers[x].BindToVip == true {
-				err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+				err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 				if err != nil {
 					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
 				}
@@ -61,7 +61,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 
 	if c.GratuitousARP == true {
 		// Gratuitous ARP, will broadcast to new MAC <-> IP
-		err := vip.ARPSendGratuitous(c.VIP, c.Interface)
+		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 		if err != nil {
 			log.Warnf("%v", err)
 		}
@@ -88,7 +88,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 				if !disableVIP {
 
 					log.Info("[VIP] Releasing the Virtual IP")
-					err = cluster.network.DeleteIP()
+					err = cluster.Network.DeleteIP()
 					if err != nil {
 						log.Warnf("%v", err)
 					}

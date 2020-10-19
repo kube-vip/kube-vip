@@ -27,6 +27,9 @@ type Config struct {
 	// VIPCIDR is cidr range for the VIP (primarily needed for BGP)
 	VIPCIDR string `yaml:"vipCidr"`
 
+	// Address is the IP or DNS Name to use as a VirtualIP
+	Address string `yaml:"address"`
+
 	// GratuitousARP will broadcast an ARP update when the VIP changes host
 	GratuitousARP bool `yaml:"gratuitousARP"`
 

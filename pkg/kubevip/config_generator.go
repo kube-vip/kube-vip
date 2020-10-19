@@ -37,10 +37,16 @@ const (
 	vipInterface = "vip_interface"
 
 	//vipAddress - defines the address that the vip will expose
+	// DEPRECATED: will be removed in a next release
 	vipAddress = "vip_address"
 
 	//vipCidr - defines the cidr that the vip will use
 	vipCidr = "vip_cidr"
+
+	//address - defines the address that would be used as a vip
+	// it may be an IP or a DNS name, in case of a DNS name
+	// kube-vip will try to resolve it and use the IP as a VIP
+	address = "address"
 
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
@@ -155,6 +161,8 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.VIP = env
+	} else {
+		c.Address = os.Getenv(address)
 	}
 
 	// Find vip address cidr range
@@ -399,10 +407,6 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
-		{
-			Name:  vipAddress,
-			Value: c.VIP,
-		},
 	}
 
 	// If a CIDR is used add it to the manifest
@@ -548,6 +552,18 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 		}
 
 		newEnvironment = append(newEnvironment, lb...)
+	}
+
+	if c.Address != "" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  address,
+			Value: c.Address,
+		})
+	} else {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipAddress,
+			Value: c.VIP,
+		})
 	}
 
 	// Parse peers into a comma seperated string

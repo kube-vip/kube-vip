@@ -87,7 +87,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 	isLeader := c.StartAsLeader
 
 	// (attempt to) Remove the virtual IP, incase it already exists
-	cluster.network.DeleteIP()
+	cluster.Network.DeleteIP()
 
 	// leader log broadcast - this counter is used to stop flooding STDOUT with leader log entries
 	var leaderbroadcast int
@@ -132,7 +132,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 					// Re-broadcast arp to ensure network stays up to date
 					if c.GratuitousARP == true {
 						// Gratuitous ARP, will broadcast to new MAC <-> IP
-						err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+						err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 						if err != nil {
 							log.Warnf("%v", err)
 						}
@@ -143,7 +143,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 					}
 				} else {
 					// (attempt to) Remove the virtual IP, incase it already exists to keep nodes clean
-					cluster.network.DeleteIP()
+					cluster.Network.DeleteIP()
 					isLeader = false
 				}
 
@@ -157,7 +157,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 					isLeader = true
 
 					log.Info("This node is assuming leadership of the cluster")
-					err = cluster.network.AddIP()
+					err = cluster.Network.AddIP()
 					if err != nil {
 						log.Warnf("%v", err)
 					}
@@ -167,7 +167,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 					for x := range c.LoadBalancers {
 
 						if c.LoadBalancers[x].BindToVip == true {
-							err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+							err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 							if err != nil {
 								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
 								log.Errorf("Dropping Leadership to another node in the cluster")
@@ -179,7 +179,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 									log.Warnf("%v", err)
 								}
 
-								err = cluster.network.DeleteIP()
+								err = cluster.Network.DeleteIP()
 								if err != nil {
 									log.Warnf("%v", err)
 								}
@@ -189,7 +189,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 
 					if c.GratuitousARP == true {
 						// Gratuitous ARP, will broadcast to new MAC <-> IP
-						err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+						err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 						if err != nil {
 							log.Warnf("%v", err)
 						}
@@ -205,7 +205,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 						log.Warnf("%v", err)
 					}
 
-					err = cluster.network.DeleteIP()
+					err = cluster.Network.DeleteIP()
 					if err != nil {
 						log.Warnf("%v", err)
 					}
@@ -215,15 +215,15 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 
 				if isLeader {
 
-					result, err := cluster.network.IsSet()
+					result, err := cluster.Network.IsSet()
 					if err != nil {
-						log.WithFields(log.Fields{"error": err, "ip": cluster.network.IP(), "interface": cluster.network.Interface()}).Error("Could not check ip")
+						log.WithFields(log.Fields{"error": err, "ip": cluster.Network.IP(), "interface": cluster.Network.Interface()}).Error("Could not check ip")
 					}
 
 					if result == false {
 						log.Error("This node is leader and is adopting the virtual IP")
 
-						err = cluster.network.AddIP()
+						err = cluster.Network.AddIP()
 						if err != nil {
 							log.Warnf("%v", err)
 						}
@@ -232,7 +232,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 						for x := range c.LoadBalancers {
 
 							if c.LoadBalancers[x].BindToVip == true {
-								err = VipLB.Add(c.VIP, &c.LoadBalancers[x])
+								err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 								if err != nil {
 									log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
 								}
@@ -240,7 +240,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 						}
 						if c.GratuitousARP == true {
 							// Gratuitous ARP, will broadcast to new MAC <-> IP
-							err = vip.ARPSendGratuitous(c.VIP, c.Interface)
+							err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 							if err != nil {
 								log.Warnf("%v", err)
 							}
@@ -266,7 +266,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 
 				if isLeader {
 					log.Info("[VIP] Releasing the Virtual IP")
-					err = cluster.network.DeleteIP()
+					err = cluster.Network.DeleteIP()
 					if err != nil {
 						log.Warnf("%v", err)
 					}
