@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
-	appv1 "k8s.io/api/core/v1"
+	appv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -36,10 +37,16 @@ const (
 	vipInterface = "vip_interface"
 
 	//vipAddress - defines the address that the vip will expose
+	// DEPRECATED: will be removed in a next release
 	vipAddress = "vip_address"
 
 	//vipCidr - defines the cidr that the vip will use
 	vipCidr = "vip_cidr"
+
+	//address - defines the address that would be used as a vip
+	// it may be an IP or a DNS name, in case of a DNS name
+	// kube-vip will try to resolve it and use the IP as a VIP
+	address = "address"
 
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
@@ -154,6 +161,8 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.VIP = env
+	} else {
+		c.Address = os.Getenv(address)
 	}
 
 	// Find vip address cidr range
@@ -385,11 +394,11 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 	return nil
 }
 
-// GenerateManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateManifestFromConfig(c *Config, imageVersion string) string {
+// generatePodSpec will take a kube-vip config and generate a Pod spec
+func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 
 	// build environment variables
-	newEnvironment := []appv1.EnvVar{
+	newEnvironment := []corev1.EnvVar{
 		{
 			Name:  vipArp,
 			Value: strconv.FormatBool(c.GratuitousARP),
@@ -398,16 +407,12 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
-		{
-			Name:  vipAddress,
-			Value: c.VIP,
-		},
 	}
 
 	// If a CIDR is used add it to the manifest
 	if c.VIPCIDR != "" {
 		// build environment variables
-		cidr := []appv1.EnvVar{
+		cidr := []corev1.EnvVar{
 			{
 				Name:  vipCidr,
 				Value: c.VIPCIDR,
@@ -420,7 +425,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 	// If Leader election is enabled then add the configuration to the manifest
 	if c.EnableLeaderElection {
 		// Generate Kubernetes Leader Election configuration
-		leaderElection := []appv1.EnvVar{
+		leaderElection := []corev1.EnvVar{
 			{
 				Name:  vipLeaderElection,
 				Value: strconv.FormatBool(c.EnableLeaderElection),
@@ -456,7 +461,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		newEnvironment = append(newEnvironment, leaderElection...)
 	} else {
 		// Generate Raft configuration
-		raft := []appv1.EnvVar{
+		raft := []corev1.EnvVar{
 			{
 				Name:  vipStartLeader,
 				Value: strconv.FormatBool(c.StartAsLeader),
@@ -475,7 +480,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 
 	// If Packet is enabled then add it to the manifest
 	if c.EnablePacket {
-		packet := []appv1.EnvVar{
+		packet := []corev1.EnvVar{
 			{
 				Name:  vipPacket,
 				Value: strconv.FormatBool(c.EnablePacket),
@@ -495,7 +500,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 
 	// If BGP is enabled then add it to the manifest
 	if c.EnableBGP {
-		bgp := []appv1.EnvVar{
+		bgp := []corev1.EnvVar{
 			{
 				Name:  bgpEnable,
 				Value: strconv.FormatBool(c.EnableBGP),
@@ -523,7 +528,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 
 	// If the load-balancer is enabled then add the configuration to the manifest
 	if c.EnableLoadBalancer {
-		lb := []appv1.EnvVar{
+		lb := []corev1.EnvVar{
 			{
 				Name:  lbEnable,
 				Value: strconv.FormatBool(c.EnableLoadBalancer),
@@ -549,6 +554,18 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 		newEnvironment = append(newEnvironment, lb...)
 	}
 
+	if c.Address != "" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  address,
+			Value: c.Address,
+		})
+	} else {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipAddress,
+			Value: c.VIP,
+		})
+	}
+
 	// Parse peers into a comma seperated string
 	if len(c.RemotePeers) != 0 {
 		var peers string
@@ -563,14 +580,14 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			//peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
 			//fmt.Sprintf("", peers)
 		}
-		peerEnvirontment := appv1.EnvVar{
+		peerEnvirontment := corev1.EnvVar{
 			Name:  vipPeers,
 			Value: peers,
 		}
 		newEnvironment = append(newEnvironment, peerEnvirontment)
 	}
 
-	newManifest := &appv1.Pod{
+	newManifest := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
 			APIVersion: "v1",
@@ -579,15 +596,15 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			Name:      "kube-vip",
 			Namespace: "kube-system",
 		},
-		Spec: appv1.PodSpec{
-			Containers: []appv1.Container{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
 				{
 					Name:            "kube-vip",
 					Image:           fmt.Sprintf("plndr/kube-vip:%s", imageVersion),
-					ImagePullPolicy: appv1.PullAlways,
-					SecurityContext: &appv1.SecurityContext{
-						Capabilities: &appv1.Capabilities{
-							Add: []appv1.Capability{
+					ImagePullPolicy: corev1.PullAlways,
+					SecurityContext: &corev1.SecurityContext{
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
 								"NET_ADMIN",
 								"SYS_TIME",
 							},
@@ -597,7 +614,7 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 						"start",
 					},
 					Env: newEnvironment,
-					VolumeMounts: []appv1.VolumeMount{
+					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "kubeconfig",
 							MountPath: "/etc/kubernetes/admin.conf",
@@ -610,19 +627,19 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 					},
 				},
 			},
-			Volumes: []appv1.Volume{
+			Volumes: []corev1.Volume{
 				{
 					Name: "kubeconfig",
-					VolumeSource: appv1.VolumeSource{
-						HostPath: &appv1.HostPathVolumeSource{
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/etc/kubernetes/admin.conf",
 						},
 					},
 				},
 				{
 					Name: "ca-certs",
-					VolumeSource: appv1.VolumeSource{
-						HostPath: &appv1.HostPathVolumeSource{
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/etc/ssl/certs",
 						},
 					},
@@ -630,6 +647,56 @@ func GenerateManifestFromConfig(c *Config, imageVersion string) string {
 			},
 			HostNetwork: true,
 		},
+	}
+	return newManifest
+
+}
+
+// GeneratePodManifestFromConfig will take a kube-vip config and generate a manifest
+func GeneratePodManifestFromConfig(c *Config, imageVersion string) string {
+	newManifest := generatePodSpec(c, imageVersion)
+	b, _ := yaml.Marshal(newManifest)
+	return string(b)
+}
+
+// GenerateDeamonsetManifestFromConfig will take a kube-vip config and generate a manifest
+func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string) string {
+
+	podSpec := generatePodSpec(c, imageVersion).Spec
+	newManifest := &appv1.DaemonSet{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "DaemonSet",
+			APIVersion: "apps/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kube-vip-ds",
+			Namespace: "kube-system",
+		},
+		Spec: appv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"name": "kube-vip-ds",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"name": "kube-vip-ds",
+					},
+				},
+				Spec: podSpec,
+			},
+		},
+	}
+
+	newManifest.Spec.Template.Spec.Tolerations = []corev1.Toleration{
+		{
+			Key:    "node-role.kubernetes.io/master",
+			Effect: corev1.TaintEffectNoSchedule,
+		},
+	}
+	newManifest.Spec.Template.Spec.NodeSelector = map[string]string{
+		"node-role.kubernetes.io/master": "true",
 	}
 
 	b, _ := yaml.Marshal(newManifest)

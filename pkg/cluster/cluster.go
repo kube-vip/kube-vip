@@ -12,14 +12,14 @@ type Cluster struct {
 	stateMachine FSM
 	stop         chan bool
 	completed    chan bool
-	network      *vip.Network
+	Network      vip.Network
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
 func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 
 	// TODO - Check for root (needed to netlink)
-	var network *vip.Network
+	var network vip.Network
 	var err error
 
 	if !disableVIP {
@@ -31,19 +31,23 @@ func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 	}
 	// Initialise the Cluster structure
 	newCluster := &Cluster{
-		network: network,
+		Network: network,
 	}
 
 	return newCluster, nil
 }
 
-func startNetworking(c *kubevip.Config) (*vip.Network, error) {
-	network, err := vip.NewConfig(c.VIP, c.Interface)
-	if err != nil {
-		// log.WithFields(log.Fields{"error": err}).Error("Network failure")
 
-		// os.Exit(-1)
+func startNetworking(c *kubevip.Config) (vip.Network, error) {
+	address := c.VIP
+
+	if c.Address != "" {
+		address = c.Address
+	}
+
+	network, err := vip.NewConfig(address, c.Interface)
+	if err != nil {
 		return nil, err
 	}
-	return &network, nil
+	return network, nil
 }

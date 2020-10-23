@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"os/signal"
 
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +27,7 @@ func init() {
 	// Pointers so we can see if they're nil (and not called)
 	kubeVipStart.Flags().StringVar(&startConfig.Interface, "interface", "eth0", "Name of the interface to bind to")
 	kubeVipStart.Flags().StringVar(&startConfig.VIP, "vip", "192.168.0.1", "The Virtual IP address")
+	kubeVipStart.Flags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipStart.Flags().BoolVar(&startConfig.SingleNode, "singleNode", false, "Start this instance as a single node")
 	kubeVipStart.Flags().BoolVar(&startConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 	kubeVipStart.Flags().BoolVar(&startConfig.GratuitousARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
@@ -69,25 +72,27 @@ var kubeVipStart = &cobra.Command{
 			log.Fatalln(err)
 		}
 
-		var newCluster *cluster.Cluster
+		newCluster, err := cluster.InitCluster(&startConfig, disableVIP)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+
+		// start the dns updater if the address flag is used and the address isn't an IP
+		if startConfig.Address != "" && !vip.IsIP(startConfig.Address) {
+			log.Infof("starting the DNS updater for the address %s", startConfig.Address)
+
+			ipUpdater := vip.NewIPUpdater(startConfig.Address, newCluster.Network)
+
+			ipUpdater.Run(context.Background())
+		}
 
 		if startConfig.SingleNode {
 			// If the Virtual IP isn't disabled then create the netlink configuration
-			newCluster, err = cluster.InitCluster(&startConfig, disableVIP)
-			if err != nil {
-				log.Fatalf("%v", err)
-			}
 			// Start a single node cluster
 			newCluster.StartSingleNode(&startConfig, disableVIP)
 		} else {
 			if disableVIP {
 				log.Fatalln("Cluster mode requires the Virtual IP to be enabled, use single node with no VIP")
-			}
-
-			// If the Virtual IP isn't disabled then create the netlink configuration
-			newCluster, err = cluster.InitCluster(&startConfig, disableVIP)
-			if err != nil {
-				log.Fatalf("%v", err)
 			}
 
 			if startConfig.EnableLeaderElection {
