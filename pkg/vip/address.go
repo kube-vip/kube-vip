@@ -40,17 +40,19 @@ func NewConfig(address string, iface string) (Network, error) {
 	}
 	result.link = link
 
-	// try to resolve the address
-	ip, err := lookupHost(address)
-	result.isDNS = err == nil
-	if err != nil {
-		// fallback to the address being an IP
+	if IsIP(address) {
 		result.address, err = netlink.ParseAddr(address + "/32")
 		if err != nil {
 			return result, errors.Wrapf(err, "could not parse address '%s'", address)
 		}
-		// keep ValidLft to 0 for backward compatibility
 		return result, nil
+	}
+
+	// try to resolve the address
+	ip, err := lookupHost(address)
+	result.isDNS = err == nil
+	if err != nil {
+		return nil, err
 	}
 
 	// we're able to resolve store this as the initial IP
