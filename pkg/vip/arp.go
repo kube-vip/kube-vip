@@ -23,6 +23,8 @@ const (
 
 var (
 	ethernetBroadcast = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	// arpRequest is used to flip between garp request or garp reply
+	arpRequest = true
 )
 
 func htons(p uint16) uint16 {
@@ -64,9 +66,9 @@ func (m *arpMessage) bytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// gratuitousARPReply returns an ARP message that contains a gratuitous ARP
-// reply from the specified sender.
-func gratuitousARPReply(ip net.IP, mac net.HardwareAddr) (*arpMessage, error) {
+// gratuitousARP return a gARP request or gARP reply alternatively
+// because different devices may support either one of them
+func gratuitousARP(ip net.IP, mac net.HardwareAddr) (*arpMessage, error) {
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("%q is not an IPv4 address", ip)
 	}
@@ -75,17 +77,40 @@ func gratuitousARPReply(ip net.IP, mac net.HardwareAddr) (*arpMessage, error) {
 	}
 
 	m := &arpMessage{
-		arpHeader{
+		arpHeader: arpHeader{
 			1,           // Ethernet
 			0x0800,      // IPv4
 			hwLen,       // 48-bit MAC Address
 			net.IPv4len, // 32-bit IPv4 Address
 			opARPReply,  // ARP Reply
 		},
-		mac,
-		ip.To4(),
-		ethernetBroadcast,
-		net.IPv4bcast,
+	}
+
+	// https://tools.ietf.org/html/rfc5944#section-4.6
+	// In either case, the ARP Sender Hardware Address is
+	// set to the link-layer address to which this cache entry should be
+	// updated.
+	m.senderHardwareAddress = mac
+
+	// When using an ARP Reply packet, the Target Hardware
+	// Address is also set to the link-layer address to which this cache
+	// entry should be updated (this field is not used in an ARP Request
+	// packet).
+	m.targetHardwareAddress = mac
+
+	// In either case, the ARP Sender Protocol Address and
+	// ARP Target Protocol Address are both set to the IP address of the
+	// cache entry to be updated,
+	m.senderProtocolAddress = ip.To4()
+	m.targetProtocolAddress = ip.To4()
+
+	// send arpRequest and arpReply alternatively
+	arpRequest = !arpRequest
+	if arpRequest {
+		m.arpHeader.opcode = opARPRequest
+
+		// this field is not used in an ARP Request packet
+		m.targetHardwareAddress = ethernetBroadcast
 	}
 
 	return m, nil
@@ -111,9 +136,6 @@ func sendARP(iface *net.Interface, m *arpMessage) error {
 		Halen:    m.hardwareAddressLength,
 	}
 	target := ethernetBroadcast
-	if m.opcode == opARPReply {
-		target = m.targetHardwareAddress
-	}
 	for i := 0; i < len(target); i++ {
 		ll.Addr[i] = target[i]
 	}
@@ -146,7 +168,7 @@ func ARPSendGratuitous(address, ifaceName string) error {
 	}
 
 	log.Infof("Broadcasting ARP update for %s (%s) via %s", address, iface.HardwareAddr, iface.Name)
-	m, err := gratuitousARPReply(ip, iface.HardwareAddr)
+	m, err := gratuitousARP(ip, iface.HardwareAddr)
 	if err != nil {
 		return err
 	}
