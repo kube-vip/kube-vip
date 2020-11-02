@@ -48,6 +48,9 @@ const (
 	// kube-vip will try to resolve it and use the IP as a VIP
 	address = "address"
 
+	//port - defines the port for the VIP
+	port = "port"
+
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
 
@@ -163,6 +166,16 @@ func ParseEnvironment(c *Config) error {
 		c.VIP = env
 	} else {
 		c.Address = os.Getenv(address)
+	}
+
+	// Find vip port
+	env = os.Getenv(port)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.Port = int(i)
 	}
 
 	// Find vip address cidr range
