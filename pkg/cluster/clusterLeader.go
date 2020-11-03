@@ -36,7 +36,7 @@ type Manager struct {
 }
 
 // NewManager will create a new managing object
-func NewManager(path string, inCluster bool) (*Manager, error) {
+func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	var clientset *kubernetes.Clientset
 	if inCluster {
 		// This will attempt to load the configuration when running within a POD
@@ -65,9 +65,7 @@ func NewManager(path string, inCluster bool) (*Manager, error) {
 			return nil, err
 		}
 
-		// TODO - we need to make the host/port configurable
-
-		config.Host = fmt.Sprintf("%s:6443", id)
+		config.Host = fmt.Sprintf("%s:%v", id, port)
 		clientset, err = kubernetes.NewForConfig(config)
 
 		if err != nil {

@@ -55,6 +55,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeVipCmd.PersistentFlags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
+	kubeVipCmd.PersistentFlags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.GratuitousARP, "arp", true, "Enable Arp for Vip changes")
 
