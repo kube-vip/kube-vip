@@ -134,7 +134,7 @@ func ParseEnvironment(c *Config) error {
 	// Attempt to find the Lease configuration from teh environment variables
 	env = os.Getenv(vipLeaseDuration)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(vipRenewDeadline)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(vipRetryPeriod)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -341,7 +341,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 	// Find LoadBalancer Port
 	env := os.Getenv(lbPort)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -373,7 +373,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 	// Find global backendport
 	env = os.Getenv(lbBackendPort)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
