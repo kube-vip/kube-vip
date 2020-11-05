@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	dhclient "github.com/digineo/go-dhclient"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
@@ -176,6 +177,9 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 							log.Errorf("Error updating Service [%s] : %v", newService.service.ServiceName, err)
 							return
 						}
+
+						sm.upnpMap(s.Services[x])
+
 					},
 				}
 
@@ -222,6 +226,9 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 				log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
 				return err
 			}
+
+			sm.upnpMap(s.Services[x])
+
 			newService.cluster = *c
 
 			// Begin watching endpoints for this service
@@ -234,4 +241,19 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 	log.Debugf("[COMPLETE] Service Sync")
 
 	return nil
+}
+
+func (sm *Manager) upnpMap(s service) {
+	// If upnp is enabled then update the gateway/router with the address
+	// TODO - work out if we need to mapping.Reclaim()
+	if sm.upnp != nil {
+
+		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.Vip, s.Port, s.ServiceName)
+		if err := sm.upnp.AddPortMapping(s.Port, s.Port, 0, s.Vip, strings.ToUpper(s.Type), s.ServiceName); err == nil {
+			log.Infof("Service should be accessible externally on port [%d]", s.Port)
+		} else {
+			sm.upnp.Reclaim()
+			log.Errorf("Unable to map port to gateway [%s]", err.Error())
+		}
+	}
 }

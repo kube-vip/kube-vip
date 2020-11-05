@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kamhlos/upnp"
+
 	dhclient "github.com/digineo/go-dhclient"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
@@ -20,15 +23,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	watchtools "k8s.io/client-go/tools/watch"
-
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	watchtools "k8s.io/client-go/tools/watch"
 )
 
 const plunderLock = "plunder-lock"
@@ -80,6 +82,9 @@ type Manager struct {
 	configMap string
 	// Keeps track of all running instances
 	serviceInstances []serviceInstance
+
+	// Additional functionality
+	upnp *upnp.Upnp
 }
 
 // NewManager will create a new managing object
@@ -169,6 +174,21 @@ func (sm *Manager) Start() error {
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
 	}()
+
+	// Before starting the leader Election enable any additional functionality
+	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
+
+	if upnpEnabled {
+		sm.upnp = new(upnp.Upnp)
+		err := sm.upnp.ExternalIPAddr()
+		if err != nil {
+			log.Errorf("Error Enabling UPNP %s", err.Error())
+			// Set the struct to nil so nothing should use it in future
+			sm.upnp = nil
+		} else {
+			log.Infof("Succesfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
+		}
+	}
 
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
