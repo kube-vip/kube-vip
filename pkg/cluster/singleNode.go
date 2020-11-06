@@ -101,3 +101,48 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	log.Infoln("Started Load Balancer and Virtual IP")
 	return nil
 }
+
+// StartLoadBalancerService will start a VIP/LoadBalancer instance
+func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, disableVIP bool) error {
+	// Start a kube-vip loadbalancer service
+	log.Infoln("Starting kube-vip as a LoadBalancer Service")
+
+	cluster.stop = make(chan bool, 1)
+	cluster.completed = make(chan bool, 1)
+
+	err := cluster.Network.DeleteIP()
+	if err != nil {
+		log.Warnf("Attempted to clean existing VIP => %v", err)
+	}
+
+	err = cluster.Network.AddIP()
+	if err != nil {
+		log.Warnf("%v", err)
+	}
+
+	if c.GratuitousARP == true {
+		// Gratuitous ARP, will broadcast to new MAC <-> IP
+		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
+		if err != nil {
+			log.Warnf("%v", err)
+		}
+	}
+
+	go func() {
+		for {
+			select {
+			case <-cluster.stop:
+				log.Info("[LOADBALANCER] Stopping load balancers")
+				log.Info("[VIP] Releasing the Virtual IP")
+				err = cluster.Network.DeleteIP()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
+				close(cluster.completed)
+				return
+			}
+		}
+	}()
+	log.Infoln("Started Load Balancer and Virtual IP")
+	return nil
+}

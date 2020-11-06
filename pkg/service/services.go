@@ -217,7 +217,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 				log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
 				return err
 			}
-			err = c.StartSingleNode(&newService.vipConfig, false)
+			err = c.StartLoadBalancerService(&newService.vipConfig, false)
 			if err != nil {
 				log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
 				return err
