@@ -102,7 +102,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	return nil
 }
 
-// StartLoadBalancerService will start a VIP/LoadBalancer instance
+// StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
 func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, disableVIP bool) error {
 	// Start a kube-vip loadbalancer service
 	log.Infoln("Starting kube-vip as a LoadBalancer Service")
