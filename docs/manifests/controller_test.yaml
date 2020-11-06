@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: starboard
+  namespace: kube-system
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: starboard-role
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["watch","get"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: starboard-role-bind
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: starboard 
+    apiGroup: ""
+roleRef:
+  kind: Role
+  name: starboard-role
+  apiGroup: "" 
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: starboard-ds
+  namespace: kube-system
+  labels:
+spec:
+  selector:
+    matchLabels:
+      name: starboard-ds 
+  template:
+    metadata:
+      labels:
+        name: starboard-ds 
+    spec:
+      hostNetwork: true
+      serviceAccountName: starboard
+      containers:
+      - name: starboard-ds
+        image: plndr/starboard:0.1.1
+        imagePullPolicy: Always
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_ADMIN
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plunder-cloud-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  name: system:plunder-cloud-controller-role
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "endpoints","events","services/status"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["nodes", "services"]
+    verbs: ["list","get","watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:plunder-cloud-controller-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:plunder-cloud-controller-role
+subjects:
+- kind: ServiceAccount
+  name: plunder-cloud-controller
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  name: plndr-cloud-provider
+  namespace: kube-system
+spec:
+  containers:
+  - command:
+    - /plndr-cloud-provider
+    - --leader-elect-resource-name plndr-cloud-controller
+    image: plndr/plndr-cloud-provider:0.1.3
+    name: plndr-cloud-provider
+    imagePullPolicy: Always
+    resources: {}
+  serviceAccountName: plunder-cloud-controller
