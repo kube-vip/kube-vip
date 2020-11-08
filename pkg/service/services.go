@@ -76,9 +76,9 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 		// Generate new Virtual IP configuration
 		newVip := kubevip.Config{
 			VIP:           s.Services[x].Vip,
-			Interface:     Interface,
+			Interface:     sm.config.Interface,
 			SingleNode:    true,
-			GratuitousARP: EnableArp,
+			GratuitousARP: sm.config.GratuitousARP,
 		}
 
 		// This instance wasn't found, we need to add it to the manager
@@ -89,7 +89,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			// If this was purposely created with the address 0.0.0.0 then we will create a macvlan on the main interface and try DHCP
 			if s.Services[x].Vip == "0.0.0.0" {
 
-				parent, err := netlink.LinkByName(Interface)
+				parent, err := netlink.LinkByName(sm.config.Interface)
 				if err != nil {
 					return fmt.Errorf("Error finding VIP Interface, for building DHCP Link : %v", err)
 				}
@@ -144,7 +144,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 							log.Errorf("Failed to add Service [%s] / [%s]", newService.service.ServiceName, newService.service.UID)
 							//return err
 						}
-						err = c.StartLoadBalancerService(&newService.vipConfig, false)
+						err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
 						if err != nil {
 							log.Errorf("Failed to add Service [%s] / [%s]", newService.service.ServiceName, newService.service.UID)
 							//return err
@@ -200,7 +200,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 
 			log.Infof("New VIP [%s] for [%s/%s] ", s.Services[x].Vip, s.Services[x].ServiceName, s.Services[x].UID)
 
-			// Generate Load Balancer configu
+			// Generate Load Balancer config
 			newLB := kubevip.LoadBalancer{
 				Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
 				Port:      s.Services[x].Port,
@@ -221,7 +221,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 				log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
 				return err
 			}
-			err = c.StartLoadBalancerService(&newService.vipConfig, false)
+			err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
 			if err != nil {
 				log.Errorf("Failed to add Service [%s] / [%s]", s.Services[x].ServiceName, s.Services[x].UID)
 				return err

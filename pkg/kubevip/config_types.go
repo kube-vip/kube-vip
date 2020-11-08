@@ -48,6 +48,9 @@ type Config struct {
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
+	// EnableARP, will use BGP to advertise the VIP address
+	EnableARP bool `yaml:"enableARP"`
+
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`
 

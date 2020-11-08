@@ -1,8 +1,11 @@
 package cluster
 
 import (
+	"fmt"
+
 	log "github.com/sirupsen/logrus"
 
+	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
 	"github.com/plunder-app/kube-vip/pkg/vip"
@@ -103,7 +106,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, disableVIP bool) error {
+func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) error {
 	// Start a kube-vip loadbalancer service
 	log.Infoln("Starting kube-vip as a LoadBalancer Service")
 
@@ -125,6 +128,17 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, disableVIP b
 		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 		if err != nil {
 			log.Warnf("%v", err)
+		}
+	}
+
+	if c.EnableBGP {
+		// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
+		cidrVip := fmt.Sprintf("%s/%s", cluster.Network.IP(), c.VIPCIDR)
+		log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+
+		err = bgp.AddHost(cidrVip)
+		if err != nil {
+			log.Error(err)
 		}
 	}
 
