@@ -54,10 +54,12 @@ demo:
 
 # This build a local docker image (x86 only) for quick testing
 dockerx86:
+	@rm ./kube-vip
 	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New single x86 Architecture Docker image created
 
 docker:
+	@rm ./kube-vip
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
@@ -65,10 +67,12 @@ docker:
 
 # This will build a local docker image (x86 only), use make dockerLocal for all architectures
 dockerx86Local:
+	@rm ./kube-vip
 	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
 dockerLocal:
+	@rm ./kube-vip
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 

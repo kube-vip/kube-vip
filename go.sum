@@ -305,6 +305,8 @@ github.com/k-sone/critbitgo v1.3.1-0.20191024122315-48c9e1530131 h1:2bjzgZk4GiWA
 github.com/k-sone/critbitgo v1.3.1-0.20191024122315-48c9e1530131/go.mod h1:7E6pyoyADnFxlUBEKcnfS49b7SUAQGMK+OAp/UQvo0s=
 github.com/k-sone/critbitgo v1.4.0 h1:l71cTyBGeh6X5ATh6Fibgw3+rtNT80BA0uNNWgkPrbE=
 github.com/k-sone/critbitgo v1.4.0/go.mod h1:7E6pyoyADnFxlUBEKcnfS49b7SUAQGMK+OAp/UQvo0s=
+github.com/kamhlos/upnp v0.0.0-20171112074648-2713e75d9aef h1:hYYYR5sSbR211XTKlIERN7I7xYU1D47eft2ooDg0Dtg=
+github.com/kamhlos/upnp v0.0.0-20171112074648-2713e75d9aef/go.mod h1:0L/S1RSG4wA4M2Vhau3z7VsYMLxFnsX0bzzgwYRIdYU=
 github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvWXihfKN4Q=
 github.com/kisielk/errcheck v1.2.0/go.mod h1:/BMXB+zMLi60iA8Vv6Ksmxu/1UDYcXs4uQLJ+jE2L00=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=

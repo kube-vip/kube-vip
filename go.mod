@@ -25,6 +25,7 @@ require (
 	github.com/hashicorp/raft v1.1.2
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/k-sone/critbitgo v1.4.0 // indirect
+	github.com/kamhlos/upnp v0.0.0-20171112074648-2713e75d9aef
 	github.com/magiconair/properties v1.8.3 // indirect
 	github.com/mattn/go-colorable v0.1.7 // indirect
 	github.com/mdlayher/raw v0.0.0-20191009151244-50f2db8cc065 // indirect
