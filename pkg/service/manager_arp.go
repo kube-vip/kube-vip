@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/kamhlos/upnp"
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +26,22 @@ func (sm *Manager) startARP() error {
 	id, err := os.Hostname()
 	if err != nil {
 		return err
+	}
+
+	// Before starting the leader Election enable any additional functionality
+	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
+
+	log.Errorf("Unable to parse ConfigMap from watcher")
+	if upnpEnabled {
+		sm.upnp = new(upnp.Upnp)
+		err := sm.upnp.ExternalIPAddr()
+		if err != nil {
+			log.Errorf("Error Enabling UPNP %s", err.Error())
+			// Set the struct to nil so nothing should use it in future
+			sm.upnp = nil
+		} else {
+			log.Infof("Succesfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
+		}
 	}
 
 	// If BGP is enabled then we start the server that will broadcast VIPs
