@@ -33,8 +33,8 @@ type Config struct {
 	// Listen port for the VirtualIP
 	Port int `yaml:"port"`
 
-	// GratuitousARP will broadcast an ARP update when the VIP changes host
-	GratuitousARP bool `yaml:"gratuitousARP"`
+	// // GratuitousARP will broadcast an ARP update when the VIP changes host
+	// GratuitousARP bool `yaml:"gratuitousARP"`
 
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`

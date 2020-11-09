@@ -56,7 +56,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipCmd.PersistentFlags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.GratuitousARP, "arp", true, "Enable Arp for Vip changes")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", true, "Enable Arp for Vip changes")
 
 	// Clustering type (leaderElection)
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
@@ -92,7 +92,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Service flags
-	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "kube-vip", "The configuration map defined within the cluster")
+	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
 	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
@@ -147,34 +147,12 @@ var kubeVipService = &cobra.Command{
 			log.Fatalln(err)
 		}
 
-		// // User Environment variables as an option to make manifest clearer
-		// envInterface := os.Getenv("vip_interface")
-		// if envInterface != "" {
-		// 	service.Interface = envInterface
-		// }
+		// User Environment variables as an option to make manifest clearer
 
-		// envConfigMap := os.Getenv("vip_configmap")
-		// if envInterface != "" {
-		// 	configMap = envConfigMap
-		// }
-
-		// envLog := os.Getenv("vip_loglevel")
-		// if envLog != "" {
-		// 	logLevel, err := strconv.Atoi(envLog)
-		// 	if err != nil {
-		// 		panic(fmt.Sprintf("Unable to parse environment variable [vip_loglevel], should be int"))
-		// 	}
-		// 	log.SetLevel(log.Level(logLevel))
-		// }
-
-		// envArp := os.Getenv("vip_arp")
-		// if envArp != "" {
-		// 	arpBool, err := strconv.ParseBool(envArp)
-		// 	if err != nil {
-		// 		panic(fmt.Sprintf("Unable to parse environment variable [arp], should be bool (true/false)"))
-		// 	}
-		// 	service.EnableArp = arpBool
-		// }
+		envConfigMap := os.Getenv("vip_configmap")
+		if envConfigMap != "" {
+			configMap = envConfigMap
+		}
 
 		// Define the new service manager
 		mgr, err := service.NewManager(configMap, &startConfig)

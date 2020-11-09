@@ -62,7 +62,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		}
 	}
 
-	if c.GratuitousARP == true {
+	if c.EnableARP == true {
 		// Gratuitous ARP, will broadcast to new MAC <-> IP
 		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 		if err != nil {
@@ -123,7 +123,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		log.Warnf("%v", err)
 	}
 
-	if c.GratuitousARP == true {
+	if c.EnableARP == true {
 		// Gratuitous ARP, will broadcast to new MAC <-> IP
 		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 		if err != nil {

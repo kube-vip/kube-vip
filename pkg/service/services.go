@@ -75,10 +75,10 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 
 		// Generate new Virtual IP configuration
 		newVip := kubevip.Config{
-			VIP:           s.Services[x].Vip,
-			Interface:     sm.config.Interface,
-			SingleNode:    true,
-			GratuitousARP: sm.config.GratuitousARP,
+			VIP:        s.Services[x].Vip,
+			Interface:  sm.config.Interface,
+			SingleNode: true,
+			EnableARP:  sm.config.EnableARP,
 		}
 
 		// This instance wasn't found, we need to add it to the manager
