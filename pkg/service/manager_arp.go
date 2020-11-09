@@ -31,7 +31,6 @@ func (sm *Manager) startARP() error {
 	// Before starting the leader Election enable any additional functionality
 	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
 
-	log.Errorf("Unable to parse ConfigMap from watcher")
 	if upnpEnabled {
 		sm.upnp = new(upnp.Upnp)
 		err := sm.upnp.ExternalIPAddr()

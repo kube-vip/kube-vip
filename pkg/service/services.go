@@ -99,20 +99,29 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 				// Generate name from UID
 				interfaceName := fmt.Sprintf("vip-%s", s.Services[x].UID[0:8])
 
-				mac := &netlink.Macvlan{LinkAttrs: netlink.LinkAttrs{Name: interfaceName, ParentIndex: parent.Attrs().Index}, Mode: netlink.MACVLAN_MODE_BRIDGE}
-				err = netlink.LinkAdd(mac)
-				if err != nil {
-					return fmt.Errorf("Could not add %s: %v", interfaceName, err)
-				}
-
-				err = netlink.LinkSetUp(mac)
-				if err != nil {
-					return fmt.Errorf("Could not bring up interface [%s] : %v", interfaceName, err)
-				}
-
+				// Check if the interface doesn't exist first
 				iface, err := net.InterfaceByName(interfaceName)
 				if err != nil {
-					return fmt.Errorf("Error finding new DHCP interface by name [%v]", err)
+					log.Infof("Creating new macvlan interface for DHCP [%s]", interfaceName)
+
+					mac := &netlink.Macvlan{LinkAttrs: netlink.LinkAttrs{Name: interfaceName, ParentIndex: parent.Attrs().Index}, Mode: netlink.MACVLAN_MODE_BRIDGE}
+
+					err = netlink.LinkAdd(mac)
+					if err != nil {
+						return fmt.Errorf("Could not add %s: %v", interfaceName, err)
+					}
+
+					err = netlink.LinkSetUp(mac)
+					if err != nil {
+						return fmt.Errorf("Could not bring up interface [%s] : %v", interfaceName, err)
+					}
+					iface, err = net.InterfaceByName(interfaceName)
+					if err != nil {
+						return fmt.Errorf("Error finding new DHCP interface by name [%v]", err)
+					}
+				} else {
+					log.Infof("Using existing macvlan interface for DHCP [%s]", interfaceName)
+
 				}
 
 				client := dhclient.Client{
@@ -121,7 +130,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 
 						// Set VIP to Address from lease
 						newVip.VIP = lease.FixedAddress.String()
-						log.Infof("New VIP [%s] for [%s/%s] ", newVip.VIP, s.Services[x].ServiceName, s.Services[x].UID)
+						log.Infof("DHCP VIP [%s] for [%s/%s] ", newVip.VIP, s.Services[x].ServiceName, s.Services[x].UID)
 
 						// Generate Load Balancer configu
 						newLB := kubevip.LoadBalancer{
@@ -172,7 +181,8 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 							return
 						}
 						dhcpService.Spec.LoadBalancerIP = newVip.VIP
-						_, err = sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
+						updatedService, err := sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
+						log.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.ExternalIPs)
 						if err != nil {
 							log.Errorf("Error updating Service [%s] : %v", newService.service.ServiceName, err)
 							return
