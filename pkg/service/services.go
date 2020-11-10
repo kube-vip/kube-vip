@@ -162,8 +162,8 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						}
 						newService.cluster = *c
 
-						// Begin watching endpoints for this service
-						//go sm.newWatcher(&newService)
+						// Begin watching this service
+						go sm.newWatcher(&newService)
 
 						// Add new service to manager configuration
 						sm.serviceInstances = append(sm.serviceInstances, newService)
@@ -240,8 +240,8 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 
 			newService.cluster = *c
 
-			// Begin watching endpoints for this service
-			//go sm.newWatcher(&newService)
+			// Begin watching this service
+			go sm.newWatcher(&newService)
 
 			// Add new service to manager configuration
 			sm.serviceInstances = append(sm.serviceInstances, newService)
