@@ -214,7 +214,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.GratuitousARP = b
+		c.EnableARP = b
 	}
 
 	//Removal of seperate peer
@@ -414,7 +414,7 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 	newEnvironment := []corev1.EnvVar{
 		{
 			Name:  vipArp,
-			Value: strconv.FormatBool(c.GratuitousARP),
+			Value: strconv.FormatBool(c.EnableARP),
 		},
 		{
 			Name:  vipInterface,

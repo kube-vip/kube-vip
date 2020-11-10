@@ -33,8 +33,8 @@ type Config struct {
 	// Listen port for the VirtualIP
 	Port int `yaml:"port"`
 
-	// GratuitousARP will broadcast an ARP update when the VIP changes host
-	GratuitousARP bool `yaml:"gratuitousARP"`
+	// // GratuitousARP will broadcast an ARP update when the VIP changes host
+	// GratuitousARP bool `yaml:"gratuitousARP"`
 
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
@@ -47,6 +47,9 @@ type Config struct {
 
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
+
+	// EnableARP, will use BGP to advertise the VIP address
+	EnableARP bool `yaml:"enableARP"`
 
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`

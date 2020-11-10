@@ -260,7 +260,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					}
 				}
 
-				if c.GratuitousARP == true {
+				if c.EnableARP == true {
 					ctxArp, cancelArp = context.WithCancel(context.Background())
 
 					go func(ctx context.Context) {
