@@ -79,6 +79,8 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			Interface:  sm.config.Interface,
 			SingleNode: true,
 			EnableARP:  sm.config.EnableARP,
+			EnableBGP:  sm.config.EnableBGP,
+			VIPCIDR:    sm.config.VIPCIDR,
 		}
 
 		// This instance wasn't found, we need to add it to the manager
@@ -132,16 +134,16 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						newVip.VIP = lease.FixedAddress.String()
 						log.Infof("DHCP VIP [%s] for [%s/%s] ", newVip.VIP, s.Services[x].ServiceName, s.Services[x].UID)
 
-						// Generate Load Balancer configu
-						newLB := kubevip.LoadBalancer{
-							Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
-							Port:      s.Services[x].Port,
-							Type:      s.Services[x].Type,
-							BindToVip: true,
-						}
+						// // Generate Load Balancer configu
+						// newLB := kubevip.LoadBalancer{
+						// 	Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
+						// 	Port:      s.Services[x].Port,
+						// 	Type:      s.Services[x].Type,
+						// 	BindToVip: true,
+						// }
 
-						// Add Load Balancer Configuration
-						newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)
+						// // Add Load Balancer Configuration
+						// newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)
 
 						// Create Add configuration to the new service
 						newService.vipConfig = newVip
@@ -161,15 +163,12 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						newService.cluster = *c
 
 						// Begin watching endpoints for this service
-						go sm.newWatcher(&newService)
+						//go sm.newWatcher(&newService)
 
 						// Add new service to manager configuration
 						sm.serviceInstances = append(sm.serviceInstances, newService)
 
 						// Update the service
-						// listOptions := metav1.ListOptions{
-						// 	FieldSelector: fmt.Sprintf("metadata.uid=%s", newService.service.UID),
-						// }
 						ns, err := returnNameSpace()
 						if err != nil {
 							log.Errorf("Error finding Namespace")
@@ -182,13 +181,13 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 						}
 						dhcpService.Spec.LoadBalancerIP = newVip.VIP
 						updatedService, err := sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
-						log.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.ExternalIPs)
+						log.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
 						if err != nil {
 							log.Errorf("Error updating Service [%s] : %v", newService.service.ServiceName, err)
 							return
 						}
 
-						sm.upnpMap(s.Services[x])
+						sm.upnpMap(newService.service)
 
 					},
 				}
@@ -242,7 +241,7 @@ func (sm *Manager) syncServices(s *plndrServices) error {
 			newService.cluster = *c
 
 			// Begin watching endpoints for this service
-			go sm.newWatcher(&newService)
+			//go sm.newWatcher(&newService)
 
 			// Add new service to manager configuration
 			sm.serviceInstances = append(sm.serviceInstances, newService)

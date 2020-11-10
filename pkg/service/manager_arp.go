@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kamhlos/upnp"
-	"github.com/plunder-app/kube-vip/pkg/bgp"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -43,22 +42,22 @@ func (sm *Manager) startARP() error {
 		}
 	}
 
-	// If BGP is enabled then we start the server that will broadcast VIPs
-	if sm.config.EnableBGP {
-		// Lets start BGP
-		log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
-		sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
-		if err != nil {
-			log.Error(err)
-		}
-	}
+	// // If BGP is enabled then we start the server that will broadcast VIPs
+	// if sm.config.EnableBGP {
+	// 	// Lets start BGP
+	// 	log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+	// 	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
+	// 	if err != nil {
+	// 		log.Error(err)
+	// 	}
+	// }
 
-	// Defer a function to check if the bgpServer has been created and if so attempt to close it
-	defer func() {
-		if sm.bgpServer != nil {
-			sm.bgpServer.Close()
-		}
-	}()
+	// // Defer a function to check if the bgpServer has been created and if so attempt to close it
+	// defer func() {
+	// 	if sm.bgpServer != nil {
+	// 		sm.bgpServer.Close()
+	// 	}
+	// }()
 
 	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
 	// we use the Lease lock type since edits to Leases are less common
