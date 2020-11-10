@@ -5,7 +5,7 @@
 
 
 ## Overview
-Kubernetes Virtual IP and Load-Balancer for both control pane and Kubernetes services
+Kubernetes Virtual IP and Load-Balancer for both control plane and Kubernetes services
 
 The idea behind `kube-vip` is a small self-contained Highly-Available option for all environments, especially:
 
