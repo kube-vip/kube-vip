@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	log "github.com/sirupsen/logrus"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -114,8 +115,18 @@ const (
 // ParseEnvironment - will popultate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
 
+	// Ensure that logging is set through the environment variables
+	env := os.Getenv(vipLogLevel)
+	if env != "" {
+		logLevel, err := strconv.Atoi(env)
+		if err != nil {
+			panic(fmt.Sprintf("Unable to parse environment variable [vip_loglevel], should be int"))
+		}
+		log.SetLevel(log.Level(logLevel))
+	}
+
 	// Find interface
-	env := os.Getenv(vipInterface)
+	env = os.Getenv(vipInterface)
 	if env != "" {
 		c.Interface = env
 	}
