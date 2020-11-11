@@ -37,7 +37,6 @@ func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 	return newCluster, nil
 }
 
-
 func startNetworking(c *kubevip.Config) (vip.Network, error) {
 	address := c.VIP
 
@@ -45,7 +44,7 @@ func startNetworking(c *kubevip.Config) (vip.Network, error) {
 		address = c.Address
 	}
 
-	network, err := vip.NewConfig(address, c.Interface)
+	network, err := vip.NewConfig(address, c.Interface, c.DDNS)
 	if err != nil {
 		return nil, err
 	}

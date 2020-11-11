@@ -36,6 +36,9 @@ type Config struct {
 	// // GratuitousARP will broadcast an ARP update when the VIP changes host
 	// GratuitousARP bool `yaml:"gratuitousARP"`
 
+	// use DDNS to allocate IP when Address is set to a DNS Name
+	DDNS bool `yaml:"ddns"`
+
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
 

@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"os/signal"
 
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -76,15 +74,6 @@ var kubeVipStart = &cobra.Command{
 		newCluster, err := cluster.InitCluster(&startConfig, disableVIP)
 		if err != nil {
 			log.Fatalf("%v", err)
-		}
-
-		// start the dns updater if the address flag is used and the address isn't an IP
-		if startConfig.Address != "" && !vip.IsIP(startConfig.Address) {
-			log.Infof("starting the DNS updater for the address %s", startConfig.Address)
-
-			ipUpdater := vip.NewIPUpdater(startConfig.Address, newCluster.Network)
-
-			ipUpdater.Run(context.Background())
 		}
 
 		if startConfig.SingleNode {

@@ -52,6 +52,9 @@ const (
 	//port - defines the port for the VIP
 	port = "port"
 
+	//vipDdns - defines if use dynamic dns to allocate IP for "address"
+	vipDdns = "vip_ddns"
+
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
 
@@ -187,6 +190,16 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.Port = int(i)
+	}
+
+	// Find vipDdns
+	env = os.Getenv(vipDdns)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.DDNS = b
 	}
 
 	// Find vip address cidr range
