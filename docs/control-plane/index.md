@@ -20,7 +20,7 @@ Below are examples of the steps required:
 
 ```
 # First Node
-sudo docker run --network host --rm plndr/kube-vip:0.1.8 kubeadm init \
+sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
 --interface ens192 \
 --vip 192.168.0.75 \
 --arp \
@@ -32,7 +32,7 @@ sudo kubeadm init --kubernetes-version 1.17.0 --control-plane-endpoint 192.168.0
 
 sudo kubeadm join 192.168.0.75:6443 --token w5atsr.blahblahblah --control-plane --certificate-key abc123
 
-sudo docker run --network host --rm plndr/kube-vip:0.1.8 kubeadm init \
+sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
 --interface ens192 \
 --vip 192.168.0.75 \
 --arp \
@@ -59,8 +59,8 @@ All nodes are running Ubuntu 18.04, Docker CE and will use Kubernetes 1.17.0.
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.1.8 \
-	kubeadm init \
+	--rm plndr/kube-vip:0.2.1 \
+	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
 	--arp \
@@ -76,11 +76,6 @@ To enable Kubernetes leader Election passing the `--leaderElection` flag will en
 
 **VIP Config**
 We will need to set our VIP address to `192.168.0.75` with `--vip 192.168.0.75` and to ensure all hosts are updated when the VIP moves we will enable ARP broadcasts `--arp` (defaults to `true`)
-
-**Load Balancer**
-We will configure the load balancer to sit on the standard API-Server port `6443` and we will configure the backends to point to the API-servers that will be configured to run on port `6444`. Also for the Kubernetes Control Plane we will configure the load balancer to be of `type: tcp`.
-
-We can also use `6443` for both the VIP and the API-Servers, in order to do this we need to specify that the api-server is bound to it's local IP. To do this we use the `--apiserver-advertise-address` flag as part of the `init`, this means that we can then bind the same port to the VIP and we wont have a port conflict.
 
 **vip.yaml** Static-pod Manifest
 
@@ -102,24 +97,18 @@ spec:
     - name: vip_arp
       value: "true"
     - name: vip_interface
-      value: ens192
+      value: ens160
+    - name: vip_leaderelection
+      value: "true"
+    - name: vip_leaseduration
+      value: "5"
+    - name: vip_renewdeadline
+      value: "3"
+    - name: vip_retryperiod
+      value: "1"
     - name: vip_address
-      value: 192.168.0.81
-    - name: vip_startleader
-      value: "true"
-    - name: vip_addpeerstolb
-      value: "true"
-    - name: vip_localpeer
-      value: controlPlane01:192.168.0.70:10000
-    - name: lb_backendport
-      value: "6443"
-    - name: lb_name
-      value: Kubeadm Load Balancer
-    - name: lb_type
-      value: tcp
-    - name: lb_bindtovip
-      value: "true"
-    image: plndr/kube-vip:0.1.8
+      value: 192.168.0.75
+    image: plndr/kube-vip:0.2.1
     imagePullPolicy: Always
     name: kube-vip
     resources: {}
@@ -140,8 +129,8 @@ Make sure that the manifest directory exists: `sudo mkdir -p /etc/kubernetes/man
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.1.8 \
-	kubeadm init \
+	--rm plndr/kube-vip:0.2.1 \
+	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
 	--arp \
@@ -152,7 +141,7 @@ Ensure that `image: plndr/kube-vip:<x>` is modified to point to a specific versi
 
 The **vip** is set to `192.168.0.75` and this first node will elect itself as leader, and as part of the `kubeadm init` it will use the VIP in order to speak back to the initialising api-server.
 
-`sudo kubeadm init --control-plane-endpoint “192.168.0.75:6443” --apiserver-bind-port 6444 --upload-certs --kubernetes-version “v1.17.0”`
+`sudo kubeadm init --control-plane-endpoint “192.168.0.75:6443” --upload-certs --kubernetes-version “v1.17.0”`
 
 Once this node is up and running we will be able to see the control-plane pods, including the `kube-vip` pod:
 
@@ -179,8 +168,8 @@ At this point **DON’T** generate the manifests, this is due to some bizarre `k
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.1.8 \
-	kubeadm init \
+	--rm plndr/kube-vip:0.2.1 \
+	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
 	--arp \
@@ -200,7 +189,7 @@ kube-system   kube-vip-controlplane03                  1/1     Running          
 
 ## BGP Support (added in 0.1.8)
 
-In version `0.1.8` `kube-vip` was updated to support [BGP](https://en.wikipedia.org/wiki/Border_Gateway_Protocol) as a VIP failover mechanism. When a node is elected as a leader then it will update it's peers so that they are aware to route traffic to that node in order to access the VIP. 
+In version `0.1.8`+ `kube-vip` was updated to support [BGP](https://en.wikipedia.org/wiki/Border_Gateway_Protocol) as a VIP failover mechanism. When a node is elected as a leader then it will update it's peers so that they are aware to route traffic to that node in order to access the VIP. 
 
 The following new flags are used:
 
@@ -240,7 +229,7 @@ export PACKET_AUTH_TOKEN=XYZ
 ```
 # Generate the manifest
 
-sudo docker run --network host --rm plndr/kube-vip:0.1.7 kubeadm init \
+sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
 --arp=false \
 --interface lo \
 --vip $EIP \
@@ -262,7 +251,7 @@ kubeadm join $EIP:6443 --token BLAH --control-plane --certificate-key BLAH --dis
 
 # Generate Manifest
 
-sudo docker run --network host --rm plndr/kube-vip:0.1.7 kubeadm init \
+sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
 --arp=false \
 --interface lo \
 --vip $EIP \
