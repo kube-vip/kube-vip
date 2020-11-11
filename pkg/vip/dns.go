@@ -13,15 +13,13 @@ type IPUpdater interface {
 }
 
 type ipUpdater struct {
-	dnsName string
-	vip     Network
+	vip Network
 }
 
 // NewIPUpdater creates a DNSUpdater
-func NewIPUpdater(dnsName string, vip Network) IPUpdater {
+func NewIPUpdater(vip Network) IPUpdater {
 	return &ipUpdater{
-		dnsName: dnsName,
-		vip:     vip,
+		vip: vip,
 	}
 }
 
@@ -31,11 +29,12 @@ func (d *ipUpdater) Run(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				log.Infof("stop ipUpdater")
 				return
 			default:
-				ip, err := lookupHost(d.dnsName)
+				ip, err := lookupHost(d.vip.DNSName())
 				if err != nil {
-					log.Warnf("cannot lookup %s: %v", d.dnsName, err)
+					log.Warnf("cannot lookup %s: %v", d.vip.DNSName(), err)
 					// fallback to renewing the existing IP
 					ip = d.vip.IP()
 				}

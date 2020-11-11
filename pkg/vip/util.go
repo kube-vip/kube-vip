@@ -1,8 +1,9 @@
 package vip
 
 import (
-	"net"
 	"github.com/pkg/errors"
+	"net"
+	"strings"
 )
 
 // LookupHost resolves dnsName and return an IP or an error
@@ -21,4 +22,14 @@ func lookupHost(dnsName string) (string, error) {
 func IsIP(address string) bool {
 	ip := net.ParseIP(address)
 	return ip != nil
+}
+
+// getHostName return the hostname from the fqdn
+func getHostName(dnsName string) string {
+	if dnsName == "" {
+		return ""
+	}
+
+	fields := strings.Split(dnsName, ".")
+	return fields[0]
 }
