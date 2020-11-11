@@ -69,7 +69,7 @@ data:
 
 ### Deploying `kube-vip`
 
-To use `kube-vip` in Layer2/ARP the follow this [guide](/arp/)
+To use `kube-vip` in Layer2/ARP the follow this [guide](/kubernetes/arp/)
 
-To use `kube-vip` in Layer3/BGP the follow this [guide](/bgp/)
+To use `kube-vip` in Layer3/BGP the follow this [guide](/kubernetes/bgp/)
 
