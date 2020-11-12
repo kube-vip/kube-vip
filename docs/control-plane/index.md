@@ -198,6 +198,20 @@ kube-system   kube-vip-controlplane03                  1/1     Running          
 
 ```
 
+## DNS Support
+
+### Static DNS Support (added in 0.2.0)
+
+A new flag `--address` is introduced to support using a DNS record as the control plane endpoint. `kube-vip` will do a dns lookup to retrieve the IP for the DNS record, and use that IP as the VIP. An `dnsUpdater` periodically checks and updates the system if IP changes for the DNS record.
+
+### Dynamic DNS Support (added in 0.2.1)
+
+`kube-vip` was also updated to support DHCP + [Dynamic DNS](https://en.wikipedia.org/wiki/Dynamic_DNS), for the use case where it's not able to reserve a static IP for the control plane endpoint.
+
+A new flag `--ddns` is introduced. Once enabled, `kube-vip` expects the input `--address` will be a FQDN without binding to an IP. Then `kube-vip` will start a dhcp client to allocate an IP for the hostname of FQDN, and maintain the lease for it.
+
+Once DHCP returns an IP for the FQDN, the same `dnsUpdater` runs to periodically checks and updates if IP got changed.
+
 ## BGP Support (added in 0.1.8)
 
 In version `0.1.8` `kube-vip` was updated to support [BGP](https://en.wikipedia.org/wiki/Border_Gateway_Protocol) as a VIP failover mechanism. When a node is elected as a leader then it will update it's peers so that they are aware to route traffic to that node in order to access the VIP. 

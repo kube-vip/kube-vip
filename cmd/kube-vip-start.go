@@ -27,6 +27,7 @@ func init() {
 	kubeVipStart.Flags().StringVar(&startConfig.VIP, "vip", "192.168.0.1", "The Virtual IP address")
 	kubeVipStart.Flags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipStart.Flags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
+	kubeVipStart.Flags().BoolVar(&startConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
 	kubeVipStart.Flags().BoolVar(&startConfig.SingleNode, "singleNode", false, "Start this instance as a single node")
 	kubeVipStart.Flags().BoolVar(&startConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 	kubeVipStart.Flags().BoolVar(&startConfig.EnableARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
