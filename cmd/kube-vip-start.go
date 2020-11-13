@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"os/signal"
 
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -28,9 +26,11 @@ func init() {
 	kubeVipStart.Flags().StringVar(&startConfig.Interface, "interface", "eth0", "Name of the interface to bind to")
 	kubeVipStart.Flags().StringVar(&startConfig.VIP, "vip", "192.168.0.1", "The Virtual IP address")
 	kubeVipStart.Flags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
+	kubeVipStart.Flags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
+	kubeVipStart.Flags().BoolVar(&startConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
 	kubeVipStart.Flags().BoolVar(&startConfig.SingleNode, "singleNode", false, "Start this instance as a single node")
 	kubeVipStart.Flags().BoolVar(&startConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
-	kubeVipStart.Flags().BoolVar(&startConfig.GratuitousARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
+	kubeVipStart.Flags().BoolVar(&startConfig.EnableARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
 	kubeVipStart.Flags().StringVar(&startLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
 	kubeVipStart.Flags().StringSliceVar(&startRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
 	// Load Balancer flags
@@ -77,15 +77,6 @@ var kubeVipStart = &cobra.Command{
 			log.Fatalf("%v", err)
 		}
 
-		// start the dns updater if the address flag is used and the address isn't an IP
-		if startConfig.Address != "" && !vip.IsIP(startConfig.Address) {
-			log.Infof("starting the DNS updater for the address %s", startConfig.Address)
-
-			ipUpdater := vip.NewIPUpdater(startConfig.Address, newCluster.Network)
-
-			ipUpdater.Run(context.Background())
-		}
-
 		if startConfig.SingleNode {
 			// If the Virtual IP isn't disabled then create the netlink configuration
 			// Start a single node cluster
@@ -96,7 +87,7 @@ var kubeVipStart = &cobra.Command{
 			}
 
 			if startConfig.EnableLeaderElection {
-				cm, err := cluster.NewManager(startKubeConfigPath, inCluster)
+				cm, err := cluster.NewManager(startKubeConfigPath, inCluster, startConfig.Port)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}

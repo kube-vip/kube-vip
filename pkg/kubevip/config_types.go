@@ -30,8 +30,14 @@ type Config struct {
 	// Address is the IP or DNS Name to use as a VirtualIP
 	Address string `yaml:"address"`
 
-	// GratuitousARP will broadcast an ARP update when the VIP changes host
-	GratuitousARP bool `yaml:"gratuitousARP"`
+	// Listen port for the VirtualIP
+	Port int `yaml:"port"`
+
+	// // GratuitousARP will broadcast an ARP update when the VIP changes host
+	// GratuitousARP bool `yaml:"gratuitousARP"`
+
+	// use DDNS to allocate IP when Address is set to a DNS Name
+	DDNS bool `yaml:"ddns"`
 
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
@@ -44,6 +50,9 @@ type Config struct {
 
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
+
+	// EnableARP, will use BGP to advertise the VIP address
+	EnableARP bool `yaml:"enableARP"`
 
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`

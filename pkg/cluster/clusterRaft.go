@@ -130,7 +130,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 				// ensure that if this node is the leader, it is set as the leader
 				if localAddress == string(raftServer.Leader()) {
 					// Re-broadcast arp to ensure network stays up to date
-					if c.GratuitousARP == true {
+					if c.EnableARP == true {
 						// Gratuitous ARP, will broadcast to new MAC <-> IP
 						err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 						if err != nil {
@@ -187,7 +187,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 						}
 					}
 
-					if c.GratuitousARP == true {
+					if c.EnableARP == true {
 						// Gratuitous ARP, will broadcast to new MAC <-> IP
 						err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 						if err != nil {
@@ -238,7 +238,7 @@ func (cluster *Cluster) StartRaftCluster(c *kubevip.Config) error {
 								}
 							}
 						}
-						if c.GratuitousARP == true {
+						if c.EnableARP == true {
 							// Gratuitous ARP, will broadcast to new MAC <-> IP
 							err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 							if err != nil {

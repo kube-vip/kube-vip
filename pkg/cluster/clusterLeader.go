@@ -36,7 +36,7 @@ type Manager struct {
 }
 
 // NewManager will create a new managing object
-func NewManager(path string, inCluster bool) (*Manager, error) {
+func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	var clientset *kubernetes.Clientset
 	if inCluster {
 		// This will attempt to load the configuration when running within a POD
@@ -65,9 +65,7 @@ func NewManager(path string, inCluster bool) (*Manager, error) {
 			return nil, err
 		}
 
-		// TODO - we need to make the host/port configurable
-
-		config.Host = fmt.Sprintf("%s:6443", id)
+		config.Host = fmt.Sprintf("%s:%v", id, port)
 		clientset, err = kubernetes.NewForConfig(config)
 
 		if err != nil {
@@ -112,6 +110,11 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	// want to step down
 	ctxArp, cancelArp := context.WithCancel(context.Background())
 	defer cancelArp()
+
+	// use a Go context so we can tell the dns loop code when we
+	// want to step down
+	ctxDns, cancelDns := context.WithCancel(context.Background())
+	defer cancelDns()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -207,9 +210,23 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		RetryPeriod:     time.Duration(c.RetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-
 				// we're notified when we start
 				log.Info("This node is starting with leadership of the cluster")
+				// setup ddns first
+				// for first time, need to wait until IP is allocated from DHCP
+				if cluster.Network.IsDDNS() {
+					if err := cluster.StartDDNS(ctxDns); err != nil {
+						log.Error(err)
+					}
+				}
+
+				// start the dns updater if address is dns
+				if cluster.Network.IsDNS() {
+					log.Infof("starting the DNS updater for the address %s", cluster.Network.DNSName())
+					ipUpdater := vip.NewIPUpdater(cluster.Network)
+					ipUpdater.Run(ctxDns)
+				}
+
 				err = cluster.Network.AddIP()
 				if err != nil {
 					log.Warnf("%v", err)
@@ -262,7 +279,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 					}
 				}
 
-				if c.GratuitousARP == true {
+				if c.EnableARP == true {
 					ctxArp, cancelArp = context.WithCancel(context.Background())
 
 					go func(ctx context.Context) {
@@ -286,6 +303,8 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 				// we can do cleanup here
 				log.Info("This node is becoming a follower within the cluster")
 
+				// Stop the dns context
+				cancelDns()
 				// Stop the Arp context if it is running
 				cancelArp()
 

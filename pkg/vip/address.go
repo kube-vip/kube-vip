@@ -19,6 +19,10 @@ type Network interface {
 	IP() string
 	SetIP(ip string) error
 	Interface() string
+	IsDNS() bool
+	IsDDNS() bool
+	DDNSHostName() string
+	DNSName() string
 }
 
 // network - This allows network configuration
@@ -27,11 +31,13 @@ type network struct {
 
 	address *netlink.Addr
 	link    netlink.Link
-	isDNS   bool
+
+	dnsName string
+	isDDNS  bool
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string) (Network, error) {
+func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	result := &network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -48,10 +54,18 @@ func NewConfig(address string, iface string) (Network, error) {
 		return result, nil
 	}
 
+	// address is DNS
+	result.isDDNS = isDDNS
+	result.dnsName = address
+
 	// try to resolve the address
 	ip, err := lookupHost(address)
-	result.isDNS = err == nil
 	if err != nil {
+		// return early for ddns if no IP is allocated for the domain
+		// when leader starts, should do get IP from DHCP for the domain
+		if isDDNS {
+			return result, nil
+		}
 		return nil, err
 	}
 
@@ -96,6 +110,10 @@ func (configurator *network) DeleteIP() error {
 func (configurator *network) IsSet() (result bool, err error) {
 	var addresses []netlink.Addr
 
+	if configurator.address == nil {
+		return false, nil
+	}
+
 	addresses, err = netlink.AddrList(configurator.link, 0)
 	if err != nil {
 		err = errors.Wrap(err, "could not list addresses")
@@ -121,7 +139,7 @@ func (configurator *network) SetIP(ip string) error {
 	if err != nil {
 		return err
 	}
-	if configurator.address != nil && configurator.isDNS {
+	if configurator.address != nil && configurator.IsDNS() {
 		addr.ValidLft = defaultValidLft
 	}
 	configurator.address = addr
@@ -134,6 +152,29 @@ func (configurator *network) IP() string {
 	defer configurator.mu.Unlock()
 
 	return configurator.address.IP.String()
+}
+
+// DNSName return the configured dnsName when use DNS
+func (configurator *network) DNSName() string {
+	return configurator.dnsName
+}
+
+// IsDNS - when dnsName is configured
+func (configurator *network) IsDNS() bool {
+	return configurator.dnsName != ""
+}
+
+// IsDDNS - return true if use dynamic dns
+func (configurator *network) IsDDNS() bool {
+	return configurator.isDDNS
+}
+
+// DDNSHostName - return the hostname for dynamic dns
+// when dDNSHostName is not empty, use DHCP to get IP for hostname: dDNSHostName
+// it's expected that dynamic DNS should be configured so
+// the fqdn for apiserver endpoint is dDNSHostName.{LocalDomain}
+func (configurator *network) DDNSHostName() string {
+	return getHostName(configurator.dnsName)
 }
 
 // Interface - return the Interface name

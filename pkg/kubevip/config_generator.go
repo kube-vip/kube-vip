@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	log "github.com/sirupsen/logrus"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,6 +48,12 @@ const (
 	// it may be an IP or a DNS name, in case of a DNS name
 	// kube-vip will try to resolve it and use the IP as a VIP
 	address = "address"
+
+	//port - defines the port for the VIP
+	port = "port"
+
+	//vipDdns - defines if use dynamic dns to allocate IP for "address"
+	vipDdns = "vip_ddns"
 
 	//vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
@@ -111,8 +118,18 @@ const (
 // ParseEnvironment - will popultate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
 
+	// Ensure that logging is set through the environment variables
+	env := os.Getenv(vipLogLevel)
+	if env != "" {
+		logLevel, err := strconv.Atoi(env)
+		if err != nil {
+			panic(fmt.Sprintf("Unable to parse environment variable [vip_loglevel], should be int"))
+		}
+		log.SetLevel(log.Level(logLevel))
+	}
+
 	// Find interface
-	env := os.Getenv(vipInterface)
+	env = os.Getenv(vipInterface)
 	if env != "" {
 		c.Interface = env
 	}
@@ -131,7 +148,7 @@ func ParseEnvironment(c *Config) error {
 	// Attempt to find the Lease configuration from teh environment variables
 	env = os.Getenv(vipLeaseDuration)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -140,7 +157,7 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(vipRenewDeadline)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -149,7 +166,7 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(vipRetryPeriod)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -163,6 +180,26 @@ func ParseEnvironment(c *Config) error {
 		c.VIP = env
 	} else {
 		c.Address = os.Getenv(address)
+	}
+
+	// Find vip port
+	env = os.Getenv(port)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.Port = int(i)
+	}
+
+	// Find vipDdns
+	env = os.Getenv(vipDdns)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.DDNS = b
 	}
 
 	// Find vip address cidr range
@@ -201,7 +238,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.GratuitousARP = b
+		c.EnableARP = b
 	}
 
 	//Removal of seperate peer
@@ -328,7 +365,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 	// Find LoadBalancer Port
 	env := os.Getenv(lbPort)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -360,7 +397,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 	// Find global backendport
 	env = os.Getenv(lbBackendPort)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 8, 0)
+		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
@@ -401,7 +438,7 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 	newEnvironment := []corev1.EnvVar{
 		{
 			Name:  vipArp,
-			Value: strconv.FormatBool(c.GratuitousARP),
+			Value: strconv.FormatBool(c.EnableARP),
 		},
 		{
 			Name:  vipInterface,

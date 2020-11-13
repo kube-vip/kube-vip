@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plunder-cloud-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  name: system:plunder-cloud-controller-role
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "endpoints","events","services/status"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["nodes", "services"]
+    verbs: ["list","get","watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:plunder-cloud-controller-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:plunder-cloud-controller-role
+subjects:
+- kind: ServiceAccount
+  name: plunder-cloud-controller
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: plndr-cloud-provider
+  namespace: kube-system
+spec:
+  serviceName: plndr-cloud-provider
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: kube-vip
+      component: plndr-cloud-provider
+  template:
+    metadata:
+      labels:
+        app: kube-vip
+        component: plndr-cloud-provider
+    spec:
+      containers:
+      - command:
+        - /plndr-cloud-provider
+        image: plndr/plndr-cloud-provider:0.1.4
+        name: plndr-cloud-provider
+        imagePullPolicy: Always
+        resources: {}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      serviceAccountName: plunder-cloud-controller
