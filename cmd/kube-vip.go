@@ -53,10 +53,10 @@ func init() {
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
-	kubeVipCmd.PersistentFlags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
-	kubeVipCmd.PersistentFlags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "listen port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", true, "Enable Arp for Vip changes")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for Vip changes")
 
 	// Clustering type (leaderElection)
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
@@ -142,7 +142,7 @@ var kubeVipService = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
-		err := kubevip.ParseEnvironment(&startConfig)
+		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -155,7 +155,7 @@ var kubeVipService = &cobra.Command{
 		}
 
 		// Define the new service manager
-		mgr, err := service.NewManager(configMap, &startConfig)
+		mgr, err := service.NewManager(configMap, &initConfig)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
