@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/service"
+	"github.com/plunder-app/kube-vip/pkg/manager"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -13,8 +13,14 @@ import (
 // Path to the configuration file
 var configPath string
 
+// Path to the configuration file
+var namespace string
+
 // Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
+
+// Disable the Virtual IP (bind to the existing network stack)
+var controlPlane bool
 
 // Run as a load balancer service (within a pod / kubernetes)
 var serviceArp bool
@@ -88,12 +94,16 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 
+	// Control plane specific flags
+	kubeVipService.Flags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
+
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
-	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+	kubeVipService.Flags().BoolVar(&manager.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+	kubeVipService.Flags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
@@ -155,10 +165,11 @@ var kubeVipService = &cobra.Command{
 		}
 
 		// Define the new service manager
-		mgr, err := service.NewManager(configMap, &initConfig)
+		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {

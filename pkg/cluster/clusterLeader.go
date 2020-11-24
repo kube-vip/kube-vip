@@ -27,12 +27,11 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-const plunderLock = "plunder-lock"
-const namespace = "kube-system"
+const plunderLock = "plndr-cp-lock"
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
-	clientSet *kubernetes.Clientset
+	KubernetesClient *kubernetes.Clientset
 }
 
 // NewManager will create a new managing object
@@ -74,7 +73,7 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	}
 
 	return &Manager{
-		clientSet: clientset,
+		KubernetesClient: clientset,
 	}, nil
 }
 
@@ -86,16 +85,16 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 		return err
 	}
 
-	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", namespace, plunderLock, id)
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, plunderLock, id)
 
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      plunderLock,
-			Namespace: namespace,
+			Namespace: c.Namespace,
 		},
-		Client: sm.clientSet.CoordinationV1(),
+		Client: sm.KubernetesClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
 			Identity: id,
 		},

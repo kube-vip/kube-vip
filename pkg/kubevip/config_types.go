@@ -6,8 +6,17 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 )
 
-// Config defines all of the settings for the Virtual IP / Load-balancer
+// Config defines all of the settings for the Kube-Vip Pod
 type Config struct {
+
+	// EnableARP, will use BGP to advertise the VIP address
+	EnableARP bool `yaml:"enableARP"`
+
+	// EnableBGP, will use BGP to advertise the VIP address
+	EnableBGP bool `yaml:"enableBGP"`
+
+	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
+	EnableControlPane bool `yaml:"enableControlPane"`
 
 	// LeaderElection defines the settings around Kubernetes LeaderElection
 	LeaderElection
@@ -33,8 +42,8 @@ type Config struct {
 	// Listen port for the VirtualIP
 	Port int `yaml:"port"`
 
-	// // GratuitousARP will broadcast an ARP update when the VIP changes host
-	// GratuitousARP bool `yaml:"gratuitousARP"`
+	// Namespace will define which namespace the control plane pods will run in
+	Namespace string `yaml:"namespace"`
 
 	// use DDNS to allocate IP when Address is set to a DNS Name
 	DDNS bool `yaml:"ddns"`
@@ -50,12 +59,6 @@ type Config struct {
 
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
-
-	// EnableARP, will use BGP to advertise the VIP address
-	EnableARP bool `yaml:"enableARP"`
-
-	// EnableBGP, will use BGP to advertise the VIP address
-	EnableBGP bool `yaml:"enableBGP"`
 
 	// BGP Configuration
 	BGPConfig     bgp.Config

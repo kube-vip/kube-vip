@@ -93,6 +93,12 @@ const (
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerAS = "bgp_peeras"
 
+	//cpNamespace defines the namespace the control plane pods will run in
+	cpNamespace = "cp_namespace"
+
+	//cpEnable starts kube-vip in the hybrid mode
+	cpEnable = "cp_enable"
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
@@ -206,9 +212,30 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find vip address cidr range
+	env = os.Getenv(cpNamespace)
+	if env != "" {
+		c.Namespace = env
+	}
+
+	// Find the namespace that the control pane should use (for leaderElection lock)
+	env = os.Getenv(cpNamespace)
+	if env != "" {
+		c.Namespace = env
+	}
+
+	// Find vipDdns
+	env = os.Getenv(cpEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableControlPane = b
+	}
+
+	// Find vip address cidr range
 	env = os.Getenv(vipCidr)
 	if env != "" {
-		// TODO - parse address net.Host()
 		c.VIPCIDR = env
 	}
 
