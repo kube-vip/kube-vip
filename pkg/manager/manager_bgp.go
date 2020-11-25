@@ -16,29 +16,8 @@ import (
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startBGP() error {
 	var cpCluster *cluster.Cluster
-	var ns string
+	//var ns string
 	var err error
-
-	if sm.config.EnableControlPane {
-		cpCluster, err = cluster.InitCluster(sm.config, false)
-		if err != nil {
-			return err
-		}
-
-		clusterManager := &cluster.Manager{
-			KubernetesClient: sm.clientSet,
-		}
-		err = cpCluster.StartLeaderCluster(sm.config, clusterManager)
-		if err != nil {
-			return err
-		}
-		ns = sm.config.Namespace
-	} else {
-		ns, err = returnNameSpace()
-		if err != nil {
-			return err
-		}
-	}
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
@@ -71,6 +50,23 @@ func (sm *Manager) startBGP() error {
 		}
 	}()
 
+	if sm.config.EnableControlPane {
+		cpCluster, err = cluster.InitCluster(sm.config, false)
+		if err != nil {
+			return err
+		}
+		err = cpCluster.StartLoadBalancerService(sm.config, sm.bgpServer)
+		if err != nil {
+			return err
+		}
+		// 	ns = sm.config.Namespace
+		// } else {
+		// 	ns, err = returnNameSpace()
+		// 	if err != nil {
+		// 		return err
+		// 	}
+	}
+
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,7 +91,7 @@ func (sm *Manager) startBGP() error {
 		cancel()
 	}()
 
-	sm.configmapWatcher(ctx, ns)
+	sm.servicesWatcher(ctx)
 
 	log.Infof("Shutting down Kube-Vip")
 

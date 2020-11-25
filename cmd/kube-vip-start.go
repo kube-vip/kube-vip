@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -76,7 +77,7 @@ var kubeVipStart = &cobra.Command{
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
-
+		var bgpServer *bgp.Server
 		if startConfig.SingleNode {
 			// If the Virtual IP isn't disabled then create the netlink configuration
 			// Start a single node cluster
@@ -92,8 +93,23 @@ var kubeVipStart = &cobra.Command{
 					log.Fatalf("%v", err)
 				}
 
+				if startConfig.EnableBGP {
+					log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+					bgpServer, err = bgp.NewBGPServer(&startConfig.BGPConfig)
+					if err != nil {
+						log.Fatalf("%v", err)
+					}
+
+					// Defer a function to check if the bgpServer has been created and if so attempt to close it
+					defer func() {
+						if bgpServer != nil {
+							bgpServer.Close()
+						}
+					}()
+				}
+
 				// Leader Cluster will block
-				err = newCluster.StartLeaderCluster(&startConfig, cm)
+				err = newCluster.StartLeaderCluster(&startConfig, cm, bgpServer)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}

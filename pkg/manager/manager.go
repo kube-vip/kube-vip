@@ -25,10 +25,6 @@ var signalChan chan os.Signal
 // OutSideCluster allows the controller to be started using a local kubeConfig for testing
 var OutSideCluster bool
 
-type kubernetesServices struct {
-	Services []service `json:"services"`
-}
-
 // Manager degines the manager of the load-balancing services
 type Manager struct {
 	clientSet *kubernetes.Clientset
@@ -57,24 +53,31 @@ type dhcpService struct {
 type Instance struct {
 	// Virtual IP / Load Balancer configuration
 	vipConfig kubevip.Config
-	// Kubernetes service mapping
-	service service
+
 	// cluster instance
 	cluster cluster.Cluster
 
 	// Custom settings
 	dhcp *dhcpService
+
+	// Kubernetes service mapping
+	Vip  string
+	Port int32
+	UID  string
+	Type string
+
+	ServiceName string
 }
 
-// TODO - call from a package (duplicated struct in the cloud-provider code)
-type service struct {
-	Vip  string `json:"vip"`
-	Port int    `json:"port"`
-	UID  string `json:"uid"`
-	Type string `json:"type"`
+// // TODO - call from a package (duplicated struct in the cloud-provider code)
+// type service struct {
+// 	Vip  string `json:"vip"`
+// 	Port int32  `json:"port"`
+// 	UID  string `json:"uid"`
+// 	Type string `json:"type"`
 
-	ServiceName string `json:"serviceName"`
-}
+// 	ServiceName string `json:"serviceName"`
+// }
 
 // SetControlPane determines if the control plane should be enabled
 // func (sm *Manager) SetControlPane(enable bool) {
