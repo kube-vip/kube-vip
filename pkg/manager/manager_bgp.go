@@ -42,31 +42,6 @@ func (sm *Manager) startBGP() error {
 	if err != nil {
 		return err
 	}
-
-	// Defer a function to check if the bgpServer has been created and if so attempt to close it
-	defer func() {
-		if sm.bgpServer != nil {
-			sm.bgpServer.Close()
-		}
-	}()
-
-	if sm.config.EnableControlPane {
-		cpCluster, err = cluster.InitCluster(sm.config, false)
-		if err != nil {
-			return err
-		}
-		err = cpCluster.StartLoadBalancerService(sm.config, sm.bgpServer)
-		if err != nil {
-			return err
-		}
-		// 	ns = sm.config.Namespace
-		// } else {
-		// 	ns, err = returnNameSpace()
-		// 	if err != nil {
-		// 		return err
-		// 	}
-	}
-
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,6 +65,46 @@ func (sm *Manager) startBGP() error {
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
 	}()
+
+	// Defer a function to check if the bgpServer has been created and if so attempt to close it
+	defer func() {
+		if sm.bgpServer != nil {
+			sm.bgpServer.Close()
+		}
+	}()
+
+	// Shutdown function that will wait on this signal, unless we call it ourselves
+	go func() {
+		<-signalChan
+		log.Info("Received termination, signaling shutdown")
+		if sm.config.EnableControlPane {
+			cpCluster.Stop()
+		}
+		// Cancel the context, which will in turn cancel the leadership
+		cancel()
+	}()
+
+	if sm.config.EnableControlPane {
+
+		cpCluster, err = cluster.InitCluster(sm.config, false)
+		if err != nil {
+			return err
+		}
+		go func() {
+			err = cpCluster.StartLoadBalancerService(sm.config, sm.bgpServer)
+			if err != nil {
+				log.Errorf("Control Pane Error [%v]", err)
+				// Trigger the shutdown of this manager instance
+				signalChan <- syscall.SIGINT
+			}
+		}()
+		// 	ns = sm.config.Namespace
+		// } else {
+		// 	ns, err = returnNameSpace()
+		// 	if err != nil {
+		// 		return err
+		// 	}
+	}
 
 	sm.servicesWatcher(ctx)
 
