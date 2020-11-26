@@ -22,9 +22,6 @@ const plunderLock = "plndr-svcs-lock"
 
 var signalChan chan os.Signal
 
-// OutSideCluster allows the controller to be started using a local kubeConfig for testing
-var OutSideCluster bool
-
 // Manager degines the manager of the load-balancing services
 type Manager struct {
 	clientSet *kubernetes.Clientset
@@ -69,78 +66,55 @@ type Instance struct {
 	ServiceName string
 }
 
-// // TODO - call from a package (duplicated struct in the cloud-provider code)
-// type service struct {
-// 	Vip  string `json:"vip"`
-// 	Port int32  `json:"port"`
-// 	UID  string `json:"uid"`
-// 	Type string `json:"type"`
-
-// 	ServiceName string `json:"serviceName"`
-// }
-
-// SetControlPane determines if the control plane should be enabled
-// func (sm *Manager) SetControlPane(enable bool) {
-// 	sm.controlPane = enable
-// }
-
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	var clientset *kubernetes.Clientset
-	if OutSideCluster == false || !config.EnableControlPane {
-		// This will attempt to load the configuration when running within a POD
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
-		}
-		clientset, err = kubernetes.NewForConfig(cfg)
 
+	var configPath string
+	var cfg *rest.Config
+	var err error
+
+	configPath = "/etc/kubernetes/admin.conf"
+	if fileExists(configPath) {
+		cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
 		if err != nil {
-			log.Debugln("Using incluster Kubernetes configuration")
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
+			return nil, err
 		}
-		// use the current context in kubeconfig
+		log.Debugf("Using outside Kubernetes configuration from file [%s]", configPath)
 	} else {
-		// Check for file existing
-		// First for default path on control plane
-		// /etc/kubernetes/admin.conf
-		var configPath string
-		var cfg *rest.Config
-		var err error
-
-		configPath = "/etc/kubernetes/admin.conf"
+		// Second check in home directory for kube config
+		configPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		if fileExists(configPath) {
+			log.Debugf("Using outside Kubernetes configuration from file [%s]", configPath)
 			cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			// Second check in home directory for kube config
-			configPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-			cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
+			cfg, err = rest.InClusterConfig()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
 			}
+			log.Debugf("Using the internal Kubernetes token")
 		}
+	}
 
-		log.Debugf("Using outside Kubernetes configuration from file [%s]", configPath)
-		clientset, err = kubernetes.NewForConfig(cfg)
+	clientset, err = kubernetes.NewForConfig(cfg)
 
-		// If this is a control pane host it will likely have started as a static pod or wont have the
-		// VIP up before trying to connect to the API server, we set the API endpoing to this machine to
-		// ensure connectivity.
-		if config.EnableControlPane {
-			// We modify the config so that we can always speak to the correct host
-			id, err := os.Hostname()
-			if err != nil {
-				return nil, err
-			}
-			cfg.Host = fmt.Sprintf("%s:%v", id, config.Port)
-			clientset, err = kubernetes.NewForConfig(cfg)
-		}
+	// If this is a control pane host it will likely have started as a static pod or wont have the
+	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
+	// ensure connectivity.
+	if config.EnableControlPane {
+		// We modify the config so that we can always speak to the correct host
+		id, err := os.Hostname()
 		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
+			return nil, err
 		}
+		cfg.Host = fmt.Sprintf("%s:%v", id, config.Port)
+		clientset, err = kubernetes.NewForConfig(cfg)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
 	}
 
 	return &Manager{

@@ -9,7 +9,7 @@ import (
 // Config defines all of the settings for the Kube-Vip Pod
 type Config struct {
 
-	// EnableARP, will use BGP to advertise the VIP address
+	// EnableARP, will use ARP to advertise the VIP address
 	EnableARP bool `yaml:"enableARP"`
 
 	// EnableBGP, will use BGP to advertise the VIP address

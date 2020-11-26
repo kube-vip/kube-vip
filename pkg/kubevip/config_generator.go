@@ -477,7 +477,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
 func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
-
+	command := "start"
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
 		{
@@ -501,6 +501,22 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 		}
 		newEnvironment = append(newEnvironment, cidr...)
 
+	}
+
+	// If we're doing the hybrid mode
+	if c.EnableControlPane {
+		command = "service"
+		cp := []corev1.EnvVar{
+			{
+				Name:  cpEnable,
+				Value: strconv.FormatBool(c.EnableControlPane),
+			},
+			{
+				Name:  cpNamespace,
+				Value: c.Namespace,
+			},
+		}
+		newEnvironment = append(newEnvironment, cp...)
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest
@@ -692,7 +708,7 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 						},
 					},
 					Args: []string{
-						"start",
+						command,
 					},
 					Env: newEnvironment,
 					VolumeMounts: []corev1.VolumeMount{

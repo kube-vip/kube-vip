@@ -47,6 +47,8 @@ func init() {
 	kubeVipStart.Flags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
 	kubeVipStart.Flags().BoolVar(&startConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
 
+	// This sets the namespace that the lock should exist in
+	kubeVipStart.Flags().StringVarP(&startConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
 }
 
 var kubeVipStart = &cobra.Command{

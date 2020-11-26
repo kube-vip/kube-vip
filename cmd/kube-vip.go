@@ -95,15 +95,14 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 
 	// Control plane specific flags
-	kubeVipService.Flags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
+	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
 
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
-	kubeVipService.Flags().BoolVar(&manager.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
-	kubeVipService.Flags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
@@ -158,7 +157,6 @@ var kubeVipService = &cobra.Command{
 		}
 
 		// User Environment variables as an option to make manifest clearer
-
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
 			configMap = envConfigMap

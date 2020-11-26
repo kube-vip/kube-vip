@@ -148,7 +148,7 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 					newVip.VIP = lease.FixedAddress.String()
 					log.Infof("DHCP VIP [%s] for [%s/%s] ", newVip.VIP, service.Name, newServiceUID)
 
-					// // Generate Load Balancer configu
+					// // Generate Load Balancer config
 					// newLB := kubevip.LoadBalancer{
 					// 	Name:      fmt.Sprintf("%s-load-balancer", s.Services[x].ServiceName),
 					// 	Port:      s.Services[x].Port,
