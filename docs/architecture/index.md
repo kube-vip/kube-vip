@@ -17,9 +17,9 @@ There are a number of technologies or functional design choices that provide hig
 
 The `kube-vip` service builds a multi-node or multi-pod cluster to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
 
-When running **out of cluster** it will use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science) clustering technology 
+When using ARP or layer2 it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
 
-When running **in cluster** it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
+It is also possible to use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science) clustering technology, but this approach has largely been superseded by leader election.
 
 ### Virtual IP
 
@@ -57,6 +57,10 @@ Request timeout for icmp_seq 150
 ### Load Balancing
 
 Within a Kubernetes cluster, the load-balancing is managed by the `plndr-cloud-provider` which watches all service that are created, and for those of `type: LoadBalancer` will create the configuration for `kube-vip` to consume.
+
+#### Load Balancing (Inside a cluster)
+
+When using `type:LoadBalancer` within a Kubernetes cluster `kube-vip` will assign the VIP to the leader (when using ARP) all to all running Pods (when using BGP). When traffic is directed to a node with the VIP then the rules configured by `kube-proxy` will redirect the traffic to one of the pods running in the service.
 
 #### Load Balancing (Outside a cluster)
 
@@ -100,7 +104,6 @@ Additionally the load-balancing within `kibe-vip` has two modes of operation:
 The `kube-vip` kubernetes load-balancer requires a number of components in order to function:
 
 - The Plunder Cloud Provider -> [https://github.com/plunder-app/plndr-cloud-provider](https://github.com/plunder-app/plndr-cloud-provider)
-- The Starboard Daemonset -> [https://github.com/plunder-app/starboard](https://github.com/plunder-app/starboard)
 - The Kube-Vip Deployment -> [https://github.com/plunder-app/kube-vip](https://github.com/plunder-app/kube-vip)
 
 ### Architecture overview
@@ -130,10 +133,6 @@ data:
   cidr-plunder: 192.168.0.210/29
   cidr-testing: 192.168.0.220/29
 ``` 
-
-### Starboard Daemonset
-
-The `starboard` pod is a simple service that implements a [client-go](https://github.com/kubernetes/client-go) [watch](https://github.com/plunder-app/starboard/blob/master/main.go#L72) on a Kubernetes `configMap` that contains the network range/cidr that load-balancer addresses will use. It then ensures that this cidr is present in the ipTables of all machines in the cluster, this will ensure that network traffic is directed to `kube-vip` to be load-balancer to the underlying application pods.
 
 ### Kube-vip
 
