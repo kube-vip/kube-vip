@@ -15,11 +15,11 @@ There are a number of technologies or functional design choices that provide hig
 
 ### Cluster
 
-The `kube-vip` service builds a multi-node or multi-pod cluster to provide High-Availability. When a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster. 
+The `kube-vip` service builds a multi-node or multi-pod cluster to provide High-Availability. In ARP mode a leader is elected, this node will inherit the Virtual IP and become the leader of the load-balancing within the cluster, whereas with BGP all nodes will advertise the VIP address.
 
 When using ARP or layer2 it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
 
-It is also possible to use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science) clustering technology, but this approach has largely been superseded by leader election.
+It is also possible to use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science) clustering technology, but this approach has largely been superseded by leader election especially when running in cluster.
 
 ### Virtual IP
 
@@ -56,11 +56,11 @@ Request timeout for icmp_seq 150
 
 ### Load Balancing
 
-Within a Kubernetes cluster, the load-balancing is managed by the `plndr-cloud-provider` which watches all service that are created, and for those of `type: LoadBalancer` will create the configuration for `kube-vip` to consume.
+Within a Kubernetes cluster, the load-balancing is managed by the `plndr-cloud-provider` which watches all service that are created, and for those of `type=LoadBalancer` will create the configuration for `kube-vip` to consume.
 
 #### Load Balancing (Inside a cluster)
 
-When using `type:LoadBalancer` within a Kubernetes cluster `kube-vip` will assign the VIP to the leader (when using ARP) all to all running Pods (when using BGP). When traffic is directed to a node with the VIP then the rules configured by `kube-proxy` will redirect the traffic to one of the pods running in the service.
+When using `type=LoadBalancer` within a Kubernetes cluster `kube-vip` will assign the VIP to the leader (when using ARP) or to all running Pods (when using BGP). When traffic is directed to a node with the VIP then the rules configured by `kube-proxy` will redirect the traffic to one of the pods running in the service.
 
 #### Load Balancing (Outside a cluster)
 
@@ -133,7 +133,3 @@ data:
   cidr-plunder: 192.168.0.210/29
   cidr-testing: 192.168.0.220/29
 ``` 
-
-### Kube-vip
-
- The `kube-vip` pod should exist in every namespace that requires load-balancing services, it also implements a "client-go watch" over a `configMap` in its current namespace. These configurations and created and managed by the cloud-provider, when `kube-vip` sees a change happen (i.e. a new service is defined) then it will implement the virtual IP and start the load-balancer. Furthermore `kube-vip` implements a second "watch" over the endpoints of the service and as that service changes (pods die, scaling etc..) so will the the endpoints that `kube-vip` will load-balancer over. 
