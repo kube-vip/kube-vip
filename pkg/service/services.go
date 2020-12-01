@@ -46,6 +46,11 @@ func (sm *Manager) deleteService(uid string) error {
 				}
 				netlink.LinkDel(macvlan)
 			}
+			if sm.serviceInstances[x].vipConfig.EnableBGP {
+				cidrVip := fmt.Sprintf("%s/%s", sm.serviceInstances[x].vipConfig.VIP, sm.serviceInstances[x].vipConfig.VIPCIDR)
+				err := sm.bgpServer.DelHost(cidrVip)
+				return err
+			}
 		}
 	}
 	// If we've been through all services and not found the correct one then error

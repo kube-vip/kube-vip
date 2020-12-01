@@ -1,6 +1,6 @@
 # Kube-vip
 
-A Load-Balancer for both **inside** and **outside** a Kubernetes cluster
+The **kube-vip** project provides High-Availability and load-balancing for both **inside** and **outside** a Kubernetes cluster
 
 ![kube-vip.png](kube-vip.png)
 
@@ -19,5 +19,4 @@ The details are [here](/kubernetes/)
 ## GitHub Repositories
 
 - The Plunder Cloud Provider -> [https://github.com/plunder-app/plndr-cloud-provider](https://github.com/plunder-app/plndr-cloud-provider)
-- The Starboard Daemonset -> [https://github.com/plunder-app/starboard](https://github.com/plunder-app/starboard)
 - The Kube-Vip Deployment -> [https://github.com/plunder-app/kube-vip](https://github.com/plunder-app/kube-vip)
