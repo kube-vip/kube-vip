@@ -44,12 +44,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
-			log.Infof("Found Service [%s], it has [%d] external addresses", svc.Name, len(svc.Status.LoadBalancer.Ingress))
-			if len(svc.Status.LoadBalancer.Ingress) > 0 {
-				err = sm.syncServices(svc)
-				if err != nil {
-					log.Error(err)
-				}
+			log.Infof("Found Service [%s], it has an assigned external addresses [%s]", svc.Name, len(svc.Spec.LoadBalancerIP))
+			err = sm.syncServices(svc)
+			if err != nil {
+				log.Error(err)
 			}
 
 		case watch.Deleted:

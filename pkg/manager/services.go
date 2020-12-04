@@ -71,7 +71,7 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 	log.Debugf("[STARTING] Service Sync")
 	// Iterate through the synchronising services
 	foundInstance := false
-	newServiceAddress := service.Status.LoadBalancer.Ingress[0].IP
+	newServiceAddress := service.Spec.LoadBalancerIP
 	newServiceUID := string(service.UID)
 
 	for x := range sm.serviceInstances {
@@ -197,10 +197,15 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 					updatedService, err := sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
 					log.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
 					if err != nil {
-						log.Errorf("Error updating Service [%s] : %v", newService.ServiceName, err)
+						log.Errorf("Error updating Service Spec [%s] : %v", newService.ServiceName, err)
 						return
 					}
-
+					updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
+					_, err = sm.clientSet.CoreV1().Services(ns).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
+					if err != nil {
+						log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+						return
+					}
 					sm.upnpMap(newService)
 
 				},
@@ -257,7 +262,12 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 		// TODO - we may need this
 		// go sm.serviceWatcher(&newService, sm.config.Namespace)
 
-		// Add new service to manager configuration
+		// Update the "Status" of the LoadBalancer (one or many may do this), as long as one does it
+		service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
+		_, err = sm.clientSet.CoreV1().Services("").UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
+		if err != nil {
+			log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+		}
 		sm.serviceInstances = append(sm.serviceInstances, newService)
 	}
 
