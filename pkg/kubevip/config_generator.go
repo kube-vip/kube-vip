@@ -488,6 +488,10 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 			Name:  vipInterface,
 			Value: c.Interface,
 		},
+		{
+			Name:  port,
+			Value: fmt.Sprintf("%d", c.Port),
+		},
 	}
 
 	// If a CIDR is used add it to the manifest

@@ -44,18 +44,29 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
-			log.Infof("Found Service [%s], it has an assigned external addresses [%s]", svc.Name, len(svc.Spec.LoadBalancerIP))
-			err = sm.syncServices(svc)
-			if err != nil {
-				log.Error(err)
+			if svc.Spec.LoadBalancerIP == "" {
+				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
+			} else {
+				log.Infof("Service [%s] has been addded/modified, it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+				err = sm.syncServices(svc)
+				if err != nil {
+					log.Error(err)
+				}
 			}
-
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
-			sm.deleteService(string(svc.UID))
+			err = sm.stopService(string(svc.UID))
+			if err != nil {
+				log.Error(err)
+			}
+			err = sm.deleteService(string(svc.UID))
+			if err != nil {
+				log.Error(err)
+			}
+			log.Infof("Service [%s] has been deleted", svc.Name)
 
 		case watch.Bookmark:
 			// Un-used

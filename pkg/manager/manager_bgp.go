@@ -106,7 +106,10 @@ func (sm *Manager) startBGP() error {
 		// 	}
 	}
 
-	sm.servicesWatcher(ctx)
+	err = sm.servicesWatcher(ctx)
+	if err != nil {
+		return err
+	}
 
 	log.Infof("Shutting down Kube-Vip")
 

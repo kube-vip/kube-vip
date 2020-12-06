@@ -183,25 +183,27 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 					sm.serviceInstances = append(sm.serviceInstances, newService)
 
 					// Update the service
-					ns, err := returnNameSpace()
-					if err != nil {
-						log.Errorf("Error finding Namespace")
-						return
-					}
-					dhcpService, err := sm.clientSet.CoreV1().Services(ns).Get(context.TODO(), newService.ServiceName, metav1.GetOptions{})
-					if err != nil {
-						log.Errorf("Error finding Service [%s] : %v", newService.ServiceName, err)
-						return
-					}
-					dhcpService.Spec.LoadBalancerIP = newVip.VIP
-					updatedService, err := sm.clientSet.CoreV1().Services(ns).Update(context.TODO(), dhcpService, metav1.UpdateOptions{})
+					// ns, err := returnNameSpace()
+					// if err != nil {
+					// 	log.Errorf("Error finding Namespace")
+					// 	return
+					// }
+					// dhcpService, err := sm.clientSet.CoreV1().Services(ns).Get(context.TODO(), newService.ServiceName, metav1.GetOptions{})
+					// if err != nil {
+					// 	log.Errorf("Error finding Service [%s] : %v", newService.ServiceName, err)
+					// 	return
+					// }
+
+					// Update the service with DHCP information
+					service.Spec.LoadBalancerIP = newVip.VIP
+					updatedService, err := sm.clientSet.CoreV1().Services(service.Namespace).Update(context.TODO(), service, metav1.UpdateOptions{})
 					log.Infof("Updating service [%s], with load balancer address [%s]", updatedService.Name, updatedService.Spec.LoadBalancerIP)
 					if err != nil {
 						log.Errorf("Error updating Service Spec [%s] : %v", newService.ServiceName, err)
 						return
 					}
 					updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
-					_, err = sm.clientSet.CoreV1().Services(ns).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
+					_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
 					if err != nil {
 						log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
 						return
@@ -264,7 +266,7 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 
 		// Update the "Status" of the LoadBalancer (one or many may do this), as long as one does it
 		service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
-		_, err = sm.clientSet.CoreV1().Services("").UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
+		_, err = sm.clientSet.CoreV1().Services(service.Namespace).UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
 		if err != nil {
 			log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
 		}
