@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"os"
-	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
@@ -27,22 +26,9 @@ func (sm *Manager) startARP() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	signalChan := make(chan os.Signal, 1)
-	// Add Notification for Userland interrupt
-	signal.Notify(signalChan, syscall.SIGINT)
-
-	// Add Notification for SIGTERM (sent from Kubernetes)
-	signal.Notify(signalChan, syscall.SIGTERM)
-
-	// Add Notification for SIGKILL (sent from Kubernetes)
-	signal.Notify(signalChan, syscall.SIGKILL)
-
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
-		<-signalChan
+		<-sm.signalChan
 		log.Info("Received termination, signaling shutdown")
 		if sm.config.EnableControlPane {
 			cpCluster.Stop()
@@ -66,10 +52,18 @@ func (sm *Manager) startARP() error {
 			if err != nil {
 				log.Errorf("Control Pane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
-				signalChan <- syscall.SIGINT
+				sm.signalChan <- syscall.SIGINT
 
 			}
 		}()
+
+		// Check if we're also starting the services, if now we can sit and wait on the closing channel and return here
+		if !sm.config.EnableServices {
+			<-sm.signalChan
+			log.Infof("Shutting down Kube-Vip")
+
+			return nil
+		}
 
 		ns = sm.config.Namespace
 	} else {

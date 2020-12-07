@@ -99,6 +99,9 @@ const (
 	//cpEnable starts kube-vip in the hybrid mode
 	cpEnable = "cp_enable"
 
+	//cpEnable starts kube-vip in the hybrid mode
+	svcEnable = "svc_enable"
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
@@ -223,7 +226,7 @@ func ParseEnvironment(c *Config) error {
 		c.Namespace = env
 	}
 
-	// Find vipDdns
+	// Find controlplane toggle
 	env = os.Getenv(cpEnable)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -231,6 +234,16 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableControlPane = b
+	}
+
+	// Find Services toggle
+	env = os.Getenv(svcEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableServices = b
 	}
 
 	// Find vip address cidr range
@@ -477,7 +490,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
 func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
-	command := "start"
+	command := "manager"
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
 		{
@@ -509,7 +522,6 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 
 	// If we're doing the hybrid mode
 	if c.EnableControlPane {
-		command = "service"
 		cp := []corev1.EnvVar{
 			{
 				Name:  cpEnable,
@@ -518,6 +530,17 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 			{
 				Name:  cpNamespace,
 				Value: c.Namespace,
+			},
+		}
+		newEnvironment = append(newEnvironment, cp...)
+	}
+
+	// If we're doing the hybrid mode
+	if c.EnableServices {
+		cp := []corev1.EnvVar{
+			{
+				Name:  svcEnable,
+				Value: strconv.FormatBool(c.EnableServices),
 			},
 		}
 		newEnvironment = append(newEnvironment, cp...)

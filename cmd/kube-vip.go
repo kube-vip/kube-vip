@@ -103,9 +103,11 @@ func init() {
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
+	kubeVipCmd.AddCommand(kubeVipManager)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipStart)
@@ -146,6 +148,39 @@ var kubeVipSample = &cobra.Command{
 var kubeVipService = &cobra.Command{
 	Use:   "service",
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
+	Run: func(cmd *cobra.Command, args []string) {
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		// parse environment variables, these will overwrite anything loaded or flags
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		// User Environment variables as an option to make manifest clearer
+		envConfigMap := os.Getenv("vip_configmap")
+		if envConfigMap != "" {
+			configMap = envConfigMap
+		}
+
+		// Define the new service manager
+		mgr, err := manager.New(configMap, &initConfig)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+
+		// Start the service manager, this will watch the config Map and construct kube-vip services for it
+		err = mgr.Start()
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	},
+}
+
+var kubeVipManager = &cobra.Command{
+	Use:   "manager",
+	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))

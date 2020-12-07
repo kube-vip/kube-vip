@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	dhclient "github.com/digineo/go-dhclient"
 	"github.com/kamhlos/upnp"
@@ -19,8 +21,6 @@ import (
 )
 
 const plunderLock = "plndr-svcs-lock"
-
-var signalChan chan os.Signal
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
@@ -36,8 +36,12 @@ type Manager struct {
 
 	// Additional functionality
 	upnp *upnp.Upnp
+
 	//BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
+
+	// This channel is used to signal a shutdown
+	signalChan chan os.Signal
 }
 
 type dhcpService struct {
@@ -126,6 +130,19 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start() error {
+
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
+	sm.signalChan = make(chan os.Signal, 1)
+	// Add Notification for Userland interrupt
+	signal.Notify(sm.signalChan, syscall.SIGINT)
+
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(sm.signalChan, syscall.SIGTERM)
+
+	// Add Notification for SIGKILL (sent from Kubernetes)
+	signal.Notify(sm.signalChan, syscall.SIGKILL)
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {

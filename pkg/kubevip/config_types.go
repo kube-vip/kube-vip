@@ -18,6 +18,9 @@ type Config struct {
 	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableControlPane bool `yaml:"enableControlPane"`
 
+	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
+	EnableServices bool `yaml:"enableServices"`
+
 	// LeaderElection defines the settings around Kubernetes LeaderElection
 	LeaderElection
 
