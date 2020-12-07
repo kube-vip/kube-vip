@@ -27,12 +27,11 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-const plunderLock = "plunder-lock"
-const namespace = "kube-system"
+const plunderLock = "plndr-cp-lock"
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
-	clientSet *kubernetes.Clientset
+	KubernetesClient *kubernetes.Clientset
 }
 
 // NewManager will create a new managing object
@@ -74,28 +73,28 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	}
 
 	return &Manager{
-		clientSet: clientset,
+		KubernetesClient: clientset,
 	}, nil
 }
 
 // StartLeaderCluster - Begins a running instance of the Raft cluster
-func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error {
+func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
 
 	id, err := os.Hostname()
 	if err != nil {
 		return err
 	}
 
-	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", namespace, plunderLock, id)
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, plunderLock, id)
 
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      plunderLock,
-			Namespace: namespace,
+			Namespace: c.Namespace,
 		},
-		Client: sm.clientSet.CoordinationV1(),
+		Client: sm.KubernetesClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
 			Identity: id,
 		},
@@ -144,8 +143,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 	nonVipLB := loadbalancer.LBManager{}
 	VipLB := loadbalancer.LBManager{}
 
-	// BGP server
-	var bgpServer *bgp.Server
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
 		if bgpServer != nil {
@@ -346,3 +343,96 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager) error
 
 	return nil
 }
+
+// TODO - refactor an active machine func(), this will replace the singleNode code and have a single code block
+
+// func (cluster *Cluster) active(c *kubevip.Config) error {
+// 	// we're notified when we start
+// 	log.Info("This node is starting with leadership of the cluster")
+// 	// setup ddns first
+// 	// for first time, need to wait until IP is allocated from DHCP
+// 	if cluster.Network.IsDDNS() {
+// 		if err := cluster.StartDDNS(ctxDns); err != nil {
+// 			log.Error(err)
+// 		}
+// 	}
+
+// 	// start the dns updater if address is dns
+// 	if cluster.Network.IsDNS() {
+// 		log.Infof("starting the DNS updater for the address %s", cluster.Network.DNSName())
+// 		ipUpdater := vip.NewIPUpdater(cluster.Network)
+// 		ipUpdater.Run(ctxDns)
+// 	}
+
+// 	err := cluster.Network.AddIP()
+// 	if err != nil {
+// 		log.Warnf("%v", err)
+// 	}
+
+// 	if c.EnablePacket {
+// 		// We're not using Packet with BGP
+// 		if !c.EnableBGP {
+// 			// Attempt to attach the EIP in the standard manner
+// 			log.Debugf("Attaching the Packet EIP through the API to this host")
+// 			err = packet.AttachEIP(packetClient, c, id)
+// 			if err != nil {
+// 				log.Error(err)
+// 			}
+// 		}
+// 	}
+
+// 	if c.EnableBGP {
+// 		// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
+// 		cidrVip := fmt.Sprintf("%s/%s", cluster.Network.IP(), c.VIPCIDR)
+// 		log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+
+// 		err = bgpServer.AddHost(cidrVip)
+// 		if err != nil {
+// 			log.Error(err)
+// 		}
+// 	}
+
+// 	if c.EnableLoadBalancer {
+// 		// Once we have the VIP running, start the load balancer(s) that bind to the VIP
+// 		for x := range c.LoadBalancers {
+
+// 			if c.LoadBalancers[x].BindToVip == true {
+// 				err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
+// 				if err != nil {
+// 					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
+
+// 					// Stop all load balancers associated with the VIP
+// 					err = VipLB.StopAll()
+// 					if err != nil {
+// 						log.Warnf("%v", err)
+// 					}
+
+// 					err = cluster.Network.DeleteIP()
+// 					if err != nil {
+// 						log.Warnf("%v", err)
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	if c.EnableARP == true {
+// 		ctxArp, cancelArp = context.WithCancel(context.Background())
+
+// 		go func(ctx context.Context) {
+// 			for {
+// 				select {
+// 				case <-ctx.Done(): // if cancel() execute
+// 					return
+// 				default:
+// 					// Gratuitous ARP, will broadcast to new MAC <-> IP
+// 					err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
+// 					if err != nil {
+// 						log.Warnf("%v", err)
+// 					}
+// 				}
+// 				time.Sleep(3 * time.Second)
+// 			}
+// 		}(ctxArp)
+// 	}
+// }

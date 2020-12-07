@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/service"
+	"github.com/plunder-app/kube-vip/pkg/manager"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -13,8 +13,14 @@ import (
 // Path to the configuration file
 var configPath string
 
+// Path to the configuration file
+var namespace string
+
 // Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
+
+// Disable the Virtual IP (bind to the existing network stack)
+var controlPlane bool
 
 // Run as a load balancer service (within a pod / kubernetes)
 var serviceArp bool
@@ -53,10 +59,10 @@ func init() {
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
-	kubeVipCmd.PersistentFlags().StringVar(&startConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
-	kubeVipCmd.PersistentFlags().IntVar(&startConfig.Port, "port", 6443, "listen port for the VIP")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", true, "Enable Arp for Vip changes")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "listen port for the VIP")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for Vip changes")
 
 	// Clustering type (leaderElection)
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
@@ -88,15 +94,20 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 
+	// Control plane specific flags
+	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
+
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
-	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
+	kubeVipCmd.AddCommand(kubeVipManager)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipStart)
@@ -142,23 +153,56 @@ var kubeVipService = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
-		err := kubevip.ParseEnvironment(&startConfig)
+		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
 		}
 
 		// User Environment variables as an option to make manifest clearer
-
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
 			configMap = envConfigMap
 		}
 
 		// Define the new service manager
-		mgr, err := service.NewManager(configMap, &startConfig)
+		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+
+		// Start the service manager, this will watch the config Map and construct kube-vip services for it
+		err = mgr.Start()
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	},
+}
+
+var kubeVipManager = &cobra.Command{
+	Use:   "manager",
+	Short: "Start the kube-vip manager",
+	Run: func(cmd *cobra.Command, args []string) {
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		// parse environment variables, these will overwrite anything loaded or flags
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		// User Environment variables as an option to make manifest clearer
+		envConfigMap := os.Getenv("vip_configmap")
+		if envConfigMap != "" {
+			configMap = envConfigMap
+		}
+
+		// Define the new service manager
+		mgr, err := manager.New(configMap, &initConfig)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {

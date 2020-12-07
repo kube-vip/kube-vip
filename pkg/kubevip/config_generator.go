@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	"github.com/plunder-app/kube-vip/pkg/detector"
 	log "github.com/sirupsen/logrus"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -83,12 +84,23 @@ const (
 	bgpEnable = "bgp_enable"
 	//bgpRouterID defines the routerID for the BGP server
 	bgpRouterID = "bgp_routerid"
+	//bgpRouterInterface defines the interface that we can find the address for
+	bgpRouterInterface = "bgp_routerinterface"
 	//bgpRouterAS defines the AS for the BGP server
 	bgpRouterAS = "bgp_as"
 	//bgpPeerAddress defines the address for a BGP peer
 	bgpPeerAddress = "bgp_peeraddress"
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerAS = "bgp_peeras"
+
+	//cpNamespace defines the namespace the control plane pods will run in
+	cpNamespace = "cp_namespace"
+
+	//cpEnable starts kube-vip in the hybrid mode
+	cpEnable = "cp_enable"
+
+	//cpEnable starts kube-vip in the hybrid mode
+	svcEnable = "svc_enable"
 
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
@@ -203,9 +215,40 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find vip address cidr range
+	env = os.Getenv(cpNamespace)
+	if env != "" {
+		c.Namespace = env
+	}
+
+	// Find the namespace that the control pane should use (for leaderElection lock)
+	env = os.Getenv(cpNamespace)
+	if env != "" {
+		c.Namespace = env
+	}
+
+	// Find controlplane toggle
+	env = os.Getenv(cpEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableControlPane = b
+	}
+
+	// Find Services toggle
+	env = os.Getenv(svcEnable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableServices = b
+	}
+
+	// Find vip address cidr range
 	env = os.Getenv(vipCidr)
 	if env != "" {
-		// TODO - parse address net.Host()
 		c.VIPCIDR = env
 	}
 
@@ -295,11 +338,22 @@ func ParseEnvironment(c *Config) error {
 		c.EnableBGP = b
 	}
 
+	// BGP Router interface determines an interface that we can use to find an address for
+	env = os.Getenv(bgpRouterInterface)
+	if env != "" {
+		_, address, err := detector.FindIPAddress(env)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.RouterID = address
+	}
+
 	// RouterID
 	env = os.Getenv(bgpRouterID)
 	if env != "" {
 		c.BGPConfig.RouterID = env
 	}
+
 	// AS
 	env = os.Getenv(bgpRouterAS)
 	if env != "" {
@@ -310,11 +364,6 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.AS = uint32(u64)
 	}
 
-	// BGP Peer options
-	env = os.Getenv(bgpPeerAddress)
-	if env != "" {
-		c.BGPPeerConfig.Address = env
-	}
 	// Peer AS
 	env = os.Getenv(bgpPeerAS)
 	if env != "" {
@@ -323,6 +372,14 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.BGPPeerConfig.AS = uint32(u64)
+	}
+
+	// BGP Peer options
+	env = os.Getenv(bgpPeerAddress)
+	if env != "" {
+		c.BGPPeerConfig.Address = env
+		// If we've added in a peer configuration, then we should add it to the BGP configuration
+		c.BGPConfig.Peers = append(c.BGPConfig.Peers, c.BGPPeerConfig)
 	}
 
 	// Enable the Packet API calls
@@ -433,7 +490,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
 func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
-
+	command := "manager"
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
 		{
@@ -443,6 +500,10 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 		{
 			Name:  vipInterface,
 			Value: c.Interface,
+		},
+		{
+			Name:  port,
+			Value: fmt.Sprintf("%d", c.Port),
 		},
 	}
 
@@ -457,6 +518,32 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 		}
 		newEnvironment = append(newEnvironment, cidr...)
 
+	}
+
+	// If we're doing the hybrid mode
+	if c.EnableControlPane {
+		cp := []corev1.EnvVar{
+			{
+				Name:  cpEnable,
+				Value: strconv.FormatBool(c.EnableControlPane),
+			},
+			{
+				Name:  cpNamespace,
+				Value: c.Namespace,
+			},
+		}
+		newEnvironment = append(newEnvironment, cp...)
+	}
+
+	// If we're doing the hybrid mode
+	if c.EnableServices {
+		cp := []corev1.EnvVar{
+			{
+				Name:  svcEnable,
+				Value: strconv.FormatBool(c.EnableServices),
+			},
+		}
+		newEnvironment = append(newEnvironment, cp...)
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest
@@ -648,7 +735,7 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 						},
 					},
 					Args: []string{
-						"start",
+						command,
 					},
 					Env: newEnvironment,
 					VolumeMounts: []corev1.VolumeMount{

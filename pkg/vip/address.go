@@ -5,6 +5,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -50,6 +51,10 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 		result.address, err = netlink.ParseAddr(address + "/32")
 		if err != nil {
 			return result, errors.Wrapf(err, "could not parse address '%s'", address)
+		}
+		// Ensure we don't have a global address on loopback
+		if iface == "lo" {
+			result.address.Scope = unix.RT_SCOPE_HOST
 		}
 		return result, nil
 	}
