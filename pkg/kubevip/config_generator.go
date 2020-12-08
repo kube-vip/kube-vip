@@ -92,6 +92,8 @@ const (
 	bgpPeerAddress = "bgp_peeraddress"
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerAS = "bgp_peeras"
+	//bgpPeerAS defines the AS for a BGP peer
+	bgpPeerPassword = "bgp_peerpass"
 
 	//cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
@@ -374,6 +376,12 @@ func ParseEnvironment(c *Config) error {
 		c.BGPPeerConfig.AS = uint32(u64)
 	}
 
+	// BGP Peer password
+	env = os.Getenv(bgpPeerPassword)
+	if env != "" {
+		c.BGPPeerConfig.Address = env
+	}
+
 	// BGP Peer options
 	env = os.Getenv(bgpPeerAddress)
 	if env != "" {
@@ -640,6 +648,10 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 			{
 				Name:  bgpPeerAddress,
 				Value: c.BGPPeerConfig.Address,
+			},
+			{
+				Name:  bgpPeerPassword,
+				Value: c.BGPPeerConfig.Password,
 			},
 			{
 				Name:  bgpPeerAS,
