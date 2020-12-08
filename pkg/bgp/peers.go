@@ -28,6 +28,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		Conf: &api.PeerConf{
 			NeighborAddress: peer.Address,
 			PeerAs:          peer.AS,
+			AuthPassword:    peer.Password,
 		},
 
 		Timers: &api.Timers{
