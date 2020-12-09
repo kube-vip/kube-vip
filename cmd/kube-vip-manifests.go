@@ -43,7 +43,8 @@ var kubeManifestPod = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		// The control plane has a requirement for a VIP being specified
+		if initConfig.EnableControlPane && initConfig.VIP == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
@@ -68,7 +69,8 @@ var kubeManifestDaemon = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		// The control plane has a requirement for a VIP being specified
+		if initConfig.EnableControlPane && initConfig.VIP == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
