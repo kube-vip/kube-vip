@@ -77,8 +77,11 @@ const (
 	//vipPacket defines that the packet API will be used for EIP
 	vipPacket = "vip_packet"
 
-	//vipPacket defines which project within Packet to use
+	//vipPacketProject defines which project within Packet to use
 	vipPacketProject = "vip_packetproject"
+
+	//vipPacketProjectID defines which projectID within Packet to use
+	vipPacketProjectID = "vip_packetprojectid"
 
 	//providerConfig defines a path to a configuration that should be parsed
 	providerConfig = "provider_config"
@@ -427,6 +430,13 @@ func ParseEnvironment(c *Config) error {
 		c.PacketProject = env
 	}
 
+	// Find the Packet project ID
+	env = os.Getenv(vipPacketProjectID)
+	if env != "" {
+		// TODO - parse address net.Host()
+		c.PacketProjectID = env
+	}
+
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
@@ -651,6 +661,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			{
 				Name:  vipPacketProject,
 				Value: c.PacketProject,
+			},
+			{
+				Name:  vipPacketProjectID,
+				Value: c.PacketProjectID,
 			},
 			{
 				Name:  "PACKET_AUTH_TOKEN",
