@@ -74,11 +74,14 @@ const (
 	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
 	vipAddPeersToLB = "vip_addpeerstolb"
 
-	//vipPacket defines that the packet API will be used tor EIP
+	//vipPacket defines that the packet API will be used for EIP
 	vipPacket = "vip_packet"
 
 	//vipPacket defines which project within Packet to use
 	vipPacketProject = "vip_packetproject"
+
+	//providerConfig defines a path to a configuration that should be parsed
+	providerConfig = "provider_config"
 
 	//bgpEnable defines if BGP should be enabled
 	bgpEnable = "bgp_enable"
@@ -150,8 +153,13 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
-	// Find Kubernetes Leader Election configuration
+	// Find provider configuration
+	env = os.Getenv(providerConfig)
+	if env != "" {
+		c.ProviderConfig = env
+	}
 
+	// Find Kubernetes Leader Election configuration
 	env = os.Getenv(vipLeaderElection)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -622,6 +630,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, raft...)
 	}
 
+	// If we're specifying a configuration
+	if c.ProviderConfig != "" {
+		provider := []corev1.EnvVar{
+			{
+				Name:  providerConfig,
+				Value: c.ProviderConfig,
+			},
+		}
+		newEnvironment = append(newEnvironment, provider...)
+	}
+
 	// If Packet is enabled then add it to the manifest
 	if c.EnablePacket {
 		packet := []corev1.EnvVar{
@@ -639,16 +658,21 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 		}
 		newEnvironment = append(newEnvironment, packet...)
-
 	}
 
-	// If BGP is enabled then add it to the manifest
+	// If BGP, but we're not using packet
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{
 			{
 				Name:  bgpEnable,
 				Value: strconv.FormatBool(c.EnableBGP),
 			},
+		}
+		newEnvironment = append(newEnvironment, bgp...)
+	}
+	// If BGP, but we're not using packet
+	if c.EnableBGP && !c.EnablePacket {
+		bgpConfig := []corev1.EnvVar{
 			{
 				Name:  bgpRouterID,
 				Value: c.BGPConfig.RouterID,
@@ -662,10 +686,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Value: c.BGPPeerConfig.Address,
 			},
 			{
-				Name:  bgpMultiHop,
-				Value: strconv.FormatBool(c.BGPPeerConfig.MultiHop),
-			},
-			{
 				Name:  bgpPeerPassword,
 				Value: c.BGPPeerConfig.Password,
 			},
@@ -674,7 +694,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Value: fmt.Sprintf("%d", c.BGPPeerConfig.AS),
 			},
 		}
-		newEnvironment = append(newEnvironment, bgp...)
+		newEnvironment = append(newEnvironment, bgpConfig...)
 
 	}
 
@@ -807,6 +827,27 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, adminConfVolume)
 	}
+
+	if c.ProviderConfig != "" {
+		providerConfigMount := corev1.VolumeMount{
+			Name:      "cloud-sa-volume",
+			MountPath: "/etc/cloud-sa",
+			ReadOnly:  true,
+		}
+		newManifest.Spec.Containers[0].VolumeMounts = append(newManifest.Spec.Containers[0].VolumeMounts, providerConfigMount)
+
+		providerConfigVolume := corev1.Volume{
+			Name: "cloud-sa-volume",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: "packet-cloud-config",
+				},
+			},
+		}
+		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, providerConfigVolume)
+
+	}
+
 	return newManifest
 
 }
@@ -819,7 +860,7 @@ func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster boo
 }
 
 // GenerateDeamonsetManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inCluster bool) string {
+func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
 
 	podSpec := generatePodSpec(c, imageVersion, inCluster).Spec
 	newManifest := &appv1.DaemonSet{
@@ -847,17 +888,17 @@ func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inClust
 			},
 		},
 	}
-
-	newManifest.Spec.Template.Spec.Tolerations = []corev1.Toleration{
-		{
-			Key:    "node-role.kubernetes.io/master",
-			Effect: corev1.TaintEffectNoSchedule,
-		},
+	if taint {
+		newManifest.Spec.Template.Spec.Tolerations = []corev1.Toleration{
+			{
+				Key:    "node-role.kubernetes.io/master",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+		}
+		newManifest.Spec.Template.Spec.NodeSelector = map[string]string{
+			"node-role.kubernetes.io/master": "true",
+		}
 	}
-	newManifest.Spec.Template.Spec.NodeSelector = map[string]string{
-		"node-role.kubernetes.io/master": "true",
-	}
-
 	b, _ := yaml.Marshal(newManifest)
 	return string(b)
 }

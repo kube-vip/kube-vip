@@ -31,7 +31,7 @@ require (
 	github.com/mdlayher/raw v0.0.0-20191009151244-50f2db8cc065 // indirect
 	github.com/mitchellh/mapstructure v1.3.3 // indirect
 	github.com/osrg/gobgp v2.0.0+incompatible
-	github.com/packethost/packngo v0.5.0
+	github.com/packethost/packngo v0.5.1
 	github.com/pelletier/go-toml v1.8.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.6.0

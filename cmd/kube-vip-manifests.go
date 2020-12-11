@@ -14,10 +14,11 @@ import (
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
 
 //var inCluster bool
+var taint bool
 
 func init() {
-	kubeManifestPod.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
-	kubeManifestDaemon.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
+	kubeManifest.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
+	kubeManifestDaemon.PersistentFlags().BoolVar(&taint, "taint", false, "Taint the manifest for only running on control planes")
 
 	kubeManifest.AddCommand(kubeManifestPod)
 	kubeManifest.AddCommand(kubeManifestDaemon)
@@ -78,7 +79,7 @@ var kubeManifestDaemon = &cobra.Command{
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version, inCluster)
+		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
 
 		fmt.Println(cfg)
 	},
