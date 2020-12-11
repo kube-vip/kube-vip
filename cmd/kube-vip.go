@@ -6,6 +6,7 @@ import (
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/manager"
+	"github.com/plunder-app/kube-vip/pkg/packet"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +31,9 @@ var configMap string
 
 // Configure the level of loggin
 var logLevel uint32
+
+// Provider Config
+var providerConfig string
 
 // Release - this struct contains the release information populated when building kube-vip
 var Release struct {
@@ -78,6 +82,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnablePacket, "packet", false, "This will use the Packet API (requires the token ENV) to update the EIP <-> VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketAPIKey, "packetKey", "", "The API token for authenticating with the Packet API")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketProject, "packetProject", "", "The name of project already created within Packet")
+	kubeVipCmd.PersistentFlags().StringVar(&providerConfig, "provider-config", "", "The path to a provider configuration")
 
 	// Load Balancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "lbEnable", false, "Enable a load-balancer on the VIP")
@@ -103,6 +108,7 @@ func init() {
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
+
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
@@ -196,6 +202,18 @@ var kubeVipManager = &cobra.Command{
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
 			configMap = envConfigMap
+		}
+
+		// If Packet is enabled and there is a provider configuration passed
+		if initConfig.EnablePacket {
+			if providerConfig != "" {
+				providerAPI, providerProject, err := packet.GetPacketConfig(providerConfig)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+				initConfig.PacketAPIKey = providerAPI
+				initConfig.PacketProject = providerProject
+			}
 		}
 
 		// Define the new service manager

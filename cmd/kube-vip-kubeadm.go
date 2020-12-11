@@ -54,7 +54,7 @@ var kubeKubeadmInit = &cobra.Command{
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
 		fmt.Println(cfg)
 	},
@@ -123,7 +123,7 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		}
 		// Generate manifest and print
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 		fmt.Println(cfg)
 	},
 }
