@@ -94,6 +94,8 @@ const (
 	bgpPeerAS = "bgp_peeras"
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerPassword = "bgp_peerpass"
+	//bgpMultiHop enables mulithop routing
+	bgpMultiHop = "bgp_multihop"
 
 	//cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
@@ -376,6 +378,16 @@ func ParseEnvironment(c *Config) error {
 		c.BGPPeerConfig.AS = uint32(u64)
 	}
 
+	// BGP Peer mutlihop
+	env = os.Getenv(bgpMultiHop)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.BGPPeerConfig.MultiHop = b
+	}
+
 	// BGP Peer password
 	env = os.Getenv(bgpPeerPassword)
 	if env != "" {
@@ -648,6 +660,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			{
 				Name:  bgpPeerAddress,
 				Value: c.BGPPeerConfig.Address,
+			},
+			{
+				Name:  bgpMultiHop,
+				Value: strconv.FormatBool(c.BGPPeerConfig.MultiHop),
 			},
 			{
 				Name:  bgpPeerPassword,
