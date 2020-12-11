@@ -497,7 +497,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 }
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
-func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
+func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod {
 	command := "manager"
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
@@ -752,10 +752,6 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 					Env: newEnvironment,
 					VolumeMounts: []corev1.VolumeMount{
 						{
-							Name:      "kubeconfig",
-							MountPath: "/etc/kubernetes/admin.conf",
-						},
-						{
 							Name:      "ca-certs",
 							MountPath: "/etc/ssl/certs",
 							ReadOnly:  true,
@@ -764,14 +760,6 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 				},
 			},
 			Volumes: []corev1.Volume{
-				{
-					Name: "kubeconfig",
-					VolumeSource: corev1.VolumeSource{
-						HostPath: &corev1.HostPathVolumeSource{
-							Path: "/etc/kubernetes/admin.conf",
-						},
-					},
-				},
 				{
 					Name: "ca-certs",
 					VolumeSource: corev1.VolumeSource{
@@ -784,21 +772,40 @@ func generatePodSpec(c *Config, imageVersion string) *corev1.Pod {
 			HostNetwork: true,
 		},
 	}
+
+	// If this isn't inside a cluster then add the external path mount
+	if !inCluster {
+
+		adminConfMount := corev1.VolumeMount{
+			Name:      "kubeconfig",
+			MountPath: "/etc/kubernetes/admin.conf",
+		}
+		newManifest.Spec.Containers[0].VolumeMounts = append(newManifest.Spec.Containers[0].VolumeMounts, adminConfMount)
+		adminConfVolume := corev1.Volume{
+			Name: "kubeconfig",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc/kubernetes/admin.conf",
+				},
+			},
+		}
+		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, adminConfVolume)
+	}
 	return newManifest
 
 }
 
 // GeneratePodManifestFromConfig will take a kube-vip config and generate a manifest
-func GeneratePodManifestFromConfig(c *Config, imageVersion string) string {
-	newManifest := generatePodSpec(c, imageVersion)
+func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster bool) string {
+	newManifest := generatePodSpec(c, imageVersion, inCluster)
 	b, _ := yaml.Marshal(newManifest)
 	return string(b)
 }
 
 // GenerateDeamonsetManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string) string {
+func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inCluster bool) string {
 
-	podSpec := generatePodSpec(c, imageVersion).Spec
+	podSpec := generatePodSpec(c, imageVersion, inCluster).Spec
 	newManifest := &appv1.DaemonSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "DaemonSet",
