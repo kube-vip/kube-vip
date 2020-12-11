@@ -30,7 +30,7 @@ func (sm *Manager) startBGP() error {
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if sm.config.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, sm.config)
+			err = packet.BGPLookup(packetClient, sm.config, "") // TODO: This will need looking at in the future
 			if err != nil {
 				log.Error(err)
 			}

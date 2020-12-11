@@ -161,7 +161,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if c.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, c)
+			err = packet.BGPLookup(packetClient, c, "") //TODO: This will need looking at in the future
 			if err != nil {
 				log.Error(err)
 			}

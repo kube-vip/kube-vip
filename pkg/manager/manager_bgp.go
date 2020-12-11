@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"os"
 	"syscall"
 
 	"github.com/packethost/packngo"
@@ -20,6 +21,18 @@ func (sm *Manager) startBGP() error {
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
 	if sm.config.EnablePacket {
+		var projectID string
+		if sm.config.ProviderConfig != "" {
+			key, project, err := packet.GetPacketConfig(sm.config.ProviderConfig)
+			if err != nil {
+				log.Error(err)
+			} else {
+				// Set the environment variable with the key for the project
+				os.Setenv("PACKET_AUTH_TOKEN", key)
+				// Update the configuration with the project key
+				projectID = project
+			}
+		}
 		packetClient, err = packngo.NewClient()
 		if err != nil {
 			log.Error(err)
@@ -28,7 +41,7 @@ func (sm *Manager) startBGP() error {
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if sm.config.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, sm.config)
+			err = packet.BGPLookup(packetClient, sm.config, projectID)
 			if err != nil {
 				log.Error(err)
 			}
