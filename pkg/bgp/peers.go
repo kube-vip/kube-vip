@@ -37,6 +37,12 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 			},
 		},
 
+		// This enables routes to be sent to routers across multiple hops
+		EbgpMultihop: &api.EbgpMultihop{
+			Enabled:     peer.MultiHop,
+			MultihopTtl: 50,
+		},
+
 		Transport: &api.Transport{
 			MtuDiscovery:  true,
 			RemoteAddress: peer.Address,

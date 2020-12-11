@@ -7,6 +7,7 @@ type Peer struct {
 	Address  string
 	AS       uint32
 	Password string
+	MultiHop bool
 }
 
 // Config defines the BGP server configuration
