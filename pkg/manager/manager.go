@@ -146,15 +146,15 @@ func (sm *Manager) Start() error {
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {
-		log.Infoln("Starting Kube-vip loadBalancer Service with the BGP engine")
-		log.Infof("Namespace [%s], Hybrid mode [%t]", sm.config.Namespace, sm.config.EnableControlPane)
+		log.Infoln("Starting Kube-vip Manager with the BGP engine")
+		log.Infof("Namespace [%s], Hybrid mode [%t]", sm.config.Namespace, sm.config.EnableControlPane && sm.config.EnableServices)
 		return sm.startBGP()
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
-		log.Infoln("Starting loadBalancer Service with the ARP engine")
-		log.Infof("Namespace [%s], Hybrid mode [%t]", sm.config.Namespace, sm.config.EnableControlPane)
+		log.Infoln("Starting Kube-vip Manager with the ARP engine")
+		log.Infof("Namespace [%s], Hybrid mode [%t]", sm.config.Namespace, sm.config.EnableControlPane && sm.config.EnableServices)
 		return sm.startARP()
 	}
 

@@ -76,6 +76,9 @@ type Config struct {
 	// PacketProject, is the name of a particular defined project
 	PacketProject string
 
+	// PacketProjectID, is the name of a particular defined project
+	PacketProjectID string
+
 	// ProviderConfig, is the path to a provider configuration file
 	ProviderConfig string
 

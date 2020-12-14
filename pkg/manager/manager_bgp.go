@@ -21,7 +21,6 @@ func (sm *Manager) startBGP() error {
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
 	if sm.config.EnablePacket {
-		var projectID string
 		if sm.config.ProviderConfig != "" {
 			key, project, err := packet.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
@@ -30,7 +29,7 @@ func (sm *Manager) startBGP() error {
 				// Set the environment variable with the key for the project
 				os.Setenv("PACKET_AUTH_TOKEN", key)
 				// Update the configuration with the project key
-				projectID = project
+				sm.config.PacketProjectID = project
 			}
 		}
 		packetClient, err = packngo.NewClient()
@@ -41,7 +40,7 @@ func (sm *Manager) startBGP() error {
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if sm.config.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, sm.config, projectID)
+			err = packet.BGPLookup(packetClient, sm.config)
 			if err != nil {
 				log.Error(err)
 			}

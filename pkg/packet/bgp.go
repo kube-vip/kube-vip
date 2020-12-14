@@ -10,16 +10,16 @@ import (
 )
 
 // BGPLookup will use the Packet API functions to populate the BGP information
-func BGPLookup(c *packngo.Client, k *kubevip.Config, projectID string) error {
+func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 	var thisDevice *packngo.Device
-	if projectID == "" {
+	if k.PacketProjectID == "" {
 		proj := findProject(k.PacketProject, c)
 		if proj == nil {
 			return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
 		}
 		thisDevice = findSelf(c, proj.ID)
 	} else {
-		thisDevice = findSelf(c, projectID)
+		thisDevice = findSelf(c, k.PacketProjectID)
 	}
 	if thisDevice == nil {
 		return fmt.Errorf("Unable to find local/this device in packet API")
