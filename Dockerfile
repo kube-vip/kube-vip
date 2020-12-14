@@ -12,5 +12,8 @@ RUN --mount=type=cache,sharing=locked,id=gomod,target=/go/pkg/mod/cache \
     CGO_ENABLED=0 GOOS=linux make build
 
 FROM scratch
+# Add Certificates into the image, for anything that does API calls
+COPY --from=dev /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# Add kube-vip binary
 COPY --from=dev /src/kube-vip /
 ENTRYPOINT ["/kube-vip"]
