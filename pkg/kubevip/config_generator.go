@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/detector"
 	log "github.com/sirupsen/logrus"
 	appv1 "k8s.io/api/apps/v1"
@@ -96,6 +97,8 @@ const (
 	bgpRouterAS = "bgp_as"
 	//bgpPeerAddress defines the address for a BGP peer
 	bgpPeerAddress = "bgp_peeraddress"
+	//bgpPeers defines the address for a BGP peer
+	bgpPeers = "bgp_peers"
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerAS = "bgp_peeras"
 	//bgpPeerAS defines the AS for a BGP peer
@@ -389,6 +392,16 @@ func ParseEnvironment(c *Config) error {
 		c.BGPPeerConfig.AS = uint32(u64)
 	}
 
+	// Peer AS
+	env = os.Getenv(bgpPeers)
+	if env != "" {
+		peers, err := bgp.ParseBGPPeerConfig(env)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.Peers = peers
+	}
+
 	// BGP Peer mutlihop
 	env = os.Getenv(bgpMultiHop)
 	if env != "" {
@@ -402,10 +415,10 @@ func ParseEnvironment(c *Config) error {
 	// BGP Peer password
 	env = os.Getenv(bgpPeerPassword)
 	if env != "" {
-		c.BGPPeerConfig.Address = env
+		c.BGPPeerConfig.Password = env
 	}
 
-	// BGP Peer options
+	// BGP Peer options, add them if relevant
 	env = os.Getenv(bgpPeerAddress)
 	if env != "" {
 		c.BGPPeerConfig.Address = env
@@ -708,6 +721,23 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Value: fmt.Sprintf("%d", c.BGPPeerConfig.AS),
 			},
 		}
+
+		var peers string
+		if len(c.BGPPeers) != 0 {
+			for x := range c.BGPPeers {
+				if x != 0 {
+					peers = fmt.Sprintf("%s,%s", peers, c.BGPPeers[x])
+				} else {
+					peers = c.BGPPeers[x]
+				}
+			}
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpPeers,
+				Value: peers,
+			},
+			)
+		}
+
 		newEnvironment = append(newEnvironment, bgpConfig...)
 
 	}

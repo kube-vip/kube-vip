@@ -66,6 +66,7 @@ type Config struct {
 	// BGP Configuration
 	BGPConfig     bgp.Config
 	BGPPeerConfig bgp.Peer
+	BGPPeers      []string
 
 	// EnablePacket, will use the packet API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
 	EnablePacket bool `yaml:"enablePacket"`
