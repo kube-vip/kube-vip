@@ -101,6 +101,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.MultiHop, "multihop", false, "This will enable BGP multihop support")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{"192.168.0.2:65000:password:true", "192.168.0.3:65000:password:true"}, "Comma seperated BGP Peer, format: address:as:password:multihop")
 
 	// Control plane specific flags
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
