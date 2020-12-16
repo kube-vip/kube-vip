@@ -10,7 +10,7 @@ jobs:
       CGO_ENABLED: 0
     steps:
     - name: Init
-      run: apt-get update && apt-get install -y build-essential golint
+      run: sudo apt-get update && sudo apt-get install -y build-essential golint
     - name: Checkout code
       uses: actions/checkout@v2
     - name: Install Go
