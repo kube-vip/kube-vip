@@ -8,23 +8,33 @@ The "hybrid" mode is now the default mode in `kube-vip` from `0.2.3` onwards, an
 
 This section details creating a number of manifests for various use cases
 
-## Configure to use a container runtime
+### Set configuration details
 
-The easiest method to generate a manifest is using the container itself, below will create an environmemnt variable for different container runtimes.
+`export VIP=192.168.0.40`
 
-### containerd
-`export KUBE-VIP="ctr run --rm --net-host docker.io/plndr/kube-vip:0.2.3 vip"`
+`export INTERFACE=<interface>`
 
-### Docker
-`export KUBE-VIP="docker run --network host --rm plndr/kube-vip:0.2.3"`
+### Configure to use a container runtime
+
+The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
+
+#### containerd
+`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.2.3 vip"`
+
+#### Docker
+`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.2.3"`
+
 
 ### ARP
 
 This configuration will create a manifest that starts `kube-vip` providing **controlplane** and **services** management, using **leaderElection**. When this instance is elected as the leader it will bind the `vip` to the specified `interface`, this is also the same for services of `type:LoadBalancer`.
+
+`export INTERFACE=eth0`
+
 ```
-$KUBE-VIP kube-vip manifest pod \
-    --interface eth0 \
-    --vip 192.168.0.40 \
+kube-vip manifest pod \
+    --interface $INTERFACE \
+    --vip $VIP \
     --controlplane \
     --services \
     --arp \
@@ -37,10 +47,12 @@ This configuration will create a manifest that will start `kube-vip` providing *
 
 **Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma seperate list in the format of `address:AS:password:multihop`.
 
+`export INTERFACE=lo`
+
 ```
-$KUBE-VIP kube-vip manifest pod \
-    --interface lo \
-    --vip 192.168.0.40 \
+kube-vip manifest pod \
+    --interface $INTERFACE \
+    --vip $VIP \
     --controlplane \
     --services \
     --bgp \
@@ -52,9 +64,9 @@ $KUBE-VIP kube-vip manifest pod \
 We can enable `kube-vip` with the capability to pull all of the required configuration for BGP by passing the `--packet` flag and the API Key and our project ID.
 
 ```
-$KUBE-VIP kube-vip manifest pod \
-    --interface lo \
-    --vip 192.168.0.40 \
+kube-vip manifest pod \
+    --interface $INTERFACE\
+    --vip $VIP \
     --controlplane \
     --services \
     --bgp \
@@ -63,6 +75,30 @@ $KUBE-VIP kube-vip manifest pod \
     --packetProjectID xxxxx
 ```
 
+## Deploy your Kubernetes Cluster
+
+### First node
+
+```
+sudo kubeadm init \
+    --kubernetes-version 1.19.0 \
+    --control-plane-endpoint $VIP \
+    --upload-certs
+```
+
+### Additional Node(s)
+
+Due to an oddity with `kubeadm` we can't have our `kube-vip` manifest present **before** joining our additional nodes. So on these control plane nodes we will add them first to the cluster.
+
+```
+sudo kubeadm join $VIP:6443 \
+    --token w5atsr.blahblahblah 
+    --control-plane \
+    --certificate-key abc123
+```
+
+**Once**, joined these nodes can have the same command that we ran on the first node to populate the `/etc/kubernetes/manifests/` folder with the `kube-vip` manifest.
+
 ## Services
 
-At this point your `kube-vip` static pods will be up and running and where passed with the `--services` flag will also be watching for Kubernetes services that they can advertise. In order for `kube-vip` to advertise a service it needs a CCM or other controller to apply an IP address to the `spec.LoadBalancerIP`, which marks the loadbalancer as defined. 
+At this point your `kube-vip` static pods will be up and running and where used with the `--services` flag will also be watching for Kubernetes services that they can advertise. In order for `kube-vip` to advertise a service it needs a CCM or other controller to apply an IP address to the `spec.LoadBalancerIP`, which marks the loadbalancer as defined. 

@@ -849,7 +849,8 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 					},
 				},
 			},
-			HostNetwork: true,
+			HostNetwork:        true,
+			ServiceAccountName: "kube-vip",
 		},
 	}
 

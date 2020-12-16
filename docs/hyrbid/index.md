@@ -5,7 +5,7 @@ We can deploy kube-vip in two different methods, which completely depends on you
 - Static Pods (hybrid)
 - Daemonset (services only)
 
-## Static Pods
+## Static Pods
 
 Static pods are a Kubernetes pod that is ran by the `kubelet` on a single node, and is **not** managed by the Kubernetes cluster itself. This means that whilst the pod can appear within Kubernetes it can't make use of a variety of kubernetes functionality (such as the kubernetes token or `configMaps`). The static pod approach is primarily required for [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/), this is due to the sequence of actions performed by `kubeadm`. Ideally we want `kube-vip` to be part of the kubernetes cluster, for various bits of functionality we also need `kube-vip` to provide a HA virtual IP as part of the installation. 
 
@@ -85,3 +85,47 @@ When using `kube-vip` as a daemonset the details are available [here](./daemonse
 |              |`--packetProject`|Packet Project (Name)||
 |              |`--packetProjectID`|Packet Project (UUID)||
 |              |`--provider-config`|Path to the Packet provider configuration|Requires the Packet CCM|
+
+## Changelog
+
+### Static DNS Support (added in 0.2.0)
+
+A new flag `--address` is introduced to support using a DNS record as the control plane endpoint. `kube-vip` will do a dns lookup to retrieve the IP for the DNS record, and use that IP as the VIP. An `dnsUpdater` periodically checks and updates the system if IP changes for the DNS record.
+
+### Dynamic DNS Support (added in 0.2.1)
+
+`kube-vip` was also updated to support DHCP + [Dynamic DNS](https://en.wikipedia.org/wiki/Dynamic_DNS), for the use case where it's not able to reserve a static IP for the control plane endpoint.
+
+A new flag `--ddns` is introduced. Once enabled, `kube-vip` expects the input `--address` will be a FQDN without binding to an IP. Then `kube-vip` will start a dhcp client to allocate an IP for the hostname of FQDN, and maintain the lease for it.
+
+Once DHCP returns an IP for the FQDN, the same `dnsUpdater` runs to periodically checks and updates if IP got changed.
+
+## BGP Support (added in 0.1.8)
+
+In version `0.1.8` `kube-vip` was updated to support [BGP](https://en.wikipedia.org/wiki/Border_Gateway_Protocol) as a VIP failover mechanism. When a node is elected as a leader then it will update it's peers so that they are aware to route traffic to that node in order to access the VIP. 
+
+The following new flags are used:
+
+- `--bgp` This will enable BGP support within kube-vip
+- `--localAS` The local AS number
+- `--bgpRouterID` The local router address
+- `--peerAS` The AS number for a BGP peer
+- `--peerAddress` The address of a BGP peer
+
+### BGP Packet support
+
+If the `--bgp` flag is passed alone with the Packet flags `packet, packetKey and packetProject`, then the Packet API will be used in order to determine the BGP configuration for the nodes being used in the cluster. This automates a lot of the process and makes using BGP within Packet much simpler.
+
+## Packet Support (added in 0.1.7)
+
+Recently in version `0.1.7` of `kube-vip` we added the functionality to use a Packet Elastic IP as the virtual IP fronting the Kubernetes Control plane cluster. In order to first get out virtual IP we will need to use our Packet account and create a EIP (either public (eek) or private). We will only need a single address so a `/32` will suffice, once this is created as part of a Packet project we can now apply this address to the servers that live in the same project. 
+
+In this example we've logged into the UI can created a new EIP of `147.75.1.2`, and we've deployed three small server instances with Ubuntu.
+
+The following new flags are used:
+
+- `--packet` which enables the use of the Packet API
+- `--packetKey` which is our API key
+- `--packetProject`which is the name of our Packet project where our servers and EIP are located.
+
+*Also* the `--arp` flag should NOT be used as it wont work within the Packet network.
