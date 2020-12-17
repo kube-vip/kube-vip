@@ -1,0 +1,23 @@
+name: For each commit and PR
+on:
+  push:
+  pull_request:
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 0
+    steps:
+    - name: Init
+      run: sudo apt-get update && sudo apt-get install -y build-essential golint
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '1.15'
+    - name: checks
+      run: make check
+    - name: test docker build
+      run: make dockerLocal

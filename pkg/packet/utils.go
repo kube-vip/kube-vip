@@ -1,6 +1,9 @@
 package packet
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"os"
 
 	"github.com/packethost/packngo"
@@ -33,4 +36,23 @@ func findSelf(c *packngo.Client, projectID string) *packngo.Device {
 		}
 	}
 	return nil
+}
+
+func GetPacketConfig(providerConfig string) (string, string, error) {
+	var config struct {
+		AuthToken string `json:"apiKey"`
+		ProjectID string `json:"projectId"`
+	}
+	// get our token and project
+	if providerConfig != "" {
+		configBytes, err := ioutil.ReadFile(providerConfig)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get read configuration file at path %s: %v", providerConfig, err)
+		}
+		err = json.Unmarshal(configBytes, &config)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to process json of configuration file at path %s: %v", providerConfig, err)
+		}
+	}
+	return config.AuthToken, config.ProjectID, nil
 }

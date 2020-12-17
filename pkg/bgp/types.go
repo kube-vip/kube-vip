@@ -4,8 +4,10 @@ import gobgp "github.com/osrg/gobgp/pkg/server"
 
 // Peer defines a BGP Peer
 type Peer struct {
-	Address string
-	AS      uint32
+	Address  string
+	AS       uint32
+	Password string
+	MultiHop bool
 }
 
 // Config defines the BGP server configuration

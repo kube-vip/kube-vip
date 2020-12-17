@@ -31,7 +31,7 @@ require (
 	github.com/mdlayher/raw v0.0.0-20191009151244-50f2db8cc065 // indirect
 	github.com/mitchellh/mapstructure v1.3.3 // indirect
 	github.com/osrg/gobgp v2.0.0+incompatible
-	github.com/packethost/packngo v0.5.0
+	github.com/packethost/packngo v0.5.1
 	github.com/pelletier/go-toml v1.8.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.6.0
@@ -45,6 +45,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a // indirect
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974
 	golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43 // indirect
+	golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	google.golang.org/genproto v0.0.0-20200917134801-bb4cff56e0d0 // indirect
 	google.golang.org/grpc v1.32.0 // indirect

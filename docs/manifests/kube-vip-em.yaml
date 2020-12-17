@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-vip
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  name: system:kube-vip-role
+rules:
+  - apiGroups: [""]
+    resources: ["services", "services/status"]
+    verbs: ["list","get","watch", "update"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:kube-vip-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-vip-role
+subjects:
+- kind: ServiceAccount
+  name: kube-vip
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  creationTimestamp: null
+  name: kube-vip-ds
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: kube-vip-ds
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        name: kube-vip-ds
+    spec:
+      containers:
+      - args:
+        - manager
+        env:
+        - name: vip_arp
+          value: "false"
+        - name: vip_interface
+          value: lo
+        - name: port
+          value: "6443"
+        - name: vip_cidr
+          value: "32"
+        - name: svc_enable
+          value: "true"
+        - name: provider_config
+          value: /etc/cloud-sa/cloud-sa.json
+        - name: vip_packet
+          value: "true"
+        - name: bgp_enable
+          value: "true"
+        image: plndr/kube-vip:0.2.3
+        imagePullPolicy: Always
+        name: kube-vip
+        resources: {}
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_TIME
+        volumeMounts:
+        - mountPath: /etc/cloud-sa
+          name: cloud-sa-volume
+          readOnly: true
+      hostNetwork: true
+      serviceAccountName: kube-vip
+      volumes:
+      - name: cloud-sa-volume
+        secret:
+          secretName: packet-cloud-config
+  updateStrategy: {}
+status:
+  currentNumberScheduled: 0
+  desiredNumberScheduled: 0
+  numberMisscheduled: 0
+  numberReady: 0

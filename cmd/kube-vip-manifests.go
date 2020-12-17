@@ -13,7 +13,12 @@ import (
 // - Pod spec manifest, mainly used for a static pod (kubeadm)
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
 
+//var inCluster bool
+var taint bool
+
 func init() {
+	kubeManifest.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
+	kubeManifestDaemon.PersistentFlags().BoolVar(&taint, "taint", false, "Taint the manifest for only running on control planes")
 
 	kubeManifest.AddCommand(kubeManifestPod)
 	kubeManifest.AddCommand(kubeManifestDaemon)
@@ -43,11 +48,12 @@ var kubeManifestPod = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		// The control plane has a requirement for a VIP being specified
+		if initConfig.EnableControlPane && initConfig.VIP == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
 		fmt.Println(cfg)
 	},
@@ -68,11 +74,12 @@ var kubeManifestDaemon = &cobra.Command{
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
-		if initConfig.VIP == "" {
+		// The control plane has a requirement for a VIP being specified
+		if initConfig.EnableControlPane && initConfig.VIP == "" {
 			cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version)
+		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
 
 		fmt.Println(cfg)
 	},

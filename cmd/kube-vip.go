@@ -5,7 +5,8 @@ import (
 	"os"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/service"
+	"github.com/plunder-app/kube-vip/pkg/manager"
+	"github.com/plunder-app/kube-vip/pkg/packet"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -13,8 +14,14 @@ import (
 // Path to the configuration file
 var configPath string
 
+// Path to the configuration file
+var namespace string
+
 // Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
+
+// Disable the Virtual IP (bind to the existing network stack)
+var controlPlane bool
 
 // Run as a load balancer service (within a pod / kubernetes)
 var serviceArp bool
@@ -24,6 +31,9 @@ var configMap string
 
 // Configure the level of loggin
 var logLevel uint32
+
+// Provider Config
+var providerConfig string
 
 // Release - this struct contains the release information populated when building kube-vip
 var Release struct {
@@ -72,6 +82,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnablePacket, "packet", false, "This will use the Packet API (requires the token ENV) to update the EIP <-> VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketAPIKey, "packetKey", "", "The API token for authenticating with the Packet API")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketProject, "packetProject", "", "The name of project already created within Packet")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketProjectID, "packetProjectID", "", "The ID of project already created within Packet")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ProviderConfig, "provider-config", "", "The path to a provider configuration")
 
 	// Load Balancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "lbEnable", false, "Enable a load-balancer on the VIP")
@@ -87,16 +99,25 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.AS, "localAS", 65000, "The local AS number for the bgp server")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.MultiHop, "multihop", false, "This will enable BGP multihop support")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma seperated BGP Peer, format: address:as:password:multihop")
+
+	// Control plane specific flags
+	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
 
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
-	kubeVipService.Flags().BoolVar(&service.OutSideCluster, "OutSideCluster", false, "Start Controller outside of cluster")
+
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
+	kubeVipCmd.AddCommand(kubeVipManager)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipStart)
@@ -148,17 +169,62 @@ var kubeVipService = &cobra.Command{
 		}
 
 		// User Environment variables as an option to make manifest clearer
-
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
 			configMap = envConfigMap
 		}
 
 		// Define the new service manager
-		mgr, err := service.NewManager(configMap, &initConfig)
+		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+
+		// Start the service manager, this will watch the config Map and construct kube-vip services for it
+		err = mgr.Start()
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	},
+}
+
+var kubeVipManager = &cobra.Command{
+	Use:   "manager",
+	Short: "Start the kube-vip manager",
+	Run: func(cmd *cobra.Command, args []string) {
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		// parse environment variables, these will overwrite anything loaded or flags
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		// User Environment variables as an option to make manifest clearer
+		envConfigMap := os.Getenv("vip_configmap")
+		if envConfigMap != "" {
+			configMap = envConfigMap
+		}
+
+		// If Packet is enabled and there is a provider configuration passed
+		if initConfig.EnablePacket {
+			if providerConfig != "" {
+				providerAPI, providerProject, err := packet.GetPacketConfig(providerConfig)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+				initConfig.PacketAPIKey = providerAPI
+				initConfig.PacketProject = providerProject
+			}
+		}
+
+		// Define the new service manager
+		mgr, err := manager.New(configMap, &initConfig)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {

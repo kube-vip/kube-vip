@@ -11,12 +11,16 @@ import (
 
 // BGPLookup will use the Packet API functions to populate the BGP information
 func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
-
-	proj := findProject(k.PacketProject, c)
-	if proj == nil {
-		return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
+	var thisDevice *packngo.Device
+	if k.PacketProjectID == "" {
+		proj := findProject(k.PacketProject, c)
+		if proj == nil {
+			return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
+		}
+		thisDevice = findSelf(c, proj.ID)
+	} else {
+		thisDevice = findSelf(c, k.PacketProjectID)
 	}
-	thisDevice := findSelf(c, proj.ID)
 	if thisDevice == nil {
 		return fmt.Errorf("Unable to find local/this device in packet API")
 	}
@@ -47,8 +51,9 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 	// Add the peer(s)
 	for x := range neighbours[0].PeerIps {
 		peer := bgp.Peer{
-			Address: neighbours[0].PeerIps[x],
-			AS:      uint32(neighbours[0].PeerAs),
+			Address:  neighbours[0].PeerIps[x],
+			AS:       uint32(neighbours[0].PeerAs),
+			MultiHop: neighbours[0].Multihop,
 		}
 		k.BGPConfig.Peers = append(k.BGPConfig.Peers, peer)
 	}
