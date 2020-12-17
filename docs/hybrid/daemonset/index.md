@@ -49,6 +49,8 @@ This configuration will create a manifest that will start `kube-vip` providing *
 
 **Note 2** we pass the `--inCluster` flag as this is running as a daemonSet within the Kubernetes cluster and therefore will have access to the token inside the running pod.
 
+**Note 2** we pass the `--taint` flag as we're deploying `kube-vip` as both a daemonset and as advertising controlplane, we want to taint this daemonset to only run on the worker nodes.
+
 `export INTERFACE=lo`
 
 ```
@@ -58,6 +60,7 @@ kube-vip manifest daemonset \
     --controlplane \
     --services \
     --inCluster \
+    --taint \
     --bgp \
     --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false
 ```
@@ -116,6 +119,11 @@ spec:
             - SYS_TIME
       hostNetwork: true
       serviceAccountName: kube-vip
+      nodeSelector:
+        node-role.kubernetes.io/master: "true"
+      tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
   updateStrategy: {}
 ```
 
