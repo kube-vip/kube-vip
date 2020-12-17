@@ -9,7 +9,7 @@ The **kube-vip** project provides High-Availability and load-balancing for both 
 The architecture for `kube-vip` (and associated kubernetes components) is covered in detail [here](/architecture/)
 
 
-## (New) Hybrid- Control-plane HA and Kubernetes service `type=LoadBalancer`
+## (New) Hybrid Control-plane HA and Kubernetes service `type=LoadBalancer`
 
 With the newest release of `kube-vip` the internal "manager" can handle the lifecycle of VIPs for both HA and for Kubernetes Load-Balancing. The main driver for this is being most effective for large nodes that can run control-plane components and run applications. The details for hybrid mode are [here](/hybrid/)
 
