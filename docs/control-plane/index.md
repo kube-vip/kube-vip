@@ -1,6 +1,6 @@
 # Load Balancing a Kubernetes Cluster (Control-Plane)
 
-**Note**: The most common deployment currently for HA Kubernetes clusters w/`kub-vip` involved `kubeadm`, however recently we've worked to bring a method of bringing `kube-vip` to other types of Kubernetes cluster. Typically this deployment method makes use of a daemonset that is usually brought up during the cluster instantiation.. So for those wanting to deploy [k3s](https://k3s.io), we now have installation steps available [here](https://kube-vip.io/control-plane/#k3s),
+**Note**: The most common deployment currently for HA Kubernetes clusters w/`kube-vip` involved `kubeadm`, however recently we've worked to bring a method of bringing `kube-vip` to other types of Kubernetes cluster. Typically this deployment method makes use of a daemonset that is usually brought up during the cluster instantiation.. So for those wanting to deploy [k3s](https://k3s.io), we now have installation steps available [here](https://kube-vip.io/control-plane/#k3s),
 
 This document covers the newer (post `0.1.6`) method for using `kube-vip` to provide HA for a Kubernetes Cluster. The documentation for older releases can be found [here](./0.1.5/)
 

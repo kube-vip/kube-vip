@@ -74,18 +74,12 @@ spec:
             - NET_ADMIN
             - SYS_TIME
         volumeMounts:
-        - mountPath: /etc/ssl/certs
-          name: ca-certs
-          readOnly: true
         - mountPath: /etc/cloud-sa
           name: cloud-sa-volume
           readOnly: true
       hostNetwork: true
       serviceAccountName: kube-vip
       volumes:
-      - hostPath:
-          path: /etc/ssl/certs
-        name: ca-certs
       - name: cloud-sa-volume
         secret:
           secretName: packet-cloud-config

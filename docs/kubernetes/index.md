@@ -6,7 +6,7 @@ The below instructions *should just work* on Kubernetes regardless of architectu
 
 If you just want things to "work", then you can quickly install the "latest" components:
 
-**Install the `plndr-cloud-provider`, `starboard` and `kube-vip`**
+**Install the `plndr-cloud-provider`, and `kube-vip`**
 
 ```
 kubectl apply -f https://kube-vip.io/manifests/controller.yaml
