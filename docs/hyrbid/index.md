@@ -5,6 +5,10 @@ We can deploy kube-vip in two different methods, which completely depends on you
 - Static Pods (hybrid)
 - Daemonset (services only)
 
+## **Prerequisites**
+
+In order for `kube-vip` to be able to speak with the Kubernetes API server, we need to be able to resolve the hostname within the pod. In order to ensure this will work as expected the `/etc/hosts` file should have the `hostname` of the server within it. The `/etc/hosts` file is passed into the running container and will ensure that the pod isn't "confused" by any Kubernetes networking.
+
 ## Static Pods
 
 Static pods are a Kubernetes pod that is ran by the `kubelet` on a single node, and is **not** managed by the Kubernetes cluster itself. This means that whilst the pod can appear within Kubernetes it can't make use of a variety of kubernetes functionality (such as the kubernetes token or `configMaps`). The static pod approach is primarily required for [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/), this is due to the sequence of actions performed by `kubeadm`. Ideally we want `kube-vip` to be part of the kubernetes cluster, for various bits of functionality we also need `kube-vip` to provide a HA virtual IP as part of the installation. 
