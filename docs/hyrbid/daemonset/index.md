@@ -11,6 +11,14 @@ If the Kubernetes installer allows for adding a Virtual IP as an additional [SAN
 
 Unlike generating the static manifest there are a few more things that may need configuring, this page will cover most scenarios.
 
+## Create the RBAC settings
+
+As a daemonSet runs within the Kubernetes cluster it needs the correct access to be able to watch Kubernetes services and other objects. In order to do this we create a User, Role, and a binding.. we can apply this with the command:
+
+```
+kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+```
+
 ## Generating a Manifest
 
 This section only covers generating a simple *BGP* configuration, as the main focus is will be on additional changes to the manifest. For more examples we can look at [here](/hybrid/static/).
@@ -106,15 +114,13 @@ spec:
             add:
             - NET_ADMIN
             - SYS_TIME
-        volumeMounts:
-        - mountPath: /etc/ssl/certs
-          name: ca-certs
-          readOnly: true
       hostNetwork: true
       serviceAccountName: kube-vip
-      volumes:
-      - hostPath:
-          path: /etc/ssl/certs
-        name: ca-certs
   updateStrategy: {}
 ```
+
+### Manifest Overview
+
+- `serviceAccountName: kube-vip` - this specifies the user in the `rbac` that will give us the permissions to get/update services.
+- `hostNetwork: true` - This pod will need to modify interfaces (for VIPs)
+- `env {...}` - We pass the configuration into the kube-vip pod through environment variables.

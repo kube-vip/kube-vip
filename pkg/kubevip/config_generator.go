@@ -830,23 +830,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 						command,
 					},
 					Env: newEnvironment,
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "ca-certs",
-							MountPath: "/etc/ssl/certs",
-							ReadOnly:  true,
-						},
-					},
-				},
-			},
-			Volumes: []corev1.Volume{
-				{
-					Name: "ca-certs",
-					VolumeSource: corev1.VolumeSource{
-						HostPath: &corev1.HostPathVolumeSource{
-							Path: "/etc/ssl/certs",
-						},
-					},
 				},
 			},
 			HostNetwork:        true,
