@@ -3,7 +3,7 @@
 We can deploy kube-vip in two different methods, which completely depends on your use-case and method for installing Kubernetes:
 
 - Static Pods (hybrid)
-- Daemonset (services only)
+- Daemonset (hybrid, requires taint)
 
 ## **Prerequisites**
 
@@ -66,24 +66,25 @@ When using `kube-vip` as a daemonset the details are available [here](./daemonse
 |**Vip Config**   ||||
 |              |`--arp`|Enables ARP brodcasts from Leader||
 |              |`--bgp`|Enables BGP peering from `kube-vip`||
-|              |`--vip`|\<IP Address>|(deprecated)|
-|              |`--address`|\<IP Address> or \<DNS name>||
-|              |`--interface`|\<linux interface>||
+|              |`--vip`|`<IP Address>`|(deprecated)|
+|              |`--address`|`<IP Address>` or `<DNS name>`||
+|              |`--interface`|`<linux interface>`||
 |              |`--leaderElection`|Enables Kubernetes LeaderElection|Used by ARP, as only the leader can broadcast|
 |**Services**||||
 |              |`--cidr`|Defaults "32"|Used when advertising BGP addresses (typically as `x.x.x.x/32`)|
 |**Kubernetes**||||
 |              |`--inCluster`|Defaults to looking inside the Pod for the token||
+|              |`--taint`|Enables a taint, stopping control plane daemonset being on workers||
 |**LeaderElection**||||
 |              |`--leaseDuration`|default 5|Seconds a lease is held for|
 |              |`--leaseRenewDuration`|default 3|Seconds a leader can attempt to renew the lease|
 |              |`--leaseRetry`|default 1|Number of times the leader will hold the lease for|
 |              |`--namespace`|"kube-vip"|The namespace where the lease will reside|
 |**BGP**||||
-|              |`--bgpRouterID`|\<IP Address>|Typically the address of the local node|
+|              |`--bgpRouterID`|`<IP Address>`|Typically the address of the local node|
 |              |`--localAS`|default 65000|The AS we peer from|
 |              |`--bgppeers`|`<address:AS:password:mutlihop>`|Comma seperate list of BGP peers|
-|              |`--peerAddress`|\<IP Address>|(deprecated), Address of a single BGP Peer|
+|              |`--peerAddress`|`<IP Address>`|(deprecated), Address of a single BGP Peer|
 |              |`--peerAS`|default 65000|(deprecated), AS of a single BGP Peer|
 |              |`--peerPass`|""|(deprecated), Password to work with a single BGP Peer|
 |              |`--multiHop`|Enables eBGP MultiHop|(deprecated), Enable multiHop with a single BGP Peer|
