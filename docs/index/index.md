@@ -1,6 +1,6 @@
 # Kube-vip
 
-A Load-Balancer for both **inside** and **outside** a Kubernetes cluster
+The **kube-vip** project provides High-Availability and load-balancing for both **inside** and **outside** a Kubernetes cluster
 
 ![kube-vip.png](kube-vip.png)
 
