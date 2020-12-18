@@ -150,16 +150,16 @@ export INTERFACE=lo
 ```
 
 ```
-kube-vip manifest daemonset     \
---interface $INTERFACE     \
---vip $EIP     \
---controlplane    \ 
---services     \
---inCluster    \
---taint     \
---bgp \
---packet \
---provider-config /etc/cloud-sa/cloud-sa.json | tee /var/lib/rancher/k3s/server/manifests/vip.yaml
+kube-vip manifest daemonset \
+  --interface $INTERFACE \
+  --vip $EIP \
+  --controlplane \
+  --services \
+  --inCluster \
+  --taint \
+  --bgp \
+  --packet \
+  --provider-config /etc/cloud-sa/cloud-sa.json | tee /var/lib/rancher/k3s/server/manifests/vip.yaml
 ```
 
 NOTE: the `—provider-config` actually comes from the secret we apply in step 5 (this will leave kube-vip waiting to start)
