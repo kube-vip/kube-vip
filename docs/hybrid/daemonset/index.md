@@ -129,6 +129,56 @@ spec:
 
 ### Manifest Overview
 
+- `nodeSelector` - Ensures that this particular daemonset only runs on control plane nodes
 - `serviceAccountName: kube-vip` - this specifies the user in the `rbac` that will give us the permissions to get/update services.
 - `hostNetwork: true` - This pod will need to modify interfaces (for VIPs)
 - `env {...}` - We pass the configuration into the kube-vip pod through environment variables.
+
+## K3s overview (on packet)
+
+### Step 1: TIDY (best if something was running before)
+`rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; ip addr flush dev lo; ip addr add 127.0.0.1/8 dev lo; mkdir -p /var/lib/rancher/k3s/server/manifests/`
+
+### Step 2: Get rbac
+`curl https://kube-vip.io/manifests/rbac.yaml > /var/lib/rancher/k3s/server/manifests/rbac.yaml`
+
+### Step 3: Generate kube-vip (get EIP from CLI or UI)
+
+```
+export EIP=x.x.x.x
+export INTERFACE=lo
+```
+
+```
+kube-vip manifest daemonset     \
+--interface $INTERFACE     \
+--vip $EIP     \
+--controlplane    \ 
+--services     \
+--inCluster    \
+--taint     \
+--bgp \
+--packet \
+--provider-config /etc/cloud-sa/cloud-sa.json | tee /var/lib/rancher/k3s/server/manifests/vip.yaml
+```
+
+NOTE: the `—provider-config` actually comes from the secret we apply in step 5 (this will leave kube-vip waiting to start)
+
+### Step 4: Up Cluster
+`K3S_TOKEN=SECRET k3s server --cluster-init --tls-san $EIP --no-deploy servicelb --disable-cloud-controller`
+
+### Step 5: Add CCM
+
+`alias k="k3s kubectl"`
+`k apply -f ./secret.yaml`
+
+(^ https://github.com/packethost/packet-ccm/blob/master/deploy/template/secret.yaml)
+
+`k apply -f https://gist.githubusercontent.com/thebsdbox/c86dd970549638105af8d96439175a59/raw/4abf90fb7929ded3f7a201818efbb6164b7081f0/ccm.yaml`
+
+### Step 6: Demo !
+`k apply -f https://k8s.io/examples/application/deployment.yaml`
+`k expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx`
+
+### Step 7 watch and test:
+`k get svc --watch`
