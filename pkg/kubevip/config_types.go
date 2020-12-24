@@ -33,7 +33,7 @@ type Config struct {
 	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
 	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
 
-	// VIP is the Virtual IP address exposed for the cluster
+	// VIP is the Virtual IP address exposed for the cluster (TODO: deprecate)
 	VIP string `yaml:"vip"`
 
 	// VIPCIDR is cidr range for the VIP (primarily needed for BGP)

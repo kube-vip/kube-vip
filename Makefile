@@ -64,6 +64,11 @@ dockerx86Local:
 	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
+dockerx86Action:
+	@-rm ./kube-vip
+	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action .
+	@echo New Multi Architecture Docker image created
+
 dockerLocal:
 	@-rm ./kube-vip
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
