@@ -20,6 +20,6 @@ jobs:
     - name: checks
       run: make check
     - name: test docker build
-      run: make dockerx86Local
+      run: make dockerx86Action
     - name: Manifest generate
       run: ./testing/testing.sh
