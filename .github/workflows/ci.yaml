@@ -20,4 +20,4 @@ jobs:
     - name: checks
       run: make check
     - name: test docker build
-      run: make dockerLocal
+      run: make dockerx86Local
