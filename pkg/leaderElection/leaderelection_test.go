@@ -26,12 +26,10 @@ import (
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/clock"
-	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "k8s.io/client-go/testing"
 	rl "k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -333,32 +331,6 @@ func TestTryAcquireOrRenewConfigMaps(t *testing.T) {
 // Will test leader election using lease as the resource
 func TestTryAcquireOrRenewLeases(t *testing.T) {
 	testTryAcquireOrRenew(t, "leases")
-}
-
-func TestLeaseSpecToLeaderElectionRecordRoundTrip(t *testing.T) {
-	holderIdentity := "foo"
-	leaseDurationSeconds := int32(10)
-	leaseTransitions := int32(1)
-	oldSpec := coordinationv1.LeaseSpec{
-		HolderIdentity:       &holderIdentity,
-		LeaseDurationSeconds: &leaseDurationSeconds,
-		AcquireTime:          &metav1.MicroTime{time.Now()},
-		RenewTime:            &metav1.MicroTime{time.Now()},
-		LeaseTransitions:     &leaseTransitions,
-	}
-
-	oldRecord := rl.LeaseSpecToLeaderElectionRecord(&oldSpec)
-	newSpec := rl.LeaderElectionRecordToLeaseSpec(oldRecord)
-
-	if !equality.Semantic.DeepEqual(oldSpec, newSpec) {
-		t.Errorf("diff: %v", diff.ObjectReflectDiff(oldSpec, newSpec))
-	}
-
-	newRecord := rl.LeaseSpecToLeaderElectionRecord(&newSpec)
-
-	if !equality.Semantic.DeepEqual(oldRecord, newRecord) {
-		t.Errorf("diff: %v", diff.ObjectReflectDiff(oldRecord, newRecord))
-	}
 }
 
 func multiLockType(t *testing.T, objectType string) (primaryType, secondaryType string) {

@@ -23,6 +23,7 @@ type ddnsManager struct {
 	network Network
 }
 
+// NewDDNSManager returns a newly created Dynamic DNS manager
 func NewDDNSManager(ctx context.Context, network Network) DDNSManager {
 	return &ddnsManager{
 		ctx:     ctx,

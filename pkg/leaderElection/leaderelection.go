@@ -69,7 +69,7 @@ import (
 )
 
 const (
-	JitterFactor = 1.2
+	jitterFactor = 1.2
 )
 
 // NewLeaderElector creates a LeaderElector from a LeaderElectionConfig
@@ -77,7 +77,7 @@ func NewLeaderElector(lec LeaderElectionConfig) (*LeaderElector, error) {
 	if lec.LeaseDuration <= lec.RenewDeadline {
 		return nil, fmt.Errorf("leaseDuration must be greater than renewDeadline")
 	}
-	if lec.RenewDeadline <= time.Duration(JitterFactor*float64(lec.RetryPeriod)) {
+	if lec.RenewDeadline <= time.Duration(jitterFactor*float64(lec.RetryPeriod)) {
 		return nil, fmt.Errorf("renewDeadline must be greater than retryPeriod*JitterFactor")
 	}
 	if lec.LeaseDuration < 1 {
@@ -97,7 +97,7 @@ func NewLeaderElector(lec LeaderElectionConfig) (*LeaderElector, error) {
 	}
 
 	if lec.Lock == nil {
-		return nil, fmt.Errorf("Lock must not be nil.")
+		return nil, fmt.Errorf("Lock must not be nil")
 	}
 	le := LeaderElector{
 		config:  lec,
@@ -108,6 +108,7 @@ func NewLeaderElector(lec LeaderElectionConfig) (*LeaderElector, error) {
 	return &le, nil
 }
 
+// LeaderElectionConfig defines the configuration for the leaderElection
 type LeaderElectionConfig struct {
 	// Lock is the resource that will be used for locking
 	Lock rl.Interface
@@ -251,7 +252,7 @@ func (le *LeaderElector) acquire(ctx context.Context) bool {
 		le.metrics.leaderOn(le.config.Name)
 		klog.Infof("successfully acquired lease %v", desc)
 		cancel()
-	}, le.config.RetryPeriod, JitterFactor, true, ctx.Done())
+	}, le.config.RetryPeriod, jitterFactor, true, ctx.Done())
 	return succeeded
 }
 

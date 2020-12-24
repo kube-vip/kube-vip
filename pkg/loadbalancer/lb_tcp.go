@@ -42,7 +42,7 @@ func (lb *LBInstance) startTCP(bindAddress string) error {
 
 				err = l.SetDeadline(time.Now().Add(200 * time.Millisecond))
 				if err != nil {
-					log.Errorf("Error setting TCP deadline", err)
+					log.Errorf("Error setting TCP deadline [%v]", err)
 				}
 				fd, err := l.Accept()
 				if err != nil {
