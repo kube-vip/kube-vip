@@ -1,4 +1,3 @@
-
 SHELL := /bin/sh
 
 # The name of the executable (default is current directory name)
@@ -14,10 +13,6 @@ TARGETOS=linux
 
 # Use linker flags to provide version/build settings to the target
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
-
-# go source files, ignore vendor directory
-SRC = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
-
 DOCKERTAG ?= $(VERSION)
 REPOSITORY = plndr
 
@@ -25,7 +20,7 @@ REPOSITORY = plndr
 
 all: check install
 
-$(TARGET): $(SRC)
+$(TARGET):
 	@go build $(LDFLAGS) -o $(TARGET)
 
 build: $(TARGET)
@@ -42,7 +37,7 @@ uninstall: clean
 	@rm -f $$(which ${TARGET})
 
 fmt:
-	@gofmt -l -w $(SRC)
+	@gofmt -l -w ./...
 
 demo:
 	@cd demo
@@ -51,7 +46,6 @@ demo:
 	@cd ..
 
 ## Remote (push of images)
-
 # This build a local docker image (x86 only) for quick testing
 dockerx86:
 	@-rm ./kube-vip
@@ -64,7 +58,6 @@ docker:
 	@echo New Multi Architecture Docker image created
 
 ## Local (docker load of images)
-
 # This will build a local docker image (x86 only), use make dockerLocal for all architectures
 dockerx86Local:
 	@-rm ./kube-vip
@@ -77,14 +70,14 @@ dockerLocal:
 	@echo New Multi Architecture Docker image created
 
 simplify:
-	@gofmt -s -l -w $(SRC)
+	@gofmt -s -l -w ./...
 
 check:
-	@go mod tidy
-	@test -z "$(git status --porcelain)"
-	@test -z $(shell gofmt -l main.go | tee /dev/stderr) || echo "[WARN] Fix formatting issues with 'make fmt'"
-	@for d in $$(go list ./... | grep -v /vendor/); do golint $${d}; done
-	@go vet ${SRC}
-
+	go mod tidy
+	test -z "$(git status --porcelain)"
+	test -z $(shell gofmt -l main.go | tee /dev/stderr) || echo "[WARN] Fix formatting issues with 'make fmt'"
+	golint ./...
+	go vet ./...
+	
 run: install
 	@$(TARGET)

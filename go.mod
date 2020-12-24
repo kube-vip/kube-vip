@@ -58,16 +58,5 @@ require (
 	k8s.io/utils v0.0.0-20200912215256-4140de9c8800 // indirect
 )
 
-replace (
-	github.com/osrg/gobgp v2.0.0+incompatible => github.com/osrg/gobgp v0.0.0-20191101114856-a42a1a5f6bf0
+replace github.com/osrg/gobgp v2.0.0+incompatible => github.com/osrg/gobgp v0.0.0-20191101114856-a42a1a5f6bf0
 
-	// CI fixes
-	github.com/plunder-app/kube-vip/pkg/bgp => ./github.com/plunder-app/kube-vip/pkg/bgp
-	github.com/plunder-app/kube-vip/pkg/cluster => ./github.com/plunder-app/kube-vip/pkg/cluster
-	github.com/plunder-app/kube-vip/pkg/detector => ./github.com/plunder-app/kube-vip/pkg/detector
-	github.com/plunder-app/kube-vip/pkg/kubevip => ./github.com/plunder-app/kube-vip/pkg/kubevip
-	github.com/plunder-app/kube-vip/pkg/leaderElection => ./github.com/plunder-app/kube-vip/pkg/leaderElection
-	github.com/plunder-app/kube-vip/pkg/loadbalancer => ./github.com/plunder-app/kube-vip/pkg/loadbalancer
-	github.com/plunder-app/kube-vip/pkg/manager => ./github.com/plunder-app/kube-vip/pkg/manager
-	github.com/plunder-app/kube-vip/pkg/packet => ./github.com/plunder-app/kube-vip/pkg/packet
-)
