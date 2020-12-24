@@ -112,8 +112,8 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 
 	// use a Go context so we can tell the dns loop code when we
 	// want to step down
-	ctxDns, cancelDns := context.WithCancel(context.Background())
-	defer cancelDns()
+	ctxDNS, cancelDNS := context.WithCancel(context.Background())
+	defer cancelDNS()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -212,7 +212,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				// setup ddns first
 				// for first time, need to wait until IP is allocated from DHCP
 				if cluster.Network.IsDDNS() {
-					if err := cluster.StartDDNS(ctxDns); err != nil {
+					if err := cluster.StartDDNS(ctxDNS); err != nil {
 						log.Error(err)
 					}
 				}
@@ -221,7 +221,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				if cluster.Network.IsDNS() {
 					log.Infof("starting the DNS updater for the address %s", cluster.Network.DNSName())
 					ipUpdater := vip.NewIPUpdater(cluster.Network)
-					ipUpdater.Run(ctxDns)
+					ipUpdater.Run(ctxDNS)
 				}
 
 				err = cluster.Network.AddIP()
@@ -301,7 +301,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				log.Info("This node is becoming a follower within the cluster")
 
 				// Stop the dns context
-				cancelDns()
+				cancelDNS()
 				// Stop the Arp context if it is running
 				cancelArp()
 
