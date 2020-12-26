@@ -833,14 +833,15 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 					Env: newEnvironment,
 				},
 			},
-			HostNetwork:        true,
-			ServiceAccountName: "kube-vip",
+			HostNetwork: true,
 		},
 	}
 
-	// If this isn't inside a cluster then add the external path mount
-	if !inCluster {
-
+	if inCluster {
+		// If we're running this inCluster then the acccount name will be required
+		newManifest.Spec.ServiceAccountName = "kube-vip"
+	} else {
+		// If this isn't inside a cluster then add the external path mount
 		adminConfMount := corev1.VolumeMount{
 			Name:      "kubeconfig",
 			MountPath: "/etc/kubernetes/admin.conf",
