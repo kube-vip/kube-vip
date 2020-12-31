@@ -39,14 +39,19 @@ const (
 	//vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 
+	//vipCidr - defines the cidr that the vip will use
+	vipCidr = "vip_cidr"
+
+	/////////////////////////////////////
+	// TO DO:
+	// Determine how to tidy this mess up
+	/////////////////////////////////////
+
 	//vipAddress - defines the address that the vip will expose
 	// DEPRECATED: will be removed in a next release
 	vipAddress = "vip_address"
 
-	//vipCidr - defines the cidr that the vip will use
-	vipCidr = "vip_cidr"
-
-	//address - defines the address that would be used as a vip
+	// address - defines the address that would be used as a vip
 	// it may be an IP or a DNS name, in case of a DNS name
 	// kube-vip will try to resolve it and use the IP as a VIP
 	address = "address"
@@ -208,8 +213,15 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.VIP = env
-	} else {
-		c.Address = os.Getenv(address)
+		// } else {
+		// 	c.VIP = os.Getenv(address)
+	}
+
+	// Find address
+	env = os.Getenv(address)
+	if env != "" {
+		// TODO - parse address net.Host()
+		c.Address = env
 	}
 
 	// Find vip port
