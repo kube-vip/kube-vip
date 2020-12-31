@@ -71,7 +71,7 @@ kube-vip manifest pod \
     --services \
     --bgp \
     --packet \
-    --packetAPI xxxxxxx \
+    --packetKey xxxxxxx \
     --packetProjectID xxxxx | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
