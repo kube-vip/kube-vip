@@ -19,10 +19,10 @@ This section details creating a number of manifests for various use cases
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 #### containerd
-`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.2.3 vip /kube-vip"`
+`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.3.0 vip /kube-vip"`
 
 #### Docker
-`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.2.3"`
+`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.3.0"`
 
 
 ### ARP
@@ -38,7 +38,7 @@ kube-vip manifest pod \
     --controlplane \
     --services \
     --arp \
-    --leaderElection
+    --leaderElection | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
 ### BGP
@@ -56,7 +56,7 @@ kube-vip manifest pod \
     --controlplane \
     --services \
     --bgp \
-    --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false
+    --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
 ### BGP with Packet
@@ -72,7 +72,7 @@ kube-vip manifest pod \
     --bgp \
     --packet \
     --packetAPI xxxxxxx \ 
-    --packetProjectID xxxxx
+    --packetProjectID xxxxx | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
 ## Deploy your Kubernetes Cluster
