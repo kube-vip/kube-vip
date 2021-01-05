@@ -48,7 +48,7 @@ The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters,
 **LoadBalancing**:
 - [HAProxy](http://www.haproxy.org/)
 - [Nginx](http://nginx.com)
-- Hardware Load-balancer(functionality differs per vendor)
+- Hardware Load-balancer (functionality differs per vendor)
 
 All of these would require a separate level of configuration and in some infrastructures multiple teams in order to implement. Also when considering the software components, they may require packaging into containers or if they’re pre-packaged then security and transparency may be an issue. Finally, in edge environments we may have limited room for hardware (no HW load-balancer) or packages solutions in the correct architectures might not exist (e.g. ARM). Luckily with `kube-vip` being written in GO, it’s small(ish) and easy to build for multiple architectures, with the added security benefit of being the only thing needed in the container.
 
