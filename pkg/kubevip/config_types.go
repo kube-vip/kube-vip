@@ -21,6 +21,9 @@ type Config struct {
 	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableServices bool `yaml:"enableServices"`
 
+	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
+	Annotations string
+
 	// LeaderElection defines the settings around Kubernetes LeaderElection
 	LeaderElection
 

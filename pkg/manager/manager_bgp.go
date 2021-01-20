@@ -57,13 +57,6 @@ func (sm *Manager) startBGP() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
-	}()
-
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
 		if sm.bgpServer != nil {
@@ -97,7 +90,7 @@ func (sm *Manager) startBGP() error {
 			}
 		}()
 
-		// Check if we're also starting the services, if now we can sit and wait on the closing channel and return here
+		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
 		if !sm.config.EnableServices {
 			<-sm.signalChan
 			log.Infof("Shutting down Kube-Vip")

@@ -84,12 +84,12 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Debugf("Using outside Kubernetes configuration from file [%s]", configPath)
+		log.Debugf("Using external Kubernetes configuration from file [%s]", configPath)
 	} else {
 		// Second check in home directory for kube config
 		configPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		if fileExists(configPath) {
-			log.Debugf("Using outside Kubernetes configuration from file [%s]", configPath)
+			log.Debugf("Using external Kubernetes configuration from file [%s]", configPath)
 			cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
 			if err != nil {
 				return nil, err
@@ -109,6 +109,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 	// ensure connectivity.
 	if config.EnableControlPane {
+		log.Debugf("Modifying address of Kubernetes server to hostname")
 		// We modify the config so that we can always speak to the correct host
 		id, err := os.Hostname()
 		if err != nil {
@@ -144,6 +145,12 @@ func (sm *Manager) Start() error {
 	// Add Notification for SIGKILL (sent from Kubernetes)
 	signal.Notify(sm.signalChan, syscall.SIGKILL)
 
+	// If Annotations have been set then we will look them up
+	err := sm.parseAnnotations()
+	if err != nil {
+		return err
+	}
+
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {
 		log.Infoln("Starting Kube-vip Manager with the BGP engine")
@@ -178,4 +185,17 @@ func fileExists(filename string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func (sm *Manager) parseAnnotations() error {
+	if sm.config.Annotations == "" {
+		log.Fatalln("No Node annotations to parse")
+		return nil
+	}
+
+	err := sm.annotationsWatcher()
+	if err != nil {
+		return err
+	}
+	return nil
 }
