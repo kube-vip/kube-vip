@@ -189,7 +189,7 @@ func fileExists(filename string) bool {
 
 func (sm *Manager) parseAnnotations() error {
 	if sm.config.Annotations == "" {
-		log.Fatalln("No Node annotations to parse")
+		log.Debugf("No Node annotations to parse")
 		return nil
 	}
 

@@ -32,9 +32,13 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
-
+	go func() {
+		<-sm.signalChan
+		// Cancel the context
+		rw.Stop()
+	}()
 	ch := rw.ResultChan()
-	defer rw.Stop()
+	//defer rw.Stop()
 	log.Infoln("Beginning watching services for type: LoadBalancer in all namespaces")
 
 	for event := range ch {
@@ -103,9 +107,6 @@ func (sm *Manager) annotationsWatcher() error {
 		return err
 	}
 
-	// TEST - REMOVE
-	hostname = "k8s.bgp01"
-
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": hostname}}
 	listOptions := metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
@@ -141,9 +142,9 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
 
-			nodeAsn := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
-			if nodeAsn != "" {
-				u64, err := strconv.ParseUint(nodeAsn, 10, 32)
+			nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
+			if nodeASN != "" {
+				u64, err := strconv.ParseUint(nodeASN, 10, 32)
 				if err != nil {
 					return err
 				}
@@ -153,7 +154,7 @@ func (sm *Manager) annotationsWatcher() error {
 			}
 			srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", sm.config.Annotations)]
 			if srcIP != "" {
-				sm.config.BGPConfig.SourceIP = srcIP
+				sm.config.BGPConfig.RouterID = srcIP
 			} else {
 				continue
 			}
@@ -176,6 +177,8 @@ func (sm *Manager) annotationsWatcher() error {
 			// Add the peer configuration to the overall BGP configuration
 			log.Infoln("Annotations have been succesfully parsed")
 			sm.config.BGPConfig.Peers = append(sm.config.BGPConfig.Peers, sm.config.BGPPeerConfig)
+			log.Debugf("%s / %d / %s / %d \n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
+
 			rw.Stop()
 			break
 		case watch.Deleted:
