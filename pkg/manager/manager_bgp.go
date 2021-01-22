@@ -20,7 +20,7 @@ func (sm *Manager) startBGP() error {
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
-	if sm.config.EnablePacket {
+	if sm.config.EnableMetal {
 		if sm.config.ProviderConfig != "" {
 			key, project, err := packet.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
@@ -29,7 +29,7 @@ func (sm *Manager) startBGP() error {
 				// Set the environment variable with the key for the project
 				os.Setenv("PACKET_AUTH_TOKEN", key)
 				// Update the configuration with the project key
-				sm.config.PacketProjectID = project
+				sm.config.MetalProjectID = project
 			}
 		}
 		packetClient, err = packngo.NewClient()
@@ -47,7 +47,7 @@ func (sm *Manager) startBGP() error {
 		}
 	}
 
-	log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+	log.Info("Starting the BGP server to adverise VIP routes to BGP peers")
 	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
 	if err != nil {
 		return err
@@ -56,13 +56,6 @@ func (sm *Manager) startBGP() error {
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
-	}()
 
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
@@ -97,7 +90,7 @@ func (sm *Manager) startBGP() error {
 			}
 		}()
 
-		// Check if we're also starting the services, if now we can sit and wait on the closing channel and return here
+		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
 		if !sm.config.EnableServices {
 			<-sm.signalChan
 			log.Infof("Shutting down Kube-Vip")

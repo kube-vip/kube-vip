@@ -12,7 +12,7 @@ metadata:
   name: system:kube-vip-role
 rules:
   - apiGroups: [""]
-    resources: ["services", "services/status"]
+    resources: ["services", "services/status", "nodes"]
     verbs: ["list","get","watch", "update"]
 ---
 kind: ClusterRoleBinding

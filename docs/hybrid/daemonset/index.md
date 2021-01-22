@@ -36,10 +36,10 @@ This section only covers generating a simple *BGP* configuration, as the main fo
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 #### containerd
-`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.3.0 vip"`
+`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.3.1 vip"`
 
 #### Docker
-`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.3.0"`
+`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.3.1"`
 
 ### BGP Example
 
@@ -134,7 +134,41 @@ spec:
 - `hostNetwork: true` - This pod will need to modify interfaces (for VIPs)
 - `env {...}` - We pass the configuration into the kube-vip pod through environment variables.
 
-## K3s overview (on packet)
+## Equinix Metal Overview (using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm))
+
+The below example is for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`. 
+
+**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
+
+This is important as the CCM will apply the BGP configuration to the [node annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) making it easy for `kube-vip` to find the networking configuration it needs to expose load balancer addresses. The `--annotations packet.com` will cause kube-vip to "watch" the annotations of the worker node that it is running on, once all of the configuarion has been applied by the CCM then the `kube-vip` pod is ready to advertise BGP addresses for the service.
+
+```
+kube-vip manifest daemonset \
+  --interface $INTERFACE \
+  --services \
+  --bgp \
+  --annotations packet.com \
+  --inCluster | k apply -f -
+```
+
+### Troubleshooting
+
+If `kube-vip` has been sat waiting for a long time then you may need to investigate that the annotations have been applied correctly by doing running the `describe` on the node:
+
+```
+kubectl describe node k8s.bgp02
+...
+Annotations:        kubeadm.alpha.kubernetes.io/cri-socket: /var/run/dockershim.sock
+                    node.alpha.kubernetes.io/ttl: 0
+                    packet.com/node-asn: 65000
+                    packet.com/peer-asn: 65530
+                    packet.com/peer-ip: x.x.x.x
+                    packet.com/src-ip: x.x.x.x
+```
+
+Additionally examining the logs of the Packet CCM may reveal why the node is not yet ready.
+
+## K3s overview (on Equinix Metal)
 
 ### Step 1: TIDY (best if something was running before)
 `rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; ip addr flush dev lo; ip addr add 127.0.0.1/8 dev lo; mkdir -p /var/lib/rancher/k3s/server/manifests/`
@@ -158,7 +192,7 @@ kube-vip manifest daemonset \
   --inCluster \
   --taint \
   --bgp \
-  --packet \
+  --metal \
   --provider-config /etc/cloud-sa/cloud-sa.json | tee /var/lib/rancher/k3s/server/manifests/vip.yaml
 ```
 

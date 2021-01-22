@@ -15,7 +15,7 @@ func (b *Server) AddHost(addr string) (err error) {
 	}
 	p := b.getPath(ip)
 	if p == nil {
-		return
+		return err
 	}
 
 	_, err = b.s.AddPath(context.Background(), &api.AddPathRequest{
