@@ -21,7 +21,7 @@ func (sm *Manager) startBGP() error {
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
-	if sm.config.EnablePacket {
+	if sm.config.EnableMetal {
 		packetClient, err = packngo.NewClient()
 		if err != nil {
 			log.Error(err)

@@ -9,17 +9,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// BGPLookup will use the Packet API functions to populate the BGP information
+// BGPLookup will use the Equinix Metal API functions to populate the BGP information
 func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 	var thisDevice *packngo.Device
-	if k.PacketProjectID == "" {
-		proj := findProject(k.PacketProject, c)
+	if k.MetalProjectID == "" {
+		proj := findProject(k.MetalProject, c)
 		if proj == nil {
-			return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
+			return fmt.Errorf("Unable to find Project [%s]", k.MetalProject)
 		}
 		thisDevice = findSelf(c, proj.ID)
 	} else {
-		thisDevice = findSelf(c, k.PacketProjectID)
+		thisDevice = findSelf(c, k.MetalProjectID)
 	}
 	if thisDevice == nil {
 		return fmt.Errorf("Unable to find local/this device in packet API")

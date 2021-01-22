@@ -166,7 +166,7 @@ $ curl externalIP:32380
 ...
 ```
 
-### Expose with packet (using the `plndr-cloud-provider`)
+### Expose with Equinix Metal (using the `plndr-cloud-provider`)
 
 Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
 

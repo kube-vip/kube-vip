@@ -108,7 +108,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
 func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) error {
 	// Start a kube-vip loadbalancer service
-	log.Infoln("Starting kube-vip as a LoadBalancer Service")
+	log.Infof("Starting advertising address [%s] with kube-vip", c.VIP)
 
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
@@ -135,7 +135,6 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 		cidrVip := fmt.Sprintf("%s/%s", cluster.Network.IP(), c.VIPCIDR)
 		log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
-
 		err = bgp.AddHost(cidrVip)
 		if err != nil {
 			log.Error(err)
