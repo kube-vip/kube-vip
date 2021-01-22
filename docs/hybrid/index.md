@@ -84,16 +84,17 @@ When using `kube-vip` as a daemonset the details are available [here](./daemonse
 |              |`--bgpRouterID`|`<IP Address>`|Typically the address of the local node|
 |              |`--localAS`|default 65000|The AS we peer from|
 |              |`--bgppeers`|`<address:AS:password:mutlihop>`|Comma seperate list of BGP peers|
-|              |`--peerAddress`|`<IP Address>`|(deprecated), Address of a single BGP Peer|
-|              |`--peerAS`|default 65000|(deprecated), AS of a single BGP Peer|
-|              |`--peerPass`|""|(deprecated), Password to work with a single BGP Peer|
-|              |`--multiHop`|Enables eBGP MultiHop|(deprecated), Enable multiHop with a single BGP Peer|
-|**Packet**|||(To be deprecated)|
-|              |`--packet`|Enables Packet API calls||
-|              |`--packetKey`|Packet API token||
-|              |`--packetProject`|Packet Project (Name)||
-|              |`--packetProjectID`|Packet Project (UUID)||
-|              |`--provider-config`|Path to the Packet provider configuration|Requires the Packet CCM|
+|              |`--peerAddress`|`<IP Address>`|Address of a single BGP Peer|
+|              |`--peerAS`|default 65000|AS of a single BGP Peer|
+|              |`--peerPass`|""| Password to work with a single BGP Peer|
+|              |`--multiHop`|Enables eBGP MultiHop| Enable multiHop with a single BGP Peer|
+|              |`--annotaions`|`<provider string>`|Startup will be paused until the node annotaions contain the BGP configuration|
+|**Equinix Metal**|||(May be deprecated)|
+|              |`--metal`|Enables Equinix Metal API calls||
+|              |`--metalKey`|Equinix Metal API token||
+|              |`--metalProject`|Equinix Metal Project (Name)||
+|              |`--metalProjectID`|Equinix Metal Project (UUID)||
+|              |`--provider-config`|Path to the Equinix Metal provider configuration|Requires the Equinix Metal CCM|
 
 ## Changelog
 
@@ -121,20 +122,20 @@ The following new flags are used:
 - `--peerAS` The AS number for a BGP peer
 - `--peerAddress` The address of a BGP peer
 
-### BGP Packet support
+### Equinix Metal BGP support
 
-If the `--bgp` flag is passed alone with the Packet flags `packet, packetKey and packetProject`, then the Packet API will be used in order to determine the BGP configuration for the nodes being used in the cluster. This automates a lot of the process and makes using BGP within Packet much simpler.
+If the `--bgp` flag is passed along with the Equinix Metal flags `metal, metalKey and metalProject`, then Equinix Metal  API will be used in order to determine the BGP configuration for the nodes being used in the cluster. This automates a lot of the process and makes using BGP within Equinix Metal much simpler.
 
-## Packet Support (added in 0.1.7)
+## Equinix Metal Control Plane Support (added in 0.1.8)
 
-Recently in version `0.1.7` of `kube-vip` we added the functionality to use a Packet Elastic IP as the virtual IP fronting the Kubernetes Control plane cluster. In order to first get out virtual IP we will need to use our Packet account and create a EIP (either public (eek) or private). We will only need a single address so a `/32` will suffice, once this is created as part of a Packet project we can now apply this address to the servers that live in the same project. 
+Recently in version `0.1.7` of `kube-vip` we added the functionality to use a Equinix Metal Elastic IP as the virtual IP fronting the Kubernetes Control plane cluster. In order to first get out virtual IP we will need to use our Equinix Metal account and create a EIP (either public or private). We will only need a single address so a `/32` will suffice, once this is created as part of a Equinix Metal project we can now apply this address to the servers that live in the same project. 
 
 In this example we've logged into the UI can created a new EIP of `147.75.1.2`, and we've deployed three small server instances with Ubuntu.
 
 The following new flags are used:
 
-- `--packet` which enables the use of the Packet API
-- `--packetKey` which is our API key
-- `--packetProject`which is the name of our Packet project where our servers and EIP are located.
+- `--metal` which enables the use of the Equinix Metal API
+- `--metalKey` which is our API key
+- `--metalProject`which is the name of our Equinix Metal project where our servers and EIP are located.
 
-*Also* the `--arp` flag should NOT be used as it wont work within the Packet network.
+*Also* the `--arp` flag should NOT be used as it wont work within the Equinix Metal network.

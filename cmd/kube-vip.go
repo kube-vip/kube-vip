@@ -80,10 +80,10 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "Add raft peers to the load-balancer")
 
 	// Packet flags
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnablePacket, "packet", false, "This will use the Packet API (requires the token ENV) to update the EIP <-> VIP")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketAPIKey, "packetKey", "", "The API token for authenticating with the Packet API")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketProject, "packetProject", "", "The name of project already created within Packet")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PacketProjectID, "packetProjectID", "", "The ID of project already created within Packet")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableMetal, "metal", false, "This will use the Equinix Metal API (requires the token ENV) to update the EIP <-> VIP")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalAPIKey, "metalKey", "", "The API token for authenticating with the Equinix Metal API")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProject, "metalProject", "", "The name of project already created within Equinix Metal")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProjectID, "metalrojectID", "", "The ID of project already created within Equinix Metal")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ProviderConfig, "provider-config", "", "The path to a provider configuration")
 
 	// Load Balancer flags
@@ -209,14 +209,14 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// If Packet is enabled and there is a provider configuration passed
-		if initConfig.EnablePacket {
+		if initConfig.EnableMetal {
 			if providerConfig != "" {
 				providerAPI, providerProject, err := packet.GetPacketConfig(providerConfig)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}
-				initConfig.PacketAPIKey = providerAPI
-				initConfig.PacketProject = providerProject
+				initConfig.MetalAPIKey = providerAPI
+				initConfig.MetalProject = providerProject
 			}
 		}
 

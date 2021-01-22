@@ -13,9 +13,9 @@ import (
 func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 
 	// Find our project
-	proj := findProject(k.PacketProject, c)
+	proj := findProject(k.MetalProject, c)
 	if proj == nil {
-		return fmt.Errorf("Unable to find Project [%s]", k.PacketProject)
+		return fmt.Errorf("Unable to find Project [%s]", k.MetalProject)
 	}
 
 	ips, _, _ := c.ProjectIPs.List(proj.ID, &packngo.ListOptions{})

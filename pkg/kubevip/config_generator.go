@@ -321,21 +321,21 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.EnablePacket = b
+		c.EnableMetal = b
 	}
 
 	// Find the Packet project name
 	env = os.Getenv(vipPacketProject)
 	if env != "" {
 		// TODO - parse address net.Host()
-		c.PacketProject = env
+		c.MetalProject = env
 	}
 
 	// Find the Packet project ID
 	env = os.Getenv(vipPacketProjectID)
 	if env != "" {
 		// TODO - parse address net.Host()
-		c.PacketProjectID = env
+		c.MetalProjectID = env
 	}
 
 	// Enable the load-balancer
@@ -565,23 +565,23 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	// If Packet is enabled then add it to the manifest
-	if c.EnablePacket {
+	if c.EnableMetal {
 		packet := []corev1.EnvVar{
 			{
 				Name:  vipPacket,
-				Value: strconv.FormatBool(c.EnablePacket),
+				Value: strconv.FormatBool(c.EnableMetal),
 			},
 			{
 				Name:  vipPacketProject,
-				Value: c.PacketProject,
+				Value: c.MetalProject,
 			},
 			{
 				Name:  vipPacketProjectID,
-				Value: c.PacketProjectID,
+				Value: c.MetalProjectID,
 			},
 			{
 				Name:  "PACKET_AUTH_TOKEN",
-				Value: c.PacketAPIKey,
+				Value: c.MetalAPIKey,
 			},
 		}
 		newEnvironment = append(newEnvironment, packet...)
@@ -598,7 +598,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, bgp...)
 	}
 	// If BGP, but we're not using packet
-	if c.EnableBGP && !c.EnablePacket {
+	if c.EnableBGP && !c.EnableMetal {
 		bgpConfig := []corev1.EnvVar{
 			{
 				Name:  bgpRouterID,

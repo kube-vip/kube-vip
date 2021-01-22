@@ -20,7 +20,7 @@ func (sm *Manager) startBGP() error {
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
-	if sm.config.EnablePacket {
+	if sm.config.EnableMetal {
 		if sm.config.ProviderConfig != "" {
 			key, project, err := packet.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
@@ -29,7 +29,7 @@ func (sm *Manager) startBGP() error {
 				// Set the environment variable with the key for the project
 				os.Setenv("PACKET_AUTH_TOKEN", key)
 				// Update the configuration with the project key
-				sm.config.PacketProjectID = project
+				sm.config.MetalProjectID = project
 			}
 		}
 		packetClient, err = packngo.NewClient()

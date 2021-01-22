@@ -152,7 +152,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
-	if c.EnablePacket {
+	if c.EnableMetal {
 		packetClient, err = packngo.NewClient()
 		if err != nil {
 			log.Error(err)
@@ -229,7 +229,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 					log.Warnf("%v", err)
 				}
 
-				if c.EnablePacket {
+				if c.EnableMetal {
 					// We're not using Packet with BGP
 					if !c.EnableBGP {
 						// Attempt to attach the EIP in the standard manner
