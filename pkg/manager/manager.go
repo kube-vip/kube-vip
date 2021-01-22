@@ -145,14 +145,15 @@ func (sm *Manager) Start() error {
 	// Add Notification for SIGKILL (sent from Kubernetes)
 	signal.Notify(sm.signalChan, syscall.SIGKILL)
 
-	// If Annotations have been set then we will look them up
-	err := sm.parseAnnotations()
-	if err != nil {
-		return err
-	}
-
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {
+
+		// If Annotations have been set then we will look them up
+		err := sm.parseAnnotations()
+		if err != nil {
+			return err
+		}
+
 		log.Infoln("Starting Kube-vip Manager with the BGP engine")
 		log.Infof("Namespace [%s], Hybrid mode [%t]", sm.config.Namespace, sm.config.EnableControlPane && sm.config.EnableServices)
 		return sm.startBGP()
