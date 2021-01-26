@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -168,15 +169,20 @@ func (sm *Manager) annotationsWatcher() error {
 			} else {
 				continue
 			}
-			peerIP := node.Annotations[fmt.Sprintf("%s/peer-ip", sm.config.Annotations)]
-			if peerIP != "" {
-				sm.config.BGPPeerConfig.Address = peerIP
-			} else {
-				continue
+
+			peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", sm.config.Annotations)]
+
+			peerIPs := strings.Split(peerIPString, ",")
+
+			for _, peerIP := range peerIPs {
+				ipAddr := strings.TrimSpace(peerIP)
+
+				if ipAddr != "" {
+					sm.config.BGPPeerConfig.Address = ipAddr
+					sm.config.BGPConfig.Peers = append(sm.config.BGPConfig.Peers, sm.config.BGPPeerConfig)
+				}
 			}
-			// Add the peer configuration to the overall BGP configuration
-			log.Infoln("Annotations have been succesfully parsed")
-			sm.config.BGPConfig.Peers = append(sm.config.BGPConfig.Peers, sm.config.BGPPeerConfig)
+
 			log.Debugf("%s / %d / %s / %d \n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
 
 			rw.Stop()
