@@ -140,14 +140,14 @@ The below example is for running `type:LoadBalancer` services on worker nodes on
 
 **NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
 
-This is important as the CCM will apply the BGP configuration to the [node annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) making it easy for `kube-vip` to find the networking configuration it needs to expose load balancer addresses. The `--annotations packet.com` will cause kube-vip to "watch" the annotations of the worker node that it is running on, once all of the configuarion has been applied by the CCM then the `kube-vip` pod is ready to advertise BGP addresses for the service.
+This is important as the CCM will apply the BGP configuration to the [node annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) making it easy for `kube-vip` to find the networking configuration it needs to expose load balancer addresses. The `--annotations metal.equinix.com` will cause kube-vip to "watch" the annotations of the worker node that it is running on, once all of the configuarion has been applied by the CCM then the `kube-vip` pod is ready to advertise BGP addresses for the service.
 
 ```
 kube-vip manifest daemonset \
   --interface $INTERFACE \
   --services \
   --bgp \
-  --annotations packet.com \
+  --annotations metal.equinix.com \
   --inCluster | k apply -f -
 ```
 
@@ -160,10 +160,18 @@ kubectl describe node k8s.bgp02
 ...
 Annotations:        kubeadm.alpha.kubernetes.io/cri-socket: /var/run/dockershim.sock
                     node.alpha.kubernetes.io/ttl: 0
-                    packet.com/node-asn: 65000
-                    packet.com/peer-asn: 65530
-                    packet.com/peer-ip: x.x.x.x
-                    packet.com/src-ip: x.x.x.x
+                    metal.equinix.com/node-asn: 65000
+                    metal.equinix.com/peer-asn: 65530
+                    metal.equinix.com/peer-ip: x.x.x.x
+                    metal.equinix.com/src-ip: x.x.x.x
+```
+
+If there are errors regarding `169.254.255.1` or `169.254.255.2` in the `kube-vip` logs then the routes to the ToR switches that provide BGP peering may by missing from the nodes. They can be replaced with the below command:
+
+```
+GATEWAY_IP=$(curl https://metadata.platformequinix.com/metadata | jq -r ".network.addresses[] | select(.public == false) | .gateway")
+ip route add 169.254.255.1 via $GATEWAY_IP
+ip route add 169.254.255.2 via $GATEWAY_IP
 ```
 
 Additionally examining the logs of the Packet CCM may reveal why the node is not yet ready.
