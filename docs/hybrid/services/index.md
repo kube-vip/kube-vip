@@ -180,3 +180,35 @@ Either through the CLI or through the UI, create a public IPv4 EIP address.. and
 
 kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
 ```
+
+## Equinix Metal Overview (using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm))
+
+Below are two examples for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`. 
+
+**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
+
+### Using Annotations
+
+This is important as the CCM will apply the BGP configuration to the [node annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) making it easy for `kube-vip` to find the networking configuration it needs to expose load balancer addresses. The `--annotations metal.equinix.com` will cause kube-vip to "watch" the annotations of the worker node that it is running on, once all of the configuarion has been applied by the CCM then the `kube-vip` pod is ready to advertise BGP addresses for the service.
+
+```
+kube-vip manifest daemonset \
+  --interface $INTERFACE \
+  --services \
+  --bgp \
+  --annotations metal.equinix.com \
+  --inCluster | k apply -f -
+```
+
+### Using the CCM secret to 
+
+Alternatively it is possible to create a daemonset that will use the existing CCM secret to do an API lookup, this will allow for discovering the networking configuration needed to advertise loadbalancer addresses through BGP.
+
+```
+kube-vip manifest daemonset --interface $INTERFACE \
+--services \
+--inCluster \
+--bgp \
+--metal \
+--provider-config /etc/cloud-sa/cloud-sa.json | kubectl apply -f -
+```
