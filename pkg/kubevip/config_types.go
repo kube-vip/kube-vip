@@ -88,6 +88,9 @@ type Config struct {
 
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
+
+	// The hostport used to expose Prometheus metrics over an HTTP server
+	PrometheusHTTPServer string `yaml:"prometheusHTTPServer,omitempty"`
 }
 
 // LeaderElection defines all of the settings for Kubernetes LeaderElection

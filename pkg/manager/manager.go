@@ -14,7 +14,9 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,6 +44,8 @@ type Manager struct {
 
 	// This channel is used to signal a shutdown
 	signalChan chan os.Signal
+
+	countEndpointWatchEvent *prometheus.CounterVec
 }
 
 type dhcpService struct {
@@ -126,6 +130,17 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		clientSet: clientset,
 		configMap: configMap,
 		config:    config,
+		countEndpointWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "kube-vip",
+			Subsystem: "manager",
+			Name:      "all_services_events",
+			Help:      "Count all events fired by the service watcher categorised by event type",
+		}, []string{
+			string(watch.Added),
+			string(watch.Modified),
+			string(watch.Deleted),
+			string(watch.Modified),
+			string(watch.Error)}),
 	}, nil
 }
 

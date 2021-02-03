@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/manager"
 	"github.com/plunder-app/kube-vip/pkg/packet"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -116,6 +121,9 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
+	// Prometheus HTTP Server
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "promethuesHTTPServer", ":2112", "Host and port used to expose Promethues metrics via an HTTP server")
+
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
 	kubeVipCmd.AddCommand(kubeVipManager)
@@ -196,6 +204,10 @@ var kubeVipManager = &cobra.Command{
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
+		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
+			Addr: initConfig.PrometheusHTTPServer,
+		})
+
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
@@ -226,10 +238,54 @@ var kubeVipManager = &cobra.Command{
 			log.Fatalf("%v", err)
 		}
 
+		prometheus.MustRegister(mgr.PromethesCollector()...)
+
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
 	},
+}
+
+type PrometheusHTTPServerConfig struct {
+	// Addr sets the http server address used to expose the metric endpoint
+	Addr string
+}
+
+func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerConfig) {
+	var err error
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	srv := &http.Server{
+		Addr:    config.Addr,
+		Handler: mux,
+	}
+
+	go func() {
+		if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen:%+s\n", err)
+		}
+	}()
+
+	log.Printf("server started")
+
+	<-ctx.Done()
+
+	log.Printf("server stopped")
+
+	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	if err = srv.Shutdown(ctxShutDown); err != nil {
+		log.Fatalf("server Shutdown Failed:%+s", err)
+	}
+
+	if err == http.ErrServerClosed {
+		err = nil
+	}
+
 }
