@@ -770,7 +770,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name: "cloud-sa-volume",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName: "packet-cloud-config",
+					SecretName: "metal-cloud-config",
 				},
 			},
 		}
