@@ -45,7 +45,9 @@ type Manager struct {
 	// This channel is used to signal a shutdown
 	signalChan chan os.Signal
 
-	countEndpointWatchEvent *prometheus.CounterVec
+	// This is a promethues counter used to count the number of events received
+	// from the service watcher
+	countServiceWatchEvent *prometheus.CounterVec
 }
 
 type dhcpService struct {
@@ -130,8 +132,8 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		clientSet: clientset,
 		configMap: configMap,
 		config:    config,
-		countEndpointWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "kube-vip",
+		countServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "kube_vip",
 			Subsystem: "manager",
 			Name:      "all_services_events",
 			Help:      "Count all events fired by the service watcher categorised by event type",
@@ -139,7 +141,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			string(watch.Added),
 			string(watch.Modified),
 			string(watch.Deleted),
-			string(watch.Modified),
+			string(watch.Bookmark),
 			string(watch.Error)}),
 	}, nil
 }
