@@ -43,7 +43,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 	log.Infoln("Beginning watching services for type: LoadBalancer in all namespaces")
 
 	for event := range ch {
-		sm.countEndpointWatchEvent.WithLabelValues(string(event.Type)).Add(1)
+		sm.countServiceWatchEvent.WithLabelValues(string(event.Type)).Add(1)
 
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
