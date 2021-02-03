@@ -200,7 +200,7 @@ kube-vip manifest daemonset \
   --inCluster | k apply -f -
 ```
 
-### Using the CCM secret to 
+### Using the existing CCM secret 
 
 Alternatively it is possible to create a daemonset that will use the existing CCM secret to do an API lookup, this will allow for discovering the networking configuration needed to advertise loadbalancer addresses through BGP.
 
