@@ -16,7 +16,6 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -137,12 +136,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			Subsystem: "manager",
 			Name:      "all_services_events",
 			Help:      "Count all events fired by the service watcher categorised by event type",
-		}, []string{
-			string(watch.Added),
-			string(watch.Modified),
-			string(watch.Deleted),
-			string(watch.Bookmark),
-			string(watch.Error)}),
+		}, []string{"type"}),
 	}, nil
 }
 
