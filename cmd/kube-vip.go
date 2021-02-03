@@ -10,6 +10,7 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	"github.com/plunder-app/kube-vip/pkg/manager"
 	"github.com/plunder-app/kube-vip/pkg/packet"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -236,6 +237,8 @@ var kubeVipManager = &cobra.Command{
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+
+		prometheus.MustRegister(mgr.PromethesCollector()...)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
