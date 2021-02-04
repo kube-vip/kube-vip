@@ -56,6 +56,8 @@ kube-vip manifest pod \
     --controlplane \
     --services \
     --bgp \
+    --localAS 65000 \
+    --bgpRouterID 192.168.0.2 \
     --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
