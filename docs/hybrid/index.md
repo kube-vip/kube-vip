@@ -62,7 +62,7 @@ When using `kube-vip` as a daemonset the details are available [here](./daemonse
 |--------------|------|-------|-------|
 |**Mode**          ||||
 |              |`--controlPlane`|Enables `kube-vip` control-plane functionality||
-|              |`--servcies`|Enables `kube-vip` to watch services of type:LoadBalancer||
+|              |`--services`|Enables `kube-vip` to watch services of type:LoadBalancer||
 |**Vip Config**   ||||
 |              |`--arp`|Enables ARP brodcasts from Leader||
 |              |`--bgp`|Enables BGP peering from `kube-vip`||
