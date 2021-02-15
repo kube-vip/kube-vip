@@ -27,7 +27,7 @@ spec:
         - name: vip_cidr
           value: "32"
         - name: cp_enable
-          value: "true"
+          value: "false"
         - name: cp_namespace
           value: kube-system
         - name: svc_enable
