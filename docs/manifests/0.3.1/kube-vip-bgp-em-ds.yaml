@@ -21,7 +21,7 @@ spec:
         - name: vip_arp
           value: "false"
         - name: vip_interface
-          value: eth0
+          value: lo
         - name: port
           value: "6443"
         - name: vip_cidr
