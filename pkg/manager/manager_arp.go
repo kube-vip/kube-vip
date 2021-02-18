@@ -133,6 +133,8 @@ func (sm *Manager) startARP() error {
 				for x := range sm.serviceInstances {
 					sm.serviceInstances[x].cluster.Stop()
 				}
+
+				log.Fatal("lost leadership, restarting kube-vip")
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected
@@ -144,9 +146,6 @@ func (sm *Manager) startARP() error {
 			},
 		},
 	})
-
-	//<-signalChan
-	log.Infof("Shutting down Kube-Vip")
 
 	return nil
 }
