@@ -323,6 +323,8 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				if err != nil {
 					log.Warnf("%v", err)
 				}
+
+				log.Fatal("lost leadership, restarting kube-vip")
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected
@@ -334,12 +336,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 			},
 		},
 	})
-
-	//<-signalChan
-	log.Infof("Shutting down Kube-Vip Leader Election cluster")
-
-	// Force a removal of the VIP (ignore the error if we don't have it)
-	cluster.Network.DeleteIP()
 
 	return nil
 }
