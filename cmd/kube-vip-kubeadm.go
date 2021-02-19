@@ -143,7 +143,7 @@ func autoGenLocalPeer() (*kubevip.RaftPeer, error) {
 	for _, address := range addrs {
 		// check the address type and if it is not a loopback the display it
 		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
+			if ipnet.IP.To16() != nil {
 				a = ipnet.IP.String()
 				break
 			}

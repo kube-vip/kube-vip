@@ -37,6 +37,14 @@ type network struct {
 	isDDNS  bool
 }
 
+func netlinkParse(addr string) (*netlink.Addr, error) {
+	mask, err := GetFullMask(addr)
+	if err != nil {
+		return nil, err
+	}
+	return netlink.ParseAddr(addr + mask)
+}
+
 // NewConfig will attempt to provide an interface to the kernel network configuration
 func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	result := &network{}
@@ -48,7 +56,7 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	result.link = link
 
 	if IsIP(address) {
-		result.address, err = netlink.ParseAddr(address + "/32")
+		result.address, err = netlinkParse(address)
 		if err != nil {
 			return result, errors.Wrapf(err, "could not parse address '%s'", address)
 		}
@@ -75,7 +83,7 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	}
 
 	// we're able to resolve store this as the initial IP
-	if result.address, err = netlink.ParseAddr(ip + "/32"); err != nil {
+	if result.address, err = netlinkParse(ip); err != nil {
 		return result, err
 	}
 	// set ValidLft so that the VIP expires if the DNS entry is updated, otherwise it'll be refreshed by the DNS prober
@@ -140,7 +148,7 @@ func (configurator *network) SetIP(ip string) error {
 	configurator.mu.Lock()
 	defer configurator.mu.Unlock()
 
-	addr, err := netlink.ParseAddr(ip + "/32")
+	addr, err := netlinkParse(ip)
 	if err != nil {
 		return err
 	}

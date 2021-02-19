@@ -28,11 +28,13 @@ require (
 	github.com/kamhlos/upnp v0.0.0-20171112074648-2713e75d9aef
 	github.com/magiconair/properties v1.8.3 // indirect
 	github.com/mattn/go-colorable v0.1.7 // indirect
+	github.com/mdlayher/ndp v0.0.0-20200602162440-17ab9e3e5567
 	github.com/mdlayher/raw v0.0.0-20191009151244-50f2db8cc065 // indirect
 	github.com/mitchellh/mapstructure v1.3.3 // indirect
+	github.com/onsi/ginkgo v1.11.0
+	github.com/onsi/gomega v1.7.0
 	github.com/osrg/gobgp v2.0.0+incompatible
 	github.com/packethost/packngo v0.5.1
-	github.com/pelletier/go-toml v1.8.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.4.0
 	github.com/sirupsen/logrus v1.6.0
@@ -55,8 +57,9 @@ require (
 	k8s.io/apimachinery v0.19.2
 	k8s.io/client-go v0.19.0
 	k8s.io/klog v1.0.0
-	k8s.io/klog/v2 v2.3.0 // indirect
+	k8s.io/klog/v2 v2.3.0
 	k8s.io/utils v0.0.0-20200912215256-4140de9c8800 // indirect
+	sigs.k8s.io/kind v0.10.0
 )
 
 replace github.com/osrg/gobgp v2.0.0+incompatible => github.com/osrg/gobgp v0.0.0-20191101114856-a42a1a5f6bf0

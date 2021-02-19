@@ -1,0 +1,41 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-vip
+  namespace: kube-system
+spec:
+  containers:
+  - name: kube-vip
+    args:
+    - start
+    env:
+    - name: vip_arp
+      value: "true"
+    - name: vip_interface
+      value: eth0
+    - name: vip_leaderelection
+      value: "true"
+    - name: address
+      value: "{{ .ControlPlaneVIP }}"
+    - name: vip_leaseduration
+      value: "5"
+    - name: vip_renewdeadline
+      value: "3"
+    - name: vip_retryperiod
+      value: "1"
+    image: "{{ .ImagePath }}"
+    imagePullPolicy: Never
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - SYS_TIME
+    volumeMounts:
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostNetwork: true
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/admin.conf
+    name: kubeconfig
