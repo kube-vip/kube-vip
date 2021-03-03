@@ -48,7 +48,7 @@ func (sm *Manager) startARP() error {
 		}
 
 		go func() {
-			cpCluster.StartLeaderCluster(sm.config, clusterManager, nil)
+			err := cpCluster.StartLeaderCluster(sm.config, clusterManager, nil)
 			if err != nil {
 				log.Errorf("Control Pane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
