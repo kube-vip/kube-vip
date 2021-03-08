@@ -1,0 +1,6 @@
+# Home lab (for testing)
+NODE01=k8s01.fnnrn.me
+NODE02=k8s02.fnnrn.me
+NODE03=k8s03.fnnrn.me
+NODE04=k8s04.fnnrn.me
+NODE05=k8s05.fnnrn.me

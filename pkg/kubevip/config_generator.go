@@ -821,8 +821,9 @@ func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inClust
 	if taint {
 		newManifest.Spec.Template.Spec.Tolerations = []corev1.Toleration{
 			{
-				Key:    "node-role.kubernetes.io/master",
-				Effect: corev1.TaintEffectNoSchedule,
+				Key:      "node-role.kubernetes.io/master",
+				Effect:   corev1.TaintEffectNoSchedule,
+				Operator: corev1.TolerationOpExists,
 			},
 		}
 		newManifest.Spec.Template.Spec.NodeSelector = map[string]string{
