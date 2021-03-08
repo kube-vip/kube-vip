@@ -16,7 +16,7 @@ rules:
     verbs: ["*"]
   - apiGroups: [""]
     resources: ["nodes", "services"]
-    verbs: ["list","get","watch"]
+    verbs: ["list","get","watch","update"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -54,7 +54,8 @@ spec:
       containers:
       - command:
         - /plndr-cloud-provider
-        image: plndr/plndr-cloud-provider:0.1.4
+        - --leader-elect-resource-name=plndr-cloud-controller
+        image: plndr/plndr-cloud-provider:0.1.5
         name: plndr-cloud-provider
         imagePullPolicy: Always
         resources: {}

@@ -31,6 +31,12 @@ docker run --network host --rm plndr/kube-vip:action manifest pod --interface et
 echo "==> ARP w/controlplane (using --address)"
 docker run --network host --rm plndr/kube-vip:action manifest pod --interface enx001e063262b1 --address k8s-api-vip.lan --arp --leaderElection --controlplane
 
+echo "==> ARP w/controlplane (using --address)"
+docker run --network host --rm plndr/kube-vip:action manifest daemonset  --interface eth0 --vip 192.168.0.1   --controlplane \
+    --services \
+    --inCluster \
+    --taint 
+
 trap : 0
 
 echo >&2 '
