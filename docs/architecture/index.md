@@ -5,7 +5,7 @@ This section covers two parts of the architecture:
 1. The technical capabilities of `kube-vip`
 2. The components to build a load-balancing service within [Kubernetes](https://kubernetes.io)
 
-The `kube-vip` project is designed to provide both a highly available networking endpoint and load-balancing functionality for underlying networking services. The project was originally designed for the purpose of providing a resilient control-plane for Kubernetes, it has since expended to provide the same functionality for applications within a Kubernetes cluster.
+The `kube-vip` project is designed to provide both a highly available networking endpoint and load-balancing functionality for underlying networking services. The project was originally designed for the purpose of providing a resilient control-plane for Kubernetes, it has since expanded to provide the same functionality for applications within a Kubernetes cluster.
 
 Additionally `kube-vip` is designed to be lightweight and **multi-architecture**, all of the components are built for Linux but are also built for both `x86` and `armv7`,`armhvf`. This means that `kube-vip` will run fine in **bare-metal**, **virtual** and **edge** (raspberry pi or small arm SoC devices). 
 
