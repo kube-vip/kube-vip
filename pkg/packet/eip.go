@@ -2,7 +2,7 @@ package packet
 
 import (
 	"fmt"
-	"strings"
+	"path"
 
 	"github.com/packethost/packngo"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
@@ -26,7 +26,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 			log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
 			// If attachements already exist then remove them
 			if len(ip.Assignments) != 0 {
-				hrefID := strings.Replace(ip.Assignments[0].Href, "/ips/", "", -1)
+				hrefID := path.Base(ip.Assignments[0].Href)
 				c.DeviceIPs.Unassign(hrefID)
 			}
 		}
