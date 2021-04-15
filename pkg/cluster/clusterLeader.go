@@ -279,16 +279,38 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				if c.EnableARP == true {
 					ctxArp, cancelArp = context.WithCancel(context.Background())
 
+					ipString := cluster.Network.IP()
+
+					var ndp *vip.NdpResponder
+					if vip.IsIPv6(ipString) {
+						ndp, err = vip.NewNDPResponder(c.Interface)
+						if err != nil {
+							log.Fatalf("failed to create new NDP Responder")
+						}
+					}
+
 					go func(ctx context.Context) {
+						if ndp != nil {
+							defer ndp.Close()
+						}
+
 						for {
 							select {
 							case <-ctx.Done(): // if cancel() execute
 								return
 							default:
-								// Gratuitous ARP, will broadcast to new MAC <-> IP
-								err = vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
-								if err != nil {
-									log.Warnf("%v", err)
+								if vip.IsIPv4(ipString) {
+									// Gratuitous ARP, will broadcast to new MAC <-> IP
+									err := vip.ARPSendGratuitous(ipString, c.Interface)
+									if err != nil {
+										log.Warnf("%v", err)
+									}
+								} else {
+									// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
+									err := ndp.SendGratuitous(ipString)
+									if err != nil {
+										log.Warnf("%v", err)
+									}
 								}
 							}
 							time.Sleep(3 * time.Second)

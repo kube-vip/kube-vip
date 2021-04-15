@@ -16,7 +16,7 @@ LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extld
 DOCKERTAG ?= $(VERSION)
 REPOSITORY = plndr
 
-.PHONY: all build clean install uninstall fmt simplify check run
+.PHONY: all build clean install uninstall fmt simplify check run e2e-tests
 
 all: check install
 
@@ -97,4 +97,5 @@ manifests:
 	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --bgp --leaderElection --controlplane --services --inCluster --provider-config /etc/cloud-sa/cloud-sa.json > ./docs/manifests/$(VERSION)/kube-vip-bgp-em-ds.yaml
 	@-rm ./kube-vip
 
-
+e2e-tests:
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/ginkgo -v -p testing/e2e

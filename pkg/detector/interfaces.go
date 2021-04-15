@@ -22,7 +22,7 @@ func FindIPAddress(addrName string) (string, string, error) {
 		}
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
+				if ipnet.IP.To16() != nil {
 					address = ipnet.IP.String()
 					// If we're not searching for a specific adapter return the first one
 					if addrName == "" {
