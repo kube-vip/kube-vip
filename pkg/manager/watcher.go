@@ -139,12 +139,12 @@ func (sm *Manager) annotationsWatcher() error {
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			// log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
+				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
 
+			// BGP Local configuration
 			nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
 			if nodeASN != "" {
 				u64, err := strconv.ParseUint(nodeASN, 10, 32)
@@ -155,9 +155,19 @@ func (sm *Manager) annotationsWatcher() error {
 			} else {
 				continue
 			}
+
 			srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", sm.config.Annotations)]
 			if srcIP != "" {
 				sm.config.BGPConfig.RouterID = srcIP
+			} else {
+				continue
+			}
+
+			// Peer configuration
+
+			bgpPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
+			if bgpPassword != "" {
+				sm.config.BGPPeerConfig.Password = bgpPassword
 			} else {
 				continue
 			}
@@ -192,7 +202,7 @@ func (sm *Manager) annotationsWatcher() error {
 		case watch.Deleted:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
+				return fmt.Errorf("Unable to parse Kubernetes Node from Kubernetes watcher")
 			}
 
 			log.Infof("Node [%s] has been deleted", node.Name)
@@ -200,7 +210,7 @@ func (sm *Manager) annotationsWatcher() error {
 		case watch.Bookmark:
 			// Un-used
 		case watch.Error:
-			log.Error("Error attempting to watch Kubernetes services")
+			log.Error("Error attempting to watch Kubernetes Nodes")
 
 			// This round trip allows us to handle unstructured status
 			errObject := apierrors.FromObject(event.Object)
