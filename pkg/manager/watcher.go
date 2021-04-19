@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -165,9 +166,14 @@ func (sm *Manager) annotationsWatcher() error {
 
 			// Peer configuration
 
-			bgpPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
-			if bgpPassword != "" {
-				sm.config.BGPPeerConfig.Password = bgpPassword
+			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
+			if base64BGPPassword != "" {
+				// Decode base64 encoded string
+				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
+				if err != nil {
+					return err
+				}
+				sm.config.BGPPeerConfig.Password = string(decodedPassword)
 			} else {
 				continue
 			}
