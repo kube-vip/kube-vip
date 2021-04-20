@@ -20,6 +20,7 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, over time it has evolved to incorporate that same functionality into Kubernetes service type [load-balancers](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).
 
+- VIP addresses can be both IPv4 or IPv6
 - Control Plane with ARP (Layer 2) or BGP (Layer 3)
 - Control Plane using either [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection) or [raft](https://en.wikipedia.org/wiki/Raft_(computer_science))
 - Control Plane HA with kubeadm (static Pods)
