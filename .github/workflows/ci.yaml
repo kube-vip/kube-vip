@@ -23,3 +23,5 @@ jobs:
       run: make dockerx86Action
     - name: Manifest generate
       run: ./testing/testing.sh
+    - name: e2e tests
+      run: DOCKERTAG=action make e2e-tests
