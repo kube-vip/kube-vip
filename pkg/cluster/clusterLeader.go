@@ -295,12 +295,23 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 						}
 
 						for {
+
+							// Ensure the address exists on the interface before attempting to ARP
+							set, err := cluster.Network.IsSet()
+							if err != nil {
+								log.Warnf("%v", err)
+							}
+							if !set {
+								err = cluster.Network.AddIP()
+								log.Warnf("%v", err)
+							}
+
 							select {
 							case <-ctx.Done(): // if cancel() execute
 								return
 							default:
 								if vip.IsIPv4(ipString) {
-									// Gratuitous ARP, will broadcast to new MAC <-> IP
+									// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 									err := vip.ARPSendGratuitous(ipString, c.Interface)
 									if err != nil {
 										log.Warnf("%v", err)
