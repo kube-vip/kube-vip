@@ -1,7 +1,9 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -110,6 +112,11 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	// Start a kube-vip loadbalancer service
 	log.Infof("Starting advertising address [%s] with kube-vip", c.VIP)
 
+	// use a Go context so we can tell the arp loop code when we
+	// want to step down
+	ctxArp, cancelArp := context.WithCancel(context.Background())
+	defer cancelArp()
+
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
@@ -124,11 +131,55 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	}
 
 	if c.EnableARP == true {
-		// Gratuitous ARP, will broadcast to new MAC <-> IP
-		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
-		if err != nil {
-			log.Warnf("%v", err)
+		ctxArp, cancelArp = context.WithCancel(context.Background())
+
+		ipString := cluster.Network.IP()
+
+		var ndp *vip.NdpResponder
+		if vip.IsIPv6(ipString) {
+			ndp, err = vip.NewNDPResponder(c.Interface)
+			if err != nil {
+				log.Fatalf("failed to create new NDP Responder")
+			}
 		}
+		go func(ctx context.Context) {
+			if ndp != nil {
+				defer ndp.Close()
+			}
+
+			for {
+
+				// Ensure the address exists on the interface before attempting to ARP
+				set, err := cluster.Network.IsSet()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
+				if !set {
+					err = cluster.Network.AddIP()
+					log.Warnf("%v", err)
+				}
+
+				select {
+				case <-ctx.Done(): // if cancel() execute
+					return
+				default:
+					if vip.IsIPv4(ipString) {
+						// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
+						err := vip.ARPSendGratuitous(ipString, c.Interface)
+						if err != nil {
+							log.Warnf("%v", err)
+						}
+					} else {
+						// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
+						err := ndp.SendGratuitous(ipString)
+						if err != nil {
+							log.Warnf("%v", err)
+						}
+					}
+				}
+				time.Sleep(3 * time.Second)
+			}
+		}(ctxArp)
 	}
 
 	if c.EnableBGP {
@@ -151,6 +202,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				if err != nil {
 					log.Warnf("%v", err)
 				}
+				// Stop the Arp context if it is running
+				cancelArp()
+
 				close(cluster.completed)
 				return
 			}
