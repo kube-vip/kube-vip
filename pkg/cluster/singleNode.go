@@ -155,8 +155,11 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 					log.Warnf("%v", err)
 				}
 				if !set {
+					log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, c.Interface)
 					err = cluster.Network.AddIP()
-					log.Warnf("%v", err)
+					if err != nil {
+						log.Warnf("%v", err)
+					}
 				}
 
 				select {
