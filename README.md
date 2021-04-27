@@ -14,7 +14,7 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 - Virtualisation
 - Pretty much anywhere else :)
 
-**NOTE** All documentation of both usage and architecture are now available at [https://kube-vip.io](https://kube-vip.io)
+**NOTE:** All documentation of both usage and architecture are now available at [https://kube-vip.io](https://kube-vip.io).
 
 ## Features
 
@@ -42,7 +42,7 @@ The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters,
 
 **VIP**:
 - [Keepalived](https://www.keepalived.org/)
-- [Ucarp](https://ucarp.wordpress.com/)
+- [UCARP](https://ucarp.wordpress.com/)
 - Hardware Load-balancer (functionality differs per vendor)
 
 
@@ -55,4 +55,4 @@ All of these would require a separate level of configuration and in some infrast
 
 ## Troubleshooting and Feedback
 
-Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/)
+Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
