@@ -9,11 +9,11 @@ import (
 	"strings"
 	"syscall"
 
-	dhclient "github.com/digineo/go-dhclient"
 	"github.com/kamhlos/upnp"
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -49,12 +49,6 @@ type Manager struct {
 	countServiceWatchEvent *prometheus.CounterVec
 }
 
-type dhcpService struct {
-	// dhcpClient (used DHCP for the vip)
-	dhcpClient    *dhclient.Client
-	dhcpInterface string
-}
-
 // Instance defines an instance of everything needed to manage a vip
 type Instance struct {
 	// Virtual IP / Load Balancer configuration
@@ -63,8 +57,10 @@ type Instance struct {
 	// cluster instance
 	cluster cluster.Cluster
 
-	// Custom settings
-	dhcp *dhcpService
+	// Service uses DHCP
+	isDHCP        bool
+	dhcpInterface string
+	lease         *vip.DHCPLease
 
 	// Kubernetes service mapping
 	Vip  string

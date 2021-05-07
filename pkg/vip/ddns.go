@@ -5,7 +5,8 @@ import (
 	"net"
 	"time"
 
-	dhclient "github.com/digineo/go-dhclient"
+	"github.com/d2g/dhcp4"
+	"github.com/digineo/go-dhclient"
 	"github.com/google/gopacket/layers"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -42,7 +43,8 @@ func (ddns *ddnsManager) Start() (string, error) {
 
 	// channel to wait for IP
 	ipCh := make(chan string)
-
+	//var options dhcp4.Option
+	AcquireLease(ddns.network.DDNSHostName(), interfaceName, dhcp4.Options{})
 	client := dhclient.Client{
 		// send host name, not current os.Hostname, but configured name from user
 		Hostname: ddns.network.DDNSHostName(),
@@ -51,6 +53,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 			ipCh <- lease.FixedAddress.String()
 		},
 	}
+	//options[DHCPOptHostname] = []byte(client.Hostname)
 
 	// add default request param
 	for _, param := range dhclient.DefaultParamsRequestList {
