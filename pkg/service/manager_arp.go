@@ -112,7 +112,7 @@ func (sm *Manager) startARP() error {
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				sm.watcher(ctx, ns)
+				sm.servicesWatcher(ctx)
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here

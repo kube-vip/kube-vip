@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -25,6 +26,7 @@ import (
 // This file handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (sm *Manager) servicesWatcher(ctx context.Context) error {
 	// Watch function
+	var wg sync.WaitGroup
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
@@ -59,10 +61,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
 			} else {
 				log.Infof("Service [%s] has been addded/modified, it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
-				err = sm.syncServices(svc)
+				wg.Add(1)
+				err = sm.syncServices(svc, &wg)
 				if err != nil {
 					log.Error(err)
 				}
+				wg.Wait()
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)

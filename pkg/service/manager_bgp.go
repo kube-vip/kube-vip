@@ -14,13 +14,10 @@ import (
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startBGP() error {
-	ns, err := returnNameSpace()
-	if err != nil {
-		return err
-	}
 
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
+	var err error
 	if sm.config.EnableMetal {
 		packetClient, err = packngo.NewClient()
 		if err != nil {
@@ -74,7 +71,7 @@ func (sm *Manager) startBGP() error {
 		cancel()
 	}()
 
-	sm.watcher(ctx, ns)
+	sm.servicesWatcher(ctx)
 
 	log.Infof("Shutting down Kube-Vip")
 

@@ -238,7 +238,7 @@ var kubeVipManager = &cobra.Command{
 			log.Fatalf("%v", err)
 		}
 
-		prometheus.MustRegister(mgr.PromethesCollector()...)
+		prometheus.MustRegister(mgr.PrometheusCollector()...)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
