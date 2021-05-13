@@ -120,7 +120,6 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
-	
 	err := cluster.Network.DeleteIP()
 	if err != nil {
 		log.Warnf("Attempted to clean existing VIP => %v", err)
@@ -200,7 +199,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			select {
 			case <-cluster.stop:
 				log.Info("[LOADBALANCER] Stopping load balancers")
-				log.Infof("[VIP] Releasing the Virtual IP [%s]", c.VIPCIDR)
+				log.Infof("[VIP] Releasing the Virtual IP [%s]", c.VIP)
 				err = cluster.Network.DeleteIP()
 				if err != nil {
 					log.Warnf("%v", err)

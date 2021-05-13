@@ -13,6 +13,7 @@ import (
 	"github.com/plunder-app/kube-vip/pkg/bgp"
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 
 	"k8s.io/client-go/kubernetes"
@@ -61,6 +62,7 @@ type Instance struct {
 	// Service uses DHCP
 	isDHCP        bool
 	dhcpInterface string
+	dhcpClient    *vip.DHCPClient
 
 	// Kubernetes service mapping
 	Vip  string

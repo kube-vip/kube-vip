@@ -4,12 +4,8 @@ go 1.14
 
 require (
 	github.com/armon/go-metrics v0.3.8 // indirect
-	github.com/containernetworking/cni v0.8.1
-	github.com/d2g/dhcp4 v0.0.0-20170904100407-a1d1b6c41b1c
-	github.com/d2g/dhcp4client v1.0.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
-	github.com/digineo/go-dhclient v1.0.2
 	github.com/fatih/color v1.10.0 // indirect
 	github.com/ghodss/yaml v1.0.0
 	github.com/golang/protobuf v1.5.2
@@ -23,14 +19,13 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/raft v1.3.1
 	github.com/imdario/mergo v0.3.12 // indirect
-	github.com/insomniacslk/dhcp v0.0.0-20210428091707-95b2ff6905c9
-	github.com/jsimonetti/rtnetlink v0.0.0-20210409061457-9561dc9288a7 // indirect
+	github.com/jpillora/backoff v1.0.0
 	github.com/json-iterator/go v1.1.11 // indirect
 	github.com/k-sone/critbitgo v1.4.0 // indirect
 	github.com/kamhlos/upnp v0.0.0-20210324072331-5661950dff08
 	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/mdlayher/ndp v0.0.0-20200602162440-17ab9e3e5567
-	github.com/mdlayher/raw v0.0.0-20210412142147-51b895745faf // indirect
+	github.com/mdlayher/raw v0.0.0-20210412142147-51b895745faf
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/onsi/ginkgo v1.11.0
 	github.com/onsi/gomega v1.7.0
@@ -40,13 +35,14 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.10.0
 	github.com/prometheus/common v0.23.0 // indirect
+	github.com/rtr7/dhcp4 v0.0.0-20181120124042-778e8c2e24a5
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/afero v1.6.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/viper v1.7.1 // indirect
-	github.com/vishvananda/netlink v1.1.0
+	github.com/vishvananda/netlink v1.1.1-0.20200221165523-c79a4b7b4066
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	golang.org/x/crypto v0.0.0-20210503195802-e9a32991a82e // indirect
 	golang.org/x/net v0.0.0-20210505024714-0287a6fb4125

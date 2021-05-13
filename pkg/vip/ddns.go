@@ -5,9 +5,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/d2g/dhcp4"
-	"github.com/digineo/go-dhclient"
-	"github.com/google/gopacket/layers"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -43,29 +40,15 @@ func (ddns *ddnsManager) Start() (string, error) {
 
 	// channel to wait for IP
 	ipCh := make(chan string)
-	//var options dhcp4.Option
-	AcquireLease(ddns.network.DDNSHostName(), interfaceName, dhcp4.Options{})
-	client := dhclient.Client{
+
+	client := DHCPClient{
 		// send host name, not current os.Hostname, but configured name from user
-		Hostname: ddns.network.DDNSHostName(),
-		Iface:    iface,
-		OnBound: func(lease *dhclient.Lease) {
-			ipCh <- lease.FixedAddress.String()
+		Hostname:  ddns.network.DDNSHostName(),
+		Interface: iface,
+		OnBound: func(lease *Lease) {
+			ipCh <- lease.ClientIP
 		},
 	}
-	//options[DHCPOptHostname] = []byte(client.Hostname)
-
-	// add default request param
-	for _, param := range dhclient.DefaultParamsRequestList {
-		client.AddParamRequest(param)
-	}
-	// send hostname to get IP for this specific name
-	client.AddOption(layers.DHCPOptHostname, []byte(client.Hostname))
-	// use clientID so different leaders will use same ID to get same IP
-	client.AddOption(layers.DHCPOptClientID, []byte(client.Hostname))
-
-	log.Info("start dhcp client for ddns")
-	client.Start()
 
 	log.Info("waiting for ip from dhcp")
 	ip, timeout := "", time.After(1*time.Minute)

@@ -60,7 +60,7 @@ type Instance struct {
 	// Service uses DHCP
 	isDHCP        bool
 	dhcpInterface string
-	lease         *vip.DHCPLease
+	dhcpClient    *vip.DHCPClient
 
 	// Kubernetes service mapping
 	Vip  string

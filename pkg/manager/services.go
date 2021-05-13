@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/plunder-app/kube-vip/pkg/cluster"
 	"github.com/plunder-app/kube-vip/pkg/kubevip"
@@ -38,7 +39,7 @@ func (sm *Manager) deleteService(uid string) error {
 			// Flip the found when we match
 			found = true
 			if sm.serviceInstances[x].isDHCP == true {
-				sm.serviceInstances[x].lease.Stop()
+				sm.serviceInstances[x].dhcpClient.Stop()
 				macvlan, err := netlink.LinkByName(sm.serviceInstances[x].dhcpInterface)
 				if err != nil {
 					return fmt.Errorf("Error finding VIP Interface, for deleting DHCP Link : %v", err)
@@ -66,7 +67,10 @@ func (sm *Manager) deleteService(uid string) error {
 	return nil
 }
 
-func (sm *Manager) syncServices(service *v1.Service) error {
+func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
+
+	defer wg.Done()
+
 	log.Debugf("[STARTING] Service Sync")
 	// Iterate through the synchronising services
 	foundInstance := false
@@ -103,6 +107,7 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 
 		// If this was purposely created with the address 0.0.0.0 then we will create a macvlan on the main interface and try DHCP
 		if newServiceAddress == "0.0.0.0" {
+
 			err := sm.createDHCPService(newServiceUID, &newVip, &newService, service)
 			if err != nil {
 				return err
