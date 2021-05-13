@@ -470,6 +470,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  cpNamespace,
 				Value: c.Namespace,
 			},
+			{
+				Name:  vipDdns,
+				Value: strconv.FormatBool(c.DDNS),
+			},
 		}
 		newEnvironment = append(newEnvironment, cp...)
 	}
