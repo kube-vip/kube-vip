@@ -17,75 +17,95 @@ This section details the flow of events in order for `kube-vip` to advertise a K
 
 ## CCM
 
-We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anything other than the Kubernetes API, and will only act upon an existing Kubernetes primative (in this case the object of type `Service`). This makes it easy for exist CCMs to simply apply their logic to services of type LoadBalancer and leave `kube-vip` to take the next steps to advertise these load-balancers to the outside world. 
+We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anything other than the Kubernetes API, and will only act upon an existing Kubernetes primative (in this case the object of type `Service`). This makes it easy for existing CCMs to simply apply their logic to services of type LoadBalancer and leave `kube-vip` to take the next steps to advertise these load-balancers to the outside world. 
 
-The below instructions *should just work* on Kubernetes regardless of architecture, Linux as the Operating System is the only requirement.
 
-## Using the Plunder Cloud Provider (CCM)
+## Using the Kube-vip Cloud Provider
 
-If you just want things to "work", then you can quickly install the "latest" components:
+The below instructions *should just work* on Kubernetes regardless of architecture (Linux Operating System is the only requirement) - you can quickly install the "latest" components:
 
-**Install the `plndr-cloud-provider`
-
-```
-kubectl apply -f https://kube-vip.io/manifests/controller.yaml
-```
-
-**Create the `cidr` for the `global` namespace**
+**Install the `kube-vip-cloud-provider`**
 
 ```
-kubectl create configmap --namespace kube-system plndr --from-literal cidr-global=192.168.0.200/29
+$ kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
 ```
 
-Creating services of `type: LoadBalancer` in the default namespace will now take addresses from the **global** cidr defined in the `configmap`.
+It uses a `statefulSet` and can always be viewed with the following command:
 
-**Additional namespaces**
+```
+kubectl describe pods -n kube-system kube-vip-cloud-provider-0
+```
 
-Edit the `configmap` and add in the cidr ranges for those namespaces, the key in the cidr should be `cidr-<namespace>`, then ensure that `kube-vip` is deployed into that namespac
-e with the above `apply` command with the `-n namespace` flag.
+**Create a global CIDR or IP Range**
+
+Any `service` in any `namespace` can use an address from the global CIDR `cidr-global` or range `range-global`
+
+```
+kubectl create configmap --namespace kube-system kubevip --from-literal cidr-global=192.168.0.220/29
+```
+or
+```
+kubectl create configmap --namespace kube-system kubevip --from-literal range-global=192.168.1.220-192.168.1.230
+```
+
+Creating services of `type: LoadBalancer` in *any namespace* will now take addresses from the **global** cidr defined in the `configmap` unless a specific 
+
 
 ## The Detailed guide
 
-### Deploy the `plndr-cloud-provider`
+### Deploy the Kube-vip Cloud Provider
 
-To deploy the [latest] then `kubectl apply -f https://kube-vip.io/manifests/controller.yaml`, specific versions should be found in the repository as detailed below:
+**Install the `kube-vip-cloud-provider`**
 
-From the GitHub repository [https://github.com/plunder-app/plndr-cloud-provider/tree/master/example/pod](https://github.com/plunder-app/plndr-cloud-provider/tree/master/example/p
-od), find the version of the plunder cloud provider manifest (although typically the highest version number will provider more functionality/stability). The [raw] option in Githu
-b will provide the url that can be applied directly with a `kubectl apply -f <url>`.
+```
+$ kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
+```
 
 The following output should appear when the manifest is applied: 
 
 ```
-serviceaccount/plunder-cloud-controller created
-clusterrole.rbac.authorization.k8s.io/system:plunder-cloud-controller-role created
-clusterrolebinding.rbac.authorization.k8s.io/system:plunder-cloud-controller-binding created
-pod/plndr-cloud-provider created
+serviceaccount/kube-vip-cloud-controller created
+clusterrole.rbac.authorization.k8s.io/system:kube-vip-cloud-controller-role created
+clusterrolebinding.rbac.authorization.k8s.io/system:kube-vip-cloud-controller-binding created
+statefulset.apps/kube-vip-cloud-provider created
 ```
 
-We can validate the cloud-provider by examining the pods:
+We can validate the cloud provider by examining the pods and following the logs:
 
-`kubectl logs -n kube-system plndr-cloud-provider-0 -f`
+```
+kubectl describe pods -n kube-system kube-vip-cloud-provider-0
+kubectl logs -n kube-system kube-vip-cloud-provider-0 -f
+```
 
-#### The `plndr-cloud-provider` `configmap`
+### The Kube-vip Cloud Provider `configmap`
 
-The `configmap` details a CIDR range *per* namespace, however as of (`kube-vip 0.2.1` and `plnder-cloud-provider 0.1.4`), there is now the option of having a **global** CIDR rang
-e (`cidr-global)`.  
+To manage the IP address ranges for the load balancer instances the `kube-vip-cloud-provider` uses a `configmap` held in the `kube-system` namespace. IP address ranges can be configured using:
+- IP address pools by CIDR
+- IP ranges [start address - end address]
+- Multiple pools by CIDR per namespace
+- Multiple IP ranges per namespace (handles overlapping ranges)
+- Setting of static addresses through --load-balancer-ip=x.x.x.x
 
-To manage the ranges for the load-balancer instances, the `plndr-cloud-provider` has a `configmap` held in the `kube-system` namespace. The structure for the key/values within th
-e `configmap` should be that the key is in the format `cidr-<namespace>` and the value should be the cidr range.
+To control which IP address range is used for which service the following rules are applied:
+- Global address pools (`cidr-global` or `range-global`) are available for use by *any* `service` in *any* `namespace`
+- Namespace specific address pools (`cidr-<namespace>` or `range-<namespace>`) are *only* available for use by `service` in the *specific* `namespace`
+- Static IP addresses can be applied to a load balancer `service` using the `loadbalancerIP` setting, even outside of the assigned ranges
 
 Example Configmap:
 
 ```
+$ kubectl get configmap -n kube-system kubevip -o yaml
+
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: plndr
+  name: kubevip
   namespace: kube-system
 data:
-  cidr-default: 192.168.0.200/29
-  cidr-global: 192.168.0.210/29
+  cidr-default: 192.168.0.200/29                      # CIDR-based IP range for use in the default namespace
+  range-development: 192.168.0.210-192.168.0.219      # Range-based IP range for use in the development namespace
+  cidr-finance: 192.168.0.220/29,192.168.0.230/29     # Multiple CIDR-based ranges for use in the finance namespace
+  cidr-global: 192.168.0.240/29                       # CIDR-based range which can be used in any namespace
 ```
 
 ### Expose a service
@@ -96,10 +116,46 @@ We can now expose a service and once the cloud provider has provided an address 
 kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx
 ```
 
+or via a `service` YAML definition
+
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+  selector:
+    app: nginx
+  type: LoadBalancer
+  ```
+
+
 We can also expose a specific address by specifying it on the command line:
 
 ```
 kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
+```
+
+or including it in the `service` definition:
+
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+  selector:
+    app: nginx
+  type: LoadBalancer
+  loadBalancerIP: "1.1.1.1"
 ```
 
 ### Using DHCP for Load Balancers (experimental)
@@ -108,8 +164,7 @@ With the latest release of `kube-vip` > 0.2.1, it is possible to use the local n
  Kubernetes service on the network. 
 
 In order to do this we need to signify to `kube-vip` and the cloud-provider that we don't need one of their managed addresses. We do this by explicitly exposing a service on the 
-address `0.0.0.0`. When `kube-vip` sees a service on this address it will create a `macvlan` interface on the host and request a DHCP address, once this address is provided it wi
-ll assign it as the VIP and update the Kubernetes service!
+address `0.0.0.0`. When `kube-vip` sees a service on this address it will create a `macvlan` interface on the host and request a DHCP address, once this address is provided it will assign it as the VIP and update the Kubernetes service!
 
 ```
 $ k expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx-dhcp --load-balancer-ip=0.0.0.0; k get svc
@@ -166,7 +221,7 @@ $ curl externalIP:32380
 ...
 ```
 
-### Expose with Equinix Metal (using the `plndr-cloud-provider`)
+### Expose with Equinix Metal (using the `kube-vip-cloud-provider`)
 
 Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
 
