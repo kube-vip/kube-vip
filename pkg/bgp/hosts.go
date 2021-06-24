@@ -2,6 +2,7 @@ package bgp
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	api "github.com/osrg/gobgp/api"
@@ -13,14 +14,19 @@ func (b *Server) AddHost(addr string) (err error) {
 	if err != nil {
 		return err
 	}
+
 	p := b.getPath(ip)
 	if p == nil {
-		return err
+		return fmt.Errorf("failed to get path for %v", ip)
 	}
 
 	_, err = b.s.AddPath(context.Background(), &api.AddPathRequest{
 		Path: p,
 	})
+
+	if err != nil {
+		return err
+	}
 
 	return
 }
