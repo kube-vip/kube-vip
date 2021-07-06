@@ -60,6 +60,7 @@ All nodes are running Ubuntu 20.04, Docker CE and will use Kubernetes 1.21.0, we
 ## Usage
 
 - [On-Prem with the kube-vip cloud controller](/usage/on-prem)
+- [KIND](/usage/kind)
 - [Equinix Metal](/usage/EquinixMetal)
 - [k3s](/usage/k3s)
 
