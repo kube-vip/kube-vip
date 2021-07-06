@@ -105,15 +105,24 @@ spec:
           value: "true"
         - name: cp_namespace
           value: kube-system
+        - name: vip_ddns
+          value: "false"
         - name: svc_enable
           value: "true"
         - name: bgp_enable
           value: "true"
+        - name: bgp_routerid
+        - name: bgp_as
+          value: "65000"
+        - name: bgp_peeraddress
+        - name: bgp_peerpass
+        - name: bgp_peeras
+          value: "65000"
         - name: bgp_peers
-          value: "192.168.0.10:65000::false,192.168.0.11:65000::false"
+          value: 192.168.0.10:65000::false,192.168.0.11:65000::false
         - name: vip_address
           value: 192.168.0.40
-        image: plndr/kube-vip:0.2.3
+        image: 'plndr/kube-vip:'
         imagePullPolicy: Always
         name: kube-vip
         resources: {}
@@ -121,16 +130,34 @@ spec:
           capabilities:
             add:
             - NET_ADMIN
+            - NET_RAW
             - SYS_TIME
       hostNetwork: true
-      serviceAccountName: kube-vip
       nodeSelector:
         node-role.kubernetes.io/master: "true"
+      serviceAccountName: kube-vip
       tolerations:
       - effect: NoSchedule
         key: node-role.kubernetes.io/master
+        operator: Exists
   updateStrategy: {}
+status:
+  currentNumberScheduled: 0
+  desiredNumberScheduled: 0
+  numberMisscheduled: 0
+  numberReady: 0
 ```
+
+### Managing a `routerID` as a daemonset
+
+The routerID needs to be unique on each node that participates in BGP advertisements. In order to do this we can modify the manifest so that when `kube-vip` starts it will look up its local address and use that as the routerID.
+
+```
+          - name: bgp_routerinterface
+            value: "ens160"
+```
+
+This will instruct each instance of `kube-vip` as part of the daemonset to look up the IP address on that interface and use it as the routerID.
 
 ### Manifest Overview
 
