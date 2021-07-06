@@ -220,18 +220,3 @@ $ curl externalIP:32380
 <html>
 ...
 ```
-
-### Expose with Equinix Metal (using the `kube-vip-cloud-provider`)
-
-Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
-
-```
-# packet ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4                                                                   
-+-------+---------------+--------+----------------------+
-|   ID  |    ADDRESS    | PUBLIC |       CREATED        |
-+-------+---------------+--------+----------------------+
-| xxxxx |     1.1.1.1   | true   | 2020-11-10T15:57:39Z |
-+-------+---------------+--------+----------------------+
-
-kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
-```
