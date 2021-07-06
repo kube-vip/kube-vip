@@ -1,0 +1,10 @@
+
+# For more information on the syntax of the CODEOWNERS file, see:
+# https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/about-code-owners
+
+# The Kube-Vip maintainers team
+*   @thebsdbox @yastij
+
+# Emeritus Maintainers
+#
+# N/A
