@@ -10,15 +10,16 @@ import (
 	"syscall"
 
 	"github.com/kamhlos/upnp"
-	"github.com/plunder-app/kube-vip/pkg/bgp"
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/plunder-app/kube-vip/pkg/bgp"
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 )
 
 const plunderLock = "plndr-svcs-lock"
@@ -58,9 +59,11 @@ type Instance struct {
 	cluster cluster.Cluster
 
 	// Service uses DHCP
-	isDHCP        bool
-	dhcpInterface string
-	dhcpClient    *vip.DHCPClient
+	isDHCP              bool
+	dhcpInterface       string
+	dhcpInterfaceHwaddr string
+	dhcpInterfaceIP     string
+	dhcpClient          *vip.DHCPClient
 
 	// Kubernetes service mapping
 	Vip  string

@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/vishvananda/netlink"
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/plunder-app/kube-vip/pkg/vip"
 )
 
 func (sm *Manager) createDHCPService(newServiceUID string, newVip *kubevip.Config, newService *Instance, service *v1.Service) error {
@@ -32,7 +33,19 @@ func (sm *Manager) createDHCPService(newServiceUID string, newVip *kubevip.Confi
 	if err != nil {
 		log.Infof("Creating new macvlan interface for DHCP [%s]", interfaceName)
 
-		mac := &netlink.Macvlan{LinkAttrs: netlink.LinkAttrs{Name: interfaceName, ParentIndex: parent.Attrs().Index}, Mode: netlink.MACVLAN_MODE_DEFAULT}
+		hwaddr, err := net.ParseMAC(newService.dhcpInterfaceHwaddr)
+		if newService.dhcpInterfaceHwaddr != "" && err != nil {
+			return err
+		}
+
+		mac := &netlink.Macvlan{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:         interfaceName,
+				ParentIndex:  parent.Attrs().Index,
+				HardwareAddr: hwaddr,
+			},
+			Mode: netlink.MACVLAN_MODE_DEFAULT,
+		}
 
 		err = netlink.LinkAdd(mac)
 		if err != nil {
@@ -51,75 +64,79 @@ func (sm *Manager) createDHCPService(newServiceUID string, newVip *kubevip.Confi
 		log.Infof("Using existing macvlan interface for DHCP [%s]", interfaceName)
 	}
 
-	client := vip.DHCPClient{
-		Interface: iface,
-		OnBound: func(lease *vip.Lease) {
-			newVip.VIP = lease.ClientIP
-
-			log.Infof("DHCP VIP [%s] for [%s/%s] ", newVip.VIP, newService.ServiceName, newServiceUID)
-
-			// Create Add configuration to the new service
-			newService.vipConfig = *newVip
-
-			// TODO - start VIP
-			c, err := cluster.InitCluster(&newService.vipConfig, false)
-			if err != nil {
-				log.Errorf("Failed to add Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
-				return
-			}
-			err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
-			if err != nil {
-				log.Errorf("Failed to add Load Balabcer service Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
-				return
-			}
-			newService.cluster = *c
-
-			// Add new service to manager configuration
-			service.Spec.LoadBalancerIP = newVip.VIP
-			log.Infof("Updating service [%s], with load balancer address [%s]", service.Name, service.Spec.LoadBalancerIP)
-			//sm.serviceInstances = append(sm.serviceInstances, *newService)
-
-			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				// Retrieve the latest version of Deployment before attempting update
-				// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-				currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				updatedService, err := sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentService, metav1.UpdateOptions{})
-				if err != nil {
-					log.Errorf("Error updating Service Spec [%s] : %v", newService.ServiceName, err)
-					return err
-				}
-
-				updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
-				_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
-				if err != nil {
-					log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
-					return err
-				}
-				return nil
-			})
-
-			if retryErr != nil {
-				log.Errorf("Failed to set Services: %v", retryErr)
-			}
-			// Find an update our array
-
-			for x := range sm.serviceInstances {
-				if sm.serviceInstances[x].UID == newServiceUID {
-					sm.serviceInstances[x] = *newService
-				}
-			}
-			sm.upnpMap(*newService)
-		},
+	var initRebootFlag bool
+	if newService.dhcpInterfaceHwaddr != "" {
+		initRebootFlag = true
 	}
+
+	client := vip.NewDHCPClient(iface, initRebootFlag, newService.dhcpInterfaceIP, func(lease *nclient4.Lease) {
+		newVip.VIP = lease.ACK.YourIPAddr.String()
+
+		log.Infof("DHCP VIP [%s] for [%s/%s] ", newVip.VIP, newService.ServiceName, newServiceUID)
+
+		// Create Add configuration to the new service
+		newService.vipConfig = *newVip
+
+		// TODO - start VIP
+		c, err := cluster.InitCluster(&newService.vipConfig, false)
+		if err != nil {
+			log.Errorf("Failed to add Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
+			return
+		}
+		err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
+		if err != nil {
+			log.Errorf("Failed to add Load Balancer service Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
+			return
+		}
+		newService.cluster = *c
+
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// Retrieve the latest version of Deployment before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+
+			currentServiceCopy := currentService.DeepCopy()
+			if currentServiceCopy.Annotations == nil {
+				currentServiceCopy.Annotations = make(map[string]string)
+			}
+			currentServiceCopy.Annotations[hwAddrKey] = iface.HardwareAddr.String()
+			currentServiceCopy.Annotations[requestedIP] = newVip.VIP
+			updatedService, err := sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+			if err != nil {
+				log.Errorf("Error updating Service Spec [%s] : %v", newService.ServiceName, err)
+				return err
+			}
+
+			updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
+			_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
+			if err != nil {
+				log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+				return err
+			}
+			return nil
+		})
+
+		if retryErr != nil {
+			log.Errorf("Failed to set Services: %v", retryErr)
+		}
+		// Find an update our array
+
+		for x := range sm.serviceInstances {
+			if sm.serviceInstances[x].UID == newServiceUID {
+				sm.serviceInstances[x] = *newService
+			}
+		}
+		sm.upnpMap(*newService)
+	})
 	// Set that DHCP is enabled
 	newService.isDHCP = true
 	// Set the name of the interface so that it can be removed on Service deletion
 	newService.dhcpInterface = interfaceName
 	// Add the client so that we can call it's stop function
-	newService.dhcpClient = &client
+	newService.dhcpClient = client
 
 	sm.serviceInstances = append(sm.serviceInstances, *newService)
 

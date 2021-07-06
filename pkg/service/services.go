@@ -13,6 +13,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	hwAddrKey = "kube-vip.io/hwaddr"
+	requestedIP = "kube-vip.io/requestedIP"
+)
+
 func (sm *Manager) stopService(uid string) error {
 	found := false
 	for x := range sm.serviceInstances {
@@ -98,6 +103,8 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 		newService.Type = string(service.Spec.Ports[0].Protocol) //TODO - support multiple port types
 		newService.Port = service.Spec.Ports[0].Port
 		newService.ServiceName = service.Name
+		newService.dhcpInterfaceHwaddr = service.Annotations[hwAddrKey]
+		newService.dhcpInterfaceIP = service.Annotations[requestedIP]
 
 		// If this was purposely created with the address 0.0.0.0 then we will create a macvlan on the main interface and try DHCP
 		if newServiceAddress == "0.0.0.0" {
