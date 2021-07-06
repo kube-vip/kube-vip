@@ -109,7 +109,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 // present
 func (sm *Manager) annotationsWatcher() error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	log.Infoln("Kube-Vip is waiting for annotations to be present on this node")
+	log.Infof("Kube-Vip is waiting for annotation prefix [%s] to be present on this node", sm.config.Annotations)
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
@@ -168,19 +168,7 @@ func (sm *Manager) annotationsWatcher() error {
 				continue
 			}
 
-			// Peer configuration
-
-			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
-			if base64BGPPassword != "" {
-				// Decode base64 encoded string
-				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
-				if err != nil {
-					return err
-				}
-				sm.config.BGPPeerConfig.Password = string(decodedPassword)
-			} else {
-				continue
-			}
+			// Peer configuration [REQUIRED]
 			peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", sm.config.Annotations)]
 			if peerASN != "" {
 				u64, err := strconv.ParseUint(peerASN, 10, 32)
@@ -205,7 +193,18 @@ func (sm *Manager) annotationsWatcher() error {
 				}
 			}
 
-			log.Debugf("%s / %d / %s / %d \n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
+			// BGP Password, if it doesn't find a password don't "continue" [OPTIONAL]
+			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
+			if base64BGPPassword != "" {
+				// Decode base64 encoded string
+				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
+				if err != nil {
+					return err
+				}
+				sm.config.BGPPeerConfig.Password = string(decodedPassword)
+			}
+
+			log.Debugf("%s / %d / %s / %d /n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
 
 			rw.Stop()
 			break
