@@ -6,12 +6,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/plunder-app/kube-vip/pkg/cluster"
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
+)
+
+const (
+	hwAddrKey = "kube-vip.io/hwaddr"
+	requestedIP = "kube-vip.io/requestedIP"
 )
 
 func (sm *Manager) stopService(uid string) error {
@@ -67,8 +73,8 @@ func (sm *Manager) deleteService(uid string) error {
 	return nil
 }
 
-func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 
+func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")
@@ -104,10 +110,11 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 		newService.Type = string(service.Spec.Ports[0].Protocol) //TODO - support multiple port types
 		newService.Port = service.Spec.Ports[0].Port
 		newService.ServiceName = service.Name
+		newService.dhcpInterfaceHwaddr = service.Annotations[hwAddrKey]
+		newService.dhcpInterfaceIP = service.Annotations[requestedIP]
 
 		// If this was purposely created with the address 0.0.0.0 then we will create a macvlan on the main interface and try DHCP
 		if newServiceAddress == "0.0.0.0" {
-
 			err := sm.createDHCPService(newServiceUID, &newVip, &newService, service)
 			if err != nil {
 				return err

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	v1 "k8s.io/api/core/v1"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
+
+	"github.com/plunder-app/kube-vip/pkg/kubevip"
 )
 
 func rebuildEndpoints(eps v1.Endpoints) []kubevip.BackEnd {
