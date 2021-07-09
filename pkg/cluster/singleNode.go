@@ -7,10 +7,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/plunder-app/kube-vip/pkg/bgp"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 // StartSingleNode will start a single node cluster
@@ -148,23 +148,24 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			}
 
 			for {
-				// Ensure the address exists on the interface before attempting to ARP
-				set, err := cluster.Network.IsSet()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
-				if !set {
-					log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, c.Interface)
-					err = cluster.Network.AddIP()
-					if err != nil {
-						log.Warnf("%v", err)
-					}
-				}
 
 				select {
 				case <-ctx.Done(): // if cancel() execute
 					return
 				default:
+					// Ensure the address exists on the interface before attempting to ARP
+					set, err := cluster.Network.IsSet()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
+					if !set {
+						log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, c.Interface)
+						err = cluster.Network.AddIP()
+						if err != nil {
+							log.Warnf("%v", err)
+						}
+					}
+
 					if vip.IsIPv4(ipString) {
 						// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 						err := vip.ARPSendGratuitous(ipString, c.Interface)
@@ -198,14 +199,15 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		for {
 			select {
 			case <-cluster.stop:
+				// Stop the Arp context if it is running
+				cancelArp()
+
 				log.Info("[LOADBALANCER] Stopping load balancers")
 				log.Infof("[VIP] Releasing the Virtual IP [%s]", c.VIP)
 				err = cluster.Network.DeleteIP()
 				if err != nil {
 					log.Warnf("%v", err)
 				}
-				// Stop the Arp context if it is running
-				cancelArp()
 
 				close(cluster.completed)
 				return

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ghodss/yaml"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	appv1 "k8s.io/api/core/v1"

@@ -3,7 +3,7 @@ package kubevip
 import (
 	"net/url"
 
-	"github.com/plunder-app/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 )
 
 // Config defines all of the settings for the Kube-Vip Pod

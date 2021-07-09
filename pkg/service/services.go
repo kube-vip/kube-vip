@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	hwAddrKey = "kube-vip.io/hwaddr"
+	hwAddrKey   = "kube-vip.io/hwaddr"
 	requestedIP = "kube-vip.io/requestedIP"
 )
 

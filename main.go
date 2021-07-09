@@ -1,6 +1,6 @@
 package main
 
-import "github.com/plunder-app/kube-vip/cmd"
+import "github.com/kube-vip/kube-vip/cmd"
 
 // Version is populated from the Makefile and is tied to the release TAG
 var Version string

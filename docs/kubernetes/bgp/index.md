@@ -4,7 +4,7 @@
 
 To deploy the [latest] then `kubectl apply -f https://kube-vip.io/manifests/kube-vip.yaml`, specific versions should be found in the repository as detailed below:
 
-From the GitHub repository [https://github.com/plunder-app/kube-vip/tree/master/example/deploy](https://github.com/plunder-app/kube-vip/tree/master/example/deploy) find the version of the `kube-vip` to deploy (although typically the highest version number will provider more functionality/stability). The [raw] option in Github will provide the url that can be applied directly with a `kubectl apply -f <url>`.
+From the GitHub repository [https://github.com/kube-vip/kube-vip/tree/master/example/deploy](https://github.com/kube-vip/kube-vip/tree/master/example/deploy) find the version of the `kube-vip` to deploy (although typically the highest version number will provider more functionality/stability). The [raw] option in Github will provide the url that can be applied directly with a `kubectl apply -f <url>`.
 
 The following output should appear when the manifest is applied: 
 ```

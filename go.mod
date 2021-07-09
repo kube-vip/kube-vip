@@ -1,4 +1,4 @@
-module github.com/plunder-app/kube-vip
+module github.com/kube-vip/kube-vip
 
 go 1.14
 

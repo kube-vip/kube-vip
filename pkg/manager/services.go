@@ -11,12 +11,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 )
 
 const (
-	hwAddrKey = "kube-vip.io/hwaddr"
+	hwAddrKey   = "kube-vip.io/hwaddr"
 	requestedIP = "kube-vip.io/requestedIP"
 )
 
@@ -72,7 +72,6 @@ func (sm *Manager) deleteService(uid string) error {
 
 	return nil
 }
-
 
 func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()

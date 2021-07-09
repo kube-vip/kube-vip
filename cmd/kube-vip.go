@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/manager"
-	"github.com/plunder-app/kube-vip/pkg/packet"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/manager"
+	"github.com/kube-vip/kube-vip/pkg/packet"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
