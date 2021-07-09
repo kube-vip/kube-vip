@@ -33,7 +33,7 @@ Edit the `configmap` and add in the cidr ranges for those namespaces, the key in
 
 To deploy the [latest] then `kubectl apply -f https://kube-vip.io/manifests/controller.yaml`, specific versions should be found in the repository as detailed below:
 
-From the GitHub repository [https://github.com/plunder-app/plndr-cloud-provider/tree/master/example/pod](https://github.com/plunder-app/plndr-cloud-provider/tree/master/example/pod), find the version of the plunder cloud provider manifest (although typically the highest version number will provider more functionality/stability). The [raw] option in Github will provide the url that can be applied directly with a `kubectl apply -f <url>`.
+From the GitHub repository [https://github.com/kube-vip/plndr-cloud-provider/tree/master/example/pod](https://github.com/kube-vip/plndr-cloud-provider/tree/master/example/pod), find the version of the plunder cloud provider manifest (although typically the highest version number will provider more functionality/stability). The [raw] option in Github will provide the url that can be applied directly with a `kubectl apply -f <url>`.
 
 The following output should appear when the manifest is applied: 
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
-	"github.com/plunder-app/kube-vip/pkg/bgp"
-	"github.com/plunder-app/kube-vip/pkg/detector"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/detector"
 	log "github.com/sirupsen/logrus"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

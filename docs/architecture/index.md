@@ -103,8 +103,8 @@ Additionally the load-balancing within `kibe-vip` has two modes of operation:
 
 The `kube-vip` kubernetes load-balancer requires a number of components in order to function:
 
-- The Plunder Cloud Provider -> [https://github.com/plunder-app/plndr-cloud-provider](https://github.com/plunder-app/plndr-cloud-provider)
-- The Kube-Vip Deployment -> [https://github.com/plunder-app/kube-vip](https://github.com/plunder-app/kube-vip)
+- The Plunder Cloud Provider -> [https://github.com/kube-vip/plndr-cloud-provider](https://github.com/kube-vip/plndr-cloud-provider)
+- The Kube-Vip Deployment -> [https://github.com/kube-vip/kube-vip](https://github.com/kube-vip/kube-vip)
 
 ### Architecture overview
 

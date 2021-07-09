@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 )
 

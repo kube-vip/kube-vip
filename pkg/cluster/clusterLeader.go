@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/plunder-app/kube-vip/pkg/bgp"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	leaderelection "github.com/plunder-app/kube-vip/pkg/leaderElection"
-	"github.com/plunder-app/kube-vip/pkg/loadbalancer"
-	"github.com/plunder-app/kube-vip/pkg/packet"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	leaderelection "github.com/kube-vip/kube-vip/pkg/leaderElection"
+	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/packet"
 
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 
 	"github.com/packethost/packngo"
 
@@ -295,24 +295,23 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 						}
 
 						for {
-
-							// Ensure the address exists on the interface before attempting to ARP
-							set, err := cluster.Network.IsSet()
-							if err != nil {
-								log.Warnf("%v", err)
-							}
-							if !set {
-								log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, c.Interface)
-								err = cluster.Network.AddIP()
-								if err != nil {
-									log.Warnf("%v", err)
-								}
-							}
-
 							select {
 							case <-ctx.Done(): // if cancel() execute
 								return
 							default:
+								// Ensure the address exists on the interface before attempting to ARP
+								set, err := cluster.Network.IsSet()
+								if err != nil {
+									log.Warnf("%v", err)
+								}
+								if !set {
+									log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, c.Interface)
+									err = cluster.Network.AddIP()
+									if err != nil {
+										log.Warnf("%v", err)
+									}
+								}
+
 								if vip.IsIPv4(ipString) {
 									// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 									err := vip.ARPSendGratuitous(ipString, c.Interface)

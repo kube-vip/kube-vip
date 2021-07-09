@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 const leaderLogcount = 5

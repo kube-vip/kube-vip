@@ -14,10 +14,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/plunder-app/kube-vip/pkg/bgp"
-	"github.com/plunder-app/kube-vip/pkg/cluster"
-	"github.com/plunder-app/kube-vip/pkg/kubevip"
-	"github.com/plunder-app/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 const plunderLock = "plunder-lock"
