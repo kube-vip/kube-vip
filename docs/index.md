@@ -1,5 +1,3 @@
-# Kube-vip
-
 ![kube-vip.png](kube-vip.png)
 
 ## Overview
@@ -72,3 +70,9 @@ All nodes are running Ubuntu 20.04, Docker CE and will use Kubernetes 1.21.0, we
 
 - The Kube-Vip Cloud Provider Repository -> [https://github.com/kube-vip/kube-vip-cloud-provider](https://github.com/kube-vip/kube-vip-cloud-provider)
 - The Kube-Vip Repository -> [https://github.com/kube-vip/kube-vip](https://github.com/kube-vip/kube-vip)
+
+© 2021 [The Linux Foundation](https://www.linuxfoundation.org/). All right reserved
+
+The Linux Foundation has registered trademarks and uses trademarks.
+
+For a list trademarks of The Linux Foundation, please see our [Trademark Usage page](https://www.linuxfoundation.org/en/trademark-usage).
