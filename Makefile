@@ -41,7 +41,7 @@ fmt:
 
 demo:
 	@cd demo
-	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 	@cd ..
 
@@ -54,7 +54,7 @@ dockerx86:
 
 docker:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
 ## Local (docker load of images)
@@ -71,7 +71,7 @@ dockerx86Action:
 
 dockerLocal:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@echo New Multi Architecture Docker image created
 
 simplify:
