@@ -41,10 +41,10 @@ This section only covers generating a simple *BGP* configuration, as the main fo
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 #### containerd
-`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.3.1 vip"`
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:0.3.7 vip"`
 
 #### Docker
-`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.3.1"`
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7"`
 
 ### BGP Example
 
@@ -122,7 +122,7 @@ spec:
           value: 192.168.0.10:65000::false,192.168.0.11:65000::false
         - name: vip_address
           value: 192.168.0.40
-        image: 'plndr/kube-vip:'
+        image: 'ghcr.io/kube-vip/kube-vip:'
         imagePullPolicy: Always
         name: kube-vip
         resources: {}

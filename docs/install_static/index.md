@@ -32,10 +32,10 @@ This section details creating a number of manifests for various use cases
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 ### containerd
-`alias kube-vip="ctr run --rm --net-host docker.io/plndr/kube-vip:0.3.1 vip /kube-vip"`
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:0.3.7 vip /kube-vip"`
 
 ### Docker
-`alias kube-vip="docker run --network host --rm plndr/kube-vip:0.3.1"`
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7"`
 
 
 ## ARP

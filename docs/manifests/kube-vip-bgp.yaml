@@ -59,7 +59,7 @@ spec:
                   - kube-vip-workers
             topologyKey: "kubernetes.io/hostname"
       containers:
-      - image: plndr/kube-vip:0.2.2
+      - image: ghcr.io/kube-vip/kube-vip:0.3.7
         imagePullPolicy: Always
         name: kube-vip
         command:
