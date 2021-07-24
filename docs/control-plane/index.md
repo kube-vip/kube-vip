@@ -20,7 +20,7 @@ Below are examples of the steps required:
 
 ```
 # First Node
-sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
+sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7 manifest pod \
 --interface ens192 \
 --vip 192.168.0.75 \
 --arp \
@@ -32,7 +32,7 @@ sudo kubeadm init --kubernetes-version 1.17.0 --control-plane-endpoint 192.168.0
 
 sudo kubeadm join 192.168.0.75:6443 --token w5atsr.blahblahblah --control-plane --certificate-key abc123
 
-sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
+sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7 manifest pod \
 --interface ens192 \
 --vip 192.168.0.75 \
 --arp \
@@ -59,7 +59,7 @@ All nodes are running Ubuntu 18.04, Docker CE and will use Kubernetes 1.17.0.
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.2.1 \
+	--rm ghcr.io/kube-vip/kube-vip:0.3.7 \
 	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
@@ -108,7 +108,7 @@ spec:
       value: "1"
     - name: vip_address
       value: 192.168.0.75
-    image: plndr/kube-vip:0.2.1
+    image: ghcr.io/kube-vip/kube-vip:0.3.7
     imagePullPolicy: Always
     name: kube-vip
     resources: {}
@@ -129,7 +129,7 @@ Make sure that the manifest directory exists: `sudo mkdir -p /etc/kubernetes/man
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.2.1 \
+	--rm ghcr.io/kube-vip/kube-vip:0.3.7 \
 	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
@@ -137,7 +137,7 @@ sudo docker run --network host \
 	--leaderElection | sudo tee /etc/kubernetes/manifests/vip.yaml
 ```
 
-Ensure that `image: plndr/kube-vip:<x>` is modified to point to a specific version (`0.1.8` at the time of writing), refer to [docker hub](https://hub.docker.com/r/plndr/kube-vip/tags) for details. 
+Ensure that `image: ghcr.io/kube-vip/kube-vip:<x>` is modified to point to a specific version (`0.3.7` at the time of writing), refer to [GitHyb](https://github.com/kube-vip/kube-vip/pkgs/container/kube-vip) for details. 
 
 The **vip** is set to `192.168.0.75` and this first node will elect itself as leader, and as part of the `kubeadm init` it will use the VIP in order to speak back to the initialising api-server.
 
@@ -168,7 +168,7 @@ At this point **DON’T** generate the manifests, this is due to some bizarre `k
 
 ```
 sudo docker run --network host \
-	--rm plndr/kube-vip:0.2.1 \
+	--rm ghcr.io/kube-vip/kube-vip:0.3.7 \
 	manifest pod \
 	--interface ens192 \
 	--vip 192.168.0.75 \
@@ -243,7 +243,7 @@ export PACKET_AUTH_TOKEN=XYZ
 ```
 # Generate the manifest
 
-sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
+sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7 manifest pod \
 --arp=false \
 --interface lo \
 --vip $EIP \
@@ -265,7 +265,7 @@ kubeadm join $EIP:6443 --token BLAH --control-plane --certificate-key BLAH --dis
 
 # Generate Manifest
 
-sudo docker run --network host --rm plndr/kube-vip:0.2.1 manifest pod \
+sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7 manifest pod \
 --arp=false \
 --interface lo \
 --vip $EIP \

@@ -104,7 +104,7 @@ var kubeVipSampleManifest = &cobra.Command{
 				Containers: []appv1.Container{
 					{
 						Name:  "kube-vip",
-						Image: fmt.Sprintf("docker.io/plndr/kube-vip:%s", Release.Version),
+						Image: fmt.Sprintf("ghcr.io/kube-vip/kube-vip:%s", Release.Version),
 						SecurityContext: &appv1.SecurityContext{
 							Capabilities: &appv1.Capabilities{
 								Add: []appv1.Capability{
