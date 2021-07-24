@@ -6,7 +6,7 @@ TARGET := kube-vip
 
 # These will be provided to the target
 VERSION := $(git tag -l | sort -r | head -n1)
-BUILD := `git rev-parse HEAD`
+BUILD := $(git rev-parse HEAD)
 
 # Operating System Default (LINUX)
 TARGETOS=linux
