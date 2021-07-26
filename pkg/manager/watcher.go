@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
@@ -130,8 +131,12 @@ func (sm *Manager) annotationsWatcher() error {
 	// We'll assume there's only one node with the hostname annotation. If that's not true,
 	// there's probably bigger problems
 	node := nodeList.Items[0]
-	if err = sm.parseNodeAnnotations(&node); err == nil {
-		// No error, the annotations already exist.
+
+	bgpConfig, bgpPeer, err := parseBgpAnnotations(&node, sm.config.Annotations)
+	if err == nil {
+		// No error, the annotations already exist
+		sm.config.BGPConfig = bgpConfig
+		sm.config.BGPPeerConfig = bgpPeer
 		return nil
 	}
 
@@ -167,10 +172,14 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			if err := sm.parseBgpAnnotations(node); err != nil {
+			bgpConfig, bgpPeer, err := parseBgpAnnotations(node, sm.config.Annotations)
+			if err != nil {
 				log.Error(err)
 				continue
 			}
+
+			sm.config.BGPConfig = bgpConfig
+			sm.config.BGPPeerConfig = bgpPeer
 
 			rw.Stop()
 			break
@@ -209,38 +218,42 @@ func (sm *Manager) annotationsWatcher() error {
 // parseNodeAnnotations parses the annotations on the node and updates the configuration
 // returning an error if the annotations are not valid or missing; and nil if everything is OK
 // to continue
-func (sm *Manager) parseBgpAnnotations(node *v1.Node) error {
-	nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
+func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
+	bgpConfig := bgp.Config{}
+	bgpPeer := bgp.Peer{}
+
+	nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", prefix)]
 	if nodeASN == "" {
-		return fmt.Errorf("node-asn value missing or empty")
+		return bgpConfig, bgpPeer, fmt.Errorf("node-asn value missing or empty")
 	}
 
 	u64, err := strconv.ParseUint(nodeASN, 10, 32)
 	if err != nil {
-		return err
+		return bgpConfig, bgpPeer, err
 	}
 
-	sm.config.BGPConfig.AS = uint32(u64)
+	bgpConfig.AS = uint32(u64)
 
-	srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", sm.config.Annotations)]
+	srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", prefix)]
 	if srcIP == "" {
-		return fmt.Errorf("src-ip value missing or empty")
+		return bgpConfig, bgpPeer, fmt.Errorf("src-ip value missing or empty")
 	}
 
-	sm.config.BGPConfig.RouterID = srcIP
+	bgpConfig.RouterID = srcIP
 
-	peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", sm.config.Annotations)]
+	peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", prefix)]
 	if peerASN == "" {
-		return fmt.Errorf("peer-asn value missing or empty")
+		return bgpConfig, bgpPeer, fmt.Errorf("peer-asn value missing or empty")
 	}
 
 	u64, err = strconv.ParseUint(peerASN, 10, 32)
 	if err != nil {
-		return err
+		return bgpConfig, bgpPeer, err
 	}
-	sm.config.BGPPeerConfig.AS = uint32(u64)
 
-	peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", sm.config.Annotations)]
+	bgpPeer.AS = uint32(u64)
+
+	peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", prefix)]
 
 	peerIPs := strings.Split(peerIPString, ",")
 
@@ -248,21 +261,23 @@ func (sm *Manager) parseBgpAnnotations(node *v1.Node) error {
 		ipAddr := strings.TrimSpace(peerIP)
 
 		if ipAddr != "" {
-			sm.config.BGPPeerConfig.Address = ipAddr
-			sm.config.BGPConfig.Peers = append(sm.config.BGPConfig.Peers, sm.config.BGPPeerConfig)
+			bgpPeer.Address = ipAddr
+			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
 		}
 	}
 
-	base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
+	base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", prefix)]
 	if base64BGPPassword != "" {
 		// Decode base64 encoded string
 		decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
 		if err != nil {
-			return err
+			return bgpConfig, bgpPeer, err
 		}
-		sm.config.BGPPeerConfig.Password = string(decodedPassword)
+		bgpPeer.Password = string(decodedPassword)
 	}
 
-	log.Debugf("%s / %d / %s / %d /n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
-	return nil
+	log.Debugf("BGPConfig: %v\n", bgpConfig)
+	log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
+
+	return bgpConfig, bgpPeer, nil
 }
