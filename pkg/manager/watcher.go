@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
@@ -120,7 +121,30 @@ func (sm *Manager) annotationsWatcher() error {
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	}
 
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	// First we'll check the annotations for the node and if
+	// they aren't what are expected, we'll drop into the watch until they are
+	nodeList, err := sm.clientSet.CoreV1().Nodes().List(context.Background(), listOptions)
+	if err != nil {
+		return err
+	}
+
+	// We'll assume there's only one node with the hostname annotation. If that's not true,
+	// there's probably bigger problems
+	node := nodeList.Items[0]
+
+	bgpConfig, bgpPeer, err := parseBgpAnnotations(&node, sm.config.Annotations)
+	if err == nil {
+		// No error, the annotations already exist
+		sm.config.BGPConfig = bgpConfig
+		sm.config.BGPPeerConfig = bgpPeer
+		return nil
+	}
+
+	// We got an error with the annotations, falling back to the watch until
+	// they're as needed
+	log.Warn(err)
+
+	rw, err := watchtools.NewRetryWatcher(node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			return sm.clientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},
@@ -140,7 +164,6 @@ func (sm *Manager) annotationsWatcher() error {
 	//defer rw.Stop()
 
 	for event := range ch {
-
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
@@ -149,62 +172,14 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			// BGP Local configuration
-			nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
-			if nodeASN != "" {
-				u64, err := strconv.ParseUint(nodeASN, 10, 32)
-				if err != nil {
-					return err
-				}
-				sm.config.BGPConfig.AS = uint32(u64)
-			} else {
+			bgpConfig, bgpPeer, err := parseBgpAnnotations(node, sm.config.Annotations)
+			if err != nil {
+				log.Error(err)
 				continue
 			}
 
-			srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", sm.config.Annotations)]
-			if srcIP != "" {
-				sm.config.BGPConfig.RouterID = srcIP
-			} else {
-				continue
-			}
-
-			// Peer configuration [REQUIRED]
-			peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", sm.config.Annotations)]
-			if peerASN != "" {
-				u64, err := strconv.ParseUint(peerASN, 10, 32)
-				if err != nil {
-					return err
-				}
-				sm.config.BGPPeerConfig.AS = uint32(u64)
-			} else {
-				continue
-			}
-
-			peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", sm.config.Annotations)]
-
-			peerIPs := strings.Split(peerIPString, ",")
-
-			for _, peerIP := range peerIPs {
-				ipAddr := strings.TrimSpace(peerIP)
-
-				if ipAddr != "" {
-					sm.config.BGPPeerConfig.Address = ipAddr
-					sm.config.BGPConfig.Peers = append(sm.config.BGPConfig.Peers, sm.config.BGPPeerConfig)
-				}
-			}
-
-			// BGP Password, if it doesn't find a password don't "continue" [OPTIONAL]
-			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", sm.config.Annotations)]
-			if base64BGPPassword != "" {
-				// Decode base64 encoded string
-				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
-				if err != nil {
-					return err
-				}
-				sm.config.BGPPeerConfig.Password = string(decodedPassword)
-			}
-
-			log.Debugf("%s / %d / %s / %d /n", sm.config.BGPConfig.RouterID, sm.config.BGPConfig.AS, sm.config.BGPConfig.Peers[0].Address, sm.config.BGPConfig.Peers[0].AS)
+			sm.config.BGPConfig = bgpConfig
+			sm.config.BGPPeerConfig = bgpPeer
 
 			rw.Stop()
 			break
@@ -238,4 +213,71 @@ func (sm *Manager) annotationsWatcher() error {
 	log.Infoln("Exiting Annotations watcher")
 	return nil
 
+}
+
+// parseNodeAnnotations parses the annotations on the node and updates the configuration
+// returning an error if the annotations are not valid or missing; and nil if everything is OK
+// to continue
+func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
+	bgpConfig := bgp.Config{}
+	bgpPeer := bgp.Peer{}
+
+	nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", prefix)]
+	if nodeASN == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("node-asn value missing or empty")
+	}
+
+	u64, err := strconv.ParseUint(nodeASN, 10, 32)
+	if err != nil {
+		return bgpConfig, bgpPeer, err
+	}
+
+	bgpConfig.AS = uint32(u64)
+
+	srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", prefix)]
+	if srcIP == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("src-ip value missing or empty")
+	}
+
+	bgpConfig.RouterID = srcIP
+
+	peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", prefix)]
+	if peerASN == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("peer-asn value missing or empty")
+	}
+
+	u64, err = strconv.ParseUint(peerASN, 10, 32)
+	if err != nil {
+		return bgpConfig, bgpPeer, err
+	}
+
+	bgpPeer.AS = uint32(u64)
+
+	peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", prefix)]
+
+	peerIPs := strings.Split(peerIPString, ",")
+
+	for _, peerIP := range peerIPs {
+		ipAddr := strings.TrimSpace(peerIP)
+
+		if ipAddr != "" {
+			bgpPeer.Address = ipAddr
+			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
+		}
+	}
+
+	base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", prefix)]
+	if base64BGPPassword != "" {
+		// Decode base64 encoded string
+		decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
+		if err != nil {
+			return bgpConfig, bgpPeer, err
+		}
+		bgpPeer.Password = string(decodedPassword)
+	}
+
+	log.Debugf("BGPConfig: %v\n", bgpConfig)
+	log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
+
+	return bgpConfig, bgpPeer, nil
 }
