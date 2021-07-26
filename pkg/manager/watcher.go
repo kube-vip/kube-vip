@@ -139,7 +139,7 @@ func (sm *Manager) annotationsWatcher() error {
 	// they're as needed
 	log.Warn(err)
 
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcher(node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			return sm.clientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},
@@ -167,7 +167,7 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			if err := sm.parseNodeAnnotations(node); err != nil {
+			if err := sm.parseBgpAnnotations(node); err != nil {
 				log.Error(err)
 				continue
 			}
@@ -209,7 +209,7 @@ func (sm *Manager) annotationsWatcher() error {
 // parseNodeAnnotations parses the annotations on the node and updates the configuration
 // returning an error if the annotations are not valid or missing; and nil if everything is OK
 // to continue
-func (sm *Manager) parseNodeAnnotations(node *v1.Node) error {
+func (sm *Manager) parseBgpAnnotations(node *v1.Node) error {
 	nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", sm.config.Annotations)]
 	if nodeASN == "" {
 		return fmt.Errorf("node-asn value missing or empty")
