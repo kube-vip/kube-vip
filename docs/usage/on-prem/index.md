@@ -7,7 +7,7 @@ We've designed `kube-vip` to be as de-coupled or agnostic from other components 
 This section details the flow of events in order for `kube-vip` to advertise a Kubernetes service:
 
 1. An end user exposes a application through Kubernetes as a LoadBalancer => `kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx`
-2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = ServiceTypeLoadBalancer`
+2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = LoadBalancer`
 3. A controller (typically a Cloud Controller) has a loop that "watches" for services of the type `LoadBalancer`.
 4. The controller now has the responsibility of providing an IP address for this service along with doing anything that is network specific for the environment where the cluster is running.
 5. Once the controller has an IP address it will update the service `svc.Spec.LoadBalancerIP` with it's new IP address.
