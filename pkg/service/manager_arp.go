@@ -45,7 +45,7 @@ func (sm *Manager) startARP() error {
 	// // If BGP is enabled then we start the server that will broadcast VIPs
 	// if sm.config.EnableBGP {
 	// 	// Lets start BGP
-	// 	log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+	// 	log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
 	// 	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
 	// 	if err != nil {
 	// 		log.Error(err)
