@@ -170,7 +170,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 
 	if c.EnableBGP {
 		// Lets start BGP
-		log.Info("Starting the BGP server to adverise VIP routes to VGP peers")
+		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
 		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig)
 		if err != nil {
 			log.Error(err)
