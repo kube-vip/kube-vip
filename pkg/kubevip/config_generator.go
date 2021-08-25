@@ -23,7 +23,7 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		logLevel, err := strconv.Atoi(env)
 		if err != nil {
-			panic(fmt.Sprintf("Unable to parse environment variable [vip_loglevel], should be int"))
+			panic("Unable to parse environment variable [vip_loglevel], should be int")
 		}
 		log.SetLevel(log.Level(logLevel))
 	}
@@ -304,6 +304,18 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(bgpPeerPassword)
 	if env != "" {
 		c.BGPPeerConfig.Password = env
+	}
+
+	// BGP Source Interface
+	env = os.Getenv(bgpSourceIF)
+	if env != "" {
+		c.BGPConfig.SourceIF = env
+	}
+
+	// BGP Source Address
+	env = os.Getenv(bgpSourceIP)
+	if env != "" {
+		c.BGPConfig.SourceIP = env
 	}
 
 	// BGP Peer options, add them if relevant
@@ -624,6 +636,24 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  bgpPeerAS,
 				Value: fmt.Sprintf("%d", c.BGPPeerConfig.AS),
 			},
+		}
+
+		// Detect if we should be using a source interface for speaking to a bgp peer
+		if c.BGPConfig.SourceIF != "" {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpSourceIF,
+				Value: c.BGPConfig.SourceIF,
+			},
+			)
+		}
+		// Detect if we should be using a source address for speaking to a bgp peer
+
+		if c.BGPConfig.SourceIP != "" {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpSourceIP,
+				Value: c.BGPConfig.SourceIP,
+			},
+			)
 		}
 
 		var peers string

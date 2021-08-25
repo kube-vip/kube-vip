@@ -50,13 +50,13 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		},
 	}
 
-	// if b.c.SourceIP != "" {
-	// 	p.Transport.LocalAddress = b.c.SourceIP
-	// }
+	if b.c.SourceIP != "" {
+		p.Transport.LocalAddress = b.c.SourceIP
+	}
 
-	// if b.c.SourceIF != "" {
-	// 	p.Transport.BindInterface = b.c.SourceIF
-	// }
+	if b.c.SourceIF != "" {
+		p.Transport.BindInterface = b.c.SourceIF
+	}
 
 	return b.s.AddPeer(context.Background(), &api.AddPeerRequest{
 		Peer: p,

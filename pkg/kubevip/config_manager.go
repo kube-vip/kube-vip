@@ -71,7 +71,7 @@ func OpenConfig(path string) (*Config, error) {
 func (c *Config) PrintConfig() {
 	b, _ := yaml.Marshal(c)
 
-	fmt.Printf(string(b))
+	fmt.Print(string(b))
 }
 
 //ParseFlags will write the current configuration to a specified [path]
@@ -159,7 +159,7 @@ func SampleConfig() {
 	}
 	b, _ := yaml.Marshal(c)
 
-	fmt.Printf(string(b))
+	fmt.Print(string(b))
 }
 
 //WriteConfig will write the current configuration to a specified [path]
