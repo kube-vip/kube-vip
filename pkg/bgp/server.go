@@ -16,9 +16,9 @@ func NewBGPServer(c *Config) (b *Server, err error) {
 		return nil, fmt.Errorf("You need to provide AS")
 	}
 
-	// if c.SourceIP != "" && c.SourceIF != "" {
-	// 	return nil, fmt.Errorf("SourceIP and SourceIF are mutually exclusive")
-	// }
+	if c.SourceIP != "" && c.SourceIF != "" {
+		return nil, fmt.Errorf("SourceIP and SourceIF are mutually exclusive")
+	}
 
 	if len(c.Peers) == 0 {
 		return nil, fmt.Errorf("You need to provide at least one peer")
