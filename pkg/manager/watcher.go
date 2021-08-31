@@ -262,18 +262,19 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 
 		if ipAddr != "" {
 			bgpPeer.Address = ipAddr
+			// Check if we're also expecting a password for this peer
+			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", prefix)]
+			if base64BGPPassword != "" {
+				// Decode base64 encoded string
+				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
+				if err != nil {
+					return bgpConfig, bgpPeer, err
+				}
+				// Set the password for each peer
+				bgpPeer.Password = string(decodedPassword)
+			}
 			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
 		}
-	}
-
-	base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", prefix)]
-	if base64BGPPassword != "" {
-		// Decode base64 encoded string
-		decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
-		if err != nil {
-			return bgpConfig, bgpPeer, err
-		}
-		bgpPeer.Password = string(decodedPassword)
 	}
 
 	log.Debugf("BGPConfig: %v\n", bgpConfig)
