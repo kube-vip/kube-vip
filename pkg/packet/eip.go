@@ -12,13 +12,20 @@ import (
 // AttachEIP will use the packet APIs to move an EIP and attach to a host
 func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 
-	// Find our project
-	proj := findProject(k.MetalProject, c)
-	if proj == nil {
-		return fmt.Errorf("Unable to find Project [%s]", k.MetalProject)
+	// Use MetalProjectID if it is defined
+	projID := k.MetalProjectID
+
+	if projID == "" {
+		// Fallback to attempting to find the project by name
+		proj := findProject(k.MetalProject, c)
+		if proj == nil {
+			return fmt.Errorf("Unable to find Project [%s]", k.MetalProject)
+		}
+
+		projID = proj.ID
 	}
 
-	ips, _, _ := c.ProjectIPs.List(proj.ID, &packngo.ListOptions{})
+	ips, _, _ := c.ProjectIPs.List(projID, &packngo.ListOptions{})
 	for _, ip := range ips {
 
 		// Find the device id for our EIP
@@ -33,7 +40,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 	}
 
 	// Lookup this server through the packet API
-	thisDevice := findSelf(c, proj.ID)
+	thisDevice := findSelf(c, projID)
 	if thisDevice == nil {
 		return fmt.Errorf("Unable to find local/this device in packet API")
 	}
