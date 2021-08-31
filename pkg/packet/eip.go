@@ -25,11 +25,17 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 		projID = proj.ID
 	}
 
+	// Prefer Address over VIP
+	vip := k.Address
+	if vip == "" {
+		vip = k.VIP
+	}
+
 	ips, _, _ := c.ProjectIPs.List(projID, &packngo.ListOptions{})
 	for _, ip := range ips {
 
 		// Find the device id for our EIP
-		if ip.Address == k.VIP {
+		if ip.Address == vip {
 			log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
 			// If attachements already exist then remove them
 			if len(ip.Assignments) != 0 {
@@ -48,7 +54,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 	// Assign the EIP to this device
 	log.Infof("Assigning EIP to -> %s\n", thisDevice.Hostname)
 	_, _, err := c.DeviceIPs.Assign(thisDevice.ID, &packngo.AddressStruct{
-		Address: k.VIP,
+		Address: vip,
 	})
 	if err != nil {
 		return err
