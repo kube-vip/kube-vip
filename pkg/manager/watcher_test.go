@@ -50,13 +50,13 @@ func TestParseBgpAnnotations(t *testing.T) {
 	}
 
 	bgpPeers := []bgp.Peer{
-		{Address: "10.0.0.1", AS: uint32(64000)},
-		{Address: "10.0.0.2", AS: uint32(64000)},
-		{Address: "10.0.0.3", AS: uint32(64000)},
+		{Address: "10.0.0.1", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.2", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.3", AS: uint32(64000), Password: "password"},
 	}
 	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
 	assert.Equal(t, "10.0.0.3", bgpPeer.Address, "bgpPeer.Address parsed incorrectly")
-	//assert.Equal(t, "password", bgpPeer.Password, "bgpPeer.Password parsed incorrectly")
+	assert.Equal(t, "password", bgpPeer.Password, "bgpPeer.Password parsed incorrectly")
 }
 
 func Test_parseBgpAnnotations(t *testing.T) {
