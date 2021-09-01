@@ -239,7 +239,9 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 		return bgpConfig, bgpPeer, fmt.Errorf("src-ip value missing or empty")
 	}
 
-	bgpConfig.RouterID = srcIP
+	// Set the routerID (Unique ID for BGP) to the source IP
+	// Also set the BGP peering to the sourceIP
+	bgpConfig.RouterID, bgpConfig.SourceIP = srcIP, srcIP
 
 	peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", prefix)]
 	if peerASN == "" {
