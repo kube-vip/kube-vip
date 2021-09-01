@@ -30,7 +30,7 @@ kubectl create configmap --namespace kube-system kubevip --from-literal range-gl
 
 Set the correct `alias` for `kube-vip`
 ```
-alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.7"
+alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"
 ```
 
 Install Kube-vip deamonset inside of KIND

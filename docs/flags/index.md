@@ -6,6 +6,8 @@ These flags are typically used in manifest generation.
 
 | Category     | Flag | Usage | Notes |
 |--------------|------|-------|-------|
+|**Troubleshooting**          ||||
+|              |`--log`|default 4|Set to `5` for debugging logs|
 |**Mode**          ||||
 |              |`--controlPlane`|Enables `kube-vip` control-plane functionality||
 |              |`--services`|Enables `kube-vip` to watch services of type:LoadBalancer||
@@ -34,6 +36,8 @@ These flags are typically used in manifest generation.
 |              |`--peerAS`|default 65000|AS of a single BGP Peer|
 |              |`--peerPass`|""| Password to work with a single BGP Peer|
 |              |`--multiHop`|Enables eBGP MultiHop| Enable multiHop with a single BGP Peer|
+|              |`--sourceif`|Source Interface| Determines which interface BGP should peer _from_|
+|              |`--sourceip`|Source Address| Determines which IP address BGP should peer _from_|
 |              |`--annotaions`|`<provider string>`|Startup will be paused until the node annotaions contain the BGP configuration|
 |**Equinix Metal**|||(May be deprecated)|
 |              |`--metal`|Enables Equinix Metal API calls||
@@ -50,6 +54,8 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 
 | Category     | Environment Variable | Usage | Notes |
 |--------------|------|-------|-------|
+|**Troubleshooting**          ||||
+|              |`vip_loglevel`|default 4|Set to `5` for debugging logs|
 |**Mode**          ||||
 |              |`cp_enable`|Enables `kube-vip` control-plane functionality||
 |              |`svc_enable`|Enables `kube-vip` to watch services of `type:LoadBalancer`||
@@ -75,6 +81,8 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |              |`bgp_peeras`|default 65000|AS of a single BGP Peer|
 |              |`bgp_peerpass`|""| Password to work with a single BGP Peer|
 |              |`bgp_multihop`|Enables eBGP MultiHop| Enable multiHop with a single BGP Peer|
+|              |`bgp_sourceif`|Source Interface| Determines which interface BGP should peer _from_|
+|              |`bgp_sourceip`|Source Address| Determines which IP address BGP should peer _from_|
 |              |`annotaions`|`<provider string>`|Startup will be paused until the node annotaions contain the BGP configuration|
 |**Equinix Metal**|||(May be deprecated)|
 |              |`vip_packet`|Enables Equinix Metal API calls||
