@@ -6,6 +6,16 @@ When deploying Kubernetes with Equinix Metal with the `--controlplane` functiona
 
 **Note** If this cluster will be making use of Equinix Metal for `type:LoadBalancer` (by using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm)) then we will need to ensure that nodes are set to use an external cloud-provider. Before doing a `kubeadm init|join` ensure the kubelet has the correct flags by using the following command `echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet`.
 
+## Configure to use a container runtime
+
+The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
+
+### containerd
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.8 vip /kube-vip"`
+
+### Docker
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"`
+
 ## Creating HA clusters in Equinix Metal
 
 ### Creating a manifest using the API

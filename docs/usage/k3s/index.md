@@ -45,10 +45,10 @@ curl -sL kube-vip.io/k3s | vipAddress=$VIP vipInterface=$INTERFACE sh | sudo tee
 ## Step 3.2 Genereate from container image
 
 ### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:0.3.7 vip /kube-vip"`
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.8 vip /kube-vip"`
 
 ### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:0.3.7"`
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"`
 
 
 ```
