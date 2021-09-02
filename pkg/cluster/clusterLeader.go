@@ -153,6 +153,17 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	// If Packet is enabled then we can begin our preperation work
 	var packetClient *packngo.Client
 	if c.EnableMetal {
+		if c.ProviderConfig != "" {
+			key, project, err := packet.GetPacketConfig(c.ProviderConfig)
+			if err != nil {
+				log.Error(err)
+			} else {
+				// Set the environment variable with the key for the project
+				os.Setenv("PACKET_AUTH_TOKEN", key)
+				// Update the configuration with the project key
+				c.MetalProjectID = project
+			}
+		}
 		packetClient, err = packngo.NewClient()
 		if err != nil {
 			log.Error(err)
