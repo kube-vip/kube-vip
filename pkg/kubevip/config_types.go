@@ -63,6 +63,9 @@ type Config struct {
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
 
+	// Interface is the network interface to bind to (default: First Adapter)
+	ServicesInterface string `yaml:"servicesInterface,omitempty"`
+
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 

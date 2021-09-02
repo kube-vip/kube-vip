@@ -101,7 +101,9 @@ var kubeKubeadmJoin = &cobra.Command{
 		opts := metav1.ListOptions{}
 		opts.LabelSelector = "node-role.kubernetes.io/master"
 		nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), opts)
-
+		if err != nil {
+			log.Fatal(err.Error())
+		}
 		// Iterate over all nodes that are masters and find the details to build a peer list
 		for x := range nodes.Items {
 			// Get hostname and address
@@ -150,7 +152,7 @@ func autoGenLocalPeer() (*kubevip.RaftPeer, error) {
 		}
 	}
 	if a == "" {
-		return nil, fmt.Errorf("Unable to find local address")
+		return nil, fmt.Errorf("nable to find local address")
 	}
 	return &kubevip.RaftPeer{
 		ID:      h,
