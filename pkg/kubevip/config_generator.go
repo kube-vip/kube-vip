@@ -855,13 +855,37 @@ func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inClust
 	if taint {
 		newManifest.Spec.Template.Spec.Tolerations = []corev1.Toleration{
 			{
-				Key:      "node-role.kubernetes.io/master",
 				Effect:   corev1.TaintEffectNoSchedule,
 				Operator: corev1.TolerationOpExists,
 			},
+			{
+				Effect:   corev1.TaintEffectNoExecute,
+				Operator: corev1.TolerationOpExists,
+			},
 		}
-		newManifest.Spec.Template.Spec.NodeSelector = map[string]string{
-			"node-role.kubernetes.io/master": "true",
+		newManifest.Spec.Template.Spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "node-role.kubernetes.io/master",
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "node-role.kubernetes.io/control-plane",
+									Operator: corev1.NodeSelectorOpExists,
+								},
+							},
+						},
+					},
+				},
+			},
 		}
 	}
 	b, _ := yaml.Marshal(newManifest)
