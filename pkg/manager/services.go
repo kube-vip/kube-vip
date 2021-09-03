@@ -91,17 +91,17 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 	}
 
 	// Detect if we're using a specific interface for services
-	var serciceInterface string
+	var serviceInterface string
 	if sm.config.ServicesInterface != "" {
-		serciceInterface = sm.config.ServicesInterface
+		serviceInterface = sm.config.ServicesInterface
 	} else {
-		serciceInterface = sm.config.Interface
+		serviceInterface = sm.config.Interface
 	}
 
 	// Generate new Virtual IP configuration
 	newVip := kubevip.Config{
 		VIP:        newServiceAddress, //TODO support more than one vip?
-		Interface:  serciceInterface,
+		Interface:  serviceInterface,
 		SingleNode: true,
 		EnableARP:  sm.config.EnableARP,
 		EnableBGP:  sm.config.EnableBGP,

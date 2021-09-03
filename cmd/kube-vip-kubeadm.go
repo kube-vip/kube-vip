@@ -152,7 +152,7 @@ func autoGenLocalPeer() (*kubevip.RaftPeer, error) {
 		}
 	}
 	if a == "" {
-		return nil, fmt.Errorf("nable to find local address")
+		return nil, fmt.Errorf("unable to find local address")
 	}
 	return &kubevip.RaftPeer{
 		ID:      h,
