@@ -141,6 +141,6 @@ var kubeVipSampleManifest = &cobra.Command{
 		}
 
 		b, _ := yaml.Marshal(p)
-		fmt.Printf(string(b))
+		fmt.Print(string(b))
 	},
 }

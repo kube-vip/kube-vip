@@ -28,8 +28,8 @@ func (sm *Manager) stopService(uid string) error {
 			sm.serviceInstances[x].cluster.Stop()
 		}
 	}
-	if found == false {
-		return fmt.Errorf("Unable to find/stop service [%s]", uid)
+	if !found {
+		return fmt.Errorf("unable to find/stop service [%s]", uid)
 	}
 	return nil
 }
@@ -90,10 +90,18 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 
 	}
 
+	// Detect if we're using a specific interface for services
+	var serviceInterface string
+	if sm.config.ServicesInterface != "" {
+		serviceInterface = sm.config.ServicesInterface
+	} else {
+		serviceInterface = sm.config.Interface
+	}
+
 	// Generate new Virtual IP configuration
 	newVip := kubevip.Config{
 		VIP:        newServiceAddress, //TODO support more than one vip?
-		Interface:  sm.config.Interface,
+		Interface:  serviceInterface,
 		SingleNode: true,
 		EnableARP:  sm.config.EnableARP,
 		EnableBGP:  sm.config.EnableBGP,
@@ -101,7 +109,7 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 	}
 
 	// This instance wasn't found, we need to add it to the manager
-	if foundInstance == false {
+	if !foundInstance {
 		// Create new service
 		var newService Instance
 		newService.UID = newServiceUID

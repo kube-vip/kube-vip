@@ -34,6 +34,12 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
+	// Find (services) interface
+	env = os.Getenv(vipServicesInterface)
+	if env != "" {
+		c.ServicesInterface = env
+	}
+
 	// Find provider configuration
 	env = os.Getenv(providerConfig)
 	if env != "" {
@@ -358,10 +364,11 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableLoadBalancer = b
+		// Load Balancer configuration
+		return parseEnvironmentLoadBalancer(c)
 	}
 
-	// Load Balancer configuration
-	return parseEnvironmentLoadBalancer(c)
+	return nil
 }
 
 func parseEnvironmentLoadBalancer(c *Config) error {
@@ -456,6 +463,18 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name:  port,
 			Value: fmt.Sprintf("%d", c.Port),
 		},
+	}
+
+	// Detect if we should be using a seperate interface for sercices
+	if c.ServicesInterface != "" {
+		// build environment variables
+		svcInterface := []corev1.EnvVar{
+			{
+				Name:  vipServicesInterface,
+				Value: c.ServicesInterface,
+			},
+		}
+		newEnvironment = append(newEnvironment, svcInterface...)
 	}
 
 	// If a CIDR is used add it to the manifest
