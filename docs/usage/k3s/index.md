@@ -1,5 +1,9 @@
 # K3s overview (on Equinix Metal)
 
+## Prerequisites
+
+In order to make ARP work on Equinix Metal, you need to follow [metal-gateway](https://metal.equinix.com/developers/docs/networking/metal-gateway/) guide to have public VLAN subnet, which you can use as your loadbalancer IP.
+
 ## Optional Tidy environment (best if something was running before)
 ```
 rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; \ 
@@ -29,7 +33,7 @@ Configure your virtual IP (for the control plane) and interface that will expose
 
 ```
 export VIP=x.x.x.x
-export INTERFACE=ethx
+export INTERFACE=bind0 # or ethX depends on your networking setup
 ```
 
 Modify the `VIP` and `INTERFACE` to match the floating IP address you'd like to use and the interface it should bind to.
