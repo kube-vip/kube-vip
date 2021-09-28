@@ -4,7 +4,9 @@
 
 When deploying Kubernetes with Equinix Metal with the `--controlplane` functionality we need to pre-populate the BGP configuration in order for the control plane to be advertised and work in a HA scenario. Luckily Equinix Metal provides the capability to "look up" the configuration details (for BGP) that we need in order to advertise our virtual IP for HA functionality. We can either make use of the [Equinix Metal API](https://metal.equinix.com/developers/api/) or we can parse the [Equinix Metal Metadata service](https://metal.equinix.com/developers/docs/servers/metadata/).
 
-**Note** If this cluster will be making use of Equinix Metal for `type:LoadBalancer` (by using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm)) then we will need to ensure that nodes are set to use an external cloud-provider. Before doing a `kubeadm init|join` ensure the kubelet has the correct flags by using the following command `echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet`.
+**Note** If this cluster will be making use of Equinix Metal for `type:LoadBalancer` (by using the [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal) then we will need to ensure that nodes are set to use an external cloud-provider. Before doing a `kubeadm init|join` ensure the kubelet has the correct flags by using the following command `echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet`.
+
+For information on how to deploy [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal)
 
 ## Configure to use a container runtime
 
@@ -17,6 +19,12 @@ The easiest method to generate a manifest is using the container itself, below w
 `alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"`
 
 ## Creating HA clusters in Equinix Metal
+
+export VIP= metal_EIP  
+export INTERFACE=<interface>
+
+where metal_EIPis the elastci IP (EIP) address your requested via Metal's UI or API, for more informaiton on how to request a Metal's EIP, please see the following Equinix Metal document - https://metal.equinix.com/developers/docs/networking/elastic-ips/#elastic-ip-addresses
+and <interface> is the interface you announce your VIP from via BGP. By default it's lo:0 in Equinix Metal.
 
 ### Creating a manifest using the API
 
@@ -33,7 +41,9 @@ kube-vip manifest pod \
     --metalKey xxxxxxx \
     --metalProjectID xxxxx | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
+where metalKey is your "personal API key" under "Personal Settings" of your Metal's portal, and MetalProjectID is your Metal's "Project ID" under "Project Settings"
 
+Or
 ### Creating a manifest using the metadata
 
 We can parse the metadata, *however* it requires that the tools `curl` and `jq` are installed. 
@@ -55,7 +65,7 @@ kube-vip manifest pod \
 
 Below are two examples for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`. 
 
-**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
+**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
 
 ### Using Annotations
 
@@ -85,17 +95,10 @@ kube-vip manifest daemonset --interface $INTERFACE \
 
 ### Expose with Equinix Metal (using the `kube-vip-cloud-provider`)
 
-Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
+Follow the Equinix Metal's Elastic IP document (https://metal.equinix.com/developers/docs/networking/elastic-ips/#elastic-ip-addresses) either through the API or through the UI, create a public IPv4 EIP address, for example (145.75.75.1) and this is the address you can expose through BGP!
 
 ```
-# packet ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4                                                                   
-+-------+---------------+--------+----------------------+
-|   ID  |    ADDRESS    | PUBLIC |       CREATED        |
-+-------+---------------+--------+----------------------+
-| xxxxx |     1.1.1.1   | true   | 2020-11-10T15:57:39Z |
-+-------+---------------+--------+----------------------+
-
-kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
+kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=147.75.75.1
 ```
 
 ## Troubleshooting
