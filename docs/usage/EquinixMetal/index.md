@@ -1,10 +1,10 @@
-# Equinix Metal Overview (using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm))
+# Equinix Metal Overview (using the [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal))
 
 ## BGP with Equinix Metal
 
-When deploying Kubernetes with Equinix Metal with the `--controlplane` functionality we need to pre-populate the BGP configuration in order for the control plane to be advertised and work in a HA scenario. Luckily Equinix Metal provides the capability to "look up" the configuration details (for BGP) that we need in order to advertise our virtual IP for HA functionality. We can either make use of the [Equinix Metal API](https://metal.equinix.com/developers/api/) or we can parse the [Equinix Metal Metadata service](https://metal.equinix.com/developers/docs/servers/metadata/).
+When deploying Kubernetes with Equinix Metal with the `--controlplane` functionality we need to pre-populate the BGP configuration in order for the control plane to be advertised and work in a HA scenario. Luckily Equinix Metal provides the capability to "look up" the configuration details (for BGP) that we need in order to advertise our virtual IP (VIP) for HA functionality. We can either make use of the [Equinix Metal API](https://metal.equinix.com/developers/api/) or we can parse the [Equinix Metal Metadata service](https://metal.equinix.com/developers/docs/servers/metadata/).
 
-**Note** If this cluster will be making use of Equinix Metal for `type:LoadBalancer` (by using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm)) then we will need to ensure that nodes are set to use an external cloud-provider. Before doing a `kubeadm init|join` ensure the kubelet has the correct flags by using the following command `echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet`.
+**Note** If this cluster will be making use of Equinix Metal for `type:LoadBalancer` (by using the [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal)) then we will need to ensure that nodes are set to use an external cloud-provider. Before doing a `kubeadm init|join` ensure the kubelet has the correct flags by using the following command `echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet`.
 
 ## Configure to use a container runtime
 
@@ -17,11 +17,18 @@ The easiest method to generate a manifest is using the container itself, below w
 `alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"`
 
 ## Creating HA clusters in Equinix Metal
-
+    
 ### Creating a manifest using the API
 
 We can enable `kube-vip` with the capability to discover the required configuration for BGP by passing the `--metal` flag and the API Key and our project ID.
 
+```
+export VIP= metal_EIP  
+export INTERFACE=<interface>
+```
+where metal_EIP is the Elastic IP (EIP) address your requested via Metal's UI or API. For more informaiton on how to request a Metal's EIP, please see the following [Equinix Metal's EIP document](https://metal.equinix.com/developers/docs/networking/elastic-ips/#elastic-ip-addresses)
+<interface> is the interface you announce your VIP from via BGP. By default it's lo:0 in Equinix Metal.
+    
 ```
 kube-vip manifest pod \
     --interface $INTERFACE\
@@ -33,7 +40,8 @@ kube-vip manifest pod \
     --metalKey xxxxxxx \
     --metalProjectID xxxxx | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
-
+where metalKey is your "personal API key" under "Personal Settings" of your Metal's portal, and MetalProjectID is your Metal's "Project ID" under "Project Settings"
+    
 ### Creating a manifest using the metadata
 
 We can parse the metadata, *however* it requires that the tools `curl` and `jq` are installed. 
@@ -55,8 +63,13 @@ kube-vip manifest pod \
 
 Below are two examples for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`. 
 
-**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
+**NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal) to be installed prior to the kube-vip setup and that the cluster/kubelet is configured to use an "external" cloud provider.
 
+```
+export INTERFACE=<interface>
+```
+where <interface> is the interface you announce your VIP from via BGP. By default it's lo:0 in Equinix Metal.
+    
 ### Using Annotations
 
 This is important as the CCM will apply the BGP configuration to the [node annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) making it easy for `kube-vip` to find the networking configuration it needs to expose load balancer addresses. The `--annotations metal.equinix.com` will cause kube-vip to "watch" the annotations of the worker node that it is running on, once all of the configuarion has been applied by the CCM then the `kube-vip` pod is ready to advertise BGP addresses for the service.
@@ -83,19 +96,19 @@ kube-vip manifest daemonset --interface $INTERFACE \
 --provider-config /etc/cloud-sa/cloud-sa.json | kubectl apply -f -
 ```
 
-### Expose with Equinix Metal (using the `kube-vip-cloud-provider`)
+### Expose with [Equinix Metal CCM](https://github.com/equinix/cloud-provider-equinix-metal)
 
-Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
+Follow the [Equinix Metal's Elastic IP (EIP) document](https://metal.equinix.com/developers/docs/networking/elastic-ips/#elastic-ip-addresses) either through the API, CLI or through the UI, to create a public IPv4 EIP address, for example (145.75.75.1) and this is the address you can expose through BGP as the service loadbalancer.
 
 ```
-# packet ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4                                                                   
+# metal ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4                                                                   
 +-------+---------------+--------+----------------------+
 |   ID  |    ADDRESS    | PUBLIC |       CREATED        |
 +-------+---------------+--------+----------------------+
-| xxxxx |     1.1.1.1   | true   | 2020-11-10T15:57:39Z |
+| xxxxx | 147.75.75.1   | true   | 2020-11-10T15:57:39Z |
 +-------+---------------+--------+----------------------+
-
-kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
+    
+kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=147.75.75.1
 ```
 
 ## Troubleshooting
@@ -121,4 +134,4 @@ ip route add 169.254.255.1 via $GATEWAY_IP
 ip route add 169.254.255.2 via $GATEWAY_IP
 ```
 
-Additionally examining the logs of the Packet CCM may reveal why the node is not yet ready.
+Additionally examining the logs of the Equinix Metal's CCM may reveal why the node is not yet ready.
