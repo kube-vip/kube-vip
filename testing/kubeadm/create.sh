@@ -29,8 +29,14 @@ esac
 
 source ./testing/nodes
 
-echo "Creating First node!"
+echo "Installing Kubernetes dependencies for Kubernetes $! on all nodes"
+ssh $NODE01 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$1-00 kubectl=$1-00 kubeadm=$1-00"
+ssh $NODE02 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$1-00 kubectl=$1-00 kubeadm=$1-00"
+ssh $NODE03 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$1-00 kubectl=$1-00 kubeadm=$1-00"
+ssh $NODE04 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$1-00 kubectl=$1-00 kubeadm=$1-00"
+ssh $NODE05 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$1-00 kubectl=$1-00 kubeadm=$1-00"
 
+echo "Creating First node!"
 ssh $NODE01 "sudo docker run --network host --rm plndr/kube-vip:$2 manifest pod $mode --interface ens160 --vip $4 --arp --leaderElection | sudo tee /etc/kubernetes/manifests/vip.yaml"
 CONTROLPLANE_CMD=$(ssh $NODE01 "sudo kubeadm init --kubernetes-version $1 --control-plane-endpoint $4 --upload-certs --pod-network-cidr=10.0.0.0/16 | grep certificate-key")
 ssh $NODE01 "sudo rm -rf ~/.kube/"
