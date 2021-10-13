@@ -809,6 +809,13 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 		}
 		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, adminConfVolume)
+		// Add Host modification
+
+		hostAlias := corev1.HostAlias{
+			IP:        "127.0.0.1",
+			Hostnames: []string{"kubernetes"},
+		}
+		newManifest.Spec.HostAliases = append(newManifest.Spec.HostAliases, hostAlias)
 	}
 
 	if c.ProviderConfig != "" {

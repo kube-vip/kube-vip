@@ -114,7 +114,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// ensure connectivity.
 	if config.EnableControlPane {
 		log.Debugf("Modifying address of Kubernetes server to localhost")
-		cfg.Host = fmt.Sprintf("localhost:%v", config.Port)
+		cfg.Host = fmt.Sprintf("kubernetes:%v", config.Port)
 		clientset, err = kubernetes.NewForConfig(cfg)
 	}
 	if err != nil {
