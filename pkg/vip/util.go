@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 
 	"github.com/pkg/errors"
+	"github.com/vishvananda/netlink"
 )
 
 // LookupHost resolves dnsName and return an IP or an error
@@ -63,4 +65,23 @@ func GetFullMask(address string) (string, error) {
 		return "/128", nil
 	}
 	return "", fmt.Errorf("failed to parse %s as either IPv4 or IPv6", address)
+}
+
+// GetDefaultGatewayInterface return default gateway interface link
+func GetDefaultGatewayInterface() (*net.Interface, error) {
+	routes, err := netlink.RouteList(nil, syscall.AF_INET)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, route := range routes {
+		if route.Dst == nil || route.Dst.String() == "0.0.0.0/0" {
+			if route.LinkIndex <= 0 {
+				return nil, errors.New("Found default route but could not determine interface")
+			}
+			return net.InterfaceByIndex(route.LinkIndex)
+		}
+	}
+
+	return nil, errors.New("Unable to find default route")
 }

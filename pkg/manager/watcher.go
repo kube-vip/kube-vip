@@ -58,6 +58,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
+			
 			if svc.Spec.LoadBalancerIP == "" {
 				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
 			} else {
