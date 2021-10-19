@@ -99,7 +99,7 @@ type Config struct {
 // LeaderElection defines all of the settings for Kubernetes LeaderElection
 type LeaderElection struct {
 
-	// EnableLeaderElection will use the Kubernetes leader election algorithim
+	// EnableLeaderElection will use the Kubernetes leader election algorithm
 	EnableLeaderElection bool `yaml:"enableLeaderElection"`
 
 	// Lease Duration - length of time a lease can be held for

@@ -21,16 +21,16 @@ import (
 var configPath string
 
 // Path to the configuration file
-var namespace string
+// var namespace string
 
 // Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
 
 // Disable the Virtual IP (bind to the existing network stack)
-var controlPlane bool
+// var controlPlane bool
 
 // Run as a load balancer service (within a pod / kubernetes)
-var serviceArp bool
+// var serviceArp bool
 
 // ConfigMap name within a Kubernetes cluster
 var configMap string
@@ -114,7 +114,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.MultiHop, "multihop", false, "This will enable BGP multihop support")
-	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma seperated BGP Peer, format: address:as:password:multihop")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma separated BGP Peer, format: address:as:password:multihop")
 
 	// Control plane specific flags
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
@@ -129,7 +129,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
 	// Prometheus HTTP Server
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "promethuesHTTPServer", ":2112", "Host and port used to expose Promethues metrics via an HTTP server")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "promethuesHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
@@ -167,7 +167,7 @@ var kubeVipSample = &cobra.Command{
 	Use:   "sample",
 	Short: "Generate a Sample configuration",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		_ = cmd.Help()
 	},
 }
 
@@ -215,7 +215,7 @@ var kubeVipManager = &cobra.Command{
 			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
 			defaultIF, err := vip.GetDefaultGatewayInterface()
 			if err != nil {
-				cmd.Help()
+				_ = cmd.Help()
 				log.Fatalf("unable to detect default interface -> [%v]", err)
 			}
 			initConfig.Interface = defaultIF.Name
@@ -266,6 +266,7 @@ var kubeVipManager = &cobra.Command{
 	},
 }
 
+// PrometheusHTTPServerConfig defines the Prometheus server configuration.
 type PrometheusHTTPServerConfig struct {
 	// Addr sets the http server address used to expose the metric endpoint
 	Addr string

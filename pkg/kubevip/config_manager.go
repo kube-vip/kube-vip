@@ -55,7 +55,7 @@ func OpenConfig(path string) (*Config, error) {
 			return nil, err
 		}
 
-		// If data is read succesfully parse the yaml
+		// If data is read successfully parse the yaml
 		var c Config
 		err = yaml.Unmarshal(configData, &c)
 		if err != nil {

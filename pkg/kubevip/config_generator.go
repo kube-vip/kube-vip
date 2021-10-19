@@ -56,7 +56,7 @@ func ParseEnvironment(c *Config) error {
 		c.EnableLeaderElection = b
 	}
 
-	// Attempt to find the Lease configuration from teh environment variables
+	// Attempt to find the Lease configuration from the environment variables
 	env = os.Getenv(vipLeaseDuration)
 	if env != "" {
 		i, err := strconv.ParseInt(env, 10, 32)
@@ -196,7 +196,7 @@ func ParseEnvironment(c *Config) error {
 		c.EnableARP = b
 	}
 
-	//Removal of seperate peer
+	//Removal of separate peer
 	env = os.Getenv(vipLocalPeer)
 	if env != "" {
 		// Parse the string in format <id>:<address>:<port>
@@ -213,10 +213,10 @@ func ParseEnvironment(c *Config) error {
 		// Remove existing peers
 		c.RemotePeers = []RaftPeer{}
 
-		// Parse the remote peers (comma seperated)
+		// Parse the remote peers (comma separated)
 		s := strings.Split(env, ",")
 		if len(s) == 0 {
-			return fmt.Errorf("The Remote Peer List [%s] is unable to be parsed, should be in comma seperated format <id>:<address>:<port>", env)
+			return fmt.Errorf("The Remote Peer List [%s] is unable to be parsed, should be in comma separated format <id>:<address>:<port>", env)
 		}
 		for x := range s {
 			// Parse the each remote peer string in format <id>:<address>:<port>
@@ -426,10 +426,10 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 		// Remove existing backends
 		c.LoadBalancers[0].Backends = []BackEnd{}
 
-		// Parse the remote peers (comma seperated)
+		// Parse the remote peers (comma separated)
 		s := strings.Split(env, ",")
 		if len(s) == 0 {
-			return fmt.Errorf("The Backends List [%s] is unable to be parsed, should be in comma seperated format <address>:<port>", env)
+			return fmt.Errorf("The Backends List [%s] is unable to be parsed, should be in comma separated format <address>:<port>", env)
 		}
 		for x := range s {
 			// Parse the each remote peer string in format <address>:<port>
@@ -473,7 +473,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, iface...)
 	}
 
-	// Detect if we should be using a seperate interface for sercices
+	// Detect if we should be using a separate interface for sercices
 	if c.ServicesInterface != "" {
 		// build environment variables
 		svcInterface := []corev1.EnvVar{
@@ -743,7 +743,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		})
 	}
 
-	// Parse peers into a comma seperated string
+	// Parse peers into a comma separated string
 	if len(c.RemotePeers) != 0 {
 		var peers string
 		for x := range c.RemotePeers {

@@ -19,7 +19,7 @@ func (sm *Manager) startBGP() error {
 	//var ns string
 	var err error
 
-	// If Packet is enabled then we can begin our preperation work
+	// If Packet is enabled then we can begin our preparation work
 	var packetClient *packngo.Client
 	if sm.config.EnableMetal {
 		if sm.config.ProviderConfig != "" {

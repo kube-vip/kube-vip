@@ -38,7 +38,7 @@ func (sm *Manager) startARP() error {
 			// Set the struct to nil so nothing should use it in future
 			sm.upnp = nil
 		} else {
-			log.Infof("Succesfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
+			log.Infof("Successfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
 		}
 	}
 
@@ -89,6 +89,7 @@ func (sm *Manager) startARP() error {
 	signal.Notify(signalChan, syscall.SIGTERM)
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
+	//nolint
 	signal.Notify(signalChan, syscall.SIGKILL)
 	go func() {
 		<-signalChan
@@ -112,7 +113,9 @@ func (sm *Manager) startARP() error {
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				sm.servicesWatcher(ctx)
+				if err := sm.servicesWatcher(ctx); err != nil {
+					log.Fatalf("error starting services watcher: %v", err)
+				}
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here

@@ -45,7 +45,7 @@ type Manager struct {
 	// This channel is used to signal a shutdown
 	signalChan chan os.Signal
 
-	// This is a promethues counter used to count the number of events received
+	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
 }
@@ -77,7 +77,7 @@ type Instance struct {
 // NewManager will create a new managing object
 func NewManager(configMap string, config *kubevip.Config) (*Manager, error) {
 	var clientset *kubernetes.Clientset
-	if OutSideCluster == false {
+	if !OutSideCluster {
 		// This will attempt to load the configuration when running within a POD
 		cfg, err := rest.InClusterConfig()
 		if err != nil {

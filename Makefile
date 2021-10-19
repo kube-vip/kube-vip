@@ -87,7 +87,7 @@ check:
 	go mod tidy
 	test -z "$(git status --porcelain)"
 	test -z $(shell gofmt -l main.go | tee /dev/stderr) || echo "[WARN] Fix formatting issues with 'make fmt'"
-	golint ./...
+	golangci-lint run
 	go vet ./...
 	
 run: install

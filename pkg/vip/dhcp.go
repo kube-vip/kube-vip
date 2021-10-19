@@ -1,5 +1,6 @@
-// It"s DHCP client implementation that refers to https://www.rfc-editor.org/rfc/rfc2131.html
 package vip
+
+// DHCP client implementation that refers to https://www.rfc-editor.org/rfc/rfc2131.html
 
 import (
 	"context"
@@ -16,7 +17,7 @@ import (
 // Callback is a function called on certain events
 type Callback func(*nclient4.Lease)
 
-// Client is a DHCP client, responsible for maintaining ipv4 lease for one specified interface
+// DHCPClient is responsible for maintaining ipv4 lease for one specified interface
 type DHCPClient struct {
 	iface          *net.Interface
 	lease          *nclient4.Lease
@@ -26,6 +27,7 @@ type DHCPClient struct {
 	onBound        Callback
 }
 
+// NewDHCPClient returns a new DHCP Client.
 func NewDHCPClient(iface *net.Interface, initRebootFlag bool, requestedIP string, onBound Callback) *DHCPClient {
 	return &DHCPClient{
 		iface:          iface,
@@ -163,10 +165,12 @@ func (c *DHCPClient) Start() {
 
 func (c *DHCPClient) request() (*nclient4.Lease, error) {
 	broadcast, err := nclient4.New(c.iface.Name)
-	defer broadcast.Close()
 	if err != nil {
 		return nil, fmt.Errorf("create a broadcast client for iface %s failed, error: %w", c.iface.Name, err)
 	}
+
+	defer broadcast.Close()
+
 	return broadcast.Request(context.TODO())
 }
 
