@@ -113,7 +113,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 	// ensure connectivity.
 	if config.EnableControlPane {
-		log.Debugf("Modifying address of Kubernetes server to localhost")
+		log.Debugf("Modifying address of Kubernetes server to \"kubernetes\" (internal hostname)")
 		cfg.Host = fmt.Sprintf("kubernetes:%v", config.Port)
 		clientset, err = kubernetes.NewForConfig(cfg)
 	}

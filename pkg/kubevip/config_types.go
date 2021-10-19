@@ -63,9 +63,6 @@ type Config struct {
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
 
-	// AutoInterface is the network interface to bind to (Adapter is determined from Default Gateway)
-	AutoInterface bool `yaml:"interface,omitempty"`
-
 	// ServicesInterface is the network interface to bind to for services (optional)
 	ServicesInterface string `yaml:"servicesInterface,omitempty"`
 

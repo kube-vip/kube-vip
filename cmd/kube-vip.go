@@ -68,7 +68,6 @@ func init() {
 	initConfig.LocalPeer = *localpeer
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AutoInterface, "autoInterface", false, "Name of the interface to bind to")
 
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
 
@@ -212,17 +211,15 @@ var kubeVipManager = &cobra.Command{
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
-		if initConfig.AutoInterface {
+		if initConfig.Interface == "" {
+			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
 			defaultIF, err := vip.GetDefaultGatewayInterface()
 			if err != nil {
-				log.Fatalf("unable to set default interface -> [%v]", err)
+				cmd.Help()
+				log.Fatalf("unable to detect default interface -> [%v]", err)
 			}
 			initConfig.Interface = defaultIF.Name
-		}
-
-		if initConfig.Interface == "" {
-			cmd.Help()
-			log.Fatalln("No interface is specified for kube-vip to bind to")
+			log.Infof("kube-vip will bind to interface [%s]", initConfig.Interface)
 		}
 
 		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{

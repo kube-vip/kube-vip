@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -43,20 +42,6 @@ var kubeManifestPod = &cobra.Command{
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		kubevip.ParseEnvironment(&initConfig)
-		// TODO - check for certain things VIP/interfaces
-
-		if initConfig.AutoInterface {
-			defaultIF, err := vip.GetDefaultGatewayInterface()
-			if err != nil {
-				log.Fatalf("unable to set default interface -> [%v]", err)
-			}
-			initConfig.Interface = defaultIF.Name
-		}
-
-		if initConfig.Interface == "" {
-			cmd.Help()
-			log.Fatalln("No interface is specified for kube-vip to bind to")
-		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
@@ -79,19 +64,6 @@ var kubeManifestDaemon = &cobra.Command{
 		// TODO - A load of text detailing what's actually happening
 		kubevip.ParseEnvironment(&initConfig)
 		// TODO - check for certain things VIP/interfaces
-
-		if initConfig.AutoInterface {
-			defaultIF, err := vip.GetDefaultGatewayInterface()
-			if err != nil {
-				log.Fatalf("unable to set default interface -> [%v]", err)
-			}
-			initConfig.Interface = defaultIF.Name
-		}
-
-		if initConfig.Interface == "" {
-			cmd.Help()
-			log.Fatalln("No interface is specified for kube-vip to bind to")
-		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {

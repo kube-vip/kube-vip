@@ -34,16 +34,6 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
-	// Find interface
-	env = os.Getenv(vipAutoInterface)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.AutoInterface = b
-	}
-
 	// Find (services) interface
 	env = os.Getenv(vipServicesInterface)
 	if env != "" {
@@ -472,16 +462,8 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		},
 	}
 
-	if c.AutoInterface {
-		// build environment variables
-		autoInterface := []corev1.EnvVar{
-			{
-				Name:  vipAutoInterface,
-				Value: strconv.FormatBool(c.AutoInterface),
-			},
-		}
-		newEnvironment = append(newEnvironment, autoInterface...)
-	} else {
+	// If we're specifically saying which interface to use then add it to the manifest
+	if c.Interface != "" {
 		iface := []corev1.EnvVar{
 			{
 				Name:  vipInterface,
@@ -490,6 +472,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, iface...)
 	}
+
 	// Detect if we should be using a seperate interface for sercices
 	if c.ServicesInterface != "" {
 		// build environment variables
