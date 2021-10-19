@@ -34,6 +34,16 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
+	// Find interface
+	env = os.Getenv(vipAutoInterface)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.AutoInterface = b
+	}
+
 	// Find (services) interface
 	env = os.Getenv(vipServicesInterface)
 	if env != "" {
@@ -449,6 +459,7 @@ func parseEnvironmentLoadBalancer(c *Config) error {
 // generatePodSpec will take a kube-vip config and generate a Pod spec
 func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod {
 	command := "manager"
+
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
 		{
@@ -456,15 +467,29 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Value: strconv.FormatBool(c.EnableARP),
 		},
 		{
-			Name:  vipInterface,
-			Value: c.Interface,
-		},
-		{
 			Name:  port,
 			Value: fmt.Sprintf("%d", c.Port),
 		},
 	}
 
+	if c.AutoInterface {
+		// build environment variables
+		autoInterface := []corev1.EnvVar{
+			{
+				Name:  vipAutoInterface,
+				Value: strconv.FormatBool(c.AutoInterface),
+			},
+		}
+		newEnvironment = append(newEnvironment, autoInterface...)
+	} else {
+		iface := []corev1.EnvVar{
+			{
+				Name:  vipInterface,
+				Value: c.Interface,
+			},
+		}
+		newEnvironment = append(newEnvironment, iface...)
+	}
 	// Detect if we should be using a seperate interface for sercices
 	if c.ServicesInterface != "" {
 		// build environment variables

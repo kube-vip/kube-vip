@@ -10,6 +10,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
 	"github.com/kube-vip/kube-vip/pkg/packet"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -67,6 +68,8 @@ func init() {
 	initConfig.LocalPeer = *localpeer
 	//initConfig.Peers = append(initConfig.Peers, *localpeer)
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AutoInterface, "autoInterface", false, "Name of the interface to bind to")
+
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
 
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
@@ -209,6 +212,19 @@ var kubeVipManager = &cobra.Command{
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
+		if initConfig.AutoInterface {
+			defaultIF, err := vip.GetDefaultGatewayInterface()
+			if err != nil {
+				log.Fatalf("unable to set default interface -> [%v]", err)
+			}
+			initConfig.Interface = defaultIF.Name
+		}
+
+		if initConfig.Interface == "" {
+			cmd.Help()
+			log.Fatalln("No interface is specified for kube-vip to bind to")
+		}
+
 		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
 			Addr: initConfig.PrometheusHTTPServer,
 		})
@@ -240,7 +256,7 @@ var kubeVipManager = &cobra.Command{
 		// Define the new service manager
 		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
-			log.Fatalf("%v", err)
+			log.Fatalf("configuring new Manager error -> %v", err)
 		}
 
 		prometheus.MustRegister(mgr.PrometheusCollector()...)
@@ -248,7 +264,7 @@ var kubeVipManager = &cobra.Command{
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {
-			log.Fatalf("%v", err)
+			log.Fatalf("starting new Manager error -> %v", err)
 		}
 	},
 }

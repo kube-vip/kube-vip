@@ -93,7 +93,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		// Second check in home directory for kube config
 		configPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 		if fileExists(configPath) {
-			log.Debugf("Using external Kubernetes configuration from file [%s]", configPath)
+			log.Debugf("Using external Kubernetes configuration from home file [%s]", configPath)
 			cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
 			if err != nil {
 				return nil, err

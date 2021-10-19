@@ -24,6 +24,9 @@ const (
 	//vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 
+	//vipAutoInterface - defines the interface that the vip should bind too
+	vipAutoInterface = "vip_autointerface"
+
 	//vipServicesInterface - defines the interface that the service vips should bind too
 	vipServicesInterface = "vip_servicesinterface"
 
