@@ -24,13 +24,13 @@ func init() {
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfig.EnableARP, "arp", true, "Use ARP broadcasts to improve VIP re-allocations")
 	kubeVipSampleConfig.Flags().StringVar(&cliLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
-	kubeVipSampleConfig.Flags().StringSliceVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma seperated remotePeers, format: id:address:port")
+	kubeVipSampleConfig.Flags().StringSliceVar(&cliRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma separated remotePeers, format: id:address:port")
 	// Load Balancer flags
 	kubeVipSampleConfig.Flags().BoolVar(&cliConfigLB.BindToVip, "lbBindToVip", false, "Bind example load balancer to VIP")
 	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Type, "lbType", "tcp", "Type of load balancer instance (TCP/HTTP)")
 	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Name, "lbName", "Example Load Balancer", "The name of a load balancer instance")
 	kubeVipSampleConfig.Flags().IntVar(&cliConfigLB.Port, "lbPort", 8080, "Port that load balancer will expose on")
-	kubeVipSampleConfig.Flags().StringSliceVar(&cliBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma seperated backends, format: address:port")
+	kubeVipSampleConfig.Flags().StringSliceVar(&cliBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma separated backends, format: address:port")
 }
 
 var kubeVipSampleConfig = &cobra.Command{
@@ -72,13 +72,13 @@ var kubeVipSampleConfig = &cobra.Command{
 
 		err := cliConfig.ParseFlags(cliLocalPeer, cliRemotePeers, cliBackends)
 		if err != nil {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln(err)
 		}
 
 		err = kubevip.ParseEnvironment(&cliConfig)
 		if err != nil {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln(err)
 		}
 

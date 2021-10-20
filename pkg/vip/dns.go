@@ -40,8 +40,13 @@ func (d *ipUpdater) Run(ctx context.Context) {
 				}
 
 				log.Infof("setting %s as an IP", ip)
-				d.vip.SetIP(ip)
-				d.vip.AddIP()
+				if err := d.vip.SetIP(ip); err != nil {
+					log.Errorf("setting %s as an IP: %v", ip, err)
+				}
+
+				if err := d.vip.AddIP(); err != nil {
+					log.Errorf("error adding virtual IP: %v", err)
+				}
 
 			}
 			time.Sleep(3 * time.Second)

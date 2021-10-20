@@ -126,6 +126,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	signal.Notify(signalChan, syscall.SIGTERM)
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
+	//nolint
 	signal.Notify(signalChan, syscall.SIGKILL)
 
 	go func() {
@@ -137,7 +138,10 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	}()
 
 	// (attempt to) Remove the virtual IP, incase it already exists
-	cluster.Network.DeleteIP()
+	err = cluster.Network.DeleteIP()
+	if err != nil {
+		log.Errorf("could not delete virtualIP: %v", err)
+	}
 
 	// Managers for Vip load balancers and none-vip loadbalancers
 	nonVipLB := loadbalancer.LBManager{}
@@ -150,7 +154,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		}
 	}()
 
-	// If Packet is enabled then we can begin our preperation work
+	// If Packet is enabled then we can begin our preparation work
 	var packetClient *packngo.Client
 	if c.EnableMetal {
 		if c.ProviderConfig != "" {
@@ -194,7 +198,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		if len(c.LoadBalancers) != 0 {
 			for x := range c.LoadBalancers {
 				// If the load balancer doesn't bind to the VIP
-				if c.LoadBalancers[x].BindToVip == false {
+				if !c.LoadBalancers[x].BindToVip {
 					err = nonVipLB.Add("", &c.LoadBalancers[x])
 					if err != nil {
 						log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
@@ -267,7 +271,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 					// Once we have the VIP running, start the load balancer(s) that bind to the VIP
 					for x := range c.LoadBalancers {
 
-						if c.LoadBalancers[x].BindToVip == true {
+						if c.LoadBalancers[x].BindToVip {
 							err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 							if err != nil {
 								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
@@ -287,7 +291,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 					}
 				}
 
-				if c.EnableARP == true {
+				if c.EnableARP {
 					ctxArp, cancelArp = context.WithCancel(context.Background())
 
 					ipString := cluster.Network.IP()
@@ -375,10 +379,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected
 				log.Infof("Node [%s] is assuming leadership of the cluster", identity)
-
-				if identity == id {
-					// We have the lock
-				}
 			},
 		},
 	})

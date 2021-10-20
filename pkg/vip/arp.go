@@ -1,6 +1,7 @@
+//go:build linux
 // +build linux
 
-// These syscalls are only supported on Linux, so this uses a build directive during compilation. Other OS's will use the arp_unsupported.go and recieve an error
+// These syscalls are only supported on Linux, so this uses a build directive during compilation. Other OS's will use the arp_unsupported.go and receive an error
 
 package vip
 

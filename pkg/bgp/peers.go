@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes" //nolint
 	"github.com/golang/protobuf/ptypes/any"
 	api "github.com/osrg/gobgp/api"
 )
 
-//AddPeer will add peers to the BGP configuration
+//  AddPeer will add peers to the BGP configuration
 func (b *Server) AddPeer(peer Peer) (err error) {
 	port := 179
 
@@ -20,7 +20,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		peer.Address = t[0]
 
 		if port, err = strconv.Atoi(t[1]); err != nil {
-			return fmt.Errorf("Unable to parse port '%s' as int: %s", t[1], err)
+			return fmt.Errorf("unable to parse port '%s' as int: %s", t[1], err)
 		}
 	}
 
@@ -73,11 +73,13 @@ func (b *Server) getPath(ip net.IP) *api.Path {
 		pfxLen = 128
 	}
 
+	//nolint
 	nlri, _ := ptypes.MarshalAny(&api.IPAddressPrefix{
 		Prefix:    ip.String(),
 		PrefixLen: pfxLen,
 	})
 
+	//nolint
 	a1, _ := ptypes.MarshalAny(&api.OriginAttribute{
 		Origin: 0,
 	})
@@ -91,6 +93,7 @@ func (b *Server) getPath(ip net.IP) *api.Path {
 		nh = b.c.RouterID
 	}
 
+	//nolint
 	a2, _ := ptypes.MarshalAny(&api.NextHopAttribute{
 		NextHop: nh,
 	})

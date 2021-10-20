@@ -62,7 +62,7 @@ func persistentConnection(frontendConnection net.Conn, lb *kubevip.LoadBalancer)
 		wg.Done()
 	}()
 	// go func() {
-	// Begin copying recieving (endpoint -> back to frontend)
+	// Begin copying receiving (endpoint -> back to frontend)
 	bytes, err := io.Copy(frontendConnection, endpoint)
 	log.Debugf("[%d] bytes of data sent to client", bytes)
 	if err != nil {
@@ -116,7 +116,7 @@ func persistentUDPConnection(frontendConnection net.Conn, lb *kubevip.LoadBalanc
 		wg.Done()
 	}()
 	// go func() {
-	// Begin copying recieving (endpoint -> back to frontend)
+	// Begin copying receiving (endpoint -> back to frontend)
 	bytes, err := io.Copy(frontendConnection, endpoint)
 	log.Debugf("[%d] bytes of data sent to client", bytes)
 	if err != nil {

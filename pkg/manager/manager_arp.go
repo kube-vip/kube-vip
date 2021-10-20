@@ -110,7 +110,7 @@ func (sm *Manager) startARP() error {
 			// Set the struct to nil so nothing should use it in future
 			sm.upnp = nil
 		} else {
-			log.Infof("Succesfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
+			log.Infof("Successfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
 		}
 	}
 

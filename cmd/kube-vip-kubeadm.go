@@ -29,7 +29,7 @@ var kubeKubeadm = &cobra.Command{
 	Use:   "kubeadm",
 	Short: "Kubeadm functions",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		_ = cmd.Help()
 		// TODO - A load of text detailing what's actually happening
 	},
 }
@@ -43,15 +43,19 @@ var kubeKubeadmInit = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
-		kubevip.ParseEnvironment(&initConfig)
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalf("Error parsing environment from config: %v", err)
+		}
+
 		// TODO - check for certain things VIP/interfaces
 		if initConfig.Interface == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
 		if initConfig.VIP == "" && initConfig.Address == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
@@ -69,15 +73,19 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
-		kubevip.ParseEnvironment(&initConfig)
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalf("Error parsing environment from config: %v", err)
+		}
+
 		// TODO - check for certain things VIP/interfaces
 		if initConfig.Interface == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No interface is specified for kube-vip to bind to")
 		}
 
 		if initConfig.VIP == "" && initConfig.Address == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 

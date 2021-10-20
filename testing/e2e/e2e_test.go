@@ -227,7 +227,7 @@ func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, even
 	}
 
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
 	}
 	client := &http.Client{Transport: transport, Timeout: transportTimeout}
 	Eventually(func() int {
@@ -235,6 +235,7 @@ func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, even
 		if resp == nil {
 			return -1
 		}
+		defer resp.Body.Close()
 		return resp.StatusCode
 	}, eventuallyTimeout).Should(Equal(http.StatusOK), "Failed to connect to VIP")
 }

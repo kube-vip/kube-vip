@@ -62,6 +62,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
+
 			if svc.Spec.LoadBalancerIP == "" {
 				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
 			} else {
@@ -190,7 +191,6 @@ func (sm *Manager) annotationsWatcher() error {
 			sm.config.BGPPeerConfig = bgpPeer
 
 			rw.Stop()
-			break
 		case watch.Deleted:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {

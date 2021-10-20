@@ -12,40 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
-
-	"github.com/kube-vip/kube-vip/pkg/kubevip"
 )
-
-func rebuildEndpoints(eps v1.Endpoints) []kubevip.BackEnd {
-	var addresses []string
-	var ports []int32
-
-	for x := range eps.Subsets {
-		// Loop over addresses
-		for y := range eps.Subsets[x].Addresses {
-			addresses = append(addresses, eps.Subsets[x].Addresses[y].IP)
-		}
-		for y := range eps.Subsets[x].Ports {
-			ports = append(ports, eps.Subsets[x].Ports[y].Port)
-		}
-	}
-	var newBackend []kubevip.BackEnd
-
-	// Build endpoints
-	for x := range addresses {
-		for y := range ports {
-			// Print out Backends if debug logging is enabled
-			if log.GetLevel() == log.DebugLevel {
-				fmt.Printf("-> Address: %s:%d \n", addresses[x], ports[y])
-			}
-			newBackend = append(newBackend, kubevip.BackEnd{
-				Address: addresses[x],
-				Port:    int(ports[y]),
-			})
-		}
-	}
-	return newBackend
-}
 
 // This file handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (sm *Manager) servicesWatcher(ctx context.Context) error {

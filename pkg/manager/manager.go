@@ -31,7 +31,7 @@ type Manager struct {
 	config    *kubevip.Config
 
 	// Manager services
-	service bool
+	// service bool
 
 	// Keeps track of all running instances
 	serviceInstances []Instance
@@ -45,7 +45,7 @@ type Manager struct {
 	// This channel is used to signal a shutdown
 	signalChan chan os.Signal
 
-	// This is a promethues counter used to count the number of events received
+	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
 }
@@ -148,6 +148,7 @@ func (sm *Manager) Start() error {
 	signal.Notify(sm.signalChan, syscall.SIGTERM)
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
+	//nolint
 	signal.Notify(sm.signalChan, syscall.SIGKILL)
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs

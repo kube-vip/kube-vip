@@ -15,7 +15,7 @@ import (
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startBGP() error {
 
-	// If Packet is enabled then we can begin our preperation work
+	// If Packet is enabled then we can begin our preparation work
 	var packetClient *packngo.Client
 	var err error
 	if sm.config.EnableMetal {
@@ -63,6 +63,7 @@ func (sm *Manager) startBGP() error {
 	signal.Notify(signalChan, syscall.SIGTERM)
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
+	//nolint
 	signal.Notify(signalChan, syscall.SIGKILL)
 	go func() {
 		<-signalChan
@@ -71,7 +72,9 @@ func (sm *Manager) startBGP() error {
 		cancel()
 	}()
 
-	sm.servicesWatcher(ctx)
+	if err := sm.servicesWatcher(ctx); err != nil {
+		log.Fatalf("error starting services watcher: %v", err)
+	}
 
 	log.Infof("Shutting down Kube-Vip")
 

@@ -17,7 +17,7 @@ import (
 func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) error {
 	// Start kube-vip as a single node server
 
-	// TODO - Split all this code out as a seperate function
+	// TODO - Split all this code out as a separate function
 	log.Infoln("Starting kube-vip as a single node cluster")
 
 	log.Info("This node is assuming leadership of the cluster")
@@ -32,7 +32,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	// Iterate through all Configurations
 	for x := range c.LoadBalancers {
 		// If the load balancer doesn't bind to the VIP
-		if c.LoadBalancers[x].BindToVip == false {
+		if !c.LoadBalancers[x].BindToVip {
 			err := nonVipLB.Add("", &c.LoadBalancers[x])
 			if err != nil {
 				log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
@@ -55,7 +55,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		// Once we have the VIP running, start the load balancer(s) that bind to the VIP
 		for x := range c.LoadBalancers {
 
-			if c.LoadBalancers[x].BindToVip == true {
+			if c.LoadBalancers[x].BindToVip {
 				err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
 				if err != nil {
 					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
@@ -64,7 +64,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		}
 	}
 
-	if c.EnableARP == true {
+	if c.EnableARP {
 		// Gratuitous ARP, will broadcast to new MAC <-> IP
 		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
 		if err != nil {
@@ -73,6 +73,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	}
 
 	go func() {
+		//nolint
 		for {
 			select {
 			case <-cluster.stop:
@@ -114,6 +115,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
+	//nolint
 	ctxArp, cancelArp := context.WithCancel(context.Background())
 	defer cancelArp()
 
@@ -130,7 +132,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		log.Warnf("%v", err)
 	}
 
-	if c.EnableARP == true {
+	if c.EnableARP {
 		ctxArp, cancelArp = context.WithCancel(context.Background())
 
 		ipString := cluster.Network.IP()
@@ -196,6 +198,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	}
 
 	go func() {
+		//nolint
 		for {
 			select {
 			case <-cluster.stop:
