@@ -92,7 +92,7 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	return result, err
 }
 
-//AddIP - Add an IP address to the interface
+// AddIP - Add an IP address to the interface
 func (configurator *network) AddIP() error {
 	if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
 		return errors.Wrap(err, "could not add ip")
@@ -100,7 +100,7 @@ func (configurator *network) AddIP() error {
 	return nil
 }
 
-//DeleteIP - Remove an IP address from the interface
+// DeleteIP - Remove an IP address from the interface
 func (configurator *network) DeleteIP() error {
 	result, err := configurator.IsSet()
 	if err != nil {

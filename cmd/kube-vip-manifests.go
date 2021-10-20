@@ -28,7 +28,7 @@ var kubeManifest = &cobra.Command{
 	Use:   "manifest",
 	Short: "Manifest functions",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		_ = cmd.Help()
 		// TODO - A load of text detailing what's actually happening
 	},
 }
@@ -41,11 +41,13 @@ var kubeManifestPod = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
-		kubevip.ParseEnvironment(&initConfig)
+		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
+			log.Fatalf("Error parsing environment from config: %v", err)
+		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
@@ -62,12 +64,15 @@ var kubeManifestDaemon = &cobra.Command{
 		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
-		kubevip.ParseEnvironment(&initConfig)
+		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
+			log.Fatalf("error parsing environment config: %v", err)
+		}
+
 		// TODO - check for certain things VIP/interfaces
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
-			cmd.Help()
+			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)

@@ -19,7 +19,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 		// Fallback to attempting to find the project by name
 		proj := findProject(k.MetalProject, c)
 		if proj == nil {
-			return fmt.Errorf("Unable to find Project [%s]", k.MetalProject)
+			return fmt.Errorf("unable to find Project [%s]", k.MetalProject)
 		}
 
 		projID = proj.ID
@@ -40,7 +40,10 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 			// If attachements already exist then remove them
 			if len(ip.Assignments) != 0 {
 				hrefID := path.Base(ip.Assignments[0].Href)
-				c.DeviceIPs.Unassign(hrefID)
+				_, err := c.DeviceIPs.Unassign(hrefID)
+				if err != nil {
+					return fmt.Errorf("unable to unassign deviceIP %q: %v", hrefID, err)
+				}
 			}
 		}
 	}
@@ -48,7 +51,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 	// Lookup this server through the packet API
 	thisDevice := findSelf(c, projID)
 	if thisDevice == nil {
-		return fmt.Errorf("Unable to find local/this device in packet API")
+		return fmt.Errorf("unable to find local/this device in packet API")
 	}
 
 	// Assign the EIP to this device

@@ -109,6 +109,7 @@ func NewLeaderElector(lec LeaderElectionConfig) (*LeaderElector, error) {
 }
 
 // LeaderElectionConfig defines the configuration for the leaderElection
+// nolint
 type LeaderElectionConfig struct {
 	// Lock is the resource that will be used for locking
 	Lock rl.Interface
@@ -191,7 +192,7 @@ type LeaderElector struct {
 	metrics leaderMetricsAdapter
 
 	// name is the name of the resource lock for debugging
-	name string
+	// name string
 }
 
 // Run starts the leader election loop

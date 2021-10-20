@@ -6,16 +6,16 @@ const (
 	//vipArp - defines if the arp broadcast should be enabled
 	vipArp = "vip_arp"
 
-	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	//vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaderElection = "vip_leaderelection"
 
-	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	//vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaseDuration = "vip_leaseduration"
 
-	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	//vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipRenewDeadline = "vip_renewdeadline"
 
-	//vipLeaderElection - defines if the kubernetes algorithim should be used
+	//vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipRetryPeriod = "vip_retryperiod"
 
 	//vipLogLevel - defines the level of logging to produce (5 being the most verbose)
@@ -66,7 +66,7 @@ const (
 	vipLocalPeer = "vip_localpeer"
 
 	//vipRemotePeers defines the configuration of the local raft peer
-	vipRemotePeers = "vip_remotepeers"
+	// vipRemotePeers = "vip_remotepeers"
 
 	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
 	vipAddPeersToLB = "vip_addpeerstolb"
@@ -98,7 +98,7 @@ const (
 	//bgpPeerAS defines the AS for a BGP peer
 	bgpPeerAS = "bgp_peeras"
 	//bgpPeerAS defines the AS for a BGP peer
-	bgpPeerPassword = "bgp_peerpass"
+	bgpPeerPassword = "bgp_peerpass" // nolint
 	//bgpMultiHop enables mulithop routing
 	bgpMultiHop = "bgp_multihop"
 	//bgpSourceIF defines the source interface for BGP peering
@@ -137,5 +137,5 @@ const (
 	lbBackends = "lb_backends"
 
 	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
-	vipConfigMap = "vip_configmap"
+	// vipConfigMap = "vip_configmap"
 )

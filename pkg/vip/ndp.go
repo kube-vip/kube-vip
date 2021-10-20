@@ -9,12 +9,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// NdpResponder defines the parameters for the NDP connection.
 type NdpResponder struct {
 	intf         string
 	hardwareAddr net.HardwareAddr
 	conn         *ndp.Conn
 }
 
+// NewNDPResponder takes an ifaceName and returns a new NDP responder and error if encountered.
 func NewNDPResponder(ifaceName string) (*NdpResponder, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -35,10 +37,12 @@ func NewNDPResponder(ifaceName string) (*NdpResponder, error) {
 	return ret, nil
 }
 
+// Close closes the NDP responder connection.
 func (n *NdpResponder) Close() error {
 	return n.conn.Close()
 }
 
+// SendGratuitous broadcasts an NDP update or returns error if encountered.
 func (n *NdpResponder) SendGratuitous(address string) error {
 	ip := net.ParseIP(address)
 	if ip == nil {

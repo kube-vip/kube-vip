@@ -57,11 +57,10 @@ func (lb *LBInstance) startHTTP(bindAddress string) error {
 
 	server := &http.Server{Addr: frontEnd, Handler: mux}
 
-	go func() error {
+	go func() {
 		if err := server.ListenAndServe(); err != nil {
-			return err
+			log.Fatalf("error starting http server: %v", err)
 		}
-		return nil
 	}()
 
 	// If the stop channel is closed then the server will be gracefully shut down
@@ -120,7 +119,9 @@ func StartHTTP(lb *kubevip.LoadBalancer, address string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler)
 	log.Infof("Starting server listening [%s]", frontEnd)
-	http.ListenAndServe(frontEnd, mux)
+	if err := http.ListenAndServe(frontEnd, mux); err != nil {
+		log.Fatalf("error serving: %v", err)
+	}
 	// Should never get here
 	return nil
 }

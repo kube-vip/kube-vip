@@ -44,14 +44,18 @@ func (sm *Manager) deleteService(uid string) error {
 		} else {
 			// Flip the found when we match
 			found = true
-			if sm.serviceInstances[x].isDHCP == true {
+			if sm.serviceInstances[x].isDHCP {
 				sm.serviceInstances[x].dhcpClient.Stop()
 				macvlan, err := netlink.LinkByName(sm.serviceInstances[x].dhcpInterface)
 				if err != nil {
-					return fmt.Errorf("Error finding VIP Interface, for deleting DHCP Link : %v", err)
+					return fmt.Errorf("error finding VIP Interface: %v", err)
 				}
 
-				netlink.LinkDel(macvlan)
+				err = netlink.LinkDel(macvlan)
+				if err != nil {
+					return fmt.Errorf("error deleting DHCP Link : %v", err)
+				}
+
 			}
 			if sm.serviceInstances[x].vipConfig.EnableBGP {
 				cidrVip := fmt.Sprintf("%s/%s", sm.serviceInstances[x].vipConfig.VIP, sm.serviceInstances[x].vipConfig.VIPCIDR)
@@ -61,8 +65,8 @@ func (sm *Manager) deleteService(uid string) error {
 		}
 	}
 	// If we've been through all services and not found the correct one then error
-	if found == false {
-		return fmt.Errorf("Unable to find/stop service [%s]", uid)
+	if !found {
+		return fmt.Errorf("unable to find/stop service [%s]", uid)
 	}
 
 	// Update the service array
