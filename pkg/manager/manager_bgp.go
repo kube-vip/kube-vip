@@ -75,7 +75,9 @@ func (sm *Manager) startBGP() error {
 		<-sm.signalChan
 		log.Info("Received termination, signaling shutdown")
 		if sm.config.EnableControlPane {
-			cpCluster.Stop()
+			if cpCluster != nil {
+				cpCluster.Stop()
+			}
 		}
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()

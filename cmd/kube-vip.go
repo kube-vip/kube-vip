@@ -211,6 +211,12 @@ var kubeVipManager = &cobra.Command{
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
+		// parse environment variables, these will overwrite anything loaded or flags
+		err := kubevip.ParseEnvironment(&initConfig)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
 		if initConfig.Interface == "" {
 			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
 			defaultIF, err := vip.GetDefaultGatewayInterface()
@@ -225,12 +231,6 @@ var kubeVipManager = &cobra.Command{
 		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
 			Addr: initConfig.PrometheusHTTPServer,
 		})
-
-		// parse environment variables, these will overwrite anything loaded or flags
-		err := kubevip.ParseEnvironment(&initConfig)
-		if err != nil {
-			log.Fatalln(err)
-		}
 
 		// User Environment variables as an option to make manifest clearer
 		envConfigMap := os.Getenv("vip_configmap")

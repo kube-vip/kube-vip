@@ -58,7 +58,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
-			
+			if svc.Annotations["kube-vip.io/ignore"] == "true" {
+				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				break
+			}
 			if svc.Spec.LoadBalancerIP == "" {
 				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
 			} else {
@@ -74,6 +77,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
+			}
+			if svc.Annotations["kube-vip.io/ignore"] == "true" {
+				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				break
 			}
 			err = sm.stopService(string(svc.UID))
 			if err != nil {
