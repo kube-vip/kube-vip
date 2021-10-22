@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"os"
-	"os/signal"
-
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -117,21 +114,7 @@ var kubeVipStart = &cobra.Command{
 				if err != nil {
 					log.Fatalf("%v", err)
 				}
-			} else {
-
-				// // Start a multi-node (raft) cluster, this doesn't block so will wait on signal
-				err = newCluster.StartRaftCluster(&startConfig)
-				if err != nil {
-					log.Fatalf("%v", err)
-				}
-				signalChan := make(chan os.Signal, 1)
-				signal.Notify(signalChan, os.Interrupt)
-
-				<-signalChan
-
-				newCluster.Stop()
 			}
-
 		}
 
 	},

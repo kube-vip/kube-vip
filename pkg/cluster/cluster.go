@@ -3,6 +3,7 @@ package cluster
 import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	log "github.com/sirupsen/logrus"
 )
 
 const leaderLogcount = 5
@@ -49,4 +50,15 @@ func startNetworking(c *kubevip.Config) (vip.Network, error) {
 		return nil, err
 	}
 	return network, nil
+}
+
+// Stop - Will stop the Cluster and release VIP if needed
+func (cluster *Cluster) Stop() {
+	// Close the stop chanel, which will shut down the VIP (if needed)
+	close(cluster.stop)
+
+	// Wait until the completed channel is closed, signallign all shutdown tasks completed
+	<-cluster.completed
+
+	log.Info("Stopped")
 }

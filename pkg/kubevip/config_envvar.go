@@ -118,23 +118,9 @@ const (
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
-	//lbBindToVip defines if the load-balancer should bind ONLY to the virtual IP
-	lbBindToVip = "lb_bindtovip"
-
-	//lbName defines the name of load-balancer
-	lbName = "lb_name"
-
-	//lbType defines the type of load-balancer
-	lbType = "lb_type"
-
 	//lbPort defines the port of load-balancer
 	lbPort = "lb_port"
 
-	//lbBackendPort defines a port that ALL backends are using
-	lbBackendPort = "lb_backendport"
-
-	//lbBackends defines the backends of load-balancer
-	lbBackends = "lb_backends"
 
 	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"

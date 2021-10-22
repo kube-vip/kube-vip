@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
@@ -19,12 +20,18 @@ import (
 	"github.com/packethost/packngo"
 
 	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	watchtools "k8s.io/client-go/tools/watch"
 )
 
 const plunderLock = "plndr-cp-lock"
@@ -32,6 +39,8 @@ const plunderLock = "plndr-cp-lock"
 // Manager degines the manager of the load-balancing services
 type Manager struct {
 	KubernetesClient *kubernetes.Clientset
+	// This channel is used to signal a shutdown
+	SignalChan chan os.Signal
 }
 
 // NewManager will create a new managing object
@@ -143,10 +152,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		log.Errorf("could not delete virtualIP: %v", err)
 	}
 
-	// Managers for Vip load balancers and none-vip loadbalancers
-	nonVipLB := loadbalancer.LBManager{}
-	VipLB := loadbalancer.LBManager{}
-
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
 		if bgpServer != nil {
@@ -192,21 +197,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		}
 	}
 
-	if c.EnableLoadBalancer {
-
-		// Iterate through all Configurations
-		if len(c.LoadBalancers) != 0 {
-			for x := range c.LoadBalancers {
-				// If the load balancer doesn't bind to the VIP
-				if !c.LoadBalancers[x].BindToVip {
-					err = nonVipLB.Add("", &c.LoadBalancers[x])
-					if err != nil {
-						log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-					}
-				}
-			}
-		}
-	}
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -223,7 +213,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// we're notified when we start
-				log.Info("This node is starting with leadership of the cluster")
+				log.Info("This node is starting the leadership of the cluster")
 				// setup ddns first
 				// for first time, need to wait until IP is allocated from DHCP
 				if cluster.Network.IsDDNS() {
@@ -268,27 +258,22 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				}
 
 				if c.EnableLoadBalancer {
-					// Once we have the VIP running, start the load balancer(s) that bind to the VIP
-					for x := range c.LoadBalancers {
 
-						if c.LoadBalancers[x].BindToVip {
-							err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
-							if err != nil {
-								log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-
-								// Stop all load balancers associated with the VIP
-								err = VipLB.StopAll()
-								if err != nil {
-									log.Warnf("%v", err)
-								}
-
-								err = cluster.Network.DeleteIP()
-								if err != nil {
-									log.Warnf("%v", err)
-								}
-							}
-						}
+					log.Infof("Starting IPVS LoadBalancer")
+					portForwarder := loadbalancer.NewServer(c.VIP, c.LoadBalancerPort)
+					// TODO
+					lb, err := loadbalancer.NewIPVSLB("1.2.3.4", 6444)
+					if err != nil {
+						log.Error(err)
 					}
+
+					go sm.LabelsWatcher(lb)
+					// Shutdown function that will wait on this signal, unless we call it ourselves
+					go func() {
+						<-signalChan
+						log.Info("Stopping IPVS LoadBalancer")
+						portForwarder.Stop()
+					}()
 				}
 
 				if c.EnableARP {
@@ -363,12 +348,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 					}
 				}
 
-				// Stop all load balancers associated with the VIP
-				err = VipLB.StopAll()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
-
 				err = cluster.Network.DeleteIP()
 				if err != nil {
 					log.Warnf("%v", err)
@@ -384,6 +363,97 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	})
 
 	return nil
+}
+
+// present
+// LabelsWatcher will watch for labels created on nodes
+func (sm *Manager) LabelsWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
+	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
+	log.Infof("Kube-Vip is watching nodes for control-plane labels")
+
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"node-role.kubernetes.io/control-plane": ""}}
+	listOptions := metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+	}
+
+	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			return sm.KubernetesClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("error creating label watcher: %s", err.Error())
+	}
+
+	go func() {
+		<-sm.SignalChan
+		log.Info("Received termination, signaling shutdown")
+		// Cancel the context
+		rw.Stop()
+	}()
+
+	ch := rw.ResultChan()
+	//defer rw.Stop()
+
+	for event := range ch {
+		// We need to inspect the event and get ResourceVersion out of it
+		switch event.Type {
+		case watch.Added, watch.Modified:
+			node, ok := event.Object.(*v1.Node)
+			if !ok {
+				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+			}
+			//Find the node IP address (this isn't foolproof)
+			for x := range node.Status.Addresses {
+
+				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
+					err = lb.AddBackend(node.Status.Addresses[x].Address)
+					if err != nil {
+						log.Errorf("Add IPVS backend [%v]", err)
+					}
+				}
+			}
+		case watch.Deleted:
+			node, ok := event.Object.(*v1.Node)
+			if !ok {
+				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+			}
+
+			//Find the node IP address (this isn't foolproof)
+			for x := range node.Status.Addresses {
+
+				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
+					err = lb.AddBackend(node.Status.Addresses[x].Address)
+					if err != nil {
+						log.Errorf("Del IPVS backend [%v]", err)
+					}
+				}
+			}
+
+			log.Infof("Node [%s] has been deleted", node.Name)
+
+		case watch.Bookmark:
+			// Un-used
+		case watch.Error:
+			log.Error("Error attempting to watch Kubernetes Nodes")
+
+			// This round trip allows us to handle unstructured status
+			errObject := apierrors.FromObject(event.Object)
+			statusErr, ok := errObject.(*apierrors.StatusError)
+			if !ok {
+				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+
+			}
+
+			status := statusErr.ErrStatus
+			log.Errorf("%v", status)
+		default:
+		}
+	}
+
+	log.Infoln("Exiting Annotations watcher")
+	return nil
+
 }
 
 // TODO - refactor an active machine func(), this will replace the singleNode code and have a single code block

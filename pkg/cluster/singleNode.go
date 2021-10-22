@@ -9,7 +9,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -25,22 +24,6 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
-	// Managers for Vip load balancers and none-vip loadbalancers
-	nonVipLB := loadbalancer.LBManager{}
-	VipLB := loadbalancer.LBManager{}
-
-	// Iterate through all Configurations
-	for x := range c.LoadBalancers {
-		// If the load balancer doesn't bind to the VIP
-		if !c.LoadBalancers[x].BindToVip {
-			err := nonVipLB.Add("", &c.LoadBalancers[x])
-			if err != nil {
-				log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-			}
-
-		}
-	}
-
 	if !disableVIP {
 		err := cluster.Network.DeleteIP()
 		if err != nil {
@@ -52,16 +35,6 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 			log.Warnf("%v", err)
 		}
 
-		// Once we have the VIP running, start the load balancer(s) that bind to the VIP
-		for x := range c.LoadBalancers {
-
-			if c.LoadBalancers[x].BindToVip {
-				err = VipLB.Add(cluster.Network.IP(), &c.LoadBalancers[x])
-				if err != nil {
-					log.Warnf("Error creating loadbalancer [%s] type [%s] -> error [%s]", c.LoadBalancers[x].Name, c.LoadBalancers[x].Type, err)
-				}
-			}
-		}
 	}
 
 	if c.EnableARP {
@@ -77,24 +50,11 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		for {
 			select {
 			case <-cluster.stop:
-				log.Info("[LOADBALANCER] Stopping load balancers")
-
-				// Stop all load balancers associated with the VIP
-				err := VipLB.StopAll()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
-
-				// Stop all load balancers associated with the Host
-				err = nonVipLB.StopAll()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
 
 				if !disableVIP {
 
 					log.Info("[VIP] Releasing the Virtual IP")
-					err = cluster.Network.DeleteIP()
+					err := cluster.Network.DeleteIP()
 					if err != nil {
 						log.Warnf("%v", err)
 					}

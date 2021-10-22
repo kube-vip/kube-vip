@@ -69,6 +69,9 @@ type Config struct {
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
+	// Listen port for the IPVS Service
+	LoadBalancerPort int `yaml:"lbPort"`
+
 	// BGP Configuration
 	BGPConfig     bgp.Config
 	BGPPeerConfig bgp.Peer

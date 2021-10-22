@@ -66,6 +66,7 @@ func (sm *Manager) startARP() error {
 
 		clusterManager := &cluster.Manager{
 			KubernetesClient: sm.clientSet,
+			SignalChan:       sm.signalChan,
 		}
 
 		go func() {

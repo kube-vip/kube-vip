@@ -365,84 +365,9 @@ func ParseEnvironment(c *Config) error {
 		}
 		c.EnableLoadBalancer = b
 		// Load Balancer configuration
-		return parseEnvironmentLoadBalancer(c)
+		// return parseEnvironmentLoadBalancer(c)
 	}
 
-	return nil
-}
-
-func parseEnvironmentLoadBalancer(c *Config) error {
-	// Check if an existing load-balancer configuration already exists
-	if len(c.LoadBalancers) == 0 {
-		c.LoadBalancers = append(c.LoadBalancers, LoadBalancer{})
-	}
-
-	// Find LoadBalancer Port
-	env := os.Getenv(lbPort)
-	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].Port = int(i)
-	}
-
-	// Find Type of LoadBalancer
-	env = os.Getenv(lbType)
-	if env != "" {
-		c.LoadBalancers[0].Type = env
-	}
-
-	// Find Type of LoadBalancer Name
-	env = os.Getenv(lbName)
-	if env != "" {
-		c.LoadBalancers[0].Name = env
-	}
-
-	// Find If LB should bind to Vip
-	env = os.Getenv(lbBindToVip)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].BindToVip = b
-	}
-
-	// Find global backendport
-	env = os.Getenv(lbBackendPort)
-	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].BackendPort = int(i)
-	}
-
-	// Parse backends
-	env = os.Getenv(lbBackends)
-	if env != "" {
-		// TODO - perhaps make this optional?
-		// Remove existing backends
-		c.LoadBalancers[0].Backends = []BackEnd{}
-
-		// Parse the remote peers (comma separated)
-		s := strings.Split(env, ",")
-		if len(s) == 0 {
-			return fmt.Errorf("The Backends List [%s] is unable to be parsed, should be in comma separated format <address>:<port>", env)
-		}
-		for x := range s {
-			// Parse the each remote peer string in format <address>:<port>
-
-			be, err := ParseBackendConfig(s[x])
-			if err != nil {
-				return err
-			}
-
-			c.LoadBalancers[0].Backends = append(c.LoadBalancers[0].Backends, *be)
-
-		}
-	}
 	return nil
 }
 
@@ -709,22 +634,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			{
 				Name:  lbEnable,
 				Value: strconv.FormatBool(c.EnableLoadBalancer),
-			},
-			{
-				Name:  lbBackendPort,
-				Value: fmt.Sprintf("%d", c.LoadBalancers[0].Port),
-			},
-			{
-				Name:  lbName,
-				Value: c.LoadBalancers[0].Name,
-			},
-			{
-				Name:  lbType,
-				Value: c.LoadBalancers[0].Type,
-			},
-			{
-				Name:  lbBindToVip,
-				Value: strconv.FormatBool(c.LoadBalancers[0].BindToVip),
 			},
 		}
 
