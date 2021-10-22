@@ -635,6 +635,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  lbEnable,
 				Value: strconv.FormatBool(c.EnableLoadBalancer),
 			},
+			{
+				Name:  lbPort,
+				Value: fmt.Sprintf("%d", c.LoadBalancerPort),
+			},
 		}
 
 		newEnvironment = append(newEnvironment, lb...)

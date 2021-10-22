@@ -6,14 +6,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const leaderLogcount = 5
-
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
-	stateMachine FSM
-	stop         chan bool
-	completed    chan bool
-	Network      vip.Network
+	stop      chan bool
+	completed chan bool
+	Network   vip.Network
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster

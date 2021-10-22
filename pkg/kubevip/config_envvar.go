@@ -121,7 +121,6 @@ const (
 	//lbPort defines the port of load-balancer
 	lbPort = "lb_port"
 
-
 	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
 )

@@ -7,12 +7,15 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type Server struct {
-	listener *net.TCPListener
-	quit     chan bool
-	exited   chan bool
+	listener   *net.TCPListener
+	listenPort int
+	quit       chan bool
+	exited     chan bool
 }
 
 func NewServer(listenVIP string, listenPort int) *Server {
@@ -32,9 +35,10 @@ func NewServer(listenVIP string, listenPort int) *Server {
 
 	// TODO: do not use this syntax, add the field names
 	srv := &Server{
-		listener,
-		make(chan bool),
-		make(chan bool),
+		listener:   listener,
+		listenPort: listenPort,
+		quit:       make(chan bool),
+		exited:     make(chan bool),
 	}
 	// TODO: no need to export Serve as it is only called internally
 	go srv.Serve()
@@ -52,7 +56,10 @@ func (srv *Server) Serve() {
 			close(srv.exited)
 			return
 		default:
-			srv.listener.SetDeadline(time.Now().Add(1e9))
+			err := srv.listener.SetDeadline(time.Now().Add(1e9))
+			if err != nil {
+				log.Errorf("Error configuring listner [%v]", err)
+			}
 			conn, err := srv.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
@@ -62,19 +69,21 @@ func (srv *Server) Serve() {
 			}
 			handlers.Add(1)
 			go func() {
-				// FIXME: handle returned error here (just log it)
-				// FIXME: determine ID (why?)
-				srv.handleConnection(conn, 0)
+
+				err = srv.handleConnection(conn)
+				if err != nil {
+					log.Errorf("Error handling connection [%v]", err)
+				}
 				handlers.Done()
 			}()
 		}
 	}
 }
 
-func (srv *Server) handleConnection(conn net.Conn, id int) error {
+func (srv *Server) handleConnection(conn net.Conn) error {
 	fmt.Println("new client")
 
-	proxy, err := net.Dial("tcp", fmt.Sprintf("1.2.3.4:6444"))
+	proxy, err := net.Dial("tcp", fmt.Sprintf("1.2.3.4:%d", srv.listenPort))
 	if err != nil {
 		return err
 	}
@@ -88,9 +97,12 @@ func (srv *Server) handleConnection(conn net.Conn, id int) error {
 func copyIO(src, dest net.Conn) {
 	defer src.Close()
 	defer dest.Close()
-	io.Copy(src, dest)
-
+	_, err := io.Copy(src, dest)
+	if err != nil {
+		log.Errorf("Error copying data [%v]", err)
+	}
 }
+
 func (srv *Server) Stop() {
 	fmt.Println("Stop requested")
 	// XXX: You cannot use the same channel in two directions.

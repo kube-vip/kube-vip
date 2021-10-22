@@ -134,10 +134,6 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
-	// Add Notification for SIGKILL (sent from Kubernetes)
-	//nolint
-	signal.Notify(signalChan, syscall.SIGKILL)
-
 	go func() {
 		<-signalChan
 		log.Info("Received termination, signaling shutdown")
@@ -267,7 +263,12 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 						log.Error(err)
 					}
 
-					go sm.LabelsWatcher(lb)
+					go func() {
+						err = sm.LabelsWatcher(lb)
+						if err != nil {
+							log.Errorf("Error watching node labels [%s]", err)
+						}
+					}()
 					// Shutdown function that will wait on this signal, unless we call it ourselves
 					go func() {
 						<-signalChan
