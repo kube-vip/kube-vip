@@ -4,30 +4,23 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kamhlos/upnp"
-	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
 )
 
 const plunderLock = "plunder-lock"
 
-// OutSideCluster allows the controller to be started using a local kubeConfig for testing
-var OutSideCluster bool
-
 var signalChan chan os.Signal
 
-// Manager degines the manager of the load-balancing services
+// Manager defines the manager of the load-balancing services
 type Manager struct {
 	clientSet *kubernetes.Clientset
 	configMap string
@@ -75,32 +68,7 @@ type Instance struct {
 }
 
 // NewManager will create a new managing object
-func NewManager(configMap string, config *kubevip.Config) (*Manager, error) {
-	var clientset *kubernetes.Clientset
-	if !OutSideCluster {
-		// This will attempt to load the configuration when running within a POD
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
-		}
-		clientset, err = kubernetes.NewForConfig(cfg)
-
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
-		}
-		// use the current context in kubeconfig
-	} else {
-		config, err := clientcmd.BuildConfigFromFlags("", filepath.Join(os.Getenv("HOME"), ".kube", "config"))
-		if err != nil {
-			panic(err.Error())
-		}
-		clientset, err = kubernetes.NewForConfig(config)
-
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
-		}
-	}
-
+func NewManager(configMap string, config *kubevip.Config, clientset *kubernetes.Clientset) (*Manager, error) {
 	return &Manager{
 		clientSet: clientset,
 		configMap: configMap,

@@ -9,17 +9,17 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kamhlos/upnp"
-	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 
+	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const plunderLock = "plndr-svcs-lock"
@@ -76,40 +76,36 @@ type Instance struct {
 
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
-	var clientset *kubernetes.Clientset
 
-	var configPath string
+	var clientset *kubernetes.Clientset
 	var cfg *rest.Config
 	var err error
 
-	configPath = "/etc/kubernetes/admin.conf"
-	if fileExists(configPath) {
-		cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
+	adminConfigPath := "/etc/kubernetes/admin.conf"
+	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+
+	switch {
+	case fileExists(adminConfigPath):
+		clientset, err = k8s.NewClientset(adminConfigPath, false, "")
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
 		}
-		log.Debugf("Using external Kubernetes configuration from file [%s]", configPath)
-	} else {
-		// Second check in home directory for kube config
-		configPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		if fileExists(configPath) {
-			log.Debugf("Using external Kubernetes configuration from home file [%s]", configPath)
-			cfg, err = clientcmd.BuildConfigFromFlags("", configPath)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			cfg, err = rest.InClusterConfig()
-			if err != nil {
-				return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
-			}
-			log.Debugf("Using the internal Kubernetes token")
+		log.Debugf("Using external Kubernetes configuration from file [%s]", adminConfigPath)
+	case fileExists(homeConfigPath):
+		clientset, err = k8s.NewClientset(homeConfigPath, false, "")
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
 		}
+		log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
+	default:
+		clientset, err = k8s.NewClientset("", true, "")
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
+		}
+		log.Debug("Using external Kubernetes configuration from incluster config.")
 	}
 
-	clientset, err = kubernetes.NewForConfig(cfg)
-
-	// If this is a control pane host it will likely have started as a static pod or wont have the
+	// If this is a control pane host it will likely have started as a static pod or won't have the
 	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 	// ensure connectivity.
 	if config.EnableControlPane {
@@ -186,14 +182,6 @@ func returnNameSpace() (string, error) {
 	return "", fmt.Errorf("Unable to find Namespace")
 }
 
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
-}
-
 func (sm *Manager) parseAnnotations() error {
 	if sm.config.Annotations == "" {
 		log.Debugf("No Node annotations to parse")
@@ -205,4 +193,12 @@ func (sm *Manager) parseAnnotations() error {
 		return err
 	}
 	return nil
+}
+
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }

@@ -6,13 +6,12 @@ import (
 	"net"
 	"os"
 
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // kubeadm adds two subcommands for managing a vip during a kubeadm init/join
@@ -95,13 +94,7 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		// We will use kubeconfig in order to find all the master nodes
 		// use the current context in kubeconfig
-		config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-
-		// create the clientset
-		clientset, err := kubernetes.NewForConfig(config)
+		clientset, err := k8s.NewClientset(kubeConfigPath, false, "")
 		if err != nil {
 			log.Fatal(err.Error())
 		}
