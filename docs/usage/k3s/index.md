@@ -46,7 +46,7 @@ To generate the manifest we have two options! We can generate the manifest from 
 curl -sL kube-vip.io/k3s | vipAddress=$VIP vipInterface=$INTERFACE sh | sudo tee /var/lib/rancher/k3s/server/manifests/vip.yaml
 ```
 
-## Step 3.2 Genereate from container image
+## Step 3.2 Generate from container image
 
 ### containerd
 `alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.8 vip /kube-vip"`

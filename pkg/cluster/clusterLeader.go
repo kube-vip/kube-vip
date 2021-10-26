@@ -11,6 +11,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/packet"
@@ -26,9 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -45,27 +43,12 @@ type Manager struct {
 
 // NewManager will create a new managing object
 func NewManager(path string, inCluster bool, port int) (*Manager, error) {
-	var clientset *kubernetes.Clientset
-	if inCluster {
-		// This will attempt to load the configuration when running within a POD
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client config: %s", err.Error())
-		}
-		clientset, err = kubernetes.NewForConfig(cfg)
+	var hostname string
 
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
-		}
-		// use the current context in kubeconfig
-	} else {
-		if path == "" {
-			path = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		}
-		config, err := clientcmd.BuildConfigFromFlags("", path)
-		if err != nil {
-			panic(err.Error())
-		}
+	// If the path passed is empty and not running in the cluster,
+	// attempt to look for a kubeconfig in the default HOME dir.
+	if len(path) == 0 && !inCluster {
+		path = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 		// We modify the config so that we can always speak to the correct host
 		id, err := os.Hostname()
@@ -73,12 +56,12 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 			return nil, err
 		}
 
-		config.Host = fmt.Sprintf("%s:%v", id, port)
-		clientset, err = kubernetes.NewForConfig(config)
+		hostname = fmt.Sprintf("%s:%v", id, port)
+	}
 
-		if err != nil {
-			return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
-		}
+	clientset, err := k8s.NewClientset(path, inCluster, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("error creating a new k8s clientset: %v", err)
 	}
 
 	return &Manager{
