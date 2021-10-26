@@ -3,7 +3,7 @@ package loadbalancer
 import (
 	"fmt"
 	"net"
-	"os"
+	"strings"
 
 	"github.com/cloudflare/ipvs"
 	log "github.com/sirupsen/logrus"
@@ -55,9 +55,12 @@ func NewIPVSLB(address string, port int) (*IPVSLoadBalancer, error) {
 	}
 	err = c.CreateService(svc)
 	// If we've an error it could be that the IPVS lb instance has been left from a previous leadership
-	if err == os.ErrExist {
+	if err != nil && strings.Contains(err.Error(), "file exists") {
 		log.Warnf("load balancer for API server already exists, attempting to remove and re-create")
-
+		err = c.RemoveService(svc)
+		if err != nil {
+			return nil, fmt.Errorf("error re-creating IPVS service: %v", err)
+		}
 		err = c.CreateService(svc)
 		if err != nil {
 			return nil, fmt.Errorf("error re-creating IPVS service: %v", err)
@@ -86,15 +89,17 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 
 func (lb *IPVSLoadBalancer) AddBackend(address string) error {
 	dst := ipvs.Destination{
-		Address: ipvs.NewIP(net.ParseIP(address)),
-		Port:    6443,
-		Family:  ipvs.INET,
-		Weight:  1,
+		Address:   ipvs.NewIP(net.ParseIP(address)),
+		Port:      6443,
+		Family:    ipvs.INET,
+		Weight:    1,
+		FwdMethod: ipvs.Local,
 	}
+
 	err := lb.client.CreateDestination(lb.loadBalancerService, dst)
-	// TODO: we either parse the IPVS configuration to see if a backend exists
-	// or if it already exists we just ignore this and continue ons
-	if err != nil && err != os.ErrExist {
+	// Swallow error of existing back end, the node watcher may attempt to apply
+	// the same back end multiple times
+	if err != nil && !strings.Contains(err.Error(), "file exists") {
 		return fmt.Errorf("error creating backend: %v", err)
 	}
 	return nil

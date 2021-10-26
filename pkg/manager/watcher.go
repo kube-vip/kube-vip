@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
@@ -292,96 +291,4 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 	log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
 
 	return bgpConfig, bgpPeer, nil
-}
-
-// This file handles the watching of node annotations for configuration, it will exit once the annotations are
-// present
-// LabelsWatcher will watch for labels created on nodes
-func (sm *Manager) LabelsWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	log.Infof("Kube-Vip is watching nodes for control-plane labels")
-
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"node-role.kubernetes.io/control-plane": ""}}
-	listOptions := metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
-	}
-
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("error creating label watcher: %s", err.Error())
-	}
-
-	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-		// Cancel the context
-		rw.Stop()
-	}()
-
-	ch := rw.ResultChan()
-	//defer rw.Stop()
-
-	for event := range ch {
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			node, ok := event.Object.(*v1.Node)
-			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
-			}
-			//Find the node IP address (this isn't foolproof)
-			for x := range node.Status.Addresses {
-
-				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address)
-					if err != nil {
-						log.Errorf("Add IPVS backend [%v]", err)
-					}
-				}
-			}
-		case watch.Deleted:
-			node, ok := event.Object.(*v1.Node)
-			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
-			}
-
-			//Find the node IP address (this isn't foolproof)
-			for x := range node.Status.Addresses {
-
-				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address)
-					if err != nil {
-						log.Errorf("Del IPVS backend [%v]", err)
-					}
-				}
-			}
-
-			log.Infof("Node [%s] has been deleted", node.Name)
-
-		case watch.Bookmark:
-			// Un-used
-		case watch.Error:
-			log.Error("Error attempting to watch Kubernetes Nodes")
-
-			// This round trip allows us to handle unstructured status
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, ok := errObject.(*apierrors.StatusError)
-			if !ok {
-				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-
-			}
-
-			status := statusErr.ErrStatus
-			log.Errorf("%v", status)
-		default:
-		}
-	}
-
-	log.Infoln("Exiting Annotations watcher")
-	return nil
-
 }

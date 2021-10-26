@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -136,36 +135,4 @@ var kubeKubeadmJoin = &cobra.Command{
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 		fmt.Println(cfg)
 	},
-}
-
-func autoGenLocalPeer() (*kubevip.RaftPeer, error) {
-	// hostname // address // defaultport
-	h, err := os.Hostname()
-	if err != nil {
-		return nil, err
-	}
-
-	var a string
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil, err
-	}
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To16() != nil {
-				a = ipnet.IP.String()
-				break
-			}
-		}
-	}
-	if a == "" {
-		return nil, fmt.Errorf("unable to find local address")
-	}
-	return &kubevip.RaftPeer{
-		ID:      h,
-		Address: a,
-		Port:    10000,
-	}, nil
-
 }

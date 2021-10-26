@@ -256,15 +256,14 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 				if c.EnableLoadBalancer {
 
 					log.Infof("Starting IPVS LoadBalancer")
-					portForwarder := loadbalancer.NewServer(c.VIP, c.LoadBalancerPort)
-					// TODO
-					lb, err := loadbalancer.NewIPVSLB("1.2.3.4", 6444)
+
+					lb, err := loadbalancer.NewIPVSLB(c.VIP, c.LoadBalancerPort)
 					if err != nil {
-						log.Error(err)
+						log.Errorf("Error creating IPVS LoadBalancer [%s]", err)
 					}
 
 					go func() {
-						err = sm.LabelsWatcher(lb)
+						err = sm.NodeWatcher(lb)
 						if err != nil {
 							log.Errorf("Error watching node labels [%s]", err)
 						}
@@ -272,8 +271,11 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 					// Shutdown function that will wait on this signal, unless we call it ourselves
 					go func() {
 						<-signalChan
+						err = lb.RemoveIPVSLB()
+						if err != nil {
+							log.Errorf("Error stopping IPVS LoadBalancer [%s]", err)
+						}
 						log.Info("Stopping IPVS LoadBalancer")
-						portForwarder.Stop()
 					}()
 				}
 
@@ -366,9 +368,7 @@ func (cluster *Cluster) StartLeaderCluster(c *kubevip.Config, sm *Manager, bgpSe
 	return nil
 }
 
-// present
-// LabelsWatcher will watch for labels created on nodes
-func (sm *Manager) LabelsWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
+func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Infof("Kube-Vip is watching nodes for control-plane labels")
 

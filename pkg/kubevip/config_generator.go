@@ -364,8 +364,6 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableLoadBalancer = b
-		// Load Balancer configuration
-		// return parseEnvironmentLoadBalancer(c)
 	}
 
 	return nil
