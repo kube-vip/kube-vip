@@ -19,7 +19,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 const plunderLock = "plndr-svcs-lock"
@@ -78,7 +77,6 @@ type Instance struct {
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	var clientset *kubernetes.Clientset
-	var cfg *rest.Config
 	var err error
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
@@ -86,7 +84,14 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	switch {
 	case fileExists(adminConfigPath):
-		clientset, err = k8s.NewClientset(adminConfigPath, false, "")
+		if config.EnableControlPane {
+			// If this is a control pane host it will likely have started as a static pod or won't have the
+			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
+			// ensure connectivity.
+			clientset, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))
+		} else {
+			clientset, err = k8s.NewClientset(adminConfigPath, false, "")
+		}
 		if err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
 		}
@@ -103,18 +108,6 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
 		}
 		log.Debug("Using external Kubernetes configuration from incluster config.")
-	}
-
-	// If this is a control pane host it will likely have started as a static pod or won't have the
-	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
-	// ensure connectivity.
-	if config.EnableControlPane {
-		log.Debugf("Modifying address of Kubernetes server to \"kubernetes\" (internal hostname)")
-		cfg.Host = fmt.Sprintf("kubernetes:%v", config.Port)
-		clientset, err = kubernetes.NewForConfig(cfg)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error creating kubernetes client: %s", err.Error())
 	}
 
 	return &Manager{
@@ -179,7 +172,7 @@ func returnNameSpace() (string, error) {
 		}
 		return "", err
 	}
-	return "", fmt.Errorf("Unable to find Namespace")
+	return "", fmt.Errorf("unable to find Namespace")
 }
 
 func (sm *Manager) parseAnnotations() error {

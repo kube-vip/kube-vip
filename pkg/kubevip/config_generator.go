@@ -366,6 +366,15 @@ func ParseEnvironment(c *Config) error {
 		c.EnableLoadBalancer = b
 	}
 
+	// Find loadbalancer port
+	env = os.Getenv(lbPort)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.LoadBalancerPort = int(i)
+	}
 	return nil
 }
 

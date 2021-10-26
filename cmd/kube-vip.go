@@ -195,14 +195,15 @@ var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
 		}
+
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
 
 		if initConfig.Interface == "" {
 			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
