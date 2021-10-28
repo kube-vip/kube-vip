@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	github.com/armon/go-metrics v0.3.8 // indirect
+	github.com/cloudflare/ipvs v0.0.0-20210114211356-96b2597859b3
 	github.com/davecgh/go-spew v1.1.1
 	github.com/fatih/color v1.10.0 // indirect
 	github.com/ghodss/yaml v1.0.0

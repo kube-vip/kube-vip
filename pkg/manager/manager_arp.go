@@ -66,6 +66,7 @@ func (sm *Manager) startARP() error {
 
 		clusterManager := &cluster.Manager{
 			KubernetesClient: sm.clientSet,
+			SignalChan:       sm.signalChan,
 		}
 
 		go func() {
@@ -78,7 +79,7 @@ func (sm *Manager) startARP() error {
 			}
 		}()
 
-		// Check if we're also starting the services, if now we can sit and wait on the closing channel and return here
+		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
 		if !sm.config.EnableServices {
 			<-sm.signalChan
 			log.Infof("Shutting down Kube-Vip")

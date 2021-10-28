@@ -61,22 +61,18 @@ var kubeVipCmd = &cobra.Command{
 
 func init() {
 
-	localpeer, err := autoGenLocalPeer()
-	if err != nil {
-		log.Fatalln(err)
-	}
-	initConfig.LocalPeer = *localpeer
-	//initConfig.Peers = append(initConfig.Peers, *localpeer)
+	// Basic flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
-
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
-
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "listen port for the VIP")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "Port for the VIP")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for Vip changes")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
+
+	// LoadBalancer flags
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "enableLoadBalancer", false, "enable loadbalancing on the VIP with IPVS")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LoadBalancerPort, "lbPort", 6444, "loadbalancer port for the VIP")
+
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
 
 	// Clustering type (leaderElection)
@@ -85,10 +81,6 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time a Kubernetes leader can attempt to renew its lease")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RetryPeriod, "leaseRetry", 1, "Number of times the host will retry to hold a lease")
 
-	// Clustering type (raft)
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AddPeersAsBackends, "addPeersToLB", true, "Add raft peers to the load-balancer")
-
 	// Packet flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableMetal, "metal", false, "This will use the Equinix Metal API (requires the token ENV) to update the EIP <-> VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalAPIKey, "metalKey", "", "The API token for authenticating with the Equinix Metal API")
@@ -96,15 +88,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProjectID, "metalProjectID", "", "The ID of project already created within Equinix Metal")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ProviderConfig, "provider-config", "", "The path to a provider configuration")
 
-	// Load Balancer flags
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "lbEnable", false, "Enable a load-balancer on the VIP")
-	kubeVipCmd.PersistentFlags().BoolVar(&initLoadBalancer.BindToVip, "lbBindToVip", true, "Bind example load balancer to VIP")
-	kubeVipCmd.PersistentFlags().StringVar(&initLoadBalancer.Type, "lbType", "tcp", "Type of load balancer instance (TCP/HTTP)")
-	kubeVipCmd.PersistentFlags().StringVar(&initLoadBalancer.Name, "lbName", "Kubeadm Load Balancer", "The name of a load balancer instance")
-	kubeVipCmd.PersistentFlags().IntVar(&initLoadBalancer.Port, "lbPort", 6443, "Port that load balancer will expose on")
-	kubeVipCmd.PersistentFlags().IntVar(&initLoadBalancer.BackendPort, "lbBackEndPort", 6444, "A port that all backends may be using (optional)")
-
 	// BGP flags
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableBGP, "bgp", false, "This will enable BGP support within kube-vip")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.RouterID, "bgpRouterID", "", "The routerID for the bgp server")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.SourceIF, "sourceIF", "", "The source interface for bgp peering (not to be used with sourceIP)")
@@ -115,6 +100,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.MultiHop, "multihop", false, "This will enable BGP multihop support")
 	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma separated BGP Peer, format: address:as:password:multihop")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
 
 	// Control plane specific flags
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
@@ -125,6 +111,7 @@ func init() {
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
 
+	// Behaviour flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
@@ -208,14 +195,15 @@ var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
 		}
+
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
 
 		if initConfig.Interface == "" {
 			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
