@@ -54,6 +54,10 @@ spec:
             - NET_ADMIN
             - NET_RAW
             - SYS_TIME
+      hostAliases:
+      - hostnames:
+        - kubernetes
+        ip: 127.0.0.1
       hostNetwork: true
       serviceAccountName: kube-vip
   updateStrategy: {}
