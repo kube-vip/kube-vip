@@ -3,18 +3,11 @@ module github.com/kube-vip/kube-vip
 go 1.14
 
 require (
-	github.com/armon/go-metrics v0.3.8 // indirect
 	github.com/cloudflare/ipvs v0.0.0-20210114211356-96b2597859b3
 	github.com/davecgh/go-spew v1.1.1
-	github.com/fatih/color v1.10.0 // indirect
 	github.com/ghodss/yaml v1.0.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/hashicorp/go-hclog v0.16.0 // indirect
-	github.com/hashicorp/go-immutable-radix v1.3.0 // indirect
-	github.com/hashicorp/go-msgpack v1.1.5 // indirect
-	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/hashicorp/raft v1.3.1
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/insomniacslk/dhcp v0.0.0-20210621130208-1cac67f12b1e
 	github.com/jpillora/backoff v1.0.0

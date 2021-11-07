@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/kamhlos/upnp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
-	"github.com/kube-vip/kube-vip/pkg/vip"
+ 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -27,10 +26,10 @@ func (sm *Manager) startARP() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// use a Go context so we can tell the dns loop code when we
-	// want to step down
-	ctxDNS, cancelDNS := context.WithCancel(context.Background())
-	defer cancelDNS()
+	// // use a Go context so we can tell the dns loop code when we
+	// // want to step down
+	// ctxDNS, cancelDNS := context.WithCancel(context.Background())
+	// defer cancelDNS()
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -49,20 +48,20 @@ func (sm *Manager) startARP() error {
 			return err
 		}
 
-		// setup ddns first
-		// for first time, need to wait until IP is allocated from DHCP
-		if cpCluster.Network.IsDDNS() {
-			if err := cpCluster.StartDDNS(ctxDNS); err != nil {
-				log.Error(err)
-			}
-		}
+		// // setup ddns first
+		// // for first time, need to wait until IP is allocated from DHCP
+		// if cpCluster.Network.IsDDNS() {
+		// 	if err := cpCluster.StartDDNS(ctxDNS); err != nil {
+		// 		log.Error(err)
+		// 	}
+		// }
 
-		// start the dns updater if address is dns
-		if cpCluster.Network.IsDNS() {
-			log.Infof("starting the DNS updater for the address %s", cpCluster.Network.DNSName())
-			ipUpdater := vip.NewIPUpdater(cpCluster.Network)
-			ipUpdater.Run(ctxDNS)
-		}
+		// // start the dns updater if address is dns
+		// if cpCluster.Network.IsDNS() {
+		// 	log.Infof("starting the DNS updater for the address %s", cpCluster.Network.DNSName())
+		// 	ipUpdater := vip.NewIPUpdater(cpCluster.Network)
+		// 	ipUpdater.Run(ctxDNS)
+		// }
 
 		clusterManager := &cluster.Manager{
 			KubernetesClient: sm.clientSet,
@@ -70,7 +69,7 @@ func (sm *Manager) startARP() error {
 		}
 
 		go func() {
-			err := cpCluster.StartLeaderCluster(sm.config, clusterManager, nil)
+			err := cpCluster.StartCluster(sm.config, clusterManager, nil)
 			if err != nil {
 				log.Errorf("Control Pane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
