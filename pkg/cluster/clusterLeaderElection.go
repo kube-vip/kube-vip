@@ -191,7 +191,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// As we're leading lets start the vip service
-				err = cluster.vipService(c, sm, bgpServer, ctxArp, ctxDNS, packetClient)
+				err = cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
 				if err != nil {
 					log.Errorf("Error starting the VIP service on the leader [%s]", err)
 				}

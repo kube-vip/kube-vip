@@ -17,7 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (cluster *Cluster) vipService(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, ctxArp, ctxDNS context.Context, packetClient *packngo.Client) error {
+func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
 	id, err := os.Hostname()
 	if err != nil {
 		return err
