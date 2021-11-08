@@ -17,49 +17,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (cluster *Cluster) vipService(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, ctxArp, ctxDNS context.Context) error {
+func (cluster *Cluster) vipService(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, ctxArp, ctxDNS context.Context, packetClient *packngo.Client) error {
 	id, err := os.Hostname()
 	if err != nil {
 		return err
 	}
-	// If Packet is enabled then we can begin our preparation work
-	var packetClient *packngo.Client
-	if c.EnableMetal {
-		if c.ProviderConfig != "" {
-			key, project, err := packet.GetPacketConfig(c.ProviderConfig)
-			if err != nil {
-				log.Error(err)
-			} else {
-				// Set the environment variable with the key for the project
-				os.Setenv("PACKET_AUTH_TOKEN", key)
-				// Update the configuration with the project key
-				c.MetalProjectID = project
-			}
-		}
-		packetClient, err := packngo.NewClient()
-		if err != nil {
-			log.Error(err)
-		}
-
-		// We're using Packet with BGP, popuplate the Peer information from the API
-		if c.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, c)
-			if err != nil {
-				log.Error(err)
-			}
-		}
-	}
-
-	// // use a Go context so we can tell the arp loop code when we
-	// // want to step down
-	// ctxArp, cancelArp := context.WithCancel(context.Background())
-	// defer cancelArp()
-
-	// // use a Go context so we can tell the dns loop code when we
-	// // want to step down
-	// ctxDNS, cancelDNS := context.WithCancel(context.Background())
-	// defer cancelDNS()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -220,7 +182,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	}
 
 	if c.EnableARP {
-		ctxArp, cancelArp = context.WithCancel(context.Background())
+		//ctxArp, cancelArp = context.WithCancel(context.Background())
 
 		ipString := cluster.Network.IP()
 

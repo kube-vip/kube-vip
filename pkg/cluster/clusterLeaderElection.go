@@ -68,7 +68,7 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	}, nil
 }
 
-// StartCluster - Begins a running instance of the Raft cluster
+// StartCluster - Begins a running instance of the Leader Election cluster
 func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
 
 	id, err := os.Hostname()
@@ -191,7 +191,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// As we're leading lets start the vip service
-				err = cluster.vipService(c, sm, bgpServer, ctxArp, ctxDNS)
+				err = cluster.vipService(c, sm, bgpServer, ctxArp, ctxDNS, packetClient)
 				if err != nil {
 					log.Errorf("Error starting the VIP service on the leader [%s]", err)
 				}
