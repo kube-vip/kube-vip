@@ -20,10 +20,10 @@ spec:
         env:
         - name: vip_arp
           value: "false"
-        - name: vip_interface
-          value: eth0
         - name: port
           value: "6443"
+        - name: vip_interface
+          value: eth0
         - name: vip_cidr
           value: "32"
         - name: cp_enable

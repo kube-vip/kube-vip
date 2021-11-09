@@ -59,18 +59,6 @@ const (
 	//vipStartLeader - will start this instance as the leader of the cluster
 	vipStartLeader = "vip_startleader"
 
-	//vipPeers defines the configuration of raft peer(s)
-	vipPeers = "vip_peers"
-
-	//vipLocalPeer defines the configuration of the local raft peer
-	vipLocalPeer = "vip_localpeer"
-
-	//vipRemotePeers defines the configuration of the local raft peer
-	// vipRemotePeers = "vip_remotepeers"
-
-	//vipAddPeersToLB defines that RAFT peers should be added to the load-balancer
-	vipAddPeersToLB = "vip_addpeerstolb"
-
 	//vipPacket defines that the packet API will be used for EIP
 	vipPacket = "vip_packet"
 

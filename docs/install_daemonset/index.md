@@ -50,11 +50,11 @@ or manually:
 
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
-#### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.9 vip"`
+### containerd
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
 
-#### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.9"`
+### Docker
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:$KVVERSION"`
 
 ### BGP Example
 
@@ -64,7 +64,7 @@ This configuration will create a manifest that will start `kube-vip` providing *
 
 **Note 2** we pass the `--inCluster` flag as this is running as a daemonSet within the Kubernetes cluster and therefore will have access to the token inside the running pod.
 
-**Note 2** we pass the `--taint` flag as we're deploying `kube-vip` as both a daemonset and as advertising controlplane, we want to taint this daemonset to only run on the worker nodes.
+**Note 3** we pass the `--taint` flag as we're deploying `kube-vip` as both a daemonset and as advertising controlplane, we want to taint this daemonset to only run on the worker nodes.
 
 `export INTERFACE=lo`
 
@@ -99,16 +99,26 @@ spec:
       labels:
         name: kube-vip-ds
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: Exists
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
       containers:
       - args:
         - manager
         env:
         - name: vip_arp
           value: "false"
-        - name: vip_interface
-          value: lo
         - name: port
           value: "6443"
+        - name: vip_interface
+          value: ens192
         - name: vip_cidr
           value: "32"
         - name: cp_enable
@@ -132,7 +142,7 @@ spec:
           value: 192.168.0.10:65000::false,192.168.0.11:65000::false
         - name: vip_address
           value: 192.168.0.40
-        image: 'ghcr.io/kube-vip/kube-vip:'
+        image: ghcr.io/kube-vip/kube-vip:v0.3.9
         imagePullPolicy: Always
         name: kube-vip
         resources: {}
@@ -143,12 +153,11 @@ spec:
             - NET_RAW
             - SYS_TIME
       hostNetwork: true
-      nodeSelector:
-        node-role.kubernetes.io/master: "true"
       serviceAccountName: kube-vip
       tolerations:
       - effect: NoSchedule
-        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoExecute
         operator: Exists
   updateStrategy: {}
 status:

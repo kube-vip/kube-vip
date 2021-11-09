@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/ghodss/yaml"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -194,50 +193,6 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableARP = b
-	}
-
-	//Removal of separate peer
-	env = os.Getenv(vipLocalPeer)
-	if env != "" {
-		// Parse the string in format <id>:<address>:<port>
-		peer, err := ParsePeerConfig(env)
-		if err != nil {
-			return err
-		}
-		c.LocalPeer = *peer
-	}
-
-	env = os.Getenv(vipPeers)
-	if env != "" {
-		// TODO - perhaps make this optional?
-		// Remove existing peers
-		c.RemotePeers = []RaftPeer{}
-
-		// Parse the remote peers (comma separated)
-		s := strings.Split(env, ",")
-		if len(s) == 0 {
-			return fmt.Errorf("The Remote Peer List [%s] is unable to be parsed, should be in comma separated format <id>:<address>:<port>", env)
-		}
-		for x := range s {
-			// Parse the each remote peer string in format <id>:<address>:<port>
-			peer, err := ParsePeerConfig(s[x])
-			if err != nil {
-				return err
-			}
-
-			c.RemotePeers = append(c.RemotePeers, *peer)
-
-		}
-	}
-
-	// Find Add Peers as Backends
-	env = os.Getenv(vipAddPeersToLB)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.AddPeersAsBackends = b
 	}
 
 	// BGP Server options
@@ -497,23 +452,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 
 		newEnvironment = append(newEnvironment, leaderElection...)
-	} else {
-		// Generate Raft configuration
-		raft := []corev1.EnvVar{
-			{
-				Name:  vipStartLeader,
-				Value: strconv.FormatBool(c.StartAsLeader),
-			},
-			{
-				Name:  vipAddPeersToLB,
-				Value: strconv.FormatBool(c.AddPeersAsBackends),
-			},
-			{
-				Name:  vipLocalPeer,
-				Value: fmt.Sprintf("%s:%s:%d", c.LocalPeer.ID, c.LocalPeer.Address, c.LocalPeer.Port),
-			},
-		}
-		newEnvironment = append(newEnvironment, raft...)
 	}
 
 	// If we're specifying an annotation configuration
@@ -661,27 +599,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name:  vipAddress,
 			Value: c.VIP,
 		})
-	}
-
-	// Parse peers into a comma separated string
-	if len(c.RemotePeers) != 0 {
-		var peers string
-		for x := range c.RemotePeers {
-			if x != 0 {
-				peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-
-			} else {
-				peers = fmt.Sprintf("%s:%s:%d", c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-
-			}
-			//peers = fmt.Sprintf("%s,%s:%s:%d", peers, c.RemotePeers[x].ID, c.RemotePeers[x].Address, c.RemotePeers[x].Port)
-			//fmt.Sprintf("", peers)
-		}
-		peerEnvirontment := corev1.EnvVar{
-			Name:  vipPeers,
-			Value: peers,
-		}
-		newEnvironment = append(newEnvironment, peerEnvirontment)
 	}
 
 	newManifest := &corev1.Pod{

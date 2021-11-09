@@ -63,6 +63,71 @@ kube-vip manifest pod \
     --leaderElection | tee  /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
+### Example manifest
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  name: kube-vip
+  namespace: kube-system
+spec:
+  containers:
+  - args:
+    - manager
+    env:
+    - name: vip_arp
+      value: "true"
+    - name: port
+      value: "6443"
+    - name: vip_interface
+      value: ens192
+    - name: vip_cidr
+      value: "32"
+    - name: cp_enable
+      value: "true"
+    - name: cp_namespace
+      value: kube-system
+    - name: vip_ddns
+      value: "false"
+    - name: svc_enable
+      value: "true"
+    - name: vip_leaderelection
+      value: "true"
+    - name: vip_leaseduration
+      value: "5"
+    - name: vip_renewdeadline
+      value: "3"
+    - name: vip_retryperiod
+      value: "1"
+    - name: vip_address
+      value: 192.168.0.40
+    image: ghcr.io/kube-vip/kube-vip:v0.3.9
+    imagePullPolicy: Always
+    name: kube-vip
+    resources: {}
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW
+        - SYS_TIME
+    volumeMounts:
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostAliases:
+  - hostnames:
+    - kubernetes
+    ip: 127.0.0.1
+  hostNetwork: true
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/admin.conf
+    name: kubeconfig
+status: {}
+```
+
 ## BGP
 
 This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses. 
@@ -81,4 +146,71 @@ kube-vip manifest pod \
     --localAS 65000 \
     --bgpRouterID 192.168.0.2 \
     --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false | tee  /etc/kubernetes/manifests/kube-vip.yaml
+```
+
+### Example Manifest 
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  name: kube-vip
+  namespace: kube-system
+spec:
+  containers:
+  - args:
+    - manager
+    env:
+    - name: vip_arp
+      value: "false"
+    - name: port
+      value: "6443"
+    - name: vip_interface
+      value: ens192
+    - name: vip_cidr
+      value: "32"
+    - name: cp_enable
+      value: "true"
+    - name: cp_namespace
+      value: kube-system
+    - name: vip_ddns
+      value: "false"
+    - name: bgp_enable
+      value: "true"
+    - name: bgp_routerid
+      value: 192.168.0.2
+    - name: bgp_as
+      value: "65000"
+    - name: bgp_peeraddress
+    - name: bgp_peerpass
+    - name: bgp_peeras
+      value: "65000"
+    - name: bgp_peers
+      value: 192.168.0.10:65000::false,192.168.0.11:65000::false
+    - name: vip_address
+      value: 192.168.0.40
+    image: ghcr.io/kube-vip/kube-vip:v0.3.9
+    imagePullPolicy: Always
+    name: kube-vip
+    resources: {}
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW
+        - SYS_TIME
+    volumeMounts:
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostAliases:
+  - hostnames:
+    - kubernetes
+    ip: 127.0.0.1
+  hostNetwork: true
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/admin.conf
+    name: kubeconfig
+status: {}
 ```
