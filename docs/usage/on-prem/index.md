@@ -2,19 +2,6 @@
 
 We've designed `kube-vip` to be as de-coupled or agnostic from other components that may exist within a Kubernetes cluster as possible. This has lead to `kube-vip` having a very simplistic but robust approach to advertising Kubernetes services to the outside world and marking these services as ready to use.
 
-## Flow
-
-This section details the flow of events in order for `kube-vip` to advertise a Kubernetes service:
-
-1. An end user exposes a application through Kubernetes as a LoadBalancer => `kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx`
-2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = LoadBalancer`
-3. A controller (typically a Cloud Controller) has a loop that "watches" for services of the type `LoadBalancer`.
-4. The controller now has the responsibility of providing an IP address for this service along with doing anything that is network specific for the environment where the cluster is running.
-5. Once the controller has an IP address it will update the service `svc.Spec.LoadBalancerIP` with it's new IP address.
-6. The `kube-vip` pods also implement a "watcher" for services that have a `svc.Spec.LoadBalancerIP` address attached.
-7. When a new service appears `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the service network.
-8. Finally `kube-vip` will update the service status so that the API reflects that this LoadBalancer is ready. This is done by updating the `svc.Status.LoadBalancer.Ingress` with the VIP address.
-
 ## CCM
 
 We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anything other than the Kubernetes API, and will only act upon an existing Kubernetes primative (in this case the object of type `Service`). This makes it easy for existing CCMs to simply apply their logic to services of type LoadBalancer and leave `kube-vip` to take the next steps to advertise these load-balancers to the outside world. 
@@ -24,7 +11,15 @@ We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anythin
 
 The below instructions *should just work* on Kubernetes regardless of architecture (Linux Operating System is the only requirement) - you can quickly install the "latest" components:
 
-**Install the `kube-vip-cloud-provider`**
+### Create the RBAC settings
+
+As a daemonSet runs within the Kubernetes cluster it needs the correct access to be able to watch Kubernetes services and other objects. In order to do this we create a User, Role, and a binding.. we can apply this with the command:
+
+```
+kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+```
+
+### Install the `kube-vip-cloud-provider`
 
 ```
 $ kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
@@ -53,9 +48,15 @@ Creating services of `type: LoadBalancer` in *any namespace* will now take addre
 
 ## The Detailed guide
 
-### Deploy the Kube-vip Cloud Provider
+### Create the RBAC settings
 
-**Install the `kube-vip-cloud-provider`**
+As a daemonSet runs within the Kubernetes cluster it needs the correct access to be able to watch Kubernetes services and other objects. In order to do this we create a User, Role, and a binding.. we can apply this with the command:
+
+```
+kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+```
+
+### Install the `kube-vip-cloud-provider`
 
 ```
 $ kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml

@@ -29,14 +29,23 @@ This section details creating a number of manifests for various use cases
 
 ## Configure to use a container runtime
 
+### Get latest version
+
+ We can parse the GitHub API to find the latest version (or we can set this manually)
+
+`KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
+
+or manually:
+
+`export KVVERSION=vx.x.x`
+
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 ### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.9 vip /kube-vip"`
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
 
 ### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.9"`
-
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:$KVVERSION"`
 
 ## ARP
 

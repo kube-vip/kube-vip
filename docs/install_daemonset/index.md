@@ -38,6 +38,16 @@ This section only covers generating a simple *BGP* configuration, as the main fo
 
 ### Configure to use a container runtime
 
+#### Get latest version
+
+ We can parse the GitHub API to find the latest version (or we can set this manually)
+
+`KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
+
+or manually:
+
+`export KVVERSION=vx.x.x`
+
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 #### containerd
