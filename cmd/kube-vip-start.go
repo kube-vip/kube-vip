@@ -110,7 +110,7 @@ var kubeVipStart = &cobra.Command{
 				}
 
 				// Leader Cluster will block
-				err = newCluster.StartLeaderCluster(&startConfig, cm, bgpServer)
+				err = newCluster.StartCluster(&startConfig, cm, bgpServer)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}

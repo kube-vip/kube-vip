@@ -8,7 +8,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/packet"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
 )
@@ -58,11 +57,6 @@ func (sm *Manager) startBGP() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// use a Go context so we can tell the dns loop code when we
-	// want to step down
-	ctxDNS, cancelDNS := context.WithCancel(context.Background())
-	defer cancelDNS()
-
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
 		if sm.bgpServer != nil {
@@ -89,22 +83,14 @@ func (sm *Manager) startBGP() error {
 		if err != nil {
 			return err
 		}
-		// setup ddns first
-		// for first time, need to wait until IP is allocated from DHCP
-		if cpCluster.Network.IsDDNS() {
-			if err := cpCluster.StartDDNS(ctxDNS); err != nil {
-				log.Error(err)
-			}
+
+		clusterManager := &cluster.Manager{
+			KubernetesClient: sm.clientSet,
+			SignalChan:       sm.signalChan,
 		}
 
-		// start the dns updater if address is dns
-		if cpCluster.Network.IsDNS() {
-			log.Infof("starting the DNS updater for the address %s", cpCluster.Network.DNSName())
-			ipUpdater := vip.NewIPUpdater(cpCluster.Network)
-			ipUpdater.Run(ctxDNS)
-		}
 		go func() {
-			err = cpCluster.StartLoadBalancerService(sm.config, sm.bgpServer)
+			err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer, packetClient)
 			if err != nil {
 				log.Errorf("Control Pane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
