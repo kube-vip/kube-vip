@@ -51,10 +51,10 @@ or manually:
 The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
 
 #### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.8 vip"`
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.3.9 vip"`
 
 #### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"`
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.9"`
 
 ### BGP Example
 
