@@ -20,10 +20,10 @@ spec:
         env:
         - name: vip_arp
           value: "true"
-        - name: vip_interface
-          value: eth0
         - name: port
           value: "6443"
+        - name: vip_interface
+          value: eth0
         - name: vip_cidr
           value: "32"
         - name: cp_enable
@@ -54,10 +54,6 @@ spec:
             - NET_ADMIN
             - NET_RAW
             - SYS_TIME
-      hostAliases:
-      - hostnames:
-        - kubernetes
-        ip: 127.0.0.1
       hostNetwork: true
       serviceAccountName: kube-vip
   updateStrategy: {}
