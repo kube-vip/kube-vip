@@ -19,8 +19,6 @@ The `kube-vip` service builds a multi-node or multi-pod cluster to provide High-
 
 When using ARP or layer2 it will use [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection)
 
-It is also possible to use [raft](https://en.wikipedia.org/wiki/Raft_(computer_science) clustering technology, but this approach has largely been superseded by leader election especially when running in cluster.
-
 ### Virtual IP
 
 The leader within the cluster will assume the **vip** and will have it bound to the selected interface that is declared within the configuration. When the leader changes it will evacuate the **vip** first or in failure scenarios the **vip** will be directly assumed by the next elected leader.
@@ -56,80 +54,105 @@ Request timeout for icmp_seq 150
 
 ### Load Balancing
 
-Within a Kubernetes cluster, the load-balancing is managed by the `plndr-cloud-provider` which watches all service that are created, and for those of `type=LoadBalancer` will create the configuration for `kube-vip` to consume.
+Kube-Vip has the capability to provide a HA address for both the Kubernetes control plane and for a Kubernetes service, it recently implemented support for "actual" load-balancing for the control plane to distribute API requests across control-plane nodes. 
 
-#### Load Balancing (Inside a cluster)
+#### Kubernetes Service Load-Balancing
 
-When using `type=LoadBalancer` within a Kubernetes cluster `kube-vip` will assign the VIP to the leader (when using ARP) or to all running Pods (when using BGP). When traffic is directed to a node with the VIP then the rules configured by `kube-proxy` will redirect the traffic to one of the pods running in the service.
-
-#### Load Balancing (Outside a cluster)
-
-Within the configuration of `kube-vip` multiple load-balancers can be created, below is the example load-balancer for a Kubernetes Control-plane:
+The following is required in the kube-vip yaml to enable services:
 
 ```
-loadBalancers:
-- name: Kubernetes Control Plane
-  type: tcp
-  port: 6443
-  bindToVip: true
-  backends:
-  - port: 6444
-    address: 192.168.0.70
-  - port: 6444
-    address: 192.168.0.71
-  - port: 6444
-    address: 192.168.0.72
+        - name: svc_enable
+          value: "true"
 ```
 
-The above load balancer will create an instance that listens on port `6443` and will forward traffic to the array of backend addresses. If the load-balancer type is `tcp` then the backends will be IP addresses, however if the backend is set to `http` then the backends should be URLs:
+This section details the flow of events in order for `kube-vip` to advertise a Kubernetes service:
+
+1. An end user exposes a application through Kubernetes as a LoadBalancer => `kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx`
+2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = LoadBalancer`
+3. A controller (typically a Cloud Controller) has a loop that "watches" for services of the type `LoadBalancer`.
+4. The controller now has the responsibility of providing an IP address for this service along with doing anything that is network specific for the environment where the cluster is running.
+5. Once the controller has an IP address it will update the service `svc.Spec.LoadBalancerIP` with it's new IP address.
+6. The `kube-vip` pods also implement a "watcher" for services that have a `svc.Spec.LoadBalancerIP` address attached.
+7. When a new service appears `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the service network.
+8. Finally `kube-vip` will update the service status so that the API reflects that this LoadBalancer is ready. This is done by updating the `svc.Status.LoadBalancer.Ingress` with the VIP address.
+
+#### Control Plane Load-Balancing (> 0.4)
+
+**NOTE** in it's initial release IPVS load-balancing is configured for having the VIP in the same subnet as the control-plane nodes, NAT based load-balancing will appear soon.
+
+To enable control-plane load balancing, the following is required in the kube-vip yaml to enable control plane load-balancing.
 
 ```
-  type: http
-  port: 6443
-  bindToVip: true
-  backends:
-  - port: 6444
-    address: https://192.168.0.70
+    - name : lb_enable
+      value: "true"
+```
+The load balancing is provided through IPVS (IP Virtual Server) and provides a layer-4 (TCP Port) based round-robin across all of the control plane nodes. By default the load balancer will listen on the default 6443 port as the Kubernetes API server. 
+**Note:** The IPVS virtual server lives in kernel space and doesn't create an "actual" service that listens on port 6443, this allows the kernel to parse packets before they're sent to an actual TCP port. This is important to know because it means we don't have any port conflicts having the IPVS load-balancer listening on the same port as the API server on the same host.
+
+The load balancer port can be customised with the following snippet in the yaml.
+
+```
+    - name: lb_port
+      value: "6443"
 ```
 
-Additionally the load-balancing within `kibe-vip` has two modes of operation:
+**How it works!**
 
-`bindToVip: false` - will result in every node in the cluster binding all load-balancer port(s) to all interfaces on the host itself
+Once the `lb_enable` is set to true kube-vip will do the following:
 
-`bindToVip: true` - The load-balancer will only **bind** to the VIP address.
+ - In Layer 2 it will create an IPVS service on the leader
+ - In Layer 3 all nodes will create an IPVS service
+ - It will start a Kubernetes node watcher for nodes with the control plane label
+ - It will add/delete them as they're added and removed from the cluster
 
+#### Debugging control plane load-balancing
+
+ In order to inspect what is happening we will need to install the `ipvsadm` tool. 
+
+##### View the configuration
+
+The command `sudo ipvsadm -ln` will display the load balancer configuration.
+
+```
+ $ sudo ipvsadm -ln
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  192.168.0.40:6443 rr
+  -> 192.168.0.41:6443            Local   1      4          0
+  -> 192.168.0.42:6443            Local   1      3          0
+  -> 192.168.0.43:6443            Local   1      3          0
+```
+
+##### Watch things interact with the API server
+
+The command `watch sudo ipvsadm -lnc` will auto-refresh the connections to the load-balancer.
+
+```
+$ watch sudo ipvsadm -lnc
+
+...
+
+sudo ipvsadm -lnc                    k8s01: Tue Nov  9 11:39:39 2021
+
+IPVS connection entries
+pro expire state       source             virtual            destination
+TCP 14:49  ESTABLISHED 192.168.0.42:37090 192.168.0.40:6443  192.168.0.41:6443
+TCP 14:55  ESTABLISHED 192.168.0.45:46510 192.168.0.40:6443  192.168.0.41:6443
+TCP 14:54  ESTABLISHED 192.168.0.43:39602 192.168.0.40:6443  192.168.0.43:6443
+TCP 14:58  ESTABLISHED 192.168.0.44:50458 192.168.0.40:6443  192.168.0.42:6443
+TCP 14:32  ESTABLISHED 192.168.0.43:39648 192.168.0.40:6443  192.168.0.42:6443
+TCP 14:58  ESTABLISHED 192.168.0.40:55944 192.168.0.40:6443  192.168.0.41:6443
+TCP 14:54  ESTABLISHED 192.168.0.42:36950 192.168.0.40:6443  192.168.0.41:6443
+TCP 14:42  ESTABLISHED 192.168.0.44:50488 192.168.0.40:6443  192.168.0.43:6443
+TCP 14:53  ESTABLISHED 192.168.0.45:46528 192.168.0.40:6443  192.168.0.43:6443
+TCP 14:49  ESTABLISHED 192.168.0.40:56040 192.168.0.40:6443  192.168.0.42:6443
+```
 
 ## Components within a Kubernetes Cluster
 
 The `kube-vip` kubernetes load-balancer requires a number of components in order to function:
 
-- The Plunder Cloud Provider -> [https://github.com/kube-vip/plndr-cloud-provider](https://github.com/kube-vip/plndr-cloud-provider)
+- The Kube-Vip Cloud Provider -> [https://github.com/kube-vip/kube-vip-cloud-provider](https://github.com/kube-vip/kube-vip-cloud-provider)
 - The Kube-Vip Deployment -> [https://github.com/kube-vip/kube-vip](https://github.com/kube-vip/kube-vip)
 
-### Architecture overview
-
-![kubernetes-vip-architecture.png](kubernetes-vip-architecture.png)
-
-### Plunder Cloud Provider
-
-The cloud provider works like all Kubernetes cloud providers and is built using the Kubernetes cloud-provider SDK. It's role is to provide the same cloud "like" services one would expect from services such as AWS / Azure / GCP etc.. in that when a user requests functionality then the cloud provider can speak natively to the underlying vendor and provision the required service 
-
-e.g. _In AWS when requesting a Kubernetes LoadBalancer, the cloud provider will provision an **ELB**_ 
-
-The `Plunder cloud Provider` is *currently* only designed to intercept the creation of LoadBalancers and translate that into a `kube-vip` load balancer. 
-
-It is configured by a `configMap` within the `kube-system` namespace that contains the ranges of addresses that the other `kube-vip` load-balancers can use, it will also manage the allocation of addresses and then build the configMap configurations in these namespaces for consumption by `kube-vip`. The IP addresses for each namespace should be in the structure `cidr-<namespace>` followed by the cidr range for the address pool.
-
-**Example `ConfigMap`**
-
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: plndr
-  namespace: kube-system
-data:
-  cidr-default: 192.168.0.200/29
-  cidr-plunder: 192.168.0.210/29
-  cidr-testing: 192.168.0.220/29
-``` 

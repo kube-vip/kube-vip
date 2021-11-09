@@ -20,6 +20,7 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Control Plane using either [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection) or [raft](https://en.wikipedia.org/wiki/Raft_(computer_science))
 - Control Plane HA with kubeadm (static Pods)
 - Control Plane HA with K3s/and others (daemonsets)
+- Control Plane LoadBalancing with IPVS (kube-vip > 0.4)
 - Service LoadBalancer using [leader election](https://godoc.org/k8s.io/client-go/tools/leaderelection) for ARP (Layer 2)
 - Service LoadBalancer using multiple nodes with BGP
 - Service LoadBalancer address pools per namespace or global

@@ -28,16 +28,23 @@ kubectl create configmap --namespace kube-system kubevip --from-literal range-gl
 
 ## Install kube-vip
 
-Set the correct `alias` for `kube-vip`
-```
-alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:v0.3.8"
-```
+### Get latest version
 
-Install Kube-vip deamonset inside of KIND
+ We can parse the GitHub API to find the latest version (or we can set this manually)
 
-```
-kube-vip manifest daemonset --services --inCluster --arp --interface eth0 | ./kubectl apply -f -
-```
+`KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
+
+or manually:
+
+`export KVVERSION=vx.x.x`
+
+The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
+
+### containerd
+`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
+
+### Docker
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:KVVERSION"`
 
 ## Test
 
