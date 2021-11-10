@@ -231,7 +231,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	return nil
 }
 
-func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
+func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Infof("Kube-Vip is watching nodes for control-plane labels")
 
@@ -271,7 +271,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
 			for x := range node.Status.Addresses {
 
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address)
+					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
 						log.Errorf("Add IPVS backend [%v]", err)
 					}
@@ -287,7 +287,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer) error {
 			for x := range node.Status.Addresses {
 
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address)
+					err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
 						log.Errorf("Del IPVS backend [%v]", err)
 					}

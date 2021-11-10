@@ -87,10 +87,10 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 
 }
 
-func (lb *IPVSLoadBalancer) AddBackend(address string) error {
+func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 	dst := ipvs.Destination{
 		Address:   ipvs.NewIP(net.ParseIP(address)),
-		Port:      6443,
+		Port:      uint16(port),
 		Family:    ipvs.INET,
 		Weight:    1,
 		FwdMethod: ipvs.Local,
@@ -105,10 +105,10 @@ func (lb *IPVSLoadBalancer) AddBackend(address string) error {
 	return nil
 }
 
-func (lb *IPVSLoadBalancer) RemoveBackend(address string) error {
+func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
 	dst := ipvs.Destination{
 		Address: ipvs.NewIP(net.ParseIP(address)),
-		Port:    6443,
+		Port:    uint16(port),
 		Family:  ipvs.INET,
 		Weight:  1,
 	}
