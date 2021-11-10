@@ -84,7 +84,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		go func() {
-			err = sm.NodeWatcher(lb)
+			err = sm.NodeWatcher(lb, c.Port)
 			if err != nil {
 				log.Errorf("Error watching node labels [%s]", err)
 			}
