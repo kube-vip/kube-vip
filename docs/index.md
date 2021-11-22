@@ -2,19 +2,19 @@
 
 ## Overview
 
-Kubernetes Virtual IP and Load-Balancer for both control plane and Kubernetes services.
+Kube-Vip provides Kubernetes clusters a virtual IP and load balancer for both control plane and Kubernetes Services.
 
 The idea behind `kube-vip` is a small, self-contained, highly-available option for all environments, especially:
 
-- Bare-Metal
-- On-Prem
+- Bare metal
+- On-Premises
 - Edge (ARM / Raspberry Pi)
 - Virtualisation
 - Pretty much anywhere else :)
 
 ## Features
 
-Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, but over time it has evolved to incorporate that same functionality for Kubernetes Services of type [LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).
+Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, but over time it has evolved to incorporate that same functionality for Kubernetes Services of type [LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer). Some of the features include:
 
 - VIP addresses can be both IPv4 or IPv6
 - Control Plane with ARP (Layer 2) or BGP (Layer 3)
