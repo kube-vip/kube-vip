@@ -39,19 +39,7 @@ The architecture for `kube-vip` (and associated Kubernetes components) is covere
 
 ## Installation
 
-There are two main routes for deploying `kube-vip`: either through a [static pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) when bringing up a Kubernetes cluster with [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/) or as a [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/) (typically with distributions like [K3s](https://k3s.io)).
-
-The infrastructure for our example HA Kubernetes cluster is as follows:
-
-| Node           | Address    |
-|----------------|------------|
-| VIP            | 10.0.0.40 |
-| controlPlane01 | 10.0.0.41 |
-| controlPlane02 | 10.0.0.42 |
-| controlPlane03 | 10.0.0.43 |
-| worker01       | 10.0.0.44 |
-
-All nodes are running Ubuntu 20.04, Docker CE and will use Kubernetes 1.21.0. We only have one worker as we're going to use our control plane in "hybrid" mode.
+There are two main routes for deploying `kube-vip`: either through a [static Pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) when bringing up a Kubernetes cluster with [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/) or as a [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/) (typically with distributions like [K3s](https://k3s.io)).
 
 - [Static Pod](/install_static)
 - [DaemonSet](/install_daemonset)
@@ -59,7 +47,7 @@ All nodes are running Ubuntu 20.04, Docker CE and will use Kubernetes 1.21.0. We
 ## Usage
 
 - [On-Prem with the kube-vip cloud controller](/usage/on-prem)
-- [KIND](/usage/kind)
+- [KinD](/usage/kind)
 - [Equinix Metal](/usage/EquinixMetal)
 - [k3s](/usage/k3s)
 

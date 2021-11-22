@@ -68,7 +68,7 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `address`             | `<IP Address>` or `<DNS name>`                              |                                                                                 |
 |                     | `vip_interface`       | `<linux interface>`                                         |                                                                                 |
 |                     | `vip_leaderelection`  | Enables Kubernetes LeaderElection                           | Used by ARP, as only the leader can broadcast                                   |
-|                     | `lb_enable`           | Enables IPVS LoadBalancer                                   | Will watch Kubernetes nodes and add them to the IPVS load-balancer              |
+|                     | `lb_enable`           | Enables IPVS LoadBalancer                                   | `kube-vip` ≥ 0.4.0. Adds nodes to the IPVS load balancer                        |
 |                     | `lb_port`             | 6443                                                        | The IPVS port that will be used to load-balance control plane requests          |
 | **Services**        |                       |                                                             |                                                                                 |
 |                     | `vip_cidr`            | Defaults "32"                                               | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
