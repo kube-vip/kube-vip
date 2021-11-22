@@ -63,6 +63,8 @@ With the inputs and alias command set, we can run the `kube-vip` container to ge
 
 This configuration will create a manifest that starts `kube-vip` providing control plane VIP and Kubernetes Service management using the `leaderElection` method and ARP. When this instance is elected as the leader, it will bind the `vip` to the specified `interface`. This is the same behavior for Services of type `LoadBalancer`.
 
+> Note: When running these commands on a to-be control plane node, `sudo` access may be required along with pre-creation of the `/etc/kubernetes/manifests/` directory.
+
 ```
 kube-vip manifest pod \
     --interface $INTERFACE \

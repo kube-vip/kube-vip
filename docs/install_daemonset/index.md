@@ -1,24 +1,20 @@
 # Kube-Vip as a DaemonSet
 
-## Daemonset
+## DaemonSet
 
-Other Kubernetes distributions can bring up a Kubernetes cluster, without depending on a VIP (BUT they are configured to support one). A prime example of this would be k3s, that can be configured to start and also sign the certificates to allow incoming traffic to a virtual IP. Given we don't need the VIP to exist **before** the cluster, we can bring up the k3s node(s) and then add `kube-vip` as a DaemonSet for all control plane nodes.
+Some Kubernetes distributions can bring up a Kubernetes cluster without depending on a pre-existing VIP (but they may be configured to support one). A prime example of this would be K3s which can be configured to start and also sign the certificates to allow incoming traffic to a virtual IP. Given we don't need the VIP to exist before the cluster, we can bring up the K3s node(s) and then add `kube-vip` as a DaemonSet for all control plane nodes.
 
-If the Kubernetes installer allows for adding a Virtual IP as an additional [SAN](https://en.wikipedia.org/wiki/Subject_Alternative_Name) to the API server certificate then we can apply `kube-vip` to the cluster once the first node has been brought up.
+If the Kubernetes installer allows for adding a virtual IP as an additional [SAN](https://en.wikipedia.org/wiki/Subject_Alternative_Name) to the API server certificate, we can apply `kube-vip` to the cluster once the first node has been brought up.
+
+Unlike running `kube-vip` as a [static Pod](/install_static) there are a few more things that may need configuring when running `kube-vip` as a DaemonSet. This page will cover primarily the differences.
 
 ## Kube-Vip as HA, Load Balancer, or both
 
-When generating a manifest for `kube-vip` we will pass in the flags `--controlplane` / `--services` these will enable the various types of functionality within `kube-vip`.
-
-With both enabled `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
-
-**Note about DaemonSets**
-
-Unlike generating the static manifest there are a few more things that may need configuring, this page will cover most scenarios.
+The functionality of `kube-vip` depends on the flags used to create the static Pod manifest. By passing in `--controlplane` we instruct `kube-vip` to provide and advertise a virtual IP to be used by the control plane. By passing in `--services` we tell `kube-vip` to provide load balancing for Kubernetes Service resources created inside the cluster. With both enabled, `kube-vip` will manage a virtual IP address that is passed through its configuration for a highly available Kubernetes cluster. It will also watch Services of type `LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller, including (optionally) the one provided by kube-vip in [on-prem](/usage/on-prem) scenarios) it will advertise this address using BGP/ARP. In this example, we will use both when generating the manifest.
 
 ## Create the RBAC settings
 
-As a daemonSet runs within the Kubernetes cluster it needs the correct access to be able to watch Kubernetes services and other objects. In order to do this we create a User, Role, and a binding.. we can apply this with the command:
+Since `kube-vip` as a DaemonSet runs as a regular resource instead of a static Pod, it still needs the correct access to be able to watch Kubernetes Services and other objects. In order to do this, RBAC resources must be created which include a ServiceAccount, ClusterRole, and ClusterRoleBinding and can be applied this with the command:
 
 ```
 kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
@@ -26,45 +22,113 @@ kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
 
 ## Generating a Manifest
 
-This section only covers generating a simple *BGP* configuration, as the main focus is will be on additional changes to the manifest. For more examples we can look at [here](/hybrid/static/).
+In order to create an easier experience of consuming the various functionality within `kube-vip`, we can use the `kube-vip` container itself to generate our DaemonSet manifest. We do this by running the `kube-vip` image as a container and passing in the various [flags](/flags/) for the capabilities we want to enable. Generating a `kube-vip` manifest for running as a DaemonSet is almost identical to the process when running `kube-vip` as a [static Pod](/install_static). Only a few flags are different between the two processes. Therefore, refer back to the [Generating a Manifest](/install_static/#generating-a-manifest) section on the [static Pod installation page](/install_static) for the main process steps.
 
-**Note:** Pay attention if using the "static" examples, as the `manifest` subcommand should use `DaemonSet` and NOT `pod`.
+### ARP Example for DaemonSet
 
-### Set configuration details
+When creating the `kube-vip` installation manifest as a DaemonSet, the `manifest` subcommand takes the value `daemonset` as opposed to the `pod` value. The flags `--inCluster` and `--taint` are also needed to configure the DaemonSet to use a ServiceAccount and affine the `kube-vip` Pods to control plane nodes thereby preventing them from running on worker instances.
 
-`export VIP=192.168.0.40`
+```
+kube-vip manifest daemonset \
+    --interface $INTERFACE \
+    --vip $VIP \
+    --inCluster \
+    --taint \
+    --controlplane \
+    --services \
+    --arp \
+    --leaderElection
+```
 
-`export INTERFACE=<interface>`
+#### Example ARP Manifest
 
-### Configure to use a container runtime
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  creationTimestamp: null
+  name: kube-vip-ds
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: kube-vip-ds
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        name: kube-vip-ds
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: Exists
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+      containers:
+      - args:
+        - manager
+        env:
+        - name: vip_arp
+          value: "true"
+        - name: port
+          value: "6443"
+        - name: vip_interface
+          value: ens160
+        - name: vip_cidr
+          value: "32"
+        - name: cp_enable
+          value: "true"
+        - name: cp_namespace
+          value: kube-system
+        - name: vip_ddns
+          value: "false"
+        - name: svc_enable
+          value: "true"
+        - name: vip_leaderelection
+          value: "true"
+        - name: vip_leaseduration
+          value: "5"
+        - name: vip_renewdeadline
+          value: "3"
+        - name: vip_retryperiod
+          value: "1"
+        - name: vip_address
+          value: 192.168.0.40
+        image: ghcr.io/kube-vip/kube-vip:v0.4.0
+        imagePullPolicy: Always
+        name: kube-vip
+        resources: {}
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_TIME
+      hostNetwork: true
+      serviceAccountName: kube-vip
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
+  updateStrategy: {}
+status:
+  currentNumberScheduled: 0
+  desiredNumberScheduled: 0
+  numberMisscheduled: 0
+  numberReady: 0
+```
 
-#### Get latest version
+### BGP Example for DaemonSet
 
- We can parse the GitHub API to find the latest version (or we can set this manually)
+This configuration will create a manifest that starts `kube-vip` providing control plane VIP and Kubernetes Service management. Unlike ARP, all nodes in the BGP configuration will advertise virtual IP addresses.
 
-`KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
-
-or manually:
-
-`export KVVERSION=vx.x.x`
-
-The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
-
-### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
-
-### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:$KVVERSION"`
-
-### BGP Example
-
-This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses.
-
-**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma separate list in the format of `address:AS:password:multihop`.
-
-**Note 2** we pass the `--inCluster` flag as this is running as a daemonSet within the Kubernetes cluster and therefore will have access to the token inside the running pod.
-
-**Note 3** we pass the `--taint` flag as we're deploying `kube-vip` as both a daemonset and as advertising controlplane, we want to taint this daemonset to only run on the worker nodes.
+**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma-separated list in the format of `address:AS:password:multihop`.
 
 `export INTERFACE=lo`
 
@@ -72,17 +136,20 @@ This configuration will create a manifest that will start `kube-vip` providing *
 kube-vip manifest daemonset \
     --interface $INTERFACE \
     --vip $VIP \
-    --controlplane \
-    --services \
     --inCluster \
     --taint \
+    --controlplane \
+    --services \
     --bgp \
+    --localAS 65000 \
+    --bgpRouterID 192.168.0.2 \
     --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false
-```
-
-### Generated Manifest
 
 ```
+
+#### Example BGP Manifest
+
+```yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -118,7 +185,7 @@ spec:
         - name: port
           value: "6443"
         - name: vip_interface
-          value: ens192
+          value: ens160
         - name: vip_cidr
           value: "32"
         - name: cp_enable
@@ -132,6 +199,7 @@ spec:
         - name: bgp_enable
           value: "true"
         - name: bgp_routerid
+          value: 192.168.0.2
         - name: bgp_as
           value: "65000"
         - name: bgp_peeraddress
@@ -142,7 +210,7 @@ spec:
           value: 192.168.0.10:65000::false,192.168.0.11:65000::false
         - name: vip_address
           value: 192.168.0.40
-        image: ghcr.io/kube-vip/kube-vip:v0.3.9
+        image: ghcr.io/kube-vip/kube-vip:v0.4.0
         imagePullPolicy: Always
         name: kube-vip
         resources: {}
@@ -167,20 +235,19 @@ status:
   numberReady: 0
 ```
 
-### Managing a `routerID` as a daemonset
+#### Managing a `routerID` as a DaemonSet
 
-The routerID needs to be unique on each node that participates in BGP advertisements. In order to do this we can modify the manifest so that when `kube-vip` starts it will look up its local address and use that as the routerID.
+The `routerID` needs to be unique on each node that participates in BGP advertisements. In order to do this, we can modify the manifest so that when `kube-vip` starts it will look up its local address and use that as the `routerID`. Add the following to the `env[]` array of the container:
 
+```yaml
+- name: bgp_routerinterface
+  value: "ens160"
 ```
-          - name: bgp_routerinterface
-            value: "ens160"
-```
 
-This will instruct each instance of `kube-vip` as part of the daemonset to look up the IP address on that interface and use it as the routerID.
+### DaemonSet Manifest Overview
 
-### Manifest Overview
+Once the manifest for `kube-vip` as a DaemonSet is generated, these are some of the notable differences over the [static Pod](/install_static) manifest and their significance.
 
-- `nodeSelector` - Ensures that this particular daemonset only runs on control plane nodes
-- `serviceAccountName: kube-vip` - this specifies the user in the `rbac` that will give us the permissions to get/update services.
-- `hostNetwork: true` - This pod will need to modify interfaces (for VIPs)
-- `env {...}` - We pass the configuration into the kube-vip pod through environment variables.
+- `nodeSelector`: Ensures that DaemonSet Pods only run on control plane nodes.
+- `serviceAccountName: kube-vip`: Specifies the ServiceAccount name that will be used to get/update Kubernetes Service resources.
+- `tolerations`: Allows scheduling to control plane nodes that normally specify `NoSchedule` or `NoExecute` taints.

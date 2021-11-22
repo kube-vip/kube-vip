@@ -16,15 +16,15 @@ These flags are typically used in the `kube-vip` manifest generation process.
 |                     | `--bgp`                | Enables BGP peering from `kube-vip`                                |                                                                                 |
 |                     | `--vip`                | `<IP Address>`                                                     | (deprecated)                                                                    |
 |                     | `--address`            | `<IP Address>` or `<DNS name>`                                     |                                                                                 |
-|                     | `--interface`          | `<linux interface>`                                                |                                                                                 |
+|                     | `--interface`          | Linux interface on the node                                        |                                                                                 |
 |                     | `--leaderElection`     | Enables Kubernetes LeaderElection                                  | Used by ARP, as only the leader can broadcast                                   |
-|                     | `--enableLoadBalancer` | Enables IPVS load balancer                                         |                                                                                 |
+|                     | `--enableLoadBalancer` | Enables IPVS load balancer                                         | `kube-vip` ≥ 0.4.0                                                              |
 |                     | `--lbPort`             | 6443                                                               | The port that the api server will load-balanced on                              |
 | **Services**        |                        |                                                                    |                                                                                 |
 |                     | `--cidr`               | Defaults "32"                                                      | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
 | **Kubernetes**      |                        |                                                                    |                                                                                 |
-|                     | `--inCluster`          | Defaults to looking inside the Pod for the token                   |                                                                                 |
-|                     | `--taint`              | Enables a taint, stopping control plane DaemonSet being on workers |                                                                                 |
+|                     | `--inCluster`          | Required for `kube-vip` as DaemonSet.                              |  Runs `kube-vip` with a ServiceAccount called `kube-vip`.                       |
+|                     | `--taint`              | Required for `kube-vip` as DaemonSet.                              |  Adds node affinity rules forcing `kube-vip` Pods to run on control plane.      |
 | **LeaderElection**  |                        |                                                                    |                                                                                 |
 |                     | `--leaseDuration`      | default 5                                                          | Seconds a lease is held for                                                     |
 |                     | `--leaseRenewDuration` | default 3                                                          | Seconds a leader can attempt to renew the lease                                 |
@@ -79,6 +79,7 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `cp_namespace`        | "kube-vip"                                                  | The namespace where the lease will reside                                       |
 | **BGP**             |                       |                                                             |                                                                                 |
 |                     | `bgp_routerid`        | `<IP Address>`                                              | Typically the address of the local node                                         |
+|                     | `bgp_routerinterface` | Interface name                                              | Used to associate the `routerID` with the control plane's interface.            |
 |                     | `bgp_as`              | default 65000                                               | The AS we peer from                                                             |
 |                     | `bgp_peers`           | `<address:AS:password:multihop>`                            | Comma separated list of BGP peers                                               |
 |                     | `bgp_peeraddress`     | `<IP Address>`                                              | Address of a single BGP Peer                                                    |
