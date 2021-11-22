@@ -1,18 +1,18 @@
-# Kube-Vip as a daemonset
+# Kube-Vip as a DaemonSet
 
 ## Daemonset
 
-Other Kubernetes distributions can bring up a Kubernetes cluster, without depending on a VIP (BUT they are configured to support one). A prime example of this would be k3s, that can be configured to start and also sign the certificates to allow incoming traffic to a virtual IP. Given we don't need the VIP to exist **before** the cluster, we can bring up the k3s node(s) and then add `kube-vip` as a daemonset for all control plane nodes.
+Other Kubernetes distributions can bring up a Kubernetes cluster, without depending on a VIP (BUT they are configured to support one). A prime example of this would be k3s, that can be configured to start and also sign the certificates to allow incoming traffic to a virtual IP. Given we don't need the VIP to exist **before** the cluster, we can bring up the k3s node(s) and then add `kube-vip` as a DaemonSet for all control plane nodes.
 
-If the Kubernetes installer allows for adding a Virtual IP as an additional [SAN](https://en.wikipedia.org/wiki/Subject_Alternative_Name) to the API server certificate then we can apply `kube-vip` to the cluster once the first node has been brought up. 
+If the Kubernetes installer allows for adding a Virtual IP as an additional [SAN](https://en.wikipedia.org/wiki/Subject_Alternative_Name) to the API server certificate then we can apply `kube-vip` to the cluster once the first node has been brought up.
 
-## Kube-Vip as **HA**, **Load-Balancer** or both ` ¯\_(ツ)_/¯`
+## Kube-Vip as HA, Load Balancer, or both
 
-When generating a manifest for `kube-vip` we will pass in the flags `--controlplane` / `--services` these will enable the various types of functionality within `kube-vip`. 
+When generating a manifest for `kube-vip` we will pass in the flags `--controlplane` / `--services` these will enable the various types of functionality within `kube-vip`.
 
 With both enabled `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
 
-**Note about Daemonsets**
+**Note about DaemonSets**
 
 Unlike generating the static manifest there are a few more things that may need configuring, this page will cover most scenarios.
 
@@ -28,7 +28,7 @@ kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
 
 This section only covers generating a simple *BGP* configuration, as the main focus is will be on additional changes to the manifest. For more examples we can look at [here](/hybrid/static/).
 
-**Note:** Pay attention if using the "static" examples, as the `manifest` subcommand should use `daemonset` and NOT `pod`.
+**Note:** Pay attention if using the "static" examples, as the `manifest` subcommand should use `DaemonSet` and NOT `pod`.
 
 ### Set configuration details
 
@@ -38,7 +38,7 @@ This section only covers generating a simple *BGP* configuration, as the main fo
 
 ### Configure to use a container runtime
 
-#### Get latest version
+#### Get latest version
 
  We can parse the GitHub API to find the latest version (or we can set this manually)
 
@@ -58,9 +58,9 @@ The easiest method to generate a manifest is using the container itself, below w
 
 ### BGP Example
 
-This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses. 
+This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses.
 
-**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma seperate list in the format of `address:AS:password:multihop`.
+**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma separate list in the format of `address:AS:password:multihop`.
 
 **Note 2** we pass the `--inCluster` flag as this is running as a daemonSet within the Kubernetes cluster and therefore will have access to the token inside the running pod.
 

@@ -1,57 +1,67 @@
-# Kube-vip as a Static Pod
+# Kube-Vip as a Static Pod
 
 ## Static Pods
 
-Static pods are a Kubernetes pod that is ran by the `kubelet` on a single node, and is **not** managed by the Kubernetes cluster itself. This means that whilst the pod can appear within Kubernetes it can't make use of a variety of kubernetes functionality (such as the kubernetes token or `configMaps`). The static pod approach is primarily required for [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/), this is due to the sequence of actions performed by `kubeadm`. Ideally we want `kube-vip` to be part of the kubernetes cluster, for various bits of functionality we also need `kube-vip` to provide a HA virtual IP as part of the installation. 
+[Static Pods](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) are Kubernetes Pods that are run by the `kubelet` on a single node and are not managed by the Kubernetes cluster itself. This means that whilst the Pod can appear within Kubernetes, it can't make use of a variety of Kubernetes functionality (such as the Kubernetes token or ConfigMap resources). The static Pod approach is primarily required for [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/) as this is due to the sequence of actions performed by `kubeadm`. Ideally, we want `kube-vip` to be part of the Kubernetes cluster, but for various bits of functionality we also need `kube-vip` to provide a HA virtual IP as part of the installation.
 
-The sequence of events for this to work follows:
-1. Generate a `kube-vip` manifest in the static pods manifest folder
-2. Run `kubeadm init`, this generates the manifests for the control plane and wait to connect to the VIP
-3. The `kubelet` will parse and execute all manifest, including the `kube-vip` manifest
-4. `kube-vip` starts and advertises our VIP
-5. The `kubeadm init` finishes succesfully.
+The sequence of events for building a highly available Kubernetes cluster with `kubeadm` and `kube-vip` are as follows:
 
-## Kube-Vip as **HA**, **Load-Balancer** or both ` ¯\_(ツ)_/¯`
+1. Generate a `kube-vip` manifest in the static Pods manifest directory (see the [generating a manifest](#generating-a-manifest) section below).
+2. Run `kubeadm init` with the `--control-plane-endpoint` flag using the VIP address provided when generating the static Pod manifest.
+3. The `kubelet` will parse and execute all manifests, including the `kube-vip` manifest generated in step one and the other control plane components including `kube-apiserver`.
+4. `kube-vip` starts and advertises the VIP address.
+5. The `kubelet` on this first control plane will connect to the VIP advertised in the previous step.
+6. `kubeadm init` finishes successfully on the first control plane.
+7. Using the output from the `kubeadm init` command on the first control plane, run the `kubeadm join` command on the remainder of the control planes.
+8. Copy the generated `kube-vip` manifest to the remainder of the control planes and place in their static Pods manifest directory (default of `/etc/kubernetes/manifests/`).
 
-When generating a manifest for `kube-vip` we will pass in the flags `--controlplane` / `--services` these will enable the various types of functionality within `kube-vip`. 
+## Kube-Vip as HA, Load Balancer, or both
 
-With both enabled `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
+The functionality of `kube-vip` depends on the flags used to create the static Pod manifest. By passing in `--controlplane` we instruct `kube-vip` to provide and advertise a virtual IP to be used by the control plane. By passing in `--services` we tell `kube-vip` to provide load balancing for Kubernetes Service resources created inside the cluster. With both enabled, `kube-vip` will manage a virtual IP address that is passed through its configuration for a highly available Kubernetes cluster. It will also watch Services of type `LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller, including (optionally) the one provided by kube-vip in [on-prem](/usage/on-prem) scenarios) it will advertise this address using BGP/ARP. In this example, we will use both when generating the manifest.
 
 ## Generating a Manifest
 
-This section details creating a number of manifests for various use cases
+In order to create an easier experience of consuming the various functionality within `kube-vip`, we can use the `kube-vip` container itself to generate our static Pod manifest. We do this by running the `kube-vip` image as a container and passing in the various [flags](/flags/) for the capabilities we want to enable.
 
 ### Set configuration details
 
+We use environment variables to predefine the values of the inputs to supply to `kube-vip`.
+
+Set the `VIP` address to be used for the control plane:
+
 `export VIP=192.168.0.40`
 
-`export INTERFACE=<interface>`
+Set the `INTERFACE` name to the name of the interface on the control plane(s) which will announce the VIP. In many Linux distributions this can be found with the `ip a` command.
 
-## Configure to use a container runtime
+`export INTERFACE=ens160`
 
-### Get latest version
-
- We can parse the GitHub API to find the latest version (or we can set this manually)
+Get the latest version of the `kube-vip` release by parsing the GitHub API. This step requires that `jq` and `curl` are installed.
 
 `KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
 
-or manually:
+To set manually instead, find the desired [release tag](https://github.com/kube-vip/kube-vip/releases):
 
-`export KVVERSION=vx.x.x`
+`export KVVERSION=v0.4.0`
 
-The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
+### Creating the manifest
 
-### containerd
+With the input values now set, we can pull and run the `kube-vip` image supplying it the desired flags and values. Once the static Pod manifest is generated for your desired method (ARP or BGP), if running multiple control plane nodes, ensure it is placed in each control plane's static manifest directory (by default, `/etc/kubernetes/manifests`).
+
+Depending on the container runtime, use one of the two aliased commands to create a `kube-vip` command which runs the `kube-vip` image as a container.
+
+For containerd, run the below command:
+
 `alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
 
-### Docker
+For Docker, run the below command:
+
 `alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:$KVVERSION"`
 
-## ARP
+### ARP
 
-This configuration will create a manifest that starts `kube-vip` providing **controlplane** and **services** management, using **leaderElection**. When this instance is elected as the leader it will bind the `vip` to the specified `interface`, this is also the same for services of `type:LoadBalancer`.
+With the inputs and alias command set, we can run the `kube-vip` container to generate a static Pod manifest which will be directed to a file at `/etc/kubernetes/manifests/kube-vip.yaml`. As such, this is assumed to run on the first control plane node.
 
-`export INTERFACE=eth0`
+This configuration will create a manifest that starts `kube-vip` providing control plane VIP and Kubernetes Service management using the `leaderElection` method and ARP. When this instance is elected as the leader, it will bind the `vip` to the specified `interface`. This is the same behavior for Services of type `LoadBalancer`.
 
 ```
 kube-vip manifest pod \
@@ -60,10 +70,10 @@ kube-vip manifest pod \
     --controlplane \
     --services \
     --arp \
-    --leaderElection | tee  /etc/kubernetes/manifests/kube-vip.yaml
+    --leaderElection | tee /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
-### Example manifest
+#### Example ARP Manifest
 
 ```
 apiVersion: v1
@@ -128,11 +138,11 @@ spec:
 status: {}
 ```
 
-## BGP
+### BGP
 
-This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses. 
+This configuration will create a manifest that starts `kube-vip` providing control plane VIP and Kubernetes Service management. Unlike ARP, all nodes in the BGP configuration will advertise virtual IP addresses.
 
-**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma seperate list in the format of `address:AS:password:multihop`.
+**Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma-separated list in the format of `address:AS:password:multihop`.
 
 `export INTERFACE=lo`
 
@@ -145,10 +155,10 @@ kube-vip manifest pod \
     --bgp \
     --localAS 65000 \
     --bgpRouterID 192.168.0.2 \
-    --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false | tee  /etc/kubernetes/manifests/kube-vip.yaml
+    --bgppeers 192.168.0.10:65000::false,192.168.0.11:65000::false | tee /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
-### Example Manifest 
+#### Example BGP Manifest
 
 ```
 apiVersion: v1

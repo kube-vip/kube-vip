@@ -1,13 +1,13 @@
 # **kube-vip** architecture
 
-This section covers two parts of the architecture: 
+This section covers two parts of the architecture:
 
 1. The technical capabilities of `kube-vip`
 2. The components to build a load-balancing service within [Kubernetes](https://kubernetes.io)
 
 The `kube-vip` project is designed to provide both a highly available networking endpoint and load-balancing functionality for underlying networking services. The project was originally designed for the purpose of providing a resilient control-plane for Kubernetes, it has since expanded to provide the same functionality for applications within a Kubernetes cluster.
 
-Additionally `kube-vip` is designed to be lightweight and **multi-architecture**, all of the components are built for Linux but are also built for both `x86` and `armv7`,`armhvf`,`ppc64le`. This means that `kube-vip` will run fine in **bare-metal**, **virtual** and **edge** (raspberry pi or small arm SoC devices). 
+Additionally `kube-vip` is designed to be lightweight and **multi-architecture**, all of the components are built for Linux but are also built for both `x86` and `armv7`,`armhvf`,`ppc64le`. This means that `kube-vip` will run fine in **bare-metal**, **virtual** and **edge** (raspberry pi or small arm SoC devices).
 
 ## Technologies
 
@@ -29,7 +29,7 @@ When the **vip** moves from one host to another any host that has been using the
 
 (Optional) The `kube-vip` can be configured to broadcast a [gratuitous arp](https://wiki.wireshark.org/Gratuitous_ARP) that will typically immediately notify all local hosts that the `vip <-> MAC` has changed.
 
-**Below** we can see that the failover is typically done within a few seconds as the ARP broadcast is recieved.
+**Below** we can see that the failover is typically done within a few seconds as the ARP broadcast is received.
 
 ```
 64 bytes from 192.168.0.75: icmp_seq=146 ttl=64 time=0.258 ms
@@ -54,7 +54,7 @@ Request timeout for icmp_seq 150
 
 ### Load Balancing
 
-Kube-Vip has the capability to provide a HA address for both the Kubernetes control plane and for a Kubernetes service, it recently implemented support for "actual" load-balancing for the control plane to distribute API requests across control-plane nodes. 
+Kube-Vip has the capability to provide a HA address for both the Kubernetes control plane and for a Kubernetes service, it recently implemented support for "actual" load-balancing for the control plane to distribute API requests across control-plane nodes.
 
 #### Kubernetes Service Load-Balancing
 
@@ -86,7 +86,8 @@ To enable control-plane load balancing, the following is required in the kube-vi
     - name : lb_enable
       value: "true"
 ```
-The load balancing is provided through IPVS (IP Virtual Server) and provides a layer-4 (TCP Port) based round-robin across all of the control plane nodes. By default the load balancer will listen on the default 6443 port as the Kubernetes API server. 
+
+The load balancing is provided through IPVS (IP Virtual Server) and provides a layer-4 (TCP Port) based round-robin across all of the control plane nodes. By default the load balancer will listen on the default 6443 port as the Kubernetes API server.
 **Note:** The IPVS virtual server lives in kernel space and doesn't create an "actual" service that listens on port 6443, this allows the kernel to parse packets before they're sent to an actual TCP port. This is important to know because it means we don't have any port conflicts having the IPVS load-balancer listening on the same port as the API server on the same host.
 
 The load balancer port can be customised with the following snippet in the yaml.
@@ -100,14 +101,14 @@ The load balancer port can be customised with the following snippet in the yaml.
 
 Once the `lb_enable` is set to true kube-vip will do the following:
 
- - In Layer 2 it will create an IPVS service on the leader
- - In Layer 3 all nodes will create an IPVS service
- - It will start a Kubernetes node watcher for nodes with the control plane label
- - It will add/delete them as they're added and removed from the cluster
+- In Layer 2 it will create an IPVS service on the leader
+- In Layer 3 all nodes will create an IPVS service
+- It will start a Kubernetes node watcher for nodes with the control plane label
+- It will add/delete them as they're added and removed from the cluster
 
 #### Debugging control plane load-balancing
 
- In order to inspect what is happening we will need to install the `ipvsadm` tool. 
+ In order to inspect what is happening we will need to install the `ipvsadm` tool.
 
 ##### View the configuration
 
@@ -155,4 +156,3 @@ The `kube-vip` kubernetes load-balancer requires a number of components in order
 
 - The Kube-Vip Cloud Provider -> [https://github.com/kube-vip/kube-vip-cloud-provider](https://github.com/kube-vip/kube-vip-cloud-provider)
 - The Kube-Vip Deployment -> [https://github.com/kube-vip/kube-vip](https://github.com/kube-vip/kube-vip)
-
