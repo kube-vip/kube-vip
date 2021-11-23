@@ -68,7 +68,7 @@ This configuration will create a manifest that starts `kube-vip` providing contr
 ```
 kube-vip manifest pod \
     --interface $INTERFACE \
-    --vip $VIP \
+    --address $VIP \
     --controlplane \
     --services \
     --arp \
@@ -113,9 +113,9 @@ spec:
       value: "3"
     - name: vip_retryperiod
       value: "1"
-    - name: vip_address
+    - name: address
       value: 192.168.0.40
-    image: ghcr.io/kube-vip/kube-vip:v0.3.9
+    image: ghcr.io/kube-vip/kube-vip:v0.4.0
     imagePullPolicy: Always
     name: kube-vip
     resources: {}
@@ -151,7 +151,7 @@ This configuration will create a manifest that starts `kube-vip` providing contr
 ```
 kube-vip manifest pod \
     --interface $INTERFACE \
-    --vip $VIP \
+    --address $VIP \
     --controlplane \
     --services \
     --bgp \
@@ -200,7 +200,7 @@ spec:
       value: "65000"
     - name: bgp_peers
       value: 192.168.0.10:65000::false,192.168.0.11:65000::false
-    - name: vip_address
+    - name: address
       value: 192.168.0.40
     image: ghcr.io/kube-vip/kube-vip:v0.3.9
     imagePullPolicy: Always
