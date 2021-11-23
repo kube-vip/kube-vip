@@ -46,12 +46,12 @@ The easiest method to generate a manifest is using the container itself, below w
 
 ### Docker
 
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:KVVERSION"`
+`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:$KVVERSION"`
 
 ## Deploy Kube-vip as a DaemonSet
 
 ```
-kube-vip manifest daemonset --services --inCluster --arp --interface eth0 | ./kubectl apply -f -
+kube-vip manifest daemonset --services --inCluster --arp --interface eth0 | kubectl apply -f -
 ```
 
 ## Test
