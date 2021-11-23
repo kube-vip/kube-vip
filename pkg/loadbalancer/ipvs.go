@@ -42,8 +42,15 @@ func NewIPVSLB(address string, port int) (*IPVSLoadBalancer, error) {
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
-		return nil, fmt.Errorf("error creating IPVS client: %v", err)
+		log.Errorf("ensure IPVS kernel modules are loaded")
+		log.Fatalf("Error starting IPVS [%v]", err)
 	}
+	i, err := c.Info()
+	if err != nil {
+		log.Errorf("ensure IPVS kernel modules are loaded")
+		log.Fatalf("Error getting IPVS version [%v]", err)
+	}
+	log.Infof("IPVS Loadbalancer enabled for %d.%d.%d", i.Version[0], i.Version[1], i.Version[2])
 
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
@@ -86,6 +93,7 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 		if err != nil && strings.Contains(err.Error(), "file exists") {
 			log.Warnf("load balancer for API server already exists, attempting to remove and re-create")
 			err = lb.client.RemoveService(lb.loadBalancerService)
+
 			if err != nil {
 				return fmt.Errorf("error re-creating IPVS service: %v", err)
 			}
@@ -94,7 +102,9 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 				return fmt.Errorf("error re-creating IPVS service: %v", err)
 			}
 		} else if err != nil {
-			return fmt.Errorf("error creating IPVS service: %v", err)
+			// Fatal error at this point as IPVS is probably not working
+			log.Errorf("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
+			log.Fatalf("IPVS service error: %v", err)
 		}
 		log.Infof("Created Load-Balancer services on [%s:%d]", lb.loadBalancerService.Address.Net(ipvs.INET).String(), lb.Port)
 	}
@@ -110,11 +120,14 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 	err = lb.client.CreateDestination(lb.loadBalancerService, dst)
 	// Swallow error of existing back end, the node watcher may attempt to apply
 	// the same back end multiple times
-	if err != nil && !strings.Contains(err.Error(), "file exists") {
-		return fmt.Errorf("error creating backend: %v", err)
-	} else {
-		log.Infof("Added backend for [%s:%d] on [%s:%d]", lb.loadBalancerService.Address.Net(ipvs.INET).String(), lb.Port, address, port)
+	if err != nil {
+		if !strings.Contains(err.Error(), "file exists") {
+			return fmt.Errorf("error creating backend: %v", err)
+		}
+		// file exists is fine, we will just return at this point
+		return nil
 	}
+	log.Infof("Added backend for [%s:%d] on [%s:%d]", lb.loadBalancerService.Address.Net(ipvs.INET).String(), lb.Port, address, port)
 
 	return nil
 }

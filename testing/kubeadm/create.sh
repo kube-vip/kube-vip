@@ -40,8 +40,8 @@ source ./testing/nodes
 
 first_node() {
 echo "Creating First node!"
-ssh $NODE01  "sudo modprobe ip_vs_rr"
-ssh $NODE01  "sudo modprobe nf_conntrack"
+#ssh $NODE01  "sudo modprobe ip_vs_rr"
+#ssh $NODE01  "sudo modprobe nf_conntrack"
 ssh $NODE01  "docker rmi plndr/kube-vip:dev"
 
 # echo "echo "ip_vs | tee -a /etc/modules"
