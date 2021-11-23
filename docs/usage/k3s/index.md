@@ -1,99 +1,53 @@
-# K3s overview (on Equinix Metal)
+# K3s Overview
 
-## Prerequisites
+`kube-vip` works on [K3s environments](https://k3s.io/) similar to most others with the exception of how it gets deployed. Because K3s is able to bootstrap a single server (control plane node) without the availability of the load balancer fronting it, `kube-vip` can be installed as a DaemonSet.
 
-In order to make ARP work on Equinix Metal, you need to follow [metal-gateway](https://metal.equinix.com/developers/docs/networking/metal-gateway/) guide to have public VLAN subnet, which you can use as your loadbalancer IP.
+## Prerequisites (on Equinix Metal)
 
-## Optional Tidy environment (best if something was running before)
+In order to make ARP work on Equinix Metal, follow the [metal-gateway](https://metal.equinix.com/developers/docs/networking/metal-gateway/) guide to have public VLAN subnet which can be used for the load balancer IP.
+
+## Clean Environment
+
+This step is optional but recommended if a K3s installation previously existed.
+
 ```
 rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; \ 
 ip addr flush dev lo; \
 ip addr add 127.0.0.1/8 dev lo; 
 ```
 
-## Step 1: Create Manifests folder
+## Step 1: Create Manifests Folder
 
-This is required, this folder will contain all of the generated manifests that `k3s` will execute as it starts. We will create it before `k3s` and place our `kube-vip` manifests within it.
+K3s has an optional manifests directory that will be searched to [auto-deploy](https://rancher.com/docs/k3s/latest/en/advanced/#auto-deploying-manifests) any manifests found within. Create this directory first in order to later place the `kube-vip` resources inside.
 
 ```
 mkdir -p /var/lib/rancher/k3s/server/manifests/
 ```
 
-## Step 2: Get rbac for `Kube-Vip`
+## Step 2: Upload Kube-Vip RBAC Manifest
 
-As `kube-vip` runs inside of the Kubernetes cluster, we will need to ensure that the required permissions exist.
+As `kube-vip` runs as a DaemonSet under K3s and not a static Pod, we will need to ensure that the required permissions exist for it to communicate with the API server. RBAC resources are needed to ensure a ServiceAccount exists with those permissions and bound appropriately.
 
-```
-curl https://kube-vip.io/manifests/rbac.yaml > /var/lib/rancher/k3s/server/manifests/rbac.yaml
-```
-
-## Step 3: Generate kube-vip (A VIP address for the network will be required)
-
-Configure your virtual IP (for the control plane) and interface that will expose this VIP first.
+Get the RBAC manifest and place in the auto-deploy directory:
 
 ```
-export VIP=x.x.x.x
-export INTERFACE=bind0 # or ethX depends on your networking setup
+curl https://kube-vip.io/manifests/rbac.yaml > /var/lib/rancher/k3s/server/manifests/kube-vip-rbac.yaml
 ```
 
-Modify the `VIP` and `INTERFACE` to match the floating IP address you'd like to use and the interface it should bind to.
+## Step 3: Generate a Kube-Vip DaemonSet Manifest
 
-To generate the manifest we have two options! We can generate the manifest from [kube-vip.io](kube-vip.io) or use a kube-vip image to generate the manifest!
+Refer to the [DaemonSet manifest generation documentation](/install_daemonset/#generating-a-manifest) for the process to complete this step.
 
-## Step 3.1: Generate from kube-vip.io
- 
-```
-curl -sL kube-vip.io/k3s | vipAddress=$VIP vipInterface=$INTERFACE sh | sudo tee /var/lib/rancher/k3s/server/manifests/vip.yaml
-```
+Either store this generated manifest separately in the `/var/lib/rancher/k3s/server/manifests/` directory, or append to the existing RBAC manifest called `kube-vip-rbac.yaml`. As a general best practice, it is a cleaner approach to place all related resources into a single YAML file.
 
-## Step 3.2 Generate from container image
+> Note: Remember to include YAML document delimiters (`---`) when composing multiple documents.
 
+## Step 4: Install a HA K3s Cluster
 
-### Get latest version
+There are multiple ways to install K3s including `[k3sup](https://k3sup.dev/)` or [running the binary](https://rancher.com/docs/k3s/latest/en/quick-start/) locally. Whichever method you choose, the `--tls-san` flag must be passed with the same IP when generating the `kube-vip` DaemonSet manifest when installing the first server (control plane) instance. This is so that K3s generates an API server certificate with the `kube-vip` virtual IP address.
 
- We can parse the GitHub API to find the latest version (or we can set this manually)
+Once the cluster is installed, you should be able to edit the `kubeconfig` file generated from the process and use the `kube-vip` VIP address to access the control plane.
 
-`KVVERSION=$(curl -sL https://api.github.com/repos/kube-vip/kube-vip/releases | jq -r ".[0].name")`
+## Step 5: Service Load Balancing
 
-or manually:
-
-`export KVVERSION=vx.x.x`
-
-The easiest method to generate a manifest is using the container itself, below will create an alias for different container runtimes.
-
-### containerd
-`alias kube-vip="ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$KVVERSION vip /kube-vip"`
-
-### Docker
-`alias kube-vip="docker run --network host --rm ghcr.io/kube-vip/kube-vip:KVVERSION"`
-
-
-```
-kube-vip manifest daemonset \
-  --interface $INTERFACE \
-  --vip $VIP \
-  --controlplane \
-  --services \
-  --inCluster \
-  --taint \
-  --arp 
-```
-
-## Step 4: Up Cluster
-
-From online `-->`
-
-```
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 \
--t agent-secret --tls-san $VIP" sh -
-```
-
-From local `-->`
-
-```
-sudo ./k3s server --tls-san $VIP
-```
-
-## Step 5: Service Load-Balancing
-
-For this refer to the [on-prem](../on-prem) documentation 
+If wanting to use the `kube-vip` [cloud controller](/usage/on-prem), pass the `--disable servicelb` flag so K3s will not attempt to render Kubernetes Service resources of type `LoadBalancer`. If building with `k3sup`, the flag should be given as an argument to the `--k3s-extra-args` flag itself: `--k3s-extra-args "--disable servicelb"`. To install the `kube-vip` cloud controller, follow the additional steps in the [cloud controller guide](/on-prem/#install-the-kube-vip-cloud-provider).
