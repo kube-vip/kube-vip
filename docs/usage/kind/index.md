@@ -28,6 +28,14 @@ kubectl create configmap --namespace kube-system kubevip --from-literal range-gl
 
 ## Install kube-vip
 
+### Create the RBAC settings
+
+Since `kube-vip` as a DaemonSet runs as a regular resource instead of a static Pod, it still needs the correct access to be able to watch Kubernetes Services and other objects. In order to do this, RBAC resources must be created which include a ServiceAccount, ClusterRole, and ClusterRoleBinding and can be applied this with the command:
+
+```
+kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+```
+
 ### Get latest version
 
 We can parse the GitHub API to find the latest version (or we can set this manually)
