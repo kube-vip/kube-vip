@@ -8,7 +8,7 @@ When deploying Kubernetes with Equinix Metal with the `--controlplane` functiona
 
 ## Configure to use a container runtime
 
-### Get latest version
+### Get latest version
 
  We can parse the GitHub API to find the latest version (or we can set this manually)
 
