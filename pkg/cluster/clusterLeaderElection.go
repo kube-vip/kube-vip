@@ -22,7 +22,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -235,9 +234,8 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Infof("Kube-Vip is watching nodes for control-plane labels")
 
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"node-role.kubernetes.io/control-plane": ""}}
 	listOptions := metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+		LabelSelector: "node-role.kubernetes.io/control-plane",
 	}
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
