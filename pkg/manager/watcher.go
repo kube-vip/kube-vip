@@ -64,9 +64,9 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			}
 
 			if svc.Spec.LoadBalancerIP == "" {
-				log.Infof("Service [%s] has been addded/modified, it has no assigned external addresses", svc.Name)
+				log.Infof("Service [%s] has been added/modified, it has no assigned external addresses", svc.Name)
 			} else {
-				log.Infof("Service [%s] has been addded/modified, it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+				log.Infof("Service [%s] has been added/modified, it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 				wg.Add(1)
 				err = sm.syncServices(svc, &wg)
 				if err != nil {
