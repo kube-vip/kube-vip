@@ -72,6 +72,9 @@ type Config struct {
 	// Listen port for the IPVS Service
 	LoadBalancerPort int `yaml:"lbPort"`
 
+	// Forwarding method for the IPVS Service
+	LoadBalancerForwardingMethod string `yaml:"lbForwardingMethod"`
+
 	// BGP Configuration
 	BGPConfig     bgp.Config
 	BGPPeerConfig bgp.Peer
@@ -146,6 +149,9 @@ type LoadBalancer struct {
 
 	//Backends, is an array of backend servers
 	Backends []BackEnd `yaml:"backends"`
+
+	// Forwarding method of LoadBalancer, either Local, Tunnel, DirectRoute or Bypass
+	ForwardingMethod string `yaml:"forwardingMethod"`
 }
 
 // BackEnd is a server we will load balance over

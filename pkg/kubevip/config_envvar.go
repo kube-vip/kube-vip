@@ -109,6 +109,9 @@ const (
 	//lbPort defines the port of load-balancer
 	lbPort = "lb_port"
 
+	//lbForwardingMethod defines the forwarding method of load-balancer
+	lbForwardingMethod = "lb_fwdmethod"
+
 	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
 )

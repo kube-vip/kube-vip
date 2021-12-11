@@ -35,9 +35,10 @@ type IPVSLoadBalancer struct {
 	client              ipvs.Client
 	loadBalancerService ipvs.Service
 	Port                int
+	forwardingMethod    ipvs.ForwardType
 }
 
-func NewIPVSLB(address string, port int) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBalancer, error) {
 
 	// Create IPVS client
 	c, err := ipvs.New()
@@ -61,10 +62,28 @@ func NewIPVSLB(address string, port int) (*IPVSLoadBalancer, error) {
 		Scheduler: ROUNDROBIN,
 	}
 
+	var m ipvs.ForwardType
+	switch strings.ToLower(forwardingMethod) {
+	case "masquerade":
+		m = ipvs.Masquarade
+	case "local":
+		m = ipvs.Local
+	case "tunnel":
+		m = ipvs.Tunnel
+	case "directroute":
+		m = ipvs.DirectRoute
+	case "bypass":
+		m = ipvs.Bypass
+	default:
+		m = ipvs.Local
+		log.Warnf("unknown forwarding method. Defaulting to Local")
+	}
+
 	lb := &IPVSLoadBalancer{
 		Port:                port,
 		client:              c,
 		loadBalancerService: svc,
+		forwardingMethod:    m,
 	}
 	// Return our created load-balancer
 	return lb, nil
@@ -114,7 +133,7 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 		Port:      uint16(port),
 		Family:    ipvs.INET,
 		Weight:    1,
-		FwdMethod: ipvs.Local,
+		FwdMethod: lb.forwardingMethod,
 	}
 
 	err = lb.client.CreateDestination(lb.loadBalancerService, dst)

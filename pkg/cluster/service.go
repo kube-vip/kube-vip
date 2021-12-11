@@ -78,7 +78,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		log.Infof("Starting IPVS LoadBalancer")
 
-		lb, err := loadbalancer.NewIPVSLB(cluster.Network.IP(), c.LoadBalancerPort)
+		lb, err := loadbalancer.NewIPVSLB(cluster.Network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod)
 		if err != nil {
 			log.Errorf("Error creating IPVS LoadBalancer [%s]", err)
 		}
