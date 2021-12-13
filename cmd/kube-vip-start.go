@@ -38,6 +38,7 @@ func init() {
 	kubeVipStart.Flags().IntVar(&startConfigLB.Port, "lbPort", 8080, "Port that load balancer will expose on")
 	kubeVipStart.Flags().IntVar(&startConfigLB.BackendPort, "lbBackEndPort", 6443, "A port that all backends may be using (optional)")
 	kubeVipStart.Flags().StringSliceVar(&startBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma separated backends, format: address:port")
+	kubeVipStart.Flags().StringVar(&startConfigLB.ForwardingMethod, "lbForwardingMethod", "local", "The forwarding method of a load balancer instance")
 
 	// Cluster configuration
 	kubeVipStart.Flags().StringVar(&startKubeConfigPath, "kubeConfig", "/etc/kubernetes/admin.conf", "The path of a kubernetes configuration file")

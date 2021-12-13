@@ -20,6 +20,7 @@ These flags are typically used in the `kube-vip` manifest generation process.
 |                     | `--leaderElection`     | Enables Kubernetes LeaderElection                                  | Used by ARP, as only the leader can broadcast                                   |
 |                     | `--enableLoadBalancer` | Enables IPVS load balancer                                         | `kube-vip` ≥ 0.4.0                                                              |
 |                     | `--lbPort`             | 6443                                                               | The port that the api server will load-balanced on                              |
+|                     | `--lbForwardingMethod` | Select the forwarding method (default local)                       | The IPVS forwarding method (local, masquerade, tunnel, direct, bypass)          |
 | **Services**        |                        |                                                                    |                                                                                 |
 |                     | `--cidr`               | Defaults "32"                                                      | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
 | **Kubernetes**      |                        |                                                                    |                                                                                 |
@@ -70,6 +71,7 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `vip_leaderelection`  | Enables Kubernetes LeaderElection                           | Used by ARP, as only the leader can broadcast                                   |
 |                     | `lb_enable`           | Enables IPVS LoadBalancer                                   | `kube-vip` ≥ 0.4.0. Adds nodes to the IPVS load balancer                        |
 |                     | `lb_port`             | 6443                                                        | The IPVS port that will be used to load-balance control plane requests          |
+|                     | `lb_fwdmethod`        | Select the forwarding method (default local)                | The IPVS forwarding method (local, masquerade, tunnel, direct, bypass)          |
 | **Services**        |                       |                                                             |                                                                                 |
 |                     | `vip_cidr`            | Defaults "32"                                               | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
 | **LeaderElection**  |                       |                                                             |                                                                                 |

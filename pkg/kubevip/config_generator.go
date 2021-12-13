@@ -330,6 +330,12 @@ func ParseEnvironment(c *Config) error {
 		}
 		c.LoadBalancerPort = int(i)
 	}
+
+	// Find loadbalancer forwarding method
+	env = os.Getenv(lbForwardingMethod)
+	if env != "" {
+		c.LoadBalancerForwardingMethod = env
+	}
 	return nil
 }
 
@@ -583,6 +589,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			{
 				Name:  lbPort,
 				Value: fmt.Sprintf("%d", c.LoadBalancerPort),
+			},
+			{
+				Name:  lbForwardingMethod,
+				Value: c.LoadBalancerForwardingMethod,
 			},
 		}
 

@@ -31,6 +31,7 @@ func init() {
 	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.Name, "lbName", "Example Load Balancer", "The name of a load balancer instance")
 	kubeVipSampleConfig.Flags().IntVar(&cliConfigLB.Port, "lbPort", 8080, "Port that load balancer will expose on")
 	kubeVipSampleConfig.Flags().StringSliceVar(&cliBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma separated backends, format: address:port")
+	kubeVipSampleConfig.Flags().StringVar(&cliConfigLB.ForwardingMethod, "lbForwardingMethod", "local", "The forwarding method of a load balancer instance")
 }
 
 var kubeVipSampleConfig = &cobra.Command{
