@@ -178,7 +178,9 @@ func (c *DHCPClient) request() (*nclient4.Lease, error) {
 	defer broadcast.Close()
 
 	if c.ddnsHostName != "" {
-		return broadcast.Request(context.TODO(), dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)))
+		return broadcast.Request(context.TODO(),
+			dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)),
+			dhcpv4.WithOption(dhcpv4.OptClientIdentifier([]byte(c.ddnsHostName))))
 	}
 
 	return broadcast.Request(context.TODO())
