@@ -46,6 +46,10 @@ func (ddns *ddnsManager) Start() (string, error) {
 		ipCh <- lease.ACK.YourIPAddr.String()
 	})
 
+	client.WithHostName(ddns.network.DDNSHostName())
+
+	go client.Start()
+
 	log.Info("waiting for ip from dhcp")
 	ip, timeout := "", time.After(1*time.Minute)
 
