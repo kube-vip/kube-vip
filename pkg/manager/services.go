@@ -104,12 +104,14 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 
 	// Generate new Virtual IP configuration
 	newVip := kubevip.Config{
-		VIP:        newServiceAddress, //TODO support more than one vip?
-		Interface:  serviceInterface,
-		SingleNode: true,
-		EnableARP:  sm.config.EnableARP,
-		EnableBGP:  sm.config.EnableBGP,
-		VIPCIDR:    sm.config.VIPCIDR,
+		VIP:            newServiceAddress, //TODO support more than one vip?
+		Interface:      serviceInterface,
+		SingleNode:     true,
+		EnableARP:      sm.config.EnableARP,
+		EnableBGP:      sm.config.EnableBGP,
+		VIPCIDR:        sm.config.VIPCIDR,
+		BackendAddress: sm.config.BackendAddress,
+		BackendPort:    sm.config.BackendPort,
 	}
 
 	// This instance wasn't found, we need to add it to the manager

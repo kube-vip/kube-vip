@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/packethost/packngo"
 
+	"github.com/davecgh/go-spew/spew"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -77,6 +77,9 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, plunderLock, id)
 
+	cluster.stop = make(chan bool, 1)
+	cluster.completed = make(chan bool, 1)
+
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -97,13 +100,18 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
-	ctxArp, cancelArp := context.WithCancel(context.Background())
+	ctxArp, cancelArp := context.WithCancel(ctx)
 	defer cancelArp()
 
 	// use a Go context so we can tell the dns loop code when we
 	// want to step down
-	ctxDNS, cancelDNS := context.WithCancel(context.Background())
+	ctxDNS, cancelDNS := context.WithCancel(ctx)
 	defer cancelDNS()
+
+	// use a Go context so we can tell the forwarder loop code when we
+	// want to step down
+	ctxFwd, cancelFwd := context.WithCancel(ctx)
+	defer cancelFwd()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -120,7 +128,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		log.Info("Received termination, signaling shutdown")
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
-		// Cancel the arp context, which will in turn stop any broadcasts
 	}()
 
 	// (attempt to) Remove the virtual IP, incase it already exists
@@ -190,7 +197,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// As we're leading lets start the vip service
-				err = cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
+				err = cluster.vipService(ctxArp, ctxDNS, ctxFwd, c, sm, bgpServer, packetClient)
 				if err != nil {
 					log.Errorf("Error starting the VIP service on the leader [%s]", err)
 				}
@@ -200,10 +207,8 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 				// we can do cleanup here
 				log.Info("This node is becoming a follower within the cluster")
 
-				// Stop the dns context
-				cancelDNS()
-				// Stop the Arp context if it is running
-				cancelArp()
+				// Stop the main context
+				cancel()
 
 				// Stop the BGP server
 				if bgpServer != nil {
@@ -217,6 +222,10 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 				if err != nil {
 					log.Warnf("%v", err)
 				}
+
+				// Todo: better teardown path (waitingGroup ?)
+				// Fatal gonna kills the process before the cleanup is done
+				time.Sleep(3 * time.Second)
 
 				log.Fatal("lost leadership, restarting kube-vip")
 			},
@@ -266,12 +275,22 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
 			//Find the node IP address (this isn't foolproof)
-			for x := range node.Status.Addresses {
-
-				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
-					if err != nil {
-						log.Errorf("Add IPVS backend [%v]", err)
+			for _, a := range node.Status.Addresses {
+				if a.Type == v1.NodeInternalIP {
+					for _, c := range node.Status.Conditions {
+						if c.Type == v1.NodeReady && c.Status == v1.ConditionTrue {
+							//Node is ready, add backend
+							err = lb.AddBackend(a.Address, port)
+							if err != nil {
+								log.Errorf("Add IPVS backend [%v]", err)
+							}
+						} else {
+							//Node is not ready, remove backend
+							err = lb.RemoveBackend(a.Address, port)
+							if err != nil {
+								log.Errorf("Del IPVS backend [%v]", err)
+							}
+						}
 					}
 				}
 			}

@@ -47,6 +47,12 @@ const (
 	//port - defines the port for the VIP
 	port = "port"
 
+	// The API server backend address (default to 0.0.0.0)
+	vipBackendAddress = "vip_backend_address"
+
+	// The API server backend port (default to 6443)
+	vipBackendPort = "vip_backend_port"
+
 	// annotations
 	annotations = "annotation"
 
