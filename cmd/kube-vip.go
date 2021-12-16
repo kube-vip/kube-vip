@@ -7,14 +7,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/manager"
-	"github.com/kube-vip/kube-vip/pkg/packet"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/manager"
+	"github.com/kube-vip/kube-vip/pkg/packet"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 // Path to the configuration file
@@ -172,6 +173,10 @@ var kubeVipService = &cobra.Command{
 			log.Fatalln(err)
 		}
 
+		if err := initConfig.CheckInterface(); err != nil {
+			log.Fatalln(err)
+		}
+
 		// User Environment variables as an option to make manifest clearer
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
@@ -200,6 +205,10 @@ var kubeVipManager = &cobra.Command{
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
+			log.Fatalln(err)
+		}
+
+		if err := initConfig.CheckInterface(); err != nil {
 			log.Fatalln(err)
 		}
 
