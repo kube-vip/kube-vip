@@ -9,6 +9,7 @@ import (
 
 	"github.com/ghodss/yaml"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 )
 
 var endPointIndex int // Holds the previous endpoint (for determining decisions on next endpoint)
@@ -179,5 +180,34 @@ func (c *Config) WriteConfig(path string) error {
 		return err
 	}
 	log.Debugf("wrote %d bytes\n", bytesWritten)
+	return nil
+}
+
+func (c *Config) CheckInterface() error {
+	if c.Interface != "" {
+		if err := isValidInterface(c.Interface); err != nil {
+			return fmt.Errorf("%s is not valid interface, reason: %w", c.Interface, err)
+		}
+	}
+
+	if c.ServicesInterface != "" {
+		if err := isValidInterface(c.ServicesInterface); err != nil {
+			return fmt.Errorf("%s is not valid interface, reason: %w", c.ServicesInterface, err)
+		}
+	}
+
+	return nil
+}
+
+func isValidInterface(iface string) error {
+	l, err := netlink.LinkByName(iface)
+	if err != nil {
+		return fmt.Errorf("get %s failed, error: %w", iface, err)
+	}
+
+	if l.Attrs().OperState != netlink.OperUp {
+		return fmt.Errorf("%s is not up", iface)
+	}
+
 	return nil
 }
