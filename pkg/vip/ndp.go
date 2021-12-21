@@ -24,7 +24,7 @@ func NewNDPResponder(ifaceName string) (*NdpResponder, error) {
 	}
 
 	// Use link-local address as the source IPv6 address for NDP communications.
-	conn, _, err := ndp.Dial(iface, ndp.LinkLocal)
+	conn, _, err := ndp.Listen(iface, ndp.LinkLocal)
 	if err != nil {
 		return nil, fmt.Errorf("creating NDP responder for %q: %s", iface.Name, err)
 	}
