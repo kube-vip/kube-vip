@@ -224,6 +224,12 @@ var kubeVipManager = &cobra.Command{
 			}
 			initConfig.Interface = defaultIF.Name
 			log.Infof("kube-vip will bind to interface [%s]", initConfig.Interface)
+
+			go func() {
+				if err := vip.MonitorDefaultInterface(context.TODO(), defaultIF); err != nil {
+					log.Fatalf("crash: %s", err.Error())
+				}
+			}()
 		}
 
 		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
