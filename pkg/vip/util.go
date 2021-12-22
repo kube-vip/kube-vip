@@ -98,7 +98,7 @@ func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) erro
 	for {
 		select {
 		case r := <-routeCh:
-			log.Infof("route event: %+v", r)
+			log.Debugf("type: %d, route: %+v", r.Type, r.Route)
 			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
 				return fmt.Errorf("default route deleted and the default interface may be invalid")
 			}
