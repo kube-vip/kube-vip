@@ -127,11 +127,6 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipStart)
 	kubeVipCmd.AddCommand(kubeVipVersion)
-
-	// Sample commands
-	kubeVipSample.AddCommand(kubeVipSampleConfig)
-	kubeVipSample.AddCommand(kubeVipSampleManifest)
-
 }
 
 // Execute - starts the command parsing process
