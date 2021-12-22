@@ -75,7 +75,7 @@ var kubeManifestDaemon = &cobra.Command{
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GenerateDeamonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
+		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
 
 		fmt.Println(cfg)
 	},
