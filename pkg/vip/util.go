@@ -1,12 +1,14 @@
 package vip
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
 	"syscall"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -84,4 +86,24 @@ func GetDefaultGatewayInterface() (*net.Interface, error) {
 	}
 
 	return nil, errors.New("Unable to find default route")
+}
+
+// MonitorDefaultInterface monitor the default interface and catch the event of the default route
+func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) error {
+	routeCh := make(chan netlink.RouteUpdate)
+	if err := netlink.RouteSubscribe(routeCh, ctx.Done()); err != nil {
+		return fmt.Errorf("subscribe route failed, error: %w", err)
+	}
+
+	for {
+		select {
+		case r := <-routeCh:
+			log.Infof("route event: %+v", r)
+			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
+				return fmt.Errorf("default route deleted and the default interface may be invalid")
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
