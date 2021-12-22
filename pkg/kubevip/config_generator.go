@@ -631,7 +631,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 							Add: []corev1.Capability{
 								"NET_ADMIN",
 								"NET_RAW",
-								"SYS_TIME",
 							},
 						},
 					},
