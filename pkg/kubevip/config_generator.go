@@ -703,8 +703,8 @@ func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster boo
 	return string(b)
 }
 
-// GenerateDeamonsetManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
+// GenerateDaemonsetManifestFromConfig will take a kube-vip config and generate a manifest
+func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
 
 	podSpec := generatePodSpec(c, imageVersion, inCluster).Spec
 	newManifest := &appv1.DaemonSet{
@@ -715,17 +715,22 @@ func GenerateDeamonsetManifestFromConfig(c *Config, imageVersion string, inClust
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-vip-ds",
 			Namespace: "kube-system",
+			Labels: map[string]string{
+				"app.kubernetes.io/name":    "kube-vip-ds",
+				"app.kubernetes.io/version": imageVersion,
+			},
 		},
 		Spec: appv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"name": "kube-vip-ds",
+					"app.kubernetes.io/name": "kube-vip-ds",
 				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"name": "kube-vip-ds",
+						"app.kubernetes.io/name":    "kube-vip-ds",
+						"app.kubernetes.io/version": imageVersion,
 					},
 				},
 				Spec: podSpec,
