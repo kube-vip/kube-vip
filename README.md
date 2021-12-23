@@ -2,7 +2,7 @@
 
 High Availability and Load-Balancing 
 
-![](https://kube-vip.io/kube-vip.png)
+![](https://github.com/kube-vip/kube-vip/raw/main/kube-vip.png)
 
 ## Overview
 Kubernetes Virtual IP and Load-Balancer for both control plane and Kubernetes services
