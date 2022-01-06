@@ -1,9 +1,8 @@
 name: Publish the latest dev image
 
 on:
-  push:
-    branches:
-      - 'master'
+  schedule:
+    - cron: '5 7 * * *'
 
 jobs:
   docker:
@@ -11,16 +10,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-
       - name: Prepare Names
         id: prep
         run: |
-          DOCKER_IMAGE=plndr/kube-vip
-          VERSION=$(echo ${GITHUB_SHA} | cut -c1-8)
+          DOCKER_IMAGE=armarny/kube-vip
+          VERSION=main
+#          TAGS="${DOCKER_IMAGE}:${VERSION},ghcr.io/kube-vip/kube-vip:${VERSION}"
           TAGS="${DOCKER_IMAGE}:${VERSION}"
-          TAGS="$TAGS,${DOCKER_IMAGE}:nightly"
           echo ::set-output name=tags::${TAGS}
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
@@ -30,14 +27,12 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push main branch 
+      - name: Build and push main branch
         uses: docker/build-push-action@v2
         with:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.prep.outputs.tags }}
-
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
