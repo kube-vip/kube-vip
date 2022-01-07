@@ -2,7 +2,6 @@ name: For each commit and PR
 on:
   push:
   pull_request:
-
 jobs:
   validation:
     runs-on: ubuntu-latest
