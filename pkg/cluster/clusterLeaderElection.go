@@ -269,7 +269,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 	for event := range ch {
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
-		case watch.Added, watch.Modified:
+		case watch.Added:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
@@ -277,14 +277,32 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 			//Find the node IP address (this isn't foolproof)
 			for _, a := range node.Status.Addresses {
 				if a.Type == v1.NodeInternalIP {
-					for _, c := range node.Status.Conditions {
-						if c.Type == v1.NodeReady && c.Status == v1.ConditionTrue {
+					//Node is new, add backend
+					err = lb.AddBackend(a.Address, port)
+					if err != nil {
+						log.Errorf("Add IPVS backend [%v]", err)
+					}
+				}
+			}
+		case watch.Modified:
+			node, ok := event.Object.(*v1.Node)
+			if !ok {
+				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+			}
+			for _, c := range node.Status.Conditions {
+				if c.Type == v1.NodeReady && c.Status == v1.ConditionTrue {
+					for _, a := range node.Status.Addresses {
+						if a.Type == v1.NodeInternalIP {
 							//Node is ready, add backend
 							err = lb.AddBackend(a.Address, port)
 							if err != nil {
 								log.Errorf("Add IPVS backend [%v]", err)
 							}
-						} else {
+						}
+					}
+				} else if c.Type == v1.NodeReady && c.Status == v1.ConditionFalse {
+					for _, a := range node.Status.Addresses {
+						if a.Type == v1.NodeInternalIP {
 							//Node is not ready, remove backend
 							err = lb.RemoveBackend(a.Address, port)
 							if err != nil {
@@ -299,10 +317,8 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
 			}
-
 			//Find the node IP address (this isn't foolproof)
 			for x := range node.Status.Addresses {
-
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
