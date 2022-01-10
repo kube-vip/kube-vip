@@ -3,6 +3,7 @@ package kubevip
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -203,6 +204,10 @@ func isValidInterface(iface string) error {
 	l, err := netlink.LinkByName(iface)
 	if err != nil {
 		return fmt.Errorf("get %s failed, error: %w", iface, err)
+	}
+
+	if l.Attrs().Flags&net.FlagLoopback == net.FlagLoopback {
+		return nil
 	}
 
 	if l.Attrs().OperState != netlink.OperUp {
