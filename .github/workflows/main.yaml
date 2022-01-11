@@ -5,7 +5,7 @@ on:
     - cron: '25 0 * * *'
 
 jobs:
-  docker-publish:
+  docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
