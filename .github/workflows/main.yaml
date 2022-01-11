@@ -32,6 +32,6 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.prep.outputs.tags }}
+          tags: plndr/kube-vip:${{ github.ref_name }},ghcr.io/kube-vip/kube-vip:${{ github.ref_name }}
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
