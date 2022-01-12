@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/forwarder"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/packet"
@@ -17,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
+func (cluster *Cluster) vipService(ctxArp, ctxDNS, ctxFwd context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
 	id, err := os.Hostname()
 	if err != nil {
 		return err
@@ -44,6 +45,11 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		log.Infof("starting the DNS updater for the address %s", cluster.Network.DNSName())
 		ipUpdater := vip.NewIPUpdater(cluster.Network)
 		ipUpdater.Run(ctxDNS)
+	}
+
+	fwd := forwarder.NewForwarder(c.Address, c.Port, c.BackendAddress, c.BackendPort, c.EnableLoadBalancer, c.LoadBalancerForwardingMethod)
+	if err := fwd.Start(ctxFwd); err != nil {
+		log.Errorf("Forwarder start error: %v", err)
 	}
 
 	err = cluster.Network.AddIP()
@@ -78,13 +84,13 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		log.Infof("Starting IPVS LoadBalancer")
 
-		lb, err := loadbalancer.NewIPVSLB(cluster.Network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod)
+		lb, err := loadbalancer.NewIPVSLB(cluster.Network.IP(), c.Port, c.LoadBalancerForwardingMethod)
 		if err != nil {
 			log.Errorf("Error creating IPVS LoadBalancer [%s]", err)
 		}
 
 		go func() {
-			err = sm.NodeWatcher(lb, c.Port)
+			err = sm.NodeWatcher(lb, c.BackendPort)
 			if err != nil {
 				log.Errorf("Error watching node labels [%s]", err)
 			}

@@ -78,5 +78,10 @@ func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp
 	ctxDNS, cancelDNS := context.WithCancel(context.Background())
 	defer cancelDNS()
 
-	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp, packetClient)
+	// use a Go context so we can tell the forwarder loop code when we
+	// want to step down
+	ctxFwd, cancelFwd := context.WithCancel(context.Background())
+	defer cancelFwd()
+
+	return cluster.vipService(ctxArp, ctxDNS, ctxFwd, c, sm, bgp, packetClient)
 }

@@ -109,6 +109,22 @@ func ParseEnvironment(c *Config) error {
 		c.Port = int(i)
 	}
 
+	// Find backend address
+	env = os.Getenv(vipBackendAddress)
+	if env != "" {
+		c.BackendAddress = env
+	}
+
+	// Find backend port
+	env = os.Getenv(vipBackendPort)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BackendPort = int(i)
+	}
+
 	// Find vipDdns
 	env = os.Getenv(vipDdns)
 	if env != "" {
@@ -321,14 +337,15 @@ func ParseEnvironment(c *Config) error {
 		c.EnableLoadBalancer = b
 	}
 
-	// Find loadbalancer port
+	// Find loadbalancer port (deprecated)
 	env = os.Getenv(lbPort)
 	if env != "" {
 		i, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			return err
 		}
-		c.LoadBalancerPort = int(i)
+		//lbPort is deprecated. port is used by IPVS LB instead.
+		c.Port = int(i)
 	}
 
 	// Find loadbalancer forwarding method
@@ -352,6 +369,14 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		{
 			Name:  port,
 			Value: fmt.Sprintf("%d", c.Port),
+		},
+		{
+			Name:  vipBackendAddress,
+			Value: c.BackendAddress,
+		},
+		{
+			Name:  vipBackendPort,
+			Value: fmt.Sprintf("%d", c.BackendPort),
 		},
 	}
 
