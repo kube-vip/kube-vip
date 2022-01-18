@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/kamhlos/upnp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
