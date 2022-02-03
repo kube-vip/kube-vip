@@ -62,6 +62,7 @@ For Docker, run the below command:
 With the inputs and alias command set, we can run the `kube-vip` container to generate a static Pod manifest which will be directed to a file at `/etc/kubernetes/manifests/kube-vip.yaml`. As such, this is assumed to run on the first control plane node.
 
 This configuration will create a manifest that starts `kube-vip` providing control plane VIP and Kubernetes Service management using the `leaderElection` method and ARP. When this instance is elected as the leader, it will bind the `vip` to the specified `interface`. This is the same behavior for Services of type `LoadBalancer`.
+Please set --cidr according to your network (i.e. for a 192.168.0.0/24 set it to 24)
 
 > Note: When running these commands on a to-be control plane node, `sudo` access may be required along with pre-creation of the `/etc/kubernetes/manifests/` directory.
 
@@ -69,6 +70,7 @@ This configuration will create a manifest that starts `kube-vip` providing contr
 kube-vip manifest pod \
     --interface $INTERFACE \
     --address $VIP \
+    --cidr 24 \
     --controlplane \
     --services \
     --arp \
@@ -96,7 +98,7 @@ spec:
     - name: vip_interface
       value: ens192
     - name: vip_cidr
-      value: "32"
+      value: "24"
     - name: cp_enable
       value: "true"
     - name: cp_namespace
