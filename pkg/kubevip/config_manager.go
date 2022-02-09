@@ -13,13 +13,11 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-var endPointIndex int // Holds the previous endpoint (for determining decisions on next endpoint)
-
 //ParseBackendConfig -
 func ParseBackendConfig(ep string) (*BackEnd, error) {
 	endpoint := strings.Split(ep, ":")
 	if len(endpoint) != 2 {
-		return nil, fmt.Errorf("Ensure a backend is in in the format address:port, e.g. 10.0.0.1:8080")
+		return nil, fmt.Errorf("ensure a backend is in in the format address:port, e.g. 10.0.0.1:8080")
 	}
 	p, err := strconv.Atoi(endpoint[1])
 	if err != nil {
@@ -32,7 +30,7 @@ func ParseBackendConfig(ep string) (*BackEnd, error) {
 func ParsePeerConfig(ep string) (*RaftPeer, error) {
 	endpoint := strings.Split(ep, ":")
 	if len(endpoint) != 3 {
-		return nil, fmt.Errorf("Ensure a peer is in in the format id:address:port, e.g. server1:10.0.0.1:8080")
+		return nil, fmt.Errorf("ensure a peer is in in the format id:address:port, e.g. server1:10.0.0.1:8080")
 	}
 	p, err := strconv.Atoi(endpoint[2])
 	if err != nil {
@@ -44,7 +42,7 @@ func ParsePeerConfig(ep string) (*RaftPeer, error) {
 //OpenConfig will attempt to read a file and parse it's contents into a configuration
 func OpenConfig(path string) (*Config, error) {
 	if path == "" {
-		return nil, fmt.Errorf("Path cannot be blank")
+		return nil, fmt.Errorf("path cannot be blank")
 	}
 
 	log.Infof("Reading configuration from [%s]", path)
@@ -66,7 +64,7 @@ func OpenConfig(path string) (*Config, error) {
 		return &c, nil
 
 	}
-	return nil, fmt.Errorf("Error reading [%s]", path)
+	return nil, fmt.Errorf("error reading [%s]", path)
 }
 
 //PrintConfig - will print out an instance of the kubevip config
