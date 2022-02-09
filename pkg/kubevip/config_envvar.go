@@ -90,9 +90,9 @@ const (
 	//bgpMultiHop enables mulithop routing
 	bgpMultiHop = "bgp_multihop"
 	//bgpSourceIF defines the source interface for BGP peering
-	bgpSourceIF = "bgp_source_if"
+	bgpSourceIF = "bgp_sourceif"
 	//bgpSourceIP defines the source address for BGP peering
-	bgpSourceIP = "bgp_source_ip"
+	bgpSourceIP = "bgp_sourceip"
 
 	//cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
