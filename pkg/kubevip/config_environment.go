@@ -15,7 +15,7 @@ func ParseEnvironment(c *Config) error {
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
 	if env != "" {
-		logLevel, err := strconv.Atoi(env)
+		logLevel, err := strconv.ParseUint(env, 10, 32)
 		if err != nil {
 			panic("Unable to parse environment variable [vip_loglevel], should be int")
 		}
