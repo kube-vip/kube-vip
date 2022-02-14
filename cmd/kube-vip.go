@@ -118,7 +118,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
 
 	// Prometheus HTTP Server
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "promethuesHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
