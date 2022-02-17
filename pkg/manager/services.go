@@ -10,6 +10,7 @@ import (
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -170,9 +171,12 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 		// go sm.serviceWatcher(&newService, sm.config.Namespace)
 
 		// Update the "Status" of the LoadBalancer (one or many may do this), as long as one does it
-		service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
-		_, err = sm.clientSet.CoreV1().Services(service.Namespace).UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
-		if err != nil {
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
+			_, updateErr := sm.clientSet.CoreV1().Services(service.Namespace).UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
 			log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
 		}
 		sm.serviceInstances = append(sm.serviceInstances, newService)
