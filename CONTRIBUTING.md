@@ -154,7 +154,7 @@ the `$GOPATH`.
 
 To develop locally, you can follow these steps:
 
- 1. [Install Go 1.15](https://golang.org/doc/install)
+ 1. [Install Go 1.17](https://golang.org/doc/install)
  2. Checkout your feature branch and `cd` into it.
  3. To build all Go files and install them under `bin`, run `make bin`
  4. To run all Go unit tests, run `make test-unit`
