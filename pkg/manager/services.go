@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	"strings"
 	"sync"
 
@@ -87,6 +89,8 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 	newServiceUID := string(service.UID)
 
 	for x := range sm.serviceInstances {
+		log.Debugf("service %s", sm.serviceInstances[x].ServiceName)
+
 		if sm.serviceInstances[x].UID == newServiceUID {
 			// We have found this instance in the manager, we can determine if it needs updating
 			foundInstance = true
@@ -111,6 +115,8 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 		EnableBGP:  sm.config.EnableBGP,
 		VIPCIDR:    sm.config.VIPCIDR,
 	}
+
+	log.Debugf("foundInstance %t", foundInstance)
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance {
@@ -169,12 +175,29 @@ func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
 		// TODO - we may need this
 		// go sm.serviceWatcher(&newService, sm.config.Namespace)
 
-		// Update the "Status" of the LoadBalancer (one or many may do this), as long as one does it
-		service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
-		_, err = sm.clientSet.CoreV1().Services(service.Namespace).UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+		update := func() error {
+			// Update the "Status" of the LoadBalancer (one or many may do this), as long as one does it
+			service.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: newVip.VIP}}
+			_, err = sm.clientSet.CoreV1().Services(service.Namespace).UpdateStatus(context.TODO(), service, metav1.UpdateOptions{})
+			return err
 		}
+
+		err = update()
+
+		if err != nil {
+			log.Debugf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+			if errors.IsConflict(err) {
+				err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					// reload service because we had a conflict
+					service, _ = sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+					return update()
+				})
+				if err != nil {
+					log.Errorf("Error updating Service [%s] Status: %v", newService.ServiceName, err)
+				}
+			}
+		}
+
 		sm.serviceInstances = append(sm.serviceInstances, newService)
 	}
 
