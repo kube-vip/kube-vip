@@ -166,7 +166,6 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	// want to step down
 	//nolint
 	ctxArp, cancelArp := context.WithCancel(context.Background())
-	defer cancelArp()
 
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
@@ -199,7 +198,6 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			}
 
 			for {
-
 				select {
 				case <-ctx.Done(): // if cancel() execute
 					return
