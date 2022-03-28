@@ -139,11 +139,7 @@ func (sm *Manager) syncServices(service *v1.Service) error {
 			log.Errorf("Failed to add Service [%s] / [%s]", newService.ServiceName, newService.UID)
 			return err
 		}
-		err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
-		if err != nil {
-			log.Errorf("Failed to add Service [%s] / [%s]", newService.ServiceName, newService.UID)
-			return err
-		}
+		c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
 
 		sm.upnpMap(newService)
 

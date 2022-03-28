@@ -13,9 +13,7 @@ import (
 
 	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -33,7 +31,7 @@ type Manager struct {
 	// service bool
 
 	// Keeps track of all running instances
-	serviceInstances []Instance
+	serviceInstances []*Instance
 
 	// Additional functionality
 	upnp *upnp.Upnp
@@ -47,30 +45,6 @@ type Manager struct {
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
-}
-
-// Instance defines an instance of everything needed to manage a vip
-type Instance struct {
-	// Virtual IP / Load Balancer configuration
-	vipConfig kubevip.Config
-
-	// cluster instance
-	cluster cluster.Cluster
-
-	// Service uses DHCP
-	isDHCP              bool
-	dhcpInterface       string
-	dhcpInterfaceHwaddr string
-	dhcpInterfaceIP     string
-	dhcpClient          *vip.DHCPClient
-
-	// Kubernetes service mapping
-	Vip  string
-	Port int32
-	UID  string
-	Type string
-
-	ServiceName string
 }
 
 // New will create a new managing object

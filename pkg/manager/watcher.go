@@ -63,35 +63,27 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 				break
 			}
 
-			if svc.Spec.LoadBalancerIP == "" {
-				log.Infof("Service [%s] has been added/modified, it has no assigned external addresses", svc.Name)
-			} else {
-				log.Infof("Service [%s] has been added/modified, it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
-				wg.Add(1)
-				err = sm.syncServices(svc, &wg)
-				if err != nil {
-					log.Error(err)
-				}
-				wg.Wait()
+			log.Infof("Service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			wg.Add(1)
+			err = sm.syncServices(svc, &wg)
+			if err != nil {
+				log.Error(err)
 			}
+			wg.Wait()
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				log.Infof("Service [%s/%s] has an ignore annotation for kube-vip", svc.Namespace, svc.Name)
 				break
-			}
-			err = sm.stopService(string(svc.UID))
-			if err != nil {
-				log.Error(err)
 			}
 			err = sm.deleteService(string(svc.UID))
 			if err != nil {
 				log.Error(err)
 			}
-			log.Infof("Service [%s] has been deleted", svc.Name)
+			log.Infof("Service [%s/%s] has been deleted", svc.Namespace, svc.Name)
 
 		case watch.Bookmark:
 			// Un-used
