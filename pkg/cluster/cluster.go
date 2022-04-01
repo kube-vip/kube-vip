@@ -15,8 +15,6 @@ type Cluster struct {
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
 func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
-
-	// TODO - Check for root (needed to netlink)
 	var network vip.Network
 	var err error
 

@@ -158,7 +158,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) error {
+func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) {
 	// Start a kube-vip loadbalancer service
 	log.Infof("Starting advertising address [%s] with kube-vip", c.VIP)
 
@@ -265,5 +265,4 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		}
 	}()
 	log.Infoln("Started Load Balancer and Virtual IP")
-	return nil
 }

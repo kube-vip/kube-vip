@@ -83,11 +83,7 @@ func (sm *Manager) createDHCPService(newServiceUID string, newVip *kubevip.Confi
 			log.Errorf("Failed to add Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
 			return
 		}
-		err = c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
-		if err != nil {
-			log.Errorf("Failed to add Load Balancer service Service [%s] / [%s]: %v", newService.ServiceName, newService.UID, err)
-			return
-		}
+		c.StartLoadBalancerService(&newService.vipConfig, sm.bgpServer)
 		newService.cluster = *c
 
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
