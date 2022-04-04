@@ -1,4 +1,20 @@
 #!/bin/bash
+ 
+set -e
+
+# Read node configuration
+source ./testing/nodes
+
+# Read logging function
+source ./testing/logging.bash
+
+## Main() 
+
+# Ensure we have an entirely new logfile
+reset_logfile
+
+logr "INFO"  "Starting kube-vip.io testing with k3s"
+logr "DEFAULT"  "Creating Logfile $logfile"
 
 if [[ -z $1 && -z $2  && -z $3 && -z $4 ]]; then
     echo "Usage:"
@@ -10,34 +26,34 @@ if [[ -z $1 && -z $2  && -z $3 && -z $4 ]]; then
     exit 1
 fi
 
-case "$2" in
+# Sane variable renaming
+kubernetes_version=$4
+kube_vip_version=$1
+kube_vip_vip=$3
 
-"controlplane")  echo "Creating control plane only cluster"
-    mode="--controlplane"
+case "$2" in
+"controlplane")  logr "INFO" "Creating in control plane only mode"
+    kube_vip_mode="--controlplane"
     ;;
-"services")  echo "Creating services only cluster"
-    mode="--services"
+"services")  logr "INFO"  "Creating in services-only mode"
+    kube_vip_mode="--services"
     ;;
-"hybrid")  echo  "Creating hybrid cluster"
-    mode="--controlplane --services"
+"hybrid")  logr "INFO"  "Creating in hybrid mode"
+    kube_vip_mode="--controlplane --services"
     ;;
-*) echo "Unknown kube-vip mode [$2]"
+*) echo "Unknown kube-vip mode [$3]"
    exit -1
    ;;
 esac
 
-source ./testing/nodes
-
-echo "Creating First node!"
-
 ssh $NODE01 "sudo mkdir -p /var/lib/rancher/k3s/server/manifests/"
-ssh $NODE01 "sudo docker run --network host --rm plndr/kube-vip:$1 manifest daemonset $mode --interface ens160 --vip $3 --arp --leaderElection --inCluster --taint | sudo tee /var/lib/rancher/k3s/server/manifests/vip.yaml"
+ssh $NODE01 "sudo docker run --network host --rm plndr/kube-vip:$kube_vip_version manifest daemonset $kube_vip_mode --interface ens160 --vip $kube_vip_vip --arp --leaderElection --inCluster --taint | sudo tee /var/lib/rancher/k3s/server/manifests/vip.yaml"
 ssh $NODE01 "sudo curl https://kube-vip.io/manifests/rbac.yaml | sudo tee /var/lib/rancher/k3s/server/manifests/rbac.yaml"
-ssh $NODE01 "sudo screen -dmSL k3s k3s server --cluster-init --tls-san $3 --no-deploy servicelb --disable-cloud-controller --token=test"
+ssh $NODE01 "sudo screen -dmSL k3s k3s server --cluster-init --tls-san $kube_vip_vip --no-deploy servicelb --disable-cloud-controller --token=test"
 echo "Started first node, sleeping for 60 seconds"
 sleep 60
 echo "Adding additional nodes"
-ssh $NODE02 "sudo screen -dmSL k3s k3s server --server https://$3:6443 --token=test"
-ssh $NODE03 "sudo screen -dmSL k3s k3s server --server https://$3:6443 --token=test"
+ssh $NODE02 "sudo screen -dmSL k3s k3s server --server https://$kube_vip_vip:6443 --token=test"
+ssh $NODE03 "sudo screen -dmSL k3s k3s server --server https://$kube_vip_vip:6443 --token=test"
 sleep 20
 ssh $NODE01 "sudo k3s kubectl get node -o wide"

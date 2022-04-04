@@ -197,6 +197,7 @@ var kubeVipManager = &cobra.Command{
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
 
+		log.Infof("Starting kube-vip.io [%s]", Release.Version)
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
