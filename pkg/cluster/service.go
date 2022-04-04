@@ -117,7 +117,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			if ndp != nil {
 				defer ndp.Close()
 			}
-
+			log.Infof("Gratuitous Arp broadcast will repeat every 3 seconds for [%s]", ipString)
 			for {
 				select {
 				case <-ctx.Done(): // if cancel() execute
