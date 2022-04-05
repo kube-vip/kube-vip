@@ -1,6 +1,6 @@
 package bgp
 
-import gobgp "github.com/osrg/gobgp/pkg/server"
+import gobgp "github.com/osrg/gobgp/v3/pkg/server"
 
 // Peer defines a BGP Peer
 type Peer struct {

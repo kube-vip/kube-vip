@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	api "github.com/osrg/gobgp/api"
-	gobgp "github.com/osrg/gobgp/pkg/server"
+	api "github.com/osrg/gobgp/v3/api"
+	gobgp "github.com/osrg/gobgp/v3/pkg/server"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -32,7 +32,7 @@ func NewBGPServer(c *Config) (b *Server, err error) {
 
 	if err = b.s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
-			As:         c.AS,
+			Asn:        c.AS,
 			RouterId:   c.RouterID,
 			ListenPort: -1,
 		},
@@ -40,7 +40,11 @@ func NewBGPServer(c *Config) (b *Server, err error) {
 		return
 	}
 
-	if err = b.s.MonitorPeer(context.Background(), &api.MonitorPeerRequest{}, func(p *api.Peer) { log.Println(p) }); err != nil {
+	if err = b.s.WatchEvent(context.Background(), &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
+		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
+			log.Println(p)
+		}
+	}); err != nil {
 		return
 	}
 

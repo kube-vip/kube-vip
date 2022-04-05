@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes" //nolint
 	"github.com/golang/protobuf/ptypes/any"
-	api "github.com/osrg/gobgp/api"
+	api "github.com/osrg/gobgp/v3/api"
 )
 
 //  AddPeer will add peers to the BGP configuration
@@ -27,7 +27,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 	p := &api.Peer{
 		Conf: &api.PeerConf{
 			NeighborAddress: peer.Address,
-			PeerAs:          peer.AS,
+			PeerAsn:         peer.AS,
 			AuthPassword:    peer.Password,
 		},
 
