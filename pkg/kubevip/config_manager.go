@@ -208,6 +208,10 @@ func isValidInterface(iface string) error {
 		return nil
 	}
 
+	if l.Attrs().Flags&net.FlagPointToPoint == net.FlagPointToPoint {
+		return nil
+	}
+
 	if l.Attrs().OperState != netlink.OperUp {
 		return fmt.Errorf("%s is not up", iface)
 	}
