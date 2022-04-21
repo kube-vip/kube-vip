@@ -24,7 +24,8 @@ type DHCPClient struct {
 	lease          *nclient4.Lease
 	initRebootFlag bool
 	requestedIP    net.IP
-	stopChan       chan struct{}
+	stopChan       chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
+	releasedChan   chan struct{} // indicate that the IP has been released
 	onBound        Callback
 }
 
@@ -33,6 +34,7 @@ func NewDHCPClient(iface *net.Interface, initRebootFlag bool, requestedIP string
 	return &DHCPClient{
 		iface:          iface,
 		stopChan:       make(chan struct{}),
+		releasedChan:   make(chan struct{}),
 		initRebootFlag: initRebootFlag,
 		requestedIP:    net.ParseIP(requestedIP),
 		onBound:        onBound,
@@ -47,6 +49,8 @@ func (c *DHCPClient) WithHostName(hostname string) *DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPClient) Stop() {
 	close(c.stopChan)
+
+	<-c.releasedChan
 }
 
 // Start state-transition process of dhcp client
@@ -159,10 +163,13 @@ func (c *DHCPClient) Start() {
 				// release
 				if err := c.release(); err != nil {
 					log.Errorf("release lease failed, error: %s, lease: %+v", err.Error(), c.lease)
+				} else {
+					log.Infof("release, lease: %+v", c.lease)
 				}
-				log.Infof("release, lease: %+v", c.lease)
 				t1.Stop()
 				t2.Stop()
+
+				close(c.releasedChan)
 				return
 			}
 		}
@@ -187,10 +194,10 @@ func (c *DHCPClient) request() (*nclient4.Lease, error) {
 }
 
 func (c *DHCPClient) release() error {
-	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(&net.UDPAddr{Port: nclient4.ClientPort}),
+	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(c.iface.Name, &net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}),
 		nclient4.WithServerAddr(&net.UDPAddr{IP: c.lease.ACK.ServerIPAddr, Port: nclient4.ServerPort}))
 	if err != nil {
-		return fmt.Errorf("create unicast client failed, error: %w, server ip: %v", err, c.lease.ACK.ServerIPAddr)
+		return fmt.Errorf("create unicast client failed, error: %w, iface: %s, server ip: %v", err, c.iface.Name, c.lease.ACK.ServerIPAddr)
 	}
 	defer unicast.Close()
 
@@ -224,7 +231,7 @@ func (c *DHCPClient) initReboot() (*nclient4.Lease, error) {
 }
 
 func (c *DHCPClient) renew() (*nclient4.Lease, error) {
-	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(&net.UDPAddr{Port: nclient4.ClientPort}),
+	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(c.iface.Name, &net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}),
 		nclient4.WithServerAddr(&net.UDPAddr{IP: c.lease.ACK.ServerIPAddr, Port: nclient4.ServerPort}))
 	if err != nil {
 		return nil, fmt.Errorf("create unicast client failed, error: %w, server ip: %v", err, c.lease.ACK.ServerIPAddr)

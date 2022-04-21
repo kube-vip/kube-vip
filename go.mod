@@ -2,6 +2,8 @@ module github.com/kube-vip/kube-vip
 
 go 1.18
 
+replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-20220421024905-28b38eafefe3
+
 require (
 	github.com/cloudflare/ipvs v0.8.0
 	github.com/davecgh/go-spew v1.1.1
@@ -55,6 +57,7 @@ require (
 	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/mdlayher/arp v0.0.0-20191213142603-f72070a231fc // indirect
 	github.com/mdlayher/ethernet v0.0.0-20190606142754-0394541c37b7 // indirect
 	github.com/mdlayher/genetlink v1.0.0 // indirect
 	github.com/mdlayher/netlink v1.4.1 // indirect
