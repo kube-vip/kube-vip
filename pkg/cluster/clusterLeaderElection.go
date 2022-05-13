@@ -43,9 +43,13 @@ type Manager struct {
 func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	var hostname string
 
-	// If the path passed is empty and not running in the cluster,
+	// If inCluster is set then it will likely have started as a static pod or won't have the
+	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
+	// ensure connectivity. Else if the path passed is empty and not running in the cluster,
 	// attempt to look for a kubeconfig in the default HOME dir.
-	if len(path) == 0 && !inCluster {
+	if inCluster {
+		hostname = fmt.Sprintf("kubernetes:%v", port)
+	} else if len(path) == 0 && !inCluster {
 		path = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 		// We modify the config so that we can always speak to the correct host
