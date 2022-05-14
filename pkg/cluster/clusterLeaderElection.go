@@ -47,9 +47,10 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 	// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 	// ensure connectivity. Else if the path passed is empty and not running in the cluster,
 	// attempt to look for a kubeconfig in the default HOME dir.
-	if inCluster {
-		hostname = fmt.Sprintf("kubernetes:%v", port)
-	} else if len(path) == 0 && !inCluster {
+
+	hostname = fmt.Sprintf("kubernetes:%v", port)
+
+	if len(path) == 0 && !inCluster {
 		path = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 		// We modify the config so that we can always speak to the correct host
