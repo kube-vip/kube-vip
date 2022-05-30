@@ -58,6 +58,45 @@ func TestParseBgpAnnotations(t *testing.T) {
 	assert.Equal(t, "password", bgpPeer.Password, "bgpPeer.Password parsed incorrectly")
 }
 
+// Node, or local, ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-node-asn
+// Peer ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-asn
+// Peer IP, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-ip
+// Source IP to use when communicating with peer, default annotation metal.equinix.com/bgp-peers-{{n}}-src-ip
+// BGP password for peer, default annotation metal.equinix.com/bgp-peers-{{n}}-bgp-pass
+
+func TestParseNewBgpAnnotations(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Annotations: map[string]string{}},
+	}
+
+	_, _, err := parseBgpAnnotations(node, "bgp")
+	if err == nil {
+		t.Fatal("Parsing BGP annotations should return an error when no annotations exist")
+	}
+
+	node.Annotations = map[string]string{
+		"bgp/bgp-peers-0-node-asn": "65000",
+		"bgp/bgp-peers-0-peer-asn": "64000",
+		"bgp/bgp-peers-0-peer-ip":  "10.0.0.254",
+		"bgp/bgp-peers-0-src-ip":   "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // password
+	}
+
+	bgpConfig, bgpPeer, err := parseBgpAnnotations(node, "bgp")
+	if err != nil {
+		t.Fatalf("Parsing BGP annotations should return nil when minimum config is met [%v]", err)
+	}
+
+	bgpPeers := []bgp.Peer{
+		{Address: "10.0.0.1", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.2", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.3", AS: uint32(64000), Password: "password"},
+	}
+	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
+	assert.Equal(t, "10.0.0.3", bgpPeer.Address, "bgpPeer.Address parsed incorrectly")
+	assert.Equal(t, "password", bgpPeer.Password, "bgpPeer.Password parsed incorrectly")
+}
+
 func Test_parseBgpAnnotations(t *testing.T) {
 	type args struct {
 		node   *corev1.Node

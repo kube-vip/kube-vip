@@ -70,7 +70,6 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	// address is DNS
 	result.isDDNS = isDDNS
 	result.dnsName = address
-
 	// try to resolve the address
 	ip, err := lookupHost(address)
 	if err != nil {

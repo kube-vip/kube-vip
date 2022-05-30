@@ -9,11 +9,11 @@ source ./testing/logging.bash
 
 install_deps() {
     echo "Installing Kubernetes dependencies for Kubernetes $kubernetes_version on all nodes"
-    ssh $NODE01 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE02 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE03 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE04 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE05 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE01 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE02 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE03 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE04 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE05 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
 }
 
 first_node() {
@@ -93,6 +93,11 @@ case "$3" in
    exit -1
    ;;
 esac
+
+if [[ -z "$DEPS" ]]; then
+  logr "INFO" "Installing specific version of Kubernetes Dependancies"
+  install_deps
+fi
 
 first_node
 additional_controlplane

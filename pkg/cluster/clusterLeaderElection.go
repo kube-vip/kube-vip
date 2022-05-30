@@ -11,10 +11,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
-	"github.com/kube-vip/kube-vip/pkg/packet"
 
 	"github.com/packethost/packngo"
 
@@ -144,7 +144,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	var packetClient *packngo.Client
 	if c.EnableMetal {
 		if c.ProviderConfig != "" {
-			key, project, err := packet.GetPacketConfig(c.ProviderConfig)
+			key, project, err := equinixmetal.GetPacketConfig(c.ProviderConfig)
 			if err != nil {
 				log.Error(err)
 			} else {
@@ -162,7 +162,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if c.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, c)
+			err = equinixmetal.BGPLookup(packetClient, c)
 			if err != nil {
 				log.Error(err)
 			}
