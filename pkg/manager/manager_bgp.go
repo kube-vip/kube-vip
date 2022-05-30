@@ -7,7 +7,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
-	"github.com/kube-vip/kube-vip/pkg/packet"
+	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
 )
@@ -22,7 +22,7 @@ func (sm *Manager) startBGP() error {
 	var packetClient *packngo.Client
 	if sm.config.EnableMetal {
 		if sm.config.ProviderConfig != "" {
-			key, project, err := packet.GetPacketConfig(sm.config.ProviderConfig)
+			key, project, err := equinixmetal.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
 				log.Error(err)
 			} else {
@@ -40,7 +40,7 @@ func (sm *Manager) startBGP() error {
 		// We're using Packet with BGP, popuplate the Peer information from the API
 		if sm.config.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
-			err = packet.BGPLookup(packetClient, sm.config)
+			err = equinixmetal.BGPLookup(packetClient, sm.config)
 			if err != nil {
 				log.Error(err)
 			}

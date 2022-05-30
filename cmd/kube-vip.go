@@ -12,9 +12,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
-	"github.com/kube-vip/kube-vip/pkg/packet"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -241,7 +241,7 @@ var kubeVipManager = &cobra.Command{
 		// If Packet is enabled and there is a provider configuration passed
 		if initConfig.EnableMetal {
 			if providerConfig != "" {
-				providerAPI, providerProject, err := packet.GetPacketConfig(providerConfig)
+				providerAPI, providerProject, err := equinixmetal.GetPacketConfig(providerConfig)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}

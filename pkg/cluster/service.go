@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
-	"github.com/kube-vip/kube-vip/pkg/packet"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
@@ -56,7 +56,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if !c.EnableBGP {
 			// Attempt to attach the EIP in the standard manner
 			log.Debugf("Attaching the Packet EIP through the API to this host")
-			err = packet.AttachEIP(packetClient, c, id)
+			err = equinixmetal.AttachEIP(packetClient, c, id)
 			if err != nil {
 				log.Error(err)
 			}

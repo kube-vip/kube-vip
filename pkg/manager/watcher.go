@@ -284,3 +284,81 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 
 	return bgpConfig, bgpPeer, nil
 }
+
+// New annotation structure
+
+// Node, or local, ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-node-asn
+// Peer ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-asn
+// Peer IP, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-ip
+// Source IP to use when communicating with peer, default annotation metal.equinix.com/bgp-peers-{{n}}-src-ip
+// BGP password for peer, default annotation metal.equinix.com/bgp-peers-{{n}}-bgp-pass
+
+// parseNodeAnnotations parses the annotations on the node and updates the configuration
+// returning an error if the annotations are not valid or missing; and nil if everything is OK
+// to continue
+func parseNewBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
+	bgpConfig := bgp.Config{}
+	bgpPeer := bgp.Peer{}
+
+	nodeASN := node.Annotations[fmt.Sprintf("%s/node-asn", prefix)]
+	if nodeASN == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("node-asn value missing or empty")
+	}
+
+	u64, err := strconv.ParseUint(nodeASN, 10, 32)
+	if err != nil {
+		return bgpConfig, bgpPeer, err
+	}
+
+	bgpConfig.AS = uint32(u64)
+
+	srcIP := node.Annotations[fmt.Sprintf("%s/src-ip", prefix)]
+	if srcIP == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("src-ip value missing or empty")
+	}
+
+	// Set the routerID (Unique ID for BGP) to the source IP
+	// Also set the BGP peering to the sourceIP
+	bgpConfig.RouterID, bgpConfig.SourceIP = srcIP, srcIP
+
+	peerASN := node.Annotations[fmt.Sprintf("%s/peer-asn", prefix)]
+	if peerASN == "" {
+		return bgpConfig, bgpPeer, fmt.Errorf("peer-asn value missing or empty")
+	}
+
+	u64, err = strconv.ParseUint(peerASN, 10, 32)
+	if err != nil {
+		return bgpConfig, bgpPeer, err
+	}
+
+	bgpPeer.AS = uint32(u64)
+
+	peerIPString := node.Annotations[fmt.Sprintf("%s/peer-ip", prefix)]
+
+	peerIPs := strings.Split(peerIPString, ",")
+
+	for _, peerIP := range peerIPs {
+		ipAddr := strings.TrimSpace(peerIP)
+
+		if ipAddr != "" {
+			bgpPeer.Address = ipAddr
+			// Check if we're also expecting a password for this peer
+			base64BGPPassword := node.Annotations[fmt.Sprintf("%s/bgp-pass", prefix)]
+			if base64BGPPassword != "" {
+				// Decode base64 encoded string
+				decodedPassword, err := base64.StdEncoding.DecodeString(base64BGPPassword)
+				if err != nil {
+					return bgpConfig, bgpPeer, err
+				}
+				// Set the password for each peer
+				bgpPeer.Password = string(decodedPassword)
+			}
+			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
+		}
+	}
+
+	log.Debugf("BGPConfig: %v\n", bgpConfig)
+	log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
+
+	return bgpConfig, bgpPeer, nil
+}
