@@ -58,6 +58,13 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
+
+			// We only care about LoadBalancer services
+			if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
+				break
+			}
+
+			// We can ignore this service
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
 				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
@@ -75,10 +82,18 @@ func (sm *Manager) servicesWatcher(ctx context.Context) error {
 			if !ok {
 				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
 			}
-			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("Service [%s/%s] has an ignore annotation for kube-vip", svc.Namespace, svc.Name)
+
+			// We only care about LoadBalancer services
+			if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
 				break
 			}
+
+			// We can ignore this service
+			if svc.Annotations["kube-vip.io/ignore"] == "true" {
+				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				break
+			}
+
 			err = sm.deleteService(string(svc.UID))
 			if err != nil {
 				log.Error(err)
