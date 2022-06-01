@@ -71,7 +71,8 @@ func (sm *Manager) startARP() error {
 	} else {
 		ns, err = returnNameSpace()
 		if err != nil {
-			return err
+			log.Errorf("Unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
+			ns = sm.config.Namespace
 		}
 	}
 
