@@ -61,7 +61,7 @@ func (sm *Manager) deleteService(uid string) error {
 	return nil
 }
 
-func (sm *Manager) syncServices(service *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")

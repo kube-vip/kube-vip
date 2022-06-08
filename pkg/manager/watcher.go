@@ -25,7 +25,7 @@ import (
 )
 
 // This file handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(s *v1.Service, wg *sync.WaitGroup) error) error {
+func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service, *sync.WaitGroup) error) error {
 	// Watch function
 	var wg sync.WaitGroup
 
@@ -71,8 +71,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(s *v1.S
 			}
 			log.Infof("Service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 			wg.Add(1)
-			err = serviceFunc(svc, &wg)
-			//err = sm.syncServices(svc, &wg)
+			err = serviceFunc(ctx, svc, &wg)
 			if err != nil {
 				log.Error(err)
 			}

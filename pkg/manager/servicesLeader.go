@@ -17,7 +17,7 @@ import (
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) error {
 
-	err := sm.servicesWatcher(ctx, sm.syncServices)
+	err := sm.servicesWatcher(ctx, sm.startServicesLeaderElection)
 	if err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (sm *Manager) startServicesLeaderElection(service *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) startServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	id, err := os.Hostname()
 	if err != nil {
 		return err
