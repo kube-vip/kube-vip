@@ -137,7 +137,7 @@ func sendARP(iface *net.Interface, m *arpMessage) error {
 		Halen:    m.hardwareAddressLength,
 	}
 	target := ethernetBroadcast
-	for i := 0; i < len(target); i++ {
+	for i := 0; i < len(target); i++ { //nolint
 		ll.Addr[i] = target[i]
 	}
 
