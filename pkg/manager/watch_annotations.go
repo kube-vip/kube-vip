@@ -194,8 +194,8 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 		}
 	}
 
-	log.Debugf("BGPConfig: %v\n", bgpConfig)
-	log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
+	//log.Debugf("BGPConfig: %v\n", bgpConfig)
+	//log.Debugf("BGPPeerConfig: %v\n", bgpPeer)
 
 	return bgpConfig, bgpPeer, nil
 }
