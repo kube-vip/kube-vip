@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -16,6 +17,7 @@ import (
 const (
 	hwAddrKey   = "kube-vip.io/hwaddr"
 	requestedIP = "kube-vip.io/requestedIP"
+	vipHost     = "kube-vip.io/vipHost"
 )
 
 func (sm *Manager) deleteService(uid string) error {
@@ -89,7 +91,7 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance && newServiceAddress != "" {
-		log.Infof("add the service [%s/%s] with external address %s", service.Namespace, service.Name, newServiceAddress)
+		log.Infof("add the service [%s/%s] with external address [%s]", service.Namespace, service.Name, newServiceAddress)
 		if err := sm.addService(service); err != nil {
 			return err
 		}
@@ -104,7 +106,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 		return err
 	}
 
-	log.Infof("New VIP [%s] for [%s/%s] ", newService.Vip, newService.ServiceNamespace, newService.ServiceName)
+	log.Infof("new VIP [%s] for [%s/%s] ", newService.Vip, newService.ServiceNamespace, newService.ServiceName)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
@@ -148,11 +150,22 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			return err
 		}
 
+		id, err := os.Hostname()
+		if err != nil {
+			return err
+		}
+
 		currentServiceCopy := currentService.DeepCopy()
+		if currentServiceCopy.Annotations == nil {
+			currentServiceCopy.Annotations = make(map[string]string)
+		}
+
+		// If we're using ARP then we can only broadcast the VIP from one place, add an annotation to the service
+		if sm.config.EnableARP {
+			// Add the current host
+			currentServiceCopy.Annotations[vipHost] = id
+		}
 		if i.dhcpInterfaceHwaddr != "" || i.dhcpInterfaceIP != "" {
-			if currentServiceCopy.Annotations == nil {
-				currentServiceCopy.Annotations = make(map[string]string)
-			}
 			currentServiceCopy.Annotations[hwAddrKey] = i.dhcpInterfaceHwaddr
 			currentServiceCopy.Annotations[requestedIP] = i.dhcpInterfaceIP
 		}

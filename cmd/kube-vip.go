@@ -105,7 +105,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
 
 	// Control plane specific flags
-	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The configuration map defined within the cluster")
+	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
@@ -114,8 +114,11 @@ func init() {
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
 
 	// Behaviour flags
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane, hybrid mode")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services, hybrid mode")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services")
+
+	// Extended behaviour flags
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServicesElection, "servicesElection", false, "Enable leader election per kubernetes service")
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
@@ -202,6 +205,14 @@ var kubeVipManager = &cobra.Command{
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
+		}
+
+		// Provide configuration to output/logging
+		log.Infof("namespace [%s], Mode(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, initConfig.EnableControlPane, initConfig.EnableServices)
+
+		// End if nothing is enabled
+		if !initConfig.EnableServices && !initConfig.EnableControlPane {
+			log.Fatalln("no modes are enabled")
 		}
 
 		if err := initConfig.CheckInterface(); err != nil {
