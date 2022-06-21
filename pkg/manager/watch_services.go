@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
@@ -20,6 +21,11 @@ import (
 func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service, *sync.WaitGroup) error) error {
 	// Watch function
 	var wg sync.WaitGroup
+
+	id, err := os.Hostname()
+	if err != nil {
+		return err
+	}
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
@@ -58,6 +64,29 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			// We only care about LoadBalancer services that have been allocated an address
 			if svc.Spec.LoadBalancerIP == "" {
 				break
+			}
+
+			// We need to see if the pod is local to this kube-vip pod
+			if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+				ep, err := sm.clientSet.CoreV1().Endpoints(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+				if err != nil {
+					return fmt.Errorf("unable to parse service endpoints [%v]", err)
+				}
+				exists := false
+				for subset := range ep.Subsets {
+					for address := range ep.Subsets[subset].Addresses {
+						// Check the node is populated
+						if ep.Subsets[subset].Addresses[address].NodeName != nil {
+							if id == *ep.Subsets[subset].Addresses[address].NodeName {
+								exists = true
+							}
+						}
+					}
+				}
+				if !exists {
+					log.Warnf("loadBalancer has External Traffic Policy: Local, no local pods found")
+					break
+				}
 			}
 
 			// We can ignore this service
