@@ -85,7 +85,7 @@ func (sm *Manager) annotationsWatcher() error {
 		case watch.Added, watch.Modified:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 
 			bgpConfig, bgpPeer, err := parseBgpAnnotations(node, sm.config.Annotations)
@@ -101,7 +101,7 @@ func (sm *Manager) annotationsWatcher() error {
 		case watch.Deleted:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Kubernetes watcher")
+				return fmt.Errorf("unable to parse Kubernetes Node from Kubernetes watcher")
 			}
 
 			log.Infof("Node [%s] has been deleted", node.Name)

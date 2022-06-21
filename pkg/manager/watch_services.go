@@ -37,7 +37,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	}()
 	ch := rw.ResultChan()
 	//defer rw.Stop()
-	log.Infoln("Beginning watching services for type: LoadBalancer in all namespaces")
 
 	for event := range ch {
 		sm.countServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
@@ -63,10 +62,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			// We can ignore this service
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
-			log.Infof("Service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 			wg.Add(1)
 			// Background the services election
 			if sm.config.EnableServicesElection {
@@ -87,7 +86,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes services from API watcher")
+				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
 
 			// We only care about LoadBalancer services
@@ -97,7 +96,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			// We can ignore this service
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("Service [%s] has an ignore annotation for kube-vip", svc.Name)
+				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
 
@@ -105,7 +104,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if err != nil {
 				log.Error(err)
 			}
-			log.Infof("Service [%s/%s] has been deleted", svc.Namespace, svc.Name)
+			log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
 
 		case watch.Bookmark:
 			// Un-used

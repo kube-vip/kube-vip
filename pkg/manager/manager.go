@@ -111,8 +111,7 @@ func (sm *Manager) Start() error {
 	signal.Notify(sm.signalChan, syscall.SIGTERM)
 
 	// Add Notification for SIGKILL (sent from Kubernetes)
-	//nolint
-	signal.Notify(sm.signalChan, syscall.SIGKILL)
+	signal.Notify(sm.signalChan, syscall.SIGKILL) //nolint
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {

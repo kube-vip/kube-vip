@@ -99,14 +99,14 @@ func (sm *Manager) startARP() error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
-		log.Infof("Beginning watching services, leaderelection will happen for every service")
+		log.Infof("beginning watching services, leaderelection will happen for every service")
 		err = sm.startServicesWatchForLeaderElection(ctx)
 		if err != nil {
 			return err
 		}
 	} else {
 
-		log.Infof("Beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
+		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
