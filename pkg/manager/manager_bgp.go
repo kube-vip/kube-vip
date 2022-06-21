@@ -52,7 +52,7 @@ func (sm *Manager) startBGP() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
