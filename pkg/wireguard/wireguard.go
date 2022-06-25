@@ -19,7 +19,6 @@ func ConfigureInterface(priKey, peerPublicKey, endpoint string) error {
 	defer client.Close()
 
 	pri, err := wgtypes.ParseKey(priKey)
-	wgtypes.GenerateKey()
 	if err != nil {
 		return fmt.Errorf("failed to generate private key: %v", err)
 	}
@@ -58,9 +57,8 @@ func ConfigureInterface(priKey, peerPublicKey, endpoint string) error {
 	if err := client.ConfigureDevice("wg0", conf); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("wg0 doesn't exist [%s]", err)
-		} else {
-			return fmt.Errorf("Unknown config error: %v", err)
 		}
+		return fmt.Errorf("unknown config error: %v", err)
 	}
 	return nil
 }
