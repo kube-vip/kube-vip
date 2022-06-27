@@ -89,11 +89,21 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 			}
 
-			// We can ignore this service
+			// Check the loadBalancer class
+			if svc.Spec.LoadBalancerClass != nil {
+				// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
+				if *svc.Spec.LoadBalancerClass != "kube-vip.io/kube-vip-class" {
+					log.Infof("service [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
+					break
+				}
+			}
+
+			// Check if we ignore this service
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
 				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
+
 			log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 			wg.Add(1)
 			// Background the services election
