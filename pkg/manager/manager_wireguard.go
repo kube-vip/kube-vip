@@ -36,7 +36,7 @@ func (sm *Manager) startWireguard() error {
 	// parse all the details needed for Wireguard
 	peerPublicKey := s.Data["peerPublicKey"]
 	peerEndpoint := s.Data["peerEndpoint"]
-	privateKey := s.Data[id]
+	privateKey := s.Data["privateKey"]
 
 	// Configure the interface to join the Wireguard VPN
 	err = wireguard.ConfigureInterface(string(privateKey), string(peerPublicKey), string(peerEndpoint))

@@ -18,6 +18,12 @@ This will require `kube-vip` starting as a daemonset as it will need to read exi
 
 ### Secrets 
 
-The secrets map is `[hostname]pubkey`
+Create a private key for the cluster:
 
-`kubectl create secret generic wireguard --from-literal=k8s01=abcdef12345`
+```
+PRIKEY=$(wg genkey)
+PUBKEY=$(echo $PRIKEY | wg pubkey)
+PEERKEY=$(sudo wg show wg0 public-key)
+echo "kubectl create -n kube-system secret generic wireguard --from-literal=privateKey=$PRIKEY --from-literal=peerPublicKey=$PEERKEY --from-literal=peerEndpoint=192.168.0.179"
+sudo wg set wg0 peer $PUBKEY allowed-ips 10.0.0.0/8
+```

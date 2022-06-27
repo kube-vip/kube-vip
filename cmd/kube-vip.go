@@ -240,16 +240,21 @@ var kubeVipManager = &cobra.Command{
 
 		// If we're using wireguard then all traffic goes through the wg0 interface
 		if initConfig.EnableWireguard {
+			if initConfig.Interface == "" {
+				// Set the vip interface to the wireguard interface
+				initConfig.Interface = "wg0"
+			}
+
 			log.Infof("configuring Wireguard networking")
-			l, err := netlink.LinkByName("wg0")
+			l, err := netlink.LinkByName(initConfig.Interface)
 			if err != nil {
 				if strings.Contains(err.Error(), "Link not found") {
-					log.Warnf("interface \"wg0\" doesn't exist, attempting to create wireguard interface ")
-					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: "wg0"}})
+					log.Warnf("interface \"%s\" doesn't exist, attempting to create wireguard interface", initConfig.Interface)
+					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
 					if err != nil {
 						log.Fatalln(err)
 					} else {
-						l, err = netlink.LinkByName("wg0")
+						l, err = netlink.LinkByName(initConfig.Interface)
 						if err != nil {
 							log.Fatalln(err)
 						}
@@ -260,8 +265,7 @@ var kubeVipManager = &cobra.Command{
 			if err != nil {
 				log.Fatalln(err)
 			}
-			// Set the vip interface to the wireguard interface
-			initConfig.Interface = "wg0"
+
 		} else { // if we're not using Wireguard then we'll need to use an actual interface
 			// Check if the interface needs auto-detecting
 			if initConfig.Interface == "" {
