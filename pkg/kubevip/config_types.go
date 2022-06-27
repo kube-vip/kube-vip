@@ -15,6 +15,9 @@ type Config struct {
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`
 
+	// EnableWireguard, will use wireguard to advertise the VIP address
+	EnableWireguard bool `yaml:"enableWireguard"`
+
 	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableControlPane bool `yaml:"enableControlPane"`
 

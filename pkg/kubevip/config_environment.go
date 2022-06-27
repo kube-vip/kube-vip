@@ -194,6 +194,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableBGP = b
 	}
 
+	// BGP Server options
+	env = os.Getenv(vipWireguard)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableWireguard = b
+	}
+
 	// BGP Router interface determines an interface that we can use to find an address for
 	env = os.Getenv(bgpRouterInterface)
 	if env != "" {

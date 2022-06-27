@@ -94,6 +94,9 @@ const (
 	//bgpSourceIP defines the source address for BGP peering
 	bgpSourceIP = "bgp_sourceip"
 
+	//vipWireguard - defines if wireguard will be used for vips
+	vipWireguard = "vip_wireguard" //nolint
+
 	//cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 

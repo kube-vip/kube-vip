@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/vishvananda/netlink"
 
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -68,7 +70,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "Port for the VIP")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for Vip changes")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for VIP changes")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableWireguard, "wireguard", false, "Enable Wireguard for services VIPs")
 
 	// LoadBalancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "enableLoadBalancer", false, "enable loadbalancing on the VIP with IPVS")
@@ -200,6 +203,13 @@ var kubeVipManager = &cobra.Command{
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
 
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
+			Addr: initConfig.PrometheusHTTPServer,
+		})
+
 		log.Infof("Starting kube-vip.io [%s]", Release.Version)
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
@@ -207,41 +217,78 @@ var kubeVipManager = &cobra.Command{
 			log.Fatalln(err)
 		}
 
+		// Determine the kube-vip mode
+		var mode string
+		if initConfig.EnableARP {
+			mode = "ARP"
+		}
+
+		if initConfig.EnableBGP {
+			mode = "BGP"
+		}
+
+		if initConfig.EnableWireguard {
+			mode = "Wireguard"
+		}
 		// Provide configuration to output/logging
-		log.Infof("namespace [%s], Mode(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, initConfig.EnableControlPane, initConfig.EnableServices)
+		log.Infof("namespace [%s], Mode: [%s], Features(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, mode, initConfig.EnableControlPane, initConfig.EnableServices)
 
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPane {
 			log.Fatalln("no modes are enabled")
 		}
 
+		// If we're using wireguard then all traffic goes through the wg0 interface
+		if initConfig.EnableWireguard {
+			if initConfig.Interface == "" {
+				// Set the vip interface to the wireguard interface
+				initConfig.Interface = "wg0"
+			}
+
+			log.Infof("configuring Wireguard networking")
+			l, err := netlink.LinkByName(initConfig.Interface)
+			if err != nil {
+				if strings.Contains(err.Error(), "Link not found") {
+					log.Warnf("interface \"%s\" doesn't exist, attempting to create wireguard interface", initConfig.Interface)
+					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
+					if err != nil {
+						log.Fatalln(err)
+					} else {
+						l, err = netlink.LinkByName(initConfig.Interface)
+						if err != nil {
+							log.Fatalln(err)
+						}
+					}
+				}
+			}
+			err = netlink.LinkSetUp(l)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+		} else { // if we're not using Wireguard then we'll need to use an actual interface
+			// Check if the interface needs auto-detecting
+			if initConfig.Interface == "" {
+				log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
+				defaultIF, err := vip.GetDefaultGatewayInterface()
+				if err != nil {
+					_ = cmd.Help()
+					log.Fatalf("unable to detect default interface -> [%v]", err)
+				}
+				initConfig.Interface = defaultIF.Name
+				log.Infof("kube-vip will bind to interface [%s]", initConfig.Interface)
+
+				go func() {
+					if err := vip.MonitorDefaultInterface(context.TODO(), defaultIF); err != nil {
+						log.Fatalf("crash: %s", err.Error())
+					}
+				}()
+			}
+		}
+		// Perform a check on th state of the interface
 		if err := initConfig.CheckInterface(); err != nil {
 			log.Fatalln(err)
 		}
-
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
-
-		if initConfig.Interface == "" {
-			log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
-			defaultIF, err := vip.GetDefaultGatewayInterface()
-			if err != nil {
-				_ = cmd.Help()
-				log.Fatalf("unable to detect default interface -> [%v]", err)
-			}
-			initConfig.Interface = defaultIF.Name
-			log.Infof("kube-vip will bind to interface [%s]", initConfig.Interface)
-
-			go func() {
-				if err := vip.MonitorDefaultInterface(context.TODO(), defaultIF); err != nil {
-					log.Fatalf("crash: %s", err.Error())
-				}
-			}()
-		}
-
-		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
-			Addr: initConfig.PrometheusHTTPServer,
-		})
 
 		// User Environment variables as an option to make manifest clearer
 		envConfigMap := os.Getenv("vip_configmap")
@@ -299,11 +346,11 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 		}
 	}()
 
-	log.Printf("server started")
+	log.Printf("prometheus HTTP server started")
 
 	<-ctx.Done()
 
-	log.Printf("server stopped")
+	log.Printf("prometheus HTTP server stopped")
 
 	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer func() {

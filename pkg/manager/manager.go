@@ -132,7 +132,12 @@ func (sm *Manager) Start() error {
 		return sm.startARP()
 	}
 
-	log.Infoln("Prematurely exiting Load-balancer as neither Layer2 or Layer3 is enabled")
+	if sm.config.EnableWireguard {
+		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
+		return sm.startWireguard()
+	}
+
+	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
 	return nil
 }
 

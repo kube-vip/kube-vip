@@ -178,6 +178,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	// If BGP, but we're not using packet
+	if c.EnableWireguard {
+		bgp := []corev1.EnvVar{
+			{
+				Name:  vipWireguard,
+				Value: strconv.FormatBool(c.EnableWireguard),
+			},
+		}
+		newEnvironment = append(newEnvironment, bgp...)
+	}
+
+	// If BGP, but we're not using packet
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{
 			{
