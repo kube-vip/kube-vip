@@ -93,7 +93,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if svc.Spec.LoadBalancerClass != nil {
 				// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
 				if *svc.Spec.LoadBalancerClass != "kube-vip.io/kube-vip-class" {
-					log.Infof("service [%s] specified the loadBalancer class [%s], ignoring", *svc.Spec.LoadBalancerClass)
+					log.Infof("service [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
 					break
 				}
 			}
