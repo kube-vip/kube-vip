@@ -137,6 +137,11 @@ func (sm *Manager) Start() error {
 		return sm.startWireguard()
 	}
 
+	if sm.config.EnableRoutingTable {
+		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
+		return sm.startTableMode()
+	}
+
 	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
 	return nil
 }

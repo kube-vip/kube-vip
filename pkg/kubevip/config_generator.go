@@ -177,18 +177,29 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, packet...)
 	}
 
-	// If BGP, but we're not using packet
+	// Detect and enable wireguard mode
 	if c.EnableWireguard {
-		bgp := []corev1.EnvVar{
+		wireguard := []corev1.EnvVar{
 			{
 				Name:  vipWireguard,
 				Value: strconv.FormatBool(c.EnableWireguard),
 			},
 		}
-		newEnvironment = append(newEnvironment, bgp...)
+		newEnvironment = append(newEnvironment, wireguard...)
 	}
 
-	// If BGP, but we're not using packet
+	// Detect and enable routing table mode
+	if c.EnableRoutingTable {
+		routingtable := []corev1.EnvVar{
+			{
+				Name:  vipWireguard,
+				Value: strconv.FormatBool(c.EnableRoutingTable),
+			},
+		}
+		newEnvironment = append(newEnvironment, routingtable...)
+	}
+
+	// If BGP, but we're not using Equinix Metal
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{
 			{
@@ -198,7 +209,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, bgp...)
 	}
-	// If BGP, but we're not using packet
+	// If BGP, but we're not using Equinix Metal
 	if c.EnableBGP && !c.EnableMetal {
 		bgpConfig := []corev1.EnvVar{
 			{

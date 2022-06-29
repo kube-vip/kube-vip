@@ -174,12 +174,17 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	if err != nil {
 		log.Warnf("Attempted to clean existing VIP => %v", err)
 	}
-
-	err = cluster.Network.AddIP()
-	if err != nil {
-		log.Warnf("%v", err)
+	if c.EnableRoutingTable {
+		err = cluster.Network.AddRoute()
+		if err != nil {
+			log.Warnf("%v", err)
+		}
+	} else {
+		err = cluster.Network.AddIP()
+		if err != nil {
+			log.Warnf("%v", err)
+		}
 	}
-
 	if c.EnableARP {
 		//ctxArp, cancelArp = context.WithCancel(context.Background())
 

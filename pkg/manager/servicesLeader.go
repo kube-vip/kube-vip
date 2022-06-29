@@ -27,6 +27,10 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 		return err
 	}
 
+	for x := range sm.serviceInstances {
+		sm.serviceInstances[x].cluster.Stop()
+	}
+
 	log.Infof("Shutting down kube-Vip")
 
 	return nil

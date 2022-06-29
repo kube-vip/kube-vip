@@ -1,16 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // kubeadm adds two subcommands for managing a vip during a kubeadm init/join
@@ -91,39 +87,6 @@ var kubeKubeadmJoin = &cobra.Command{
 			log.Fatalf("Unable to find file [%s]", kubeConfigPath)
 		}
 
-		// We will use kubeconfig in order to find all the master nodes
-		// use the current context in kubeconfig
-		clientset, err := k8s.NewClientset(kubeConfigPath, false, "")
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-
-		opts := metav1.ListOptions{}
-		opts.LabelSelector = "node-role.kubernetes.io/master"
-		nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), opts)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		// Iterate over all nodes that are masters and find the details to build a peer list
-		for x := range nodes.Items {
-			// Get hostname and address
-			var nodeAddress, nodeHostname string
-			for y := range nodes.Items[x].Status.Addresses {
-				switch nodes.Items[x].Status.Addresses[y].Type {
-				case corev1.NodeHostName:
-					nodeHostname = nodes.Items[x].Status.Addresses[y].Address
-				case corev1.NodeInternalIP:
-					nodeAddress = nodes.Items[x].Status.Addresses[y].Address
-				}
-			}
-
-			newPeer, err := kubevip.ParsePeerConfig(fmt.Sprintf("%s:%s:%d", nodeHostname, nodeAddress, 10000))
-			if err != nil {
-				panic(err.Error())
-			}
-			initConfig.RemotePeers = append(initConfig.RemotePeers, *newPeer)
-
-		}
 		// Generate manifest and print
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 		fmt.Println(cfg)

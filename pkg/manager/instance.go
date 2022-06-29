@@ -56,12 +56,15 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 
 	// Generate new Virtual IP configuration
 	newVip := &kubevip.Config{
-		VIP:        instanceAddress, //TODO support more than one vip?
-		Interface:  serviceInterface,
-		SingleNode: true,
-		EnableARP:  config.EnableARP,
-		EnableBGP:  config.EnableBGP,
-		VIPCIDR:    config.VIPCIDR,
+		VIP:                instanceAddress, //TODO support more than one vip?
+		Interface:          serviceInterface,
+		SingleNode:         true,
+		EnableARP:          config.EnableARP,
+		EnableBGP:          config.EnableBGP,
+		VIPCIDR:            config.VIPCIDR,
+		VIPSubnet:          config.VIPSubnet,
+		EnableRoutingTable: config.EnableRoutingTable,
+		RoutingTableID:     config.RoutingTableID,
 	}
 
 	// Create new service
