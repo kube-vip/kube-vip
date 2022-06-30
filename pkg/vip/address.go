@@ -15,7 +15,9 @@ const (
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
 	AddIP() error
+	AddRoute() error
 	DeleteIP() error
+	DeleteRoute() error
 	IsSet() (bool, error)
 	IP() string
 	SetIP(ip string) error
@@ -35,6 +37,8 @@ type network struct {
 
 	dnsName string
 	isDDNS  bool
+
+	routeTable int
 }
 
 func netlinkParse(addr string) (*netlink.Addr, error) {
@@ -46,19 +50,29 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int) (Network, error) {
 	result := &network{}
 
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
 		return result, errors.Wrapf(err, "could not get link for interface '%s'", iface)
 	}
+
 	result.link = link
+	result.routeTable = tableID
 
 	if IsIP(address) {
-		result.address, err = netlinkParse(address)
-		if err != nil {
-			return result, errors.Wrapf(err, "could not parse address '%s'", address)
+		// Check if the subnet needs overriding
+		if subnet != "" {
+			result.address, err = netlink.ParseAddr(address + subnet)
+			if err != nil {
+				return result, errors.Wrapf(err, "could not parse address '%s'", address)
+			}
+		} else {
+			result.address, err = netlinkParse(address)
+			if err != nil {
+				return result, errors.Wrapf(err, "could not parse address '%s'", address)
+			}
 		}
 		// Ensure we don't have a global address on loopback
 		if iface == "lo" {
@@ -89,6 +103,34 @@ func NewConfig(address string, iface string, isDDNS bool) (Network, error) {
 	result.address.ValidLft = defaultValidLft
 
 	return result, err
+}
+
+// AddRoute - Add an IP address to a route table
+func (configurator *network) AddRoute() error {
+	route := &netlink.Route{
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Dst:       configurator.address.IPNet,
+		LinkIndex: configurator.link.Attrs().Index,
+		Table:     configurator.routeTable,
+	}
+	if err := netlink.RouteAdd(route); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AddRoute - Add an IP address to a route table
+func (configurator *network) DeleteRoute() error {
+	route := &netlink.Route{
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Dst:       configurator.address.IPNet,
+		LinkIndex: configurator.link.Attrs().Index,
+		Table:     configurator.routeTable,
+	}
+	if err := netlink.RouteDel(route); err != nil {
+		return err
+	}
+	return nil
 }
 
 // AddIP - Add an IP address to the interface

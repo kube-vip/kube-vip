@@ -83,13 +83,22 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 
 	// If we're doing the hybrid mode
 	if c.EnableServices {
-		cp := []corev1.EnvVar{
+		svc := []corev1.EnvVar{
 			{
 				Name:  svcEnable,
 				Value: strconv.FormatBool(c.EnableServices),
 			},
 		}
-		newEnvironment = append(newEnvironment, cp...)
+		newEnvironment = append(newEnvironment, svc...)
+		if c.EnableServicesElection {
+			svcElection := []corev1.EnvVar{
+				{
+					Name:  svcElection,
+					Value: strconv.FormatBool(c.EnableServicesElection),
+				},
+			}
+			newEnvironment = append(newEnvironment, svcElection...)
+		}
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest
@@ -177,18 +186,29 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, packet...)
 	}
 
-	// If BGP, but we're not using packet
+	// Detect and enable wireguard mode
 	if c.EnableWireguard {
-		bgp := []corev1.EnvVar{
+		wireguard := []corev1.EnvVar{
 			{
 				Name:  vipWireguard,
 				Value: strconv.FormatBool(c.EnableWireguard),
 			},
 		}
-		newEnvironment = append(newEnvironment, bgp...)
+		newEnvironment = append(newEnvironment, wireguard...)
 	}
 
-	// If BGP, but we're not using packet
+	// Detect and enable routing table mode
+	if c.EnableRoutingTable {
+		routingtable := []corev1.EnvVar{
+			{
+				Name:  vipWireguard,
+				Value: strconv.FormatBool(c.EnableRoutingTable),
+			},
+		}
+		newEnvironment = append(newEnvironment, routingtable...)
+	}
+
+	// If BGP, but we're not using Equinix Metal
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{
 			{
@@ -198,7 +218,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, bgp...)
 	}
-	// If BGP, but we're not using packet
+	// If BGP, but we're not using Equinix Metal
 	if c.EnableBGP && !c.EnableMetal {
 		bgpConfig := []corev1.EnvVar{
 			{

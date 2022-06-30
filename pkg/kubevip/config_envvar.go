@@ -97,14 +97,20 @@ const (
 	//vipWireguard - defines if wireguard will be used for vips
 	vipWireguard = "vip_wireguard" //nolint
 
+	//vipRoutingTable - defines if table mode will be used for vips
+	vipRoutingTable = "vip_routingtable" //nolint
+
 	//cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 
-	//cpEnable starts kube-vip in the hybrid mode
+	//cpEnable enables the control plane feature
 	cpEnable = "cp_enable"
 
-	//cpEnable starts kube-vip in the hybrid mode
+	//svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"
+
+	//svcElection enables election per Kubernetes service
+	svcElection = "svc_election"
 
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"

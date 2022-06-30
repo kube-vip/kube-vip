@@ -68,16 +68,20 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc..")
+
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address") // todo: deprecate
+
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "Port for the VIP")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for VIP changes")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableWireguard, "wireguard", false, "Enable Wireguard for services VIPs")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableRoutingTable, "table", false, "Enable Routing Table for services VIPs")
 
 	// LoadBalancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "enableLoadBalancer", false, "enable loadbalancing on the VIP with IPVS")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LoadBalancerPort, "lbPort", 6443, "loadbalancer port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerForwardingMethod, "lbForwardingMethod", "local", "loadbalancer forwarding method")
-
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
 
 	// Clustering type (leaderElection)
@@ -86,7 +90,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time a Kubernetes leader can attempt to renew its lease")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RetryPeriod, "leaseRetry", 1, "Number of times the host will retry to hold a lease")
 
-	// Packet flags
+	// Equinix Metal flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableMetal, "metal", false, "This will use the Equinix Metal API (requires the token ENV) to update the EIP <-> VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalAPIKey, "metalKey", "", "The API token for authenticating with the Equinix Metal API")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProject, "metalProject", "", "The name of project already created within Equinix Metal")
@@ -94,7 +98,6 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ProviderConfig, "provider-config", "", "The path to a provider configuration")
 
 	// BGP flags
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableBGP, "bgp", false, "This will enable BGP support within kube-vip")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.RouterID, "bgpRouterID", "", "The routerID for the bgp server")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.SourceIF, "sourceIF", "", "The source interface for bgp peering (not to be used with sourceIP)")
@@ -115,6 +118,9 @@ func init() {
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
+
+	// Routing Table flags
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableID, "tableID", 198, "The routing table used for all table entries")
 
 	// Behaviour flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane")
@@ -205,11 +211,9 @@ var kubeVipManager = &cobra.Command{
 
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
-
 		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
 			Addr: initConfig.PrometheusHTTPServer,
 		})
-
 		log.Infof("Starting kube-vip.io [%s]", Release.Version)
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
@@ -230,12 +234,17 @@ var kubeVipManager = &cobra.Command{
 		if initConfig.EnableWireguard {
 			mode = "Wireguard"
 		}
+
+		if initConfig.EnableRoutingTable {
+			mode = "Routing Table"
+		}
+
 		// Provide configuration to output/logging
 		log.Infof("namespace [%s], Mode: [%s], Features(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, mode, initConfig.EnableControlPane, initConfig.EnableServices)
 
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPane {
-			log.Fatalln("no modes are enabled")
+			log.Fatalln("no features are enabled")
 		}
 
 		// If we're using wireguard then all traffic goes through the wg0 interface

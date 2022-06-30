@@ -18,6 +18,9 @@ type Config struct {
 	// EnableWireguard, will use wireguard to advertise the VIP address
 	EnableWireguard bool `yaml:"enableWireguard"`
 
+	// EnableRoutingTable, will use the routing table to advertise the VIP address
+	EnableRoutingTable bool `yaml:"enableRoutingTable"`
+
 	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableControlPane bool `yaml:"enableControlPane"`
 
@@ -33,17 +36,14 @@ type Config struct {
 	// LeaderElection defines the settings around Kubernetes LeaderElection
 	LeaderElection
 
-	// LocalPeer is the configuration of this host
-	LocalPeer RaftPeer `yaml:"localPeer"`
-
-	// Peers are all of the peers within the RAFT cluster
-	RemotePeers []RaftPeer `yaml:"remotePeers"`
-
 	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
 	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
 
 	// VIP is the Virtual IP address exposed for the cluster (TODO: deprecate)
 	VIP string `yaml:"vip"`
+
+	// VipSubnet is the Subnet that is applied to the VIP
+	VIPSubnet string `yaml:"vipSubnet"`
 
 	// VIPCIDR is cidr range for the VIP (primarily needed for BGP)
 	VIPCIDR string `yaml:"vipCidr"`
@@ -80,6 +80,9 @@ type Config struct {
 
 	// Forwarding method for the IPVS Service
 	LoadBalancerForwardingMethod string `yaml:"lbForwardingMethod"`
+
+	// Routing Table ID for when using routing table mode
+	RoutingTableID int `yaml:"routingTableID"`
 
 	// BGP Configuration
 	BGPConfig     bgp.Config
@@ -122,18 +125,6 @@ type LeaderElection struct {
 
 	// RetryPerion - Number of times the host will retry to hold a lease
 	RetryPeriod int
-}
-
-// RaftPeer details the configuration of all cluster peers
-type RaftPeer struct {
-	// ID is the unique identifier a peer instance
-	ID string `yaml:"id"`
-
-	// IP Address of a peer instance
-	Address string `yaml:"address"`
-
-	// Listening port of this peer instance
-	Port int `yaml:"port"`
 }
 
 // LoadBalancer contains the configuration of a load balancing instance

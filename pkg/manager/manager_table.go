@@ -3,11 +3,8 @@ package manager
 import (
 	"context"
 	"os"
-	"strconv"
 	"time"
 
-	"github.com/kamhlos/upnp"
-	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -15,7 +12,7 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startWireguard() error {
+func (sm *Manager) startTableMode() error {
 	var ns string
 	var err error
 
@@ -28,21 +25,7 @@ func (sm *Manager) startWireguard() error {
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	log.Infoln("reading wireguard peer configuration from Kubernetes secret")
-	s, err := sm.clientSet.CoreV1().Secrets(sm.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	// parse all the details needed for Wireguard
-	peerPublicKey := s.Data["peerPublicKey"]
-	peerEndpoint := s.Data["peerEndpoint"]
-	privateKey := s.Data["privateKey"]
-
-	// Configure the interface to join the Wireguard VPN
-	err = wireguard.ConfigureInterface(string(privateKey), string(peerPublicKey), string(peerEndpoint))
-	if err != nil {
-		return err
-	}
+	log.Infof("all routing table entries will exist in table [%d]", sm.config.RoutingTableID)
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -57,21 +40,6 @@ func (sm *Manager) startWireguard() error {
 	if err != nil {
 		log.Warnf("unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
 		ns = sm.config.Namespace
-	}
-
-	// Before starting the leader Election enable any additional functionality
-	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
-
-	if upnpEnabled {
-		sm.upnp = new(upnp.Upnp)
-		err := sm.upnp.ExternalIPAddr()
-		if err != nil {
-			log.Errorf("Error Enabling UPNP %s", err.Error())
-			// Set the struct to nil so nothing should use it in future
-			sm.upnp = nil
-		} else {
-			log.Infof("Successfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
-		}
 	}
 
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service

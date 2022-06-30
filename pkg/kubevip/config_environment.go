@@ -138,6 +138,16 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableServices = b
+
+		// Find Services leader Election
+		env = os.Getenv(svcElection)
+		if env != "" {
+			b, err := strconv.ParseBool(env)
+			if err != nil {
+				return err
+			}
+			c.EnableServicesElection = b
+		}
 	}
 
 	// Find vip address cidr range
@@ -184,6 +194,26 @@ func ParseEnvironment(c *Config) error {
 		c.EnableARP = b
 	}
 
+	// Wireguard Mode
+	env = os.Getenv(vipWireguard)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableWireguard = b
+	}
+
+	// Routing Table Mode
+	env = os.Getenv(vipRoutingTable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableRoutingTable = b
+	}
+
 	// BGP Server options
 	env = os.Getenv(bgpEnable)
 	if env != "" {
@@ -192,16 +222,6 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableBGP = b
-	}
-
-	// BGP Server options
-	env = os.Getenv(vipWireguard)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.EnableWireguard = b
 	}
 
 	// BGP Router interface determines an interface that we can use to find an address for

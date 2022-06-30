@@ -25,19 +25,6 @@ func ParseBackendConfig(ep string) (*BackEnd, error) {
 	return &BackEnd{Address: endpoint[0], Port: p}, nil
 }
 
-//ParsePeerConfig -
-func ParsePeerConfig(ep string) (*RaftPeer, error) {
-	endpoint := strings.Split(ep, ":")
-	if len(endpoint) != 3 {
-		return nil, fmt.Errorf("ensure a peer is in in the format id:address:port, e.g. server1:10.0.0.1:8080")
-	}
-	p, err := strconv.Atoi(endpoint[2])
-	if err != nil {
-		return nil, err
-	}
-	return &RaftPeer{ID: endpoint[0], Address: endpoint[1], Port: p}, nil
-}
-
 //OpenConfig will attempt to read a file and parse it's contents into a configuration
 func OpenConfig(path string) (*Config, error) {
 	if path == "" {
@@ -73,61 +60,12 @@ func (c *Config) PrintConfig() {
 	fmt.Print(string(b))
 }
 
-//ParseFlags will write the current configuration to a specified [path]
-func (c *Config) ParseFlags(localPeer string, remotePeers, backends []string) error {
-	// Parse localPeer
-	p, err := ParsePeerConfig(localPeer)
-	if err != nil {
-		return err
-	}
-	c.LocalPeer = *p
-
-	// Parse remotePeers
-	//Iterate backends
-	for i := range remotePeers {
-		p, err := ParsePeerConfig(remotePeers[i])
-		if err != nil {
-			return err
-
-		}
-		c.RemotePeers = append(c.RemotePeers, *p)
-	}
-
-	//Iterate backends
-	for i := range backends {
-		b, err := ParseBackendConfig(backends[i])
-		if err != nil {
-			return err
-		}
-		c.LoadBalancers[0].Backends = append(c.LoadBalancers[0].Backends, *b)
-	}
-
-	return nil
-}
-
 //SampleConfig will create an example configuration and write it to the specified [path]
 func SampleConfig() {
 
 	// Generate Sample configuration
 	c := &Config{
-		// Generate sample peers
-		RemotePeers: []RaftPeer{
-			{
-				ID:      "server2",
-				Address: "192.168.0.2",
-				Port:    10000,
-			},
-			{
-				ID:      "server3",
-				Address: "192.168.0.3",
-				Port:    10000,
-			},
-		},
-		LocalPeer: RaftPeer{
-			ID:      "server1",
-			Address: "192.168.0.1",
-			Port:    10000,
-		},
+
 		// Virtual IP address
 		VIP: "192.168.0.100",
 		// Interface to bind to
