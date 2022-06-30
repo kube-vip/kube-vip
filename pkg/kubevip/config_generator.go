@@ -83,13 +83,22 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 
 	// If we're doing the hybrid mode
 	if c.EnableServices {
-		cp := []corev1.EnvVar{
+		svc := []corev1.EnvVar{
 			{
 				Name:  svcEnable,
 				Value: strconv.FormatBool(c.EnableServices),
 			},
 		}
-		newEnvironment = append(newEnvironment, cp...)
+		newEnvironment = append(newEnvironment, svc...)
+		if c.EnableServicesElection {
+			svcElection := []corev1.EnvVar{
+				{
+					Name:  svcElection,
+					Value: strconv.FormatBool(c.EnableServicesElection),
+				},
+			}
+			newEnvironment = append(newEnvironment, svcElection...)
+		}
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest

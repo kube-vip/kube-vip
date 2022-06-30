@@ -138,6 +138,16 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableServices = b
+
+		// Find Services leader Election
+		env = os.Getenv(svcElection)
+		if env != "" {
+			b, err := strconv.ParseBool(env)
+			if err != nil {
+				return err
+			}
+			c.EnableServicesElection = b
+		}
 	}
 
 	// Find vip address cidr range
