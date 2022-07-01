@@ -209,16 +209,21 @@ var kubeVipManager = &cobra.Command{
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
-		go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
-			Addr: initConfig.PrometheusHTTPServer,
-		})
 		log.Infof("Starting kube-vip.io [%s]", Release.Version)
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
+		}
+
+		// Set the logging level for all subsequent functions
+		log.SetLevel(log.Level(logLevel))
+
+		// start prometheus server
+		if initConfig.PrometheusHTTPServer != "" {
+			go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
+				Addr: initConfig.PrometheusHTTPServer,
+			})
 		}
 
 		// Determine the kube-vip mode

@@ -121,6 +121,9 @@ const (
 	//lbForwardingMethod defines the forwarding method of load-balancer
 	lbForwardingMethod = "lb_fwdmethod"
 
+	//prometheusServer defines the address prometheus listens on
+	prometheusServer = "prometheus_server"
+
 	//vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
 )

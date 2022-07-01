@@ -355,5 +355,12 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		c.LoadBalancerForwardingMethod = env
 	}
+
+	// Find Prometheus configuration
+	env = os.Getenv(prometheusServer)
+	if env != "" {
+		c.PrometheusHTTPServer = env
+	}
+
 	return nil
 }
