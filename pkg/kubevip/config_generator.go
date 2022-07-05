@@ -313,6 +313,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		})
 	}
 
+	if c.PrometheusHTTPServer != "" {
+		prometheus := []corev1.EnvVar{
+
+			{
+				Name:  prometheusServer,
+				Value: c.PrometheusHTTPServer,
+			},
+		}
+		newEnvironment = append(newEnvironment, prometheus...)
+	}
+
 	newManifest := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
