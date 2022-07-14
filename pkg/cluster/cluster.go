@@ -51,7 +51,9 @@ func startNetworking(c *kubevip.Config) (vip.Network, error) {
 // Stop - Will stop the Cluster and release VIP if needed
 func (cluster *Cluster) Stop() {
 	// Close the stop chanel, which will shut down the VIP (if needed)
-	close(cluster.stop)
+	if cluster.stop != nil {
+		close(cluster.stop)
+	}
 
 	// Wait until the completed channel is closed, signallign all shutdown tasks completed
 	<-cluster.completed
