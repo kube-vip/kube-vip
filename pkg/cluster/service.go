@@ -154,6 +154,14 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			}
 		}(ctxArp)
 	}
+
+	if c.EnableRoutingTable {
+		err = cluster.Network.AddRoute()
+		if err != nil {
+			log.Warnf("%v", err)
+		}
+	}
+
 	return nil
 }
 
