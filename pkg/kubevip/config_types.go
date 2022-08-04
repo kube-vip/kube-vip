@@ -30,6 +30,9 @@ type Config struct {
 	// EnableServicesElection, will enable leaderElection per service
 	EnableServicesElection bool `yaml:"enableServicesElection"`
 
+	// LoadBalancerClassOnly, will enable load balancing only for services with LoadBalancerClass set to "kube-vip.io/kube-vip-class"
+	LoadBalancerClassOnly bool `yaml:"lbClassOnly"`
+
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 

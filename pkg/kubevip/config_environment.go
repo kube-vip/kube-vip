@@ -148,6 +148,16 @@ func ParseEnvironment(c *Config) error {
 			}
 			c.EnableServicesElection = b
 		}
+
+		// Find load-balancer class only
+		env = os.Getenv(lbClassOnly)
+		if env != "" {
+			b, err := strconv.ParseBool(env)
+			if err != nil {
+				return err
+			}
+			c.LoadBalancerClassOnly = b
+		}
 	}
 
 	// Find vip address cidr range
