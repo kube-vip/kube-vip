@@ -168,7 +168,7 @@ func (i *Instance) startDHCP() (chan string, error) {
 	}
 
 	var initRebootFlag bool
-	if i.dhcpInterfaceHwaddr != "" {
+	if i.dhcpInterfaceIP != "" {
 		initRebootFlag = true
 	}
 

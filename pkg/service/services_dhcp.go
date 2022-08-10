@@ -65,7 +65,7 @@ func (sm *Manager) createDHCPService(newServiceUID string, newVip *kubevip.Confi
 	}
 
 	var initRebootFlag bool
-	if newService.dhcpInterfaceHwaddr != "" {
+	if newService.dhcpInterfaceIP != "" {
 		initRebootFlag = true
 	}
 
