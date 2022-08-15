@@ -99,6 +99,15 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			}
 			newEnvironment = append(newEnvironment, svcElection...)
 		}
+		if c.LoadBalancerClassOnly {
+			lbClassOnlyVar := []corev1.EnvVar{
+				{
+					Name:  lbClassOnly,
+					Value: strconv.FormatBool(c.LoadBalancerClassOnly),
+				},
+			}
+			newEnvironment = append(newEnvironment, lbClassOnlyVar...)
+		}
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest

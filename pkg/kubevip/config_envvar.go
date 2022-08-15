@@ -112,6 +112,9 @@ const (
 	//svcElection enables election per Kubernetes service
 	svcElection = "svc_election"
 
+	//lbClassOnly enables load-balancer for class "kube-vip.io/kube-vip-class" only
+	lbClassOnly = "lb_class_only"
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
