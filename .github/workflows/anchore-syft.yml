@@ -31,7 +31,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v1
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag localbuild/testimage:latest
+      run: docker buildx build . --file Dockerfile --tag localbuild/testimage:latest
     - name: Scan the image and upload dependency results
       uses: anchore/sbom-action@bb716408e75840bbb01e839347cd213767269d4a
       with:
