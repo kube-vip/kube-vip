@@ -351,8 +351,9 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	mux.Handle("/metrics", promhttp.Handler())
 
 	srv := &http.Server{
-		Addr:    config.Addr,
-		Handler: mux,
+		Addr:              config.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 2 * time.Second,
 	}
 
 	go func() {
