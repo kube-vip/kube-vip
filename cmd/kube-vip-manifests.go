@@ -13,7 +13,7 @@ import (
 // - Pod spec manifest, mainly used for a static pod (kubeadm)
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
 
-//var inCluster bool
+// var inCluster bool
 var taint bool
 
 func init() {

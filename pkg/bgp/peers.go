@@ -12,7 +12,7 @@ import (
 	api "github.com/osrg/gobgp/v3/api"
 )
 
-//  AddPeer will add peers to the BGP configuration
+// AddPeer will add peers to the BGP configuration
 func (b *Server) AddPeer(peer Peer) (err error) {
 	port := 179
 
