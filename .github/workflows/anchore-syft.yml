@@ -38,3 +38,9 @@ jobs:
         image: "localbuild/testimage:latest"
         artifact-name: image.spdx.json
         dependency-snapshot: true
+  license-check:
+    runs-on: ubuntu-latest
+    name: License Check
+    steps:
+      - uses: actions/checkout@v3
+      - uses: yusufpapurcu/go-license-checker@v0.5
