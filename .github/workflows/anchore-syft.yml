@@ -43,4 +43,4 @@ jobs:
     name: License Check
     steps:
       - uses: actions/checkout@v3
-      - uses: yusufpapurcu/go-license-checker@v0.5
+      - uses: yusufpapurcu/go-license-checker@v0.9
