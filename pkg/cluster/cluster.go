@@ -55,7 +55,7 @@ func (cluster *Cluster) Stop() {
 		close(cluster.stop)
 	}
 
-	// Wait until the completed channel is closed, signallign all shutdown tasks completed
+	// Wait until the completed channel is closed, signalling all shutdown tasks completed
 	<-cluster.completed
 
 	log.Info("Stopped")

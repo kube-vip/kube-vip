@@ -37,7 +37,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 		// Find the device id for our EIP
 		if ip.Address == vip {
 			log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
-			// If attachements already exist then remove them
+			// If attachments already exist then remove them
 			if len(ip.Assignments) != 0 {
 				hrefID := path.Base(ip.Assignments[0].Href)
 				_, err := c.DeviceIPs.Unassign(hrefID)

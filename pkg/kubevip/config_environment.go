@@ -9,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ParseEnvironment - will popultate the configuration from environment variables
+// ParseEnvironment - will populate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
 
 	// Ensure that logging is set through the environment variables
@@ -183,7 +183,7 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find Start As Leader
-	// TODO - does this need depricating?
+	// TODO - does this need deprecating?
 	// Required when the host sets itself as leader before the state change
 	env = os.Getenv(vipStartLeader)
 	if env != "" {

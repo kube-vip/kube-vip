@@ -21,7 +21,7 @@ import (
 
 const plunderLock = "plndr-svcs-lock"
 
-// Manager degines the manager of the load-balancing services
+// Manager defines the manager of the load-balancing services
 type Manager struct {
 	clientSet *kubernetes.Clientset
 	configMap string

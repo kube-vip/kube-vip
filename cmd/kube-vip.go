@@ -38,7 +38,7 @@ var disableVIP bool
 // ConfigMap name within a Kubernetes cluster
 var configMap string
 
-// Configure the level of loggin
+// Configure the level of logging
 var logLevel uint32
 
 // Provider Config

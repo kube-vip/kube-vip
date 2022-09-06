@@ -126,7 +126,7 @@ type LeaderElection struct {
 	// RenewDeadline - length of time a host can attempt to renew its lease
 	RenewDeadline int
 
-	// RetryPerion - Number of times the host will retry to hold a lease
+	// RetryPeriod - Number of times the host will retry to hold a lease
 	RetryPeriod int
 }
 

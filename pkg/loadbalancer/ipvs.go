@@ -13,7 +13,7 @@ import (
 IPVS Architecture - for those that are interested
 
 There are going to be a large number of end users that are using a VIP that exists within the same subnet
-as the back end servers. This unfortunately will result in "packet" confusion with the destingation and
+as the back end servers. This unfortunately will result in "packet" confusion with the destination and
 source becoming messed up by the IPVS NAT.
 
 The solution is to perform two things !

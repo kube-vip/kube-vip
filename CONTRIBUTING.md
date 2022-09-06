@@ -39,7 +39,7 @@ you to have a [github account](https://github.com/join).
 
 There are multiple ways in which you can contribute, either by contributing
 code in the form of new features or bug-fixes or non-code contributions like
-helping with code reviews, triaging of bugs, documentation updates, filing
+helping with code reviews, trialing of bugs, documentation updates, filing
 [new issues](#filing-an-issue) or writing blogs/manuals etc.
 
 ### GitHub Workflow

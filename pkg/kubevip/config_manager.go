@@ -144,7 +144,7 @@ func isValidInterface(iface string) error {
 
 	// Some interfaces (included but not limited to lo and point-to-point
 	//	interfaces) do not provide a operational status but are safe to use.
-	// From kernek.org: "Interface is in unknown state, neither driver nor
+	// From kernel.org: "Interface is in unknown state, neither driver nor
 	// userspace has set operational state. Interface must be considered for user
 	// data as setting operational state has not been implemented in every driver."
 	if attrs.OperState == netlink.OperUnknown {
