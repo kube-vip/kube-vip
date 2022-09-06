@@ -7,6 +7,7 @@ replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-2022042
 require (
 	github.com/cloudflare/ipvs v0.8.0
 	github.com/davecgh/go-spew v1.1.1
+	github.com/florianl/go-conntrack v0.3.0
 	github.com/ghodss/yaml v1.0.0
 	github.com/golang/protobuf v1.5.2
 	github.com/insomniacslk/dhcp v0.0.0-20220119180841-3c283ff8b7dd
@@ -38,6 +39,7 @@ require (
 	github.com/alessio/shellescape v1.4.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
+	github.com/coreos/go-iptables v0.6.0
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/eapache/channels v1.1.0 // indirect
 	github.com/eapache/queue v1.1.0 // indirect

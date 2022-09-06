@@ -44,6 +44,9 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	ch := rw.ResultChan()
 	//defer rw.Stop()
 
+	// Used for tracking an active endpoint / pod
+	var podIP string
+
 	for event := range ch {
 		sm.countServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
 
@@ -70,7 +73,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 				ep, err := sm.clientSet.CoreV1().Endpoints(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
 				if err != nil {
-					return fmt.Errorf("unable to parse service endpoints [%v]", err)
+					log.Errorf("unable to parse service endpoints [%v]", err)
 				}
 				exists := false
 				for subset := range ep.Subsets {
@@ -79,6 +82,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						if ep.Subsets[subset].Addresses[address].NodeName != nil {
 							if id == *ep.Subsets[subset].Addresses[address].NodeName {
 								exists = true
+								podIP = ep.Subsets[subset].Addresses[address].IP
 							}
 						}
 					}
@@ -86,6 +90,14 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				if !exists {
 					log.Warnf("loadBalancer has External Traffic Policy: Local, no local pods found")
 					break
+				}
+				// Check if we want to rewrite egress
+				if svc.Annotations["kube-vip.io/egress"] == "true" && exists {
+					// We will need to modify the iptables rules
+					err = sm.configureEgress(svc.Spec.LoadBalancerIP, podIP)
+					if err != nil {
+						log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+					}
 				}
 			}
 
@@ -141,6 +153,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
 				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
+			}
+
+			// We will need to tear down the egress
+			if svc.Annotations["kube-vip.io/egress"] == "true" {
+				log.Infof("service [%s] has an egress re-write enabled", svc.Name)
+				TeardownEgress(podIP, svc.Spec.LoadBalancerIP)
 			}
 
 			err = sm.deleteService(string(svc.UID))
