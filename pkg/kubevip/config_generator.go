@@ -210,7 +210,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	if c.EnableRoutingTable {
 		routingtable := []corev1.EnvVar{
 			{
-				Name:  vipWireguard,
+				Name:  vipRoutingTable,
 				Value: strconv.FormatBool(c.EnableRoutingTable),
 			},
 		}
