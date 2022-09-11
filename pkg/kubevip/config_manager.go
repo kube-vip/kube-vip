@@ -12,7 +12,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-//ParseBackendConfig -
+// ParseBackendConfig -
 func ParseBackendConfig(ep string) (*BackEnd, error) {
 	endpoint := strings.Split(ep, ":")
 	if len(endpoint) != 2 {
@@ -25,7 +25,7 @@ func ParseBackendConfig(ep string) (*BackEnd, error) {
 	return &BackEnd{Address: endpoint[0], Port: p}, nil
 }
 
-//OpenConfig will attempt to read a file and parse it's contents into a configuration
+// OpenConfig will attempt to read a file and parse it's contents into a configuration
 func OpenConfig(path string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("path cannot be blank")
@@ -53,14 +53,14 @@ func OpenConfig(path string) (*Config, error) {
 	return nil, fmt.Errorf("error reading [%s]", path)
 }
 
-//PrintConfig - will print out an instance of the kubevip config
+// PrintConfig - will print out an instance of the kubevip config
 func (c *Config) PrintConfig() {
 	b, _ := yaml.Marshal(c)
 
 	fmt.Print(string(b))
 }
 
-//SampleConfig will create an example configuration and write it to the specified [path]
+// SampleConfig will create an example configuration and write it to the specified [path]
 func SampleConfig() {
 
 	// Generate Sample configuration
@@ -99,7 +99,7 @@ func SampleConfig() {
 	fmt.Print(string(b))
 }
 
-//WriteConfig will write the current configuration to a specified [path]
+// WriteConfig will write the current configuration to a specified [path]
 func (c *Config) WriteConfig(path string) error {
 	f, err := os.Create(path)
 	if err != nil {

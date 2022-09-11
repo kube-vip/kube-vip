@@ -38,7 +38,7 @@ func findSelf(c *packngo.Client, projectID string) *packngo.Device {
 	return nil
 }
 
-//GetPacketConfig will lookup the configuration from a file path
+// GetPacketConfig will lookup the configuration from a file path
 func GetPacketConfig(providerConfig string) (string, string, error) {
 	var config struct {
 		AuthToken string `json:"apiKey"`

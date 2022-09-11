@@ -54,50 +54,59 @@ func (c *DHCPClient) Stop() {
 }
 
 // Start state-transition process of dhcp client
-//  --------                               -------
+//
+//	--------                               -------
+//
 // |        | +-------------------------->|       |<-------------------+
 // | INIT-  | |     +-------------------->| INIT  |                    |
 // | REBOOT |DHCPNAK/         +---------->|       |<---+               |
 // |        |Restart|         |            -------     |               |
-//  --------  |  DHCPNAK/     |               |                        |
-//     |      Discard offer   |      -/Send DHCPDISCOVER               |
+//
+//	--------  |  DHCPNAK/     |               |                        |
+//	   |      Discard offer   |      -/Send DHCPDISCOVER               |
+//
 // -/Send DHCPREQUEST         |               |                        |
-//     |      |     |      DHCPACK            v        |               |
-//  -----------     |   (not accept.)/   -----------   |               |
+//
+//	   |      |     |      DHCPACK            v        |               |
+//	-----------     |   (not accept.)/   -----------   |               |
+//
 // |           |    |  Send DHCPDECLINE |           |                  |
 // | REBOOTING |    |         |         | SELECTING |<----+            |
 // |           |    |        /          |           |     |DHCPOFFER/  |
-//  -----------     |       /            -----------   |  |Collect     |
-//     |            |      /                  |   |       |  replies   |
+//
+//	-----------     |       /            -----------   |  |Collect     |
+//	   |            |      /                  |   |       |  replies   |
+//
 // DHCPACK/         |     /  +----------------+   +-------+            |
 // Record lease, set|    |   v   Select offer/                         |
 // timers T1, T2   ------------  send DHCPREQUEST      |               |
-//     |   +----->|            |             DHCPNAK, Lease expired/   |
-//     |   |      | REQUESTING |                  Halt network         |
-//     DHCPOFFER/ |            |                       |               |
-//     Discard     ------------                        |               |
-//     |   |        |        |                   -----------           |
-//     |   +--------+     DHCPACK/              |           |          |
-//     |              Record lease, set    -----| REBINDING |          |
-//     |                timers T1, T2     /     |           |          |
-//     |                     |        DHCPACK/   -----------           |
-//     |                     v     Record lease, set   ^               |
-//     +----------------> -------      /timers T1,T2   |               |
-//                +----->|       |<---+                |               |
-//                |      | BOUND |<---+                |               |
-//   DHCPOFFER, DHCPACK, |       |    |            T2 expires/   DHCPNAK/
-//    DHCPNAK/Discard     -------     |             Broadcast  Halt network
-//                |       | |         |            DHCPREQUEST         |
-//                +-------+ |        DHCPACK/          |               |
-//                     T1 expires/   Record lease, set |               |
-//                  Send DHCPREQUEST timers T1, T2     |               |
-//                  to leasing server |                |               |
-//                          |   ----------             |               |
-//                          |  |          |------------+               |
-//                          +->| RENEWING |                            |
-//                             |          |----------------------------+
-//                              ----------
-//           Figure: State-transition diagram for DHCP clients
+//
+//	  |   +----->|            |             DHCPNAK, Lease expired/   |
+//	  |   |      | REQUESTING |                  Halt network         |
+//	  DHCPOFFER/ |            |                       |               |
+//	  Discard     ------------                        |               |
+//	  |   |        |        |                   -----------           |
+//	  |   +--------+     DHCPACK/              |           |          |
+//	  |              Record lease, set    -----| REBINDING |          |
+//	  |                timers T1, T2     /     |           |          |
+//	  |                     |        DHCPACK/   -----------           |
+//	  |                     v     Record lease, set   ^               |
+//	  +----------------> -------      /timers T1,T2   |               |
+//	             +----->|       |<---+                |               |
+//	             |      | BOUND |<---+                |               |
+//	DHCPOFFER, DHCPACK, |       |    |            T2 expires/   DHCPNAK/
+//	 DHCPNAK/Discard     -------     |             Broadcast  Halt network
+//	             |       | |         |            DHCPREQUEST         |
+//	             +-------+ |        DHCPACK/          |               |
+//	                  T1 expires/   Record lease, set |               |
+//	               Send DHCPREQUEST timers T1, T2     |               |
+//	               to leasing server |                |               |
+//	                       |   ----------             |               |
+//	                       |  |          |------------+               |
+//	                       +->| RENEWING |                            |
+//	                          |          |----------------------------+
+//	                           ----------
+//	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPClient) Start() {
 	backoff := backoff.Backoff{
 		Factor: 2,
@@ -205,14 +214,14 @@ func (c *DHCPClient) release() error {
 	return unicast.Release(c.lease)
 }
 
-//   --------------------------------------------------------
-//   |              |INIT-REBOOT  | RENEWING     |REBINDING |
-//   --------------------------------------------------------
-//   |broad/unicast |broadcast    | unicast      |broadcast |
-//   |server-ip     |MUST NOT     | MUST NOT     |MUST NOT  |
-//   |requested-ip  |MUST         | MUST NOT     |MUST NOT  |
-//   |ciaddr        |zero         | IP address   |IP address|
-//   --------------------------------------------------------
+// --------------------------------------------------------
+// |              |INIT-REBOOT  | RENEWING     |REBINDING |
+// --------------------------------------------------------
+// |broad/unicast |broadcast    | unicast      |broadcast |
+// |server-ip     |MUST NOT     | MUST NOT     |MUST NOT  |
+// |requested-ip  |MUST         | MUST NOT     |MUST NOT  |
+// |ciaddr        |zero         | IP address   |IP address|
+// --------------------------------------------------------
 func (c *DHCPClient) initReboot() (*nclient4.Lease, error) {
 	broadcast, err := nclient4.New(c.iface.Name)
 	if err != nil {
