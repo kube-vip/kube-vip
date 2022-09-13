@@ -2,6 +2,7 @@ package vip
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"strings"
@@ -106,4 +107,22 @@ func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) erro
 			return nil
 		}
 	}
+}
+
+func GenerateMac() (mac string) {
+	buf := make([]byte, 3)
+	_, err := rand.Read(buf)
+	if err != nil {
+		return
+	}
+
+	/**
+	 * The first 3 bytes need to match a real manufacturer
+	 * you can refer to the following lists for examples:
+	 * - https://gist.github.com/aallan/b4bb86db86079509e6159810ae9bd3e4
+	 * - https://macaddress.io/database-download
+	 */
+	mac = fmt.Sprintf("%s:%s:%s:%02x:%02x:%02x", "00", "00", "6C", buf[0], buf[1], buf[2])
+	log.Infof("Generated mac: %s", mac)
+	return mac
 }

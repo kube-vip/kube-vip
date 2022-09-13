@@ -139,8 +139,14 @@ func (i *Instance) startDHCP() (chan string, error) {
 		hwaddr, err := net.ParseMAC(i.dhcpInterfaceHwaddr)
 		if i.dhcpInterfaceHwaddr != "" && err != nil {
 			return nil, err
+		} else if hwaddr == nil {
+			hwaddr, err = net.ParseMAC(vip.GenerateMac())
+			if err != nil {
+				return nil, err
+			}
 		}
 
+		log.Infof("New interface [%s] mac is %s", interfaceName, hwaddr)
 		mac := &netlink.Macvlan{
 			LinkAttrs: netlink.LinkAttrs{
 				Name:         interfaceName,
@@ -159,6 +165,7 @@ func (i *Instance) startDHCP() (chan string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not bring up interface [%s] : %v", interfaceName, err)
 		}
+
 		iface, err = net.InterfaceByName(interfaceName)
 		if err != nil {
 			return nil, fmt.Errorf("error finding new DHCP interface by name [%v]", err)
