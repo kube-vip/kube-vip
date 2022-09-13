@@ -84,21 +84,45 @@ func (e *Egress) CreateMangleChain(name string) error {
 }
 func (e *Egress) AppendReturnRulesForDestinationSubnet(name, subnet string) error {
 	log.Infof("[Egress] Adding jump for subnet [%s] to RETURN to previous chain/rules", subnet)
-	return e.ipTablesClient.Append("mangle", name, "-d", subnet, "-j", "RETURN")
+	exists, _ := e.ipTablesClient.Exists("mangle", name, "-d", subnet, "-j", "RETURN")
+	if !exists {
+		return e.ipTablesClient.Append("mangle", name, "-d", subnet, "-j", "RETURN")
+	}
+	return nil
 }
 
 func (e *Egress) AppendReturnRulesForMarking(name, subnet string) error {
 	log.Infof("[Egress] Marking packets on network [%s]", subnet)
-	return e.ipTablesClient.Append("mangle", name, "-s", subnet, "-j", "MARK", "--set-mark", "64/64")
+	exists, _ := e.ipTablesClient.Exists("mangle", name, "-s", subnet, "-j", "MARK", "--set-mark", "64/64")
+	if !exists {
+		return e.ipTablesClient.Append("mangle", name, "-s", subnet, "-j", "MARK", "--set-mark", "64/64")
+	}
+	return nil
 }
 
 func (e *Egress) InsertMangeTableIntoPrerouting(name string) error {
 	log.Infof("[Egress] Adding jump from mangle prerouting to [%s]", name)
+	if exists, err := e.ipTablesClient.Exists("mangle", "PREROUTING", "-j", name); err != nil {
+		return err
+	} else if exists {
+		if err2 := e.ipTablesClient.Delete("mangle", "PREROUTING", "-j", name); err2 != nil {
+			return err2
+		}
+	}
+
 	return e.ipTablesClient.Insert("mangle", "PREROUTING", 1, "-j", name)
 }
 
 func (e *Egress) InsertSourceNat(vip, podIP string) error {
 	log.Infof("[Egress] Adding jump from mangle prerouting to [%s]", "name")
+	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip); err != nil {
+		return err
+	} else if exists {
+		if err2 := e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip); err2 != nil {
+			return err2
+		}
+	}
+
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
 }
 

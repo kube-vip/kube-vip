@@ -91,7 +91,6 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance && newServiceAddress != "" {
-		log.Infof("add the service [%s/%s] with external address [%s]", service.Namespace, service.Name, newServiceAddress)
 		if err := sm.addService(service); err != nil {
 			return err
 		}
@@ -106,7 +105,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 		return err
 	}
 
-	log.Infof("new VIP [%s] for [%s/%s] ", newService.Vip, newService.ServiceNamespace, newService.ServiceName)
+	log.Infof("adding VIP [%s] for [%s/%s] ", newService.Vip, newService.ServiceNamespace, newService.ServiceName)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
