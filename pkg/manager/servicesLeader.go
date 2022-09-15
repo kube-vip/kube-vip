@@ -14,15 +14,10 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-// activeService keeps track of services that already have a leaderElection in place
-var activeService map[string]bool
-
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) error {
 
-	activeService = make(map[string]bool)
-
-	err := sm.servicesWatcher(ctx, sm.startServicesLeaderElection)
+	err := sm.servicesWatcher(ctx, sm.StartServicesLeaderElection)
 	if err != nil {
 		return err
 	}
@@ -37,11 +32,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (sm *Manager) startServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	// No leader election is necessary
-	if activeService[string(service.UID)] {
-		return nil
-	}
+func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 
 	id, err := os.Hostname()
 	if err != nil {
@@ -62,7 +53,7 @@ func (sm *Manager) startServicesLeaderElection(ctx context.Context, service *v1.
 			Identity: id,
 		},
 	}
-	activeService[string(service.UID)] = true
+	//activeService[string(service.UID)] = true
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -80,8 +71,8 @@ func (sm *Manager) startServicesLeaderElection(ctx context.Context, service *v1.
 			OnStartedLeading: func(ctx context.Context) {
 				// we run this in background as it's blocking
 				go func() {
-					log.Infof("adding the service [%s/%s] with external address [%s]", service.Namespace, service.Name, service.Spec.LoadBalancerIP)
-					if err := sm.addService(service); err != nil {
+					//sm.syncServices(ctx, service, wg)
+					if err := sm.syncServices(ctx, service, wg); err != nil {
 						log.Errorln(err)
 					}
 				}()
@@ -93,7 +84,7 @@ func (sm *Manager) startServicesLeaderElection(ctx context.Context, service *v1.
 					log.Errorln(err)
 				}
 				// Mark this service is inactive
-				activeService[string(service.UID)] = false
+				//activeService[string(service.UID)] = false
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected

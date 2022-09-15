@@ -17,10 +17,20 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
-// This file handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
+// activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
+var activeServiceLoadBalancer map[string]context.Context
+
+// activeService keeps track of services that already have a leaderElection in place
+var activeService map[string]bool
+
+// This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service, *sync.WaitGroup) error) error {
 	// Watch function
 	var wg sync.WaitGroup
+
+	// Set up the activeServiceLoadBalancer
+	activeServiceLoadBalancer = make(map[string]context.Context)
+	activeService = make(map[string]bool)
 
 	id, err := os.Hostname()
 	if err != nil {
@@ -44,6 +54,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	ch := rw.ResultChan()
 	//defer rw.Stop()
 
+	// Used for tracking an active endpoint / pod
 	for event := range ch {
 		sm.countServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
 
@@ -66,29 +77,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			// We need to see if the pod is local to this kube-vip pod
-			if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-				ep, err := sm.clientSet.CoreV1().Endpoints(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
-				if err != nil {
-					return fmt.Errorf("unable to parse service endpoints [%v]", err)
-				}
-				exists := false
-				for subset := range ep.Subsets {
-					for address := range ep.Subsets[subset].Addresses {
-						// Check the node is populated
-						if ep.Subsets[subset].Addresses[address].NodeName != nil {
-							if id == *ep.Subsets[subset].Addresses[address].NodeName {
-								exists = true
-							}
-						}
-					}
-				}
-				if !exists {
-					log.Warnf("loadBalancer has External Traffic Policy: Local, no local pods found")
-					break
-				}
-			}
-
 			// Check the loadBalancer class
 			if svc.Spec.LoadBalancerClass != nil {
 				// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
@@ -108,47 +96,119 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
+			// // We need to see if the pod is local to this kube-vip pod
+			// if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+			// 	ep, err := sm.clientSet.CoreV1().Endpoints(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+			// 	if err != nil {
+			// 		log.Errorf("unable to parse service endpoints [%v]", err)
+			// 	}
+			// 	exists := false
+			// 	for subset := range ep.Subsets {
+			// 		for address := range ep.Subsets[subset].Addresses {
+			// 			// Check the node is populated
+			// 			if ep.Subsets[subset].Addresses[address].NodeName != nil {
+			// 				if id == *ep.Subsets[subset].Addresses[address].NodeName {
+			// 					exists = true
+			// 					podIP = ep.Subsets[subset].Addresses[address].IP
+			// 				}
+			// 			}
+			// 		}
+			// 	}
+			// 	if !exists {
+			// 		log.Warnf("loadBalancer [%s] has External Traffic Policy: Local, no local pods found", svc.Name)
+			// 		break
+			// 	}
+			// 	// Check if we want to rewrite egress
+			// 	if svc.Annotations["kube-vip.io/egress"] == "true" && exists {
+			// 		// We will need to modify the iptables rules
+			// 		err = sm.configureEgress(svc.Spec.LoadBalancerIP, podIP)
+			// 		if err != nil {
+			// 			log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+			// 		}
+			// 	}
+			// }
+
 			log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
-			wg.Add(1)
-			// Background the services election
-			if sm.config.EnableServicesElection {
-				go func() {
-					err = serviceFunc(ctx, svc, &wg)
+
+			// Scenarios:
+			// 1.
+
+			if !activeService[string(svc.UID)] {
+				wg.Add(1)
+				activeServiceLoadBalancer[string(svc.UID)] = context.TODO()
+				// Background the services election
+				if sm.config.EnableServicesElection {
+					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+						// Start an endpoint watcher
+						// background the endpoint watcher
+						go func() {
+							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+								// Add Endpoint watcher
+								err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+								if err != nil {
+									log.Errorf("%v", err)
+								}
+								wg.Wait()
+							}
+						}()
+					} else {
+						go func() {
+							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+							if err != nil {
+								log.Error(err)
+							}
+							wg.Wait()
+						}()
+					}
+				} else {
+					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 					if err != nil {
 						log.Error(err)
 					}
 					wg.Wait()
-				}()
-			} else {
-				err = serviceFunc(ctx, svc, &wg)
-				if err != nil {
-					log.Error(err)
 				}
-				wg.Wait()
+				activeService[string(svc.UID)] = true
+
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
+			if activeService[string(svc.UID)] {
+				// We only care about LoadBalancer services
+				if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
+					break
+				}
 
-			// We only care about LoadBalancer services
-			if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-				break
+				// We can ignore this service
+				if svc.Annotations["kube-vip.io/ignore"] == "true" {
+					log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
+					break
+				}
+
+				// We will need to tear down the egress
+				if svc.Annotations["kube-vip.io/egress"] == "true" {
+					if svc.Annotations["kube-vip.io/active-endpoint"] != "" {
+
+						log.Infof("service [%s] has an egress re-write enabled", svc.Name)
+						err = TeardownEgress(svc.Annotations["kube-vip.io/active-endpoint"], svc.Spec.LoadBalancerIP)
+						if err != nil {
+							log.Errorf("%v", err)
+						}
+					}
+				}
+
+				err = sm.deleteService(string(svc.UID))
+				if err != nil {
+					log.Error(err)
+				}
+
+				activeServiceLoadBalancer[string(svc.UID)].Done()
+				activeService[string(svc.UID)] = false
+
+				log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
 			}
-
-			// We can ignore this service
-			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
-				break
-			}
-
-			err = sm.deleteService(string(svc.UID))
-			if err != nil {
-				log.Error(err)
-			}
-			log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
-
 		case watch.Bookmark:
 			// Un-used
 		case watch.Error:

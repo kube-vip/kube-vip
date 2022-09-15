@@ -38,8 +38,7 @@ type Instance struct {
 	UID  string
 	Type string
 
-	ServiceName      string
-	ServiceNamespace string
+	serviceSnapshot *v1.Service
 }
 
 func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error) {
@@ -69,10 +68,9 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 
 	// Create new service
 	instance := &Instance{
-		UID:              instanceUID,
-		Vip:              instanceAddress,
-		ServiceName:      service.Name,
-		ServiceNamespace: service.Namespace,
+		UID:             instanceUID,
+		Vip:             instanceAddress,
+		serviceSnapshot: service,
 	}
 	if len(service.Spec.Ports) > 0 {
 		instance.Type = string(service.Spec.Ports[0].Protocol)
@@ -85,7 +83,7 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 
 	// Generate Load Balancer config
 	newLB := kubevip.LoadBalancer{
-		Name:      fmt.Sprintf("%s-load-balancer", instance.ServiceName),
+		Name:      fmt.Sprintf("%s-load-balancer", service.Name),
 		Port:      int(instance.Port),
 		Type:      instance.Type,
 		BindToVip: true,
@@ -105,7 +103,7 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 		select {
 		case <-time.After(dhcpTimeout):
 			return nil, fmt.Errorf("timeout to request the IP from DHCP server for service %s/%s",
-				instance.ServiceNamespace, instance.ServiceName)
+				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name)
 		case ip := <-ipChan:
 			instance.vipConfig.VIP = ip
 			instance.dhcpInterfaceIP = ip
@@ -114,7 +112,7 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 
 	c, err := cluster.InitCluster(instance.vipConfig, false)
 	if err != nil {
-		log.Errorf("Failed to add Service %s/%s", instance.ServiceNamespace, instance.ServiceName)
+		log.Errorf("Failed to add Service %s/%s", service.Namespace, service.Name)
 		return nil, err
 	}
 	instance.cluster = c
@@ -177,7 +175,7 @@ func (i *Instance) startDHCP() (chan string, error) {
 	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP, func(lease *nclient4.Lease) {
 		ipChan <- lease.ACK.YourIPAddr.String()
 
-		log.Infof("DHCP VIP [%s] for [%s/%s] ", i.vipConfig.VIP, i.ServiceNamespace, i.ServiceName)
+		log.Infof("DHCP VIP [%s] for [%s/%s] ", i.vipConfig.VIP, i.serviceSnapshot.Namespace, i.serviceSnapshot.Name)
 	})
 
 	go client.Start()
