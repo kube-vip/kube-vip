@@ -52,8 +52,8 @@ func (sm *Manager) configureEgress(vipIP, podIP string) error {
 		panic(err)
 	}
 
-	_ = i.DumpChain(vip.MangleChainName)
-	err = vip.DeleteExistingSessions(podIP)
+	//_ = i.DumpChain(vip.MangleChainName)
+	err = i.DeleteExistingSessions(vipIP, podIP)
 	if err != nil {
 		return err
 	}
@@ -86,5 +86,13 @@ func TeardownEgress(podIP, serviceIP string) error {
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
-	return i.DeleteSourceNat(podIP, serviceIP)
+	err = i.DeleteSourceNat(podIP, serviceIP)
+	if err != nil {
+		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	}
+	err = i.DeleteExistingSessions(serviceIP, podIP)
+	if err != nil {
+		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	}
+	return nil
 }

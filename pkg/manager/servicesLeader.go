@@ -53,7 +53,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			Identity: id,
 		},
 	}
-	activeService[string(service.UID)] = true
+	//activeService[string(service.UID)] = true
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -84,7 +84,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 					log.Errorln(err)
 				}
 				// Mark this service is inactive
-				activeService[string(service.UID)] = false
+				//activeService[string(service.UID)] = false
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected

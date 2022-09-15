@@ -72,6 +72,11 @@ func (e *Egress) DeleteManglePrerouting(name string) error {
 }
 
 func (e *Egress) DeleteSourceNat(podIP, vip string) error {
+	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
+
+	if !exists {
+		return fmt.Errorf("Unable to find source Nat rule for [%s]", podIP)
+	}
 	return e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
 }
 
@@ -126,7 +131,8 @@ func (e *Egress) InsertSourceNat(vip, podIP string) error {
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
 }
 
-func DeleteExistingSessions(podIP string) error {
+func (e *Egress) DeleteExistingSessions(vip, podIP string) error {
+
 	nfct, err := ct.Open(&ct.Config{})
 	if err != nil {
 		fmt.Println("could not create nfct:", err)
@@ -140,8 +146,9 @@ func DeleteExistingSessions(podIP string) error {
 	}
 
 	for _, session := range sessions {
-		if session.Origin.Dst.String() == podIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
-			fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
+		//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
+		if session.Origin.Src.String() == podIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
+			//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
 
 			err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
 			if err != nil {

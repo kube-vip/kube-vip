@@ -105,7 +105,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 		return err
 	}
 
-	log.Infof("adding VIP [%s] for [%s/%s] ", newService.Vip, newService.ServiceNamespace, newService.ServiceName)
+	log.Infof("adding VIP [%s] for [%s/%s] ", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
@@ -120,7 +120,16 @@ func (sm *Manager) addService(service *v1.Service) error {
 		}
 		return err
 	}
-
+	if service.Annotations["kube-vip.io/egress"] == "true" {
+		if service.Annotations["kube-vip.io/active-endpoint"] != "" {
+			// We will need to modify the iptables rules
+			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"])
+			if err != nil {
+				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+			}
+		}
+		sm.updateServiceEndpointAnnotation(service.Annotations["kube-vip.io/active-endpoint"], service)
+	}
 	log.Debugf("[COMPLETE] Service Sync")
 
 	return nil
@@ -130,8 +139,8 @@ func (sm *Manager) upnpMap(s *Instance) {
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - work out if we need to mapping.Reclaim()
 	if sm.upnp != nil {
-		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.Vip, s.Port, s.ServiceName)
-		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, s.Vip, strings.ToUpper(s.Type), s.ServiceName); err == nil {
+		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.Vip, s.Port, s.serviceSnapshot.Name)
+		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, s.Vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
 			log.Infof("Service should be accessible externally on port [%d]", s.Port)
 		} else {
 			sm.upnp.Reclaim()
@@ -144,7 +153,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(i.ServiceNamespace).Get(context.TODO(), i.ServiceName, metav1.GetOptions{})
+		currentService, err := sm.clientSet.CoreV1().Services(i.serviceSnapshot.Namespace).Get(context.TODO(), i.serviceSnapshot.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -171,14 +180,14 @@ func (sm *Manager) updateStatus(i *Instance) error {
 
 		updatedService, err := sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
-			log.Errorf("Error updating Service Spec [%s] : %v", i.ServiceName, err)
+			log.Errorf("Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
 			return err
 		}
 
 		updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: i.vipConfig.VIP}}
 		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
 		if err != nil {
-			log.Errorf("Error updating Service %s/%s Status: %v", i.ServiceNamespace, i.ServiceName, err)
+			log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
 			return err
 		}
 		return nil

@@ -12,7 +12,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -56,8 +55,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	//defer rw.Stop()
 
 	// Used for tracking an active endpoint / pod
-	var podIP string
-
 	for event := range ch {
 		sm.countServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
 
@@ -170,6 +167,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 					wg.Wait()
 				}
+				activeService[string(svc.UID)] = true
+
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
@@ -190,8 +189,14 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 				// We will need to tear down the egress
 				if svc.Annotations["kube-vip.io/egress"] == "true" {
-					log.Infof("service [%s] has an egress re-write enabled", svc.Name)
-					TeardownEgress(podIP, svc.Spec.LoadBalancerIP)
+					if svc.Annotations["kube-vip.io/active-endpoint"] != "" {
+
+						log.Infof("service [%s] has an egress re-write enabled", svc.Name)
+						err = TeardownEgress(svc.Annotations["kube-vip.io/active-endpoint"], svc.Spec.LoadBalancerIP)
+						if err != nil {
+							log.Errorf("%v", err)
+						}
+					}
 				}
 
 				err = sm.deleteService(string(svc.UID))
@@ -200,6 +205,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 
 				activeServiceLoadBalancer[string(svc.UID)].Done()
+				activeService[string(svc.UID)] = false
 
 				log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
 			}
@@ -222,137 +228,5 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		}
 	}
 	log.Warnln("Stopping watching services for type: LoadBalancer in all namespaces")
-	return nil
-}
-
-func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	watchContect := context.TODO()
-
-	opts := metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", service.Name).String(),
-	}
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Endpoints(service.Namespace).Watch(watchContect, opts)
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("error creating endpoint watcher: %s", err.Error())
-	}
-
-	ch := rw.ResultChan()
-	//defer rw.Stop()
-	var localEndpoint string
-	var endpointExists bool
-	for event := range ch {
-
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			var endPointStillExists bool
-			ep, ok := event.Object.(*v1.Endpoints)
-			if !ok {
-				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
-			}
-			for subset := range ep.Subsets {
-				for address := range ep.Subsets[subset].Addresses {
-
-					// Check the node is populated
-					if ep.Subsets[subset].Addresses[address].NodeName != nil {
-						if id == *ep.Subsets[subset].Addresses[address].NodeName {
-
-							log.Info("local endpoint discovered")
-							localEndpoint = ep.Subsets[subset].Addresses[address].IP
-							endpointExists = true
-							endPointStillExists = true
-							//podIP = ep.Subsets[subset].Addresses[address].IP
-							go func() {
-								err = sm.StartServicesLeaderElection(ctx, service, wg)
-								if err != nil {
-									log.Error(err)
-								}
-								wg.Wait()
-							}()
-
-							if service.Annotations["kube-vip.io/egress"] == "true" {
-								log.Info("stuff happening")
-
-								// We will need to modify the iptables rules
-								err = sm.configureEgress(service.Spec.LoadBalancerIP, ep.Subsets[subset].Addresses[address].IP)
-								if err != nil {
-									log.Errorf("Error configuring egress for loadbalancer [%s]", err)
-								}
-							}
-						}
-					}
-				}
-			}
-			// Does the endpoint still exist
-			if endpointExists && !endPointStillExists {
-
-			}
-		case watch.Deleted:
-			watchContect.Done()
-			return nil
-		}
-	}
-
-	if !exists {
-		ctx.Done()
-	}
-
-	return nil
-}
-
-func (sm updateServiceEndpointAnnotation(service *v1.Service) error {
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Retrieve the latest version of Deployment before attempting update
-		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(i.ServiceNamespace).Get(context.TODO(), i.ServiceName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		id, err := os.Hostname()
-		if err != nil {
-			return err
-		}
-
-		currentServiceCopy := currentService.DeepCopy()
-		if currentServiceCopy.Annotations == nil {
-			currentServiceCopy.Annotations = make(map[string]string)
-		}
-
-		// If we're using ARP then we can only broadcast the VIP from one place, add an annotation to the service
-		if sm.config.EnableARP {
-			// Add the current host
-			currentServiceCopy.Annotations[vipHost] = id
-		}
-		if i.dhcpInterfaceHwaddr != "" || i.dhcpInterfaceIP != "" {
-			currentServiceCopy.Annotations[hwAddrKey] = i.dhcpInterfaceHwaddr
-			currentServiceCopy.Annotations[requestedIP] = i.dhcpInterfaceIP
-		}
-
-		updatedService, err := sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service Spec [%s] : %v", i.ServiceName, err)
-			return err
-		}
-
-		updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: i.vipConfig.VIP}}
-		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service %s/%s Status: %v", i.ServiceNamespace, i.ServiceName, err)
-			return err
-		}
-		return nil
-	})
-
-	if retryErr != nil {
-		log.Errorf("Failed to set Services: %v", retryErr)
-		return retryErr
-	}
-	return nil
 	return nil
 }
