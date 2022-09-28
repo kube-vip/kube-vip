@@ -1,5 +1,9 @@
 name: Build and publish main iptables based image regularly
 
+on:
+  schedule:
+    - cron: '25 0 * * *'
+
 jobs:
   docker:
     runs-on: ubuntu-latest
