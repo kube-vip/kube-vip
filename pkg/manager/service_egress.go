@@ -1,13 +1,41 @@
 package manager
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func (sm *Manager) iptablesCheck() error {
+	file, err := os.Open("/proc/modules")
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	var nat, filter, mangle bool
+	for scanner.Scan() {
+		line := strings.Fields(scanner.Text())
+		switch line[0] {
+		case "iptable_filter":
+			filter = true
+		case "iptable_nat":
+			nat = true
+		case "iptable_mangle":
+			mangle = true
+		}
+	}
+
+	if !filter || !nat || !mangle {
+		return fmt.Errorf("missing iptables modules -> nat [%t] -> filter [%t] mangle -> [%t]", nat, filter, mangle)
+	}
+	return nil
+}
 
 func (sm *Manager) configureEgress(vipIP, podIP string) error {
 	serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()

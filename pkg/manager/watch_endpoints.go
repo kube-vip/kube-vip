@@ -59,40 +59,6 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					if ep.Subsets[subset].Addresses[address].NodeName != nil {
 						if id == *ep.Subsets[subset].Addresses[address].NodeName {
 							localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
-							// 	if localEndpoint == ep.Subsets[subset].Addresses[address].IP {
-							// 		endPointStillExists = true
-							// 		break
-							// 	}
-							// } else {
-							// 	localEndpoint = ep.Subsets[subset].Addresses[address].IP
-							// 	log.Infof("local endpoint [%s] discovered")
-							// 	//err = sm.updateServiceEndpointAnnotation(ep.Subsets[subset].Addresses[address].IP, service)
-							// 	// if err != nil {
-							// 	// 	//log.Error(err)
-							// 	// 	watchContect.Done()
-							// 	// 	return err
-							// 	// }
-							// 	endpointExists = true
-							// 	endPointStillExists = true
-							// 	//podIP = ep.Subsets[subset].Addresses[address].IP
-							// 	go func() {
-							// 		err = sm.StartServicesLeaderElection(ctx, service, wg)
-							// 		if err != nil {
-							// 			log.Error(err)
-							// 		}
-							// 		wg.Wait()
-							// 	}()
-
-							// 	if service.Annotations["kube-vip.io/egress"] == "true" {
-							// 		log.Info("stuff happening")
-
-							// 		// We will need to modify the iptables rules
-							// 		err = sm.configureEgress(service.Spec.LoadBalancerIP, ep.Subsets[subset].Addresses[address].IP)
-							// 		if err != nil {
-							// 			log.Errorf("Error configuring egress for loadbalancer [%s]", err)
-							// 		}
-							// 	}
-
 						}
 					}
 				}
@@ -104,7 +70,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				if lastKnownGoodEndpoint == "" {
 					lastKnownGoodEndpoint = localendpoints[0]
 					// Create new context
-					endpointContext, cancel = context.WithCancel(context.Background())
+					endpointContext, cancel = context.WithCancel(context.Background()) //nolint
 					wg.Add(1)
 					if service.Annotations["kube-vip.io/egress"] == "true" {
 						service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
