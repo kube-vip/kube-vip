@@ -21,9 +21,14 @@ const (
 )
 
 func (sm *Manager) deleteService(uid string) error {
+	//pretect multiple calls
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
 	var updatedInstances []*Instance
 	found := false
 	for x := range sm.serviceInstances {
+		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].UID)
 		// Add the running services to the new array
 		if sm.serviceInstances[x].UID != uid {
 			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
@@ -48,11 +53,25 @@ func (sm *Manager) deleteService(uid string) error {
 				err := sm.bgpServer.DelHost(cidrVip)
 				return err
 			}
+
+			// We will need to tear down the egress
+			if sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/egress"] == "true" {
+				if sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"] != "" {
+
+					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP)
+					if err != nil {
+						log.Errorf("%v", err)
+					}
+				}
+			}
 		}
 	}
 	// If we've been through all services and not found the correct one then error
 	if !found {
-		return fmt.Errorf("unable to find/stop service [%s]", uid)
+		// TODO: - fix UX
+		//return fmt.Errorf("unable to find/stop service [%s]", uid)
+		return nil
 	}
 
 	// Update the service array
@@ -123,12 +142,20 @@ func (sm *Manager) addService(service *v1.Service) error {
 	if service.Annotations["kube-vip.io/egress"] == "true" {
 		if service.Annotations["kube-vip.io/active-endpoint"] != "" {
 			// We will need to modify the iptables rules
-			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"])
+			err = sm.iptablesCheck()
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
+			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"])
+			if err != nil {
+				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+			} else {
+				err = sm.updateServiceEndpointAnnotation(service.Annotations["kube-vip.io/active-endpoint"], service)
+				if err != nil {
+					log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
+				}
+			}
 		}
-		sm.updateServiceEndpointAnnotation(service.Annotations["kube-vip.io/active-endpoint"], service)
 	}
 	log.Debugf("[COMPLETE] Service Sync")
 

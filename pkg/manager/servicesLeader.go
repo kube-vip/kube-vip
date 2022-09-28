@@ -69,6 +69,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 		RetryPeriod:     5 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
+
 				// we run this in background as it's blocking
 				go func() {
 					//sm.syncServices(ctx, service, wg)
@@ -76,15 +77,19 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 						log.Errorln(err)
 					}
 				}()
+				activeService[string(service.UID)] = true
+
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("leader lost: %s", id)
-				if err := sm.deleteService(string(service.UID)); err != nil {
-					log.Errorln(err)
+				log.Infof("services leader lost: %s", id)
+				if activeService[string(service.UID)] {
+					if err := sm.deleteService(string(service.UID)); err != nil {
+						log.Errorln(err)
+					}
 				}
 				// Mark this service is inactive
-				//activeService[string(service.UID)] = false
+				activeService[string(service.UID)] = false
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected

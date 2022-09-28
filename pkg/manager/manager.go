@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/k8s"
@@ -45,6 +46,9 @@ type Manager struct {
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
+
+	// This mutex is to protect calls from various goroutines
+	mutex sync.Mutex
 }
 
 // New will create a new managing object
