@@ -1,4 +1,4 @@
-name: Build and publish main image regularly
+name: Build and publish main iptables based image regularly
 
 jobs:
   docker:
