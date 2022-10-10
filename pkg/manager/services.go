@@ -59,7 +59,7 @@ func (sm *Manager) deleteService(uid string) error {
 				if sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"] != "" {
 
 					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP)
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/egress-destination-ports"])
 					if err != nil {
 						log.Errorf("%v", err)
 					}
@@ -146,7 +146,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
-			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"])
+			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"], service.Annotations["kube-vip.io/egress-destination-ports"], service.Annotations["kube-vip.io/egress-source-ports"])
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			} else {

@@ -109,6 +109,9 @@ const (
 	//svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"
 
+	//svcNamespace defines the namespace the service pods will run in
+	svcNamespace = "svc_namespace"
+
 	//svcElection enables election per Kubernetes service
 	svcElection = "svc_election"
 

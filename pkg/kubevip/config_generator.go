@@ -14,6 +14,14 @@ import (
 func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod {
 	command := "manager"
 
+	// Determine where the pods should be living (for multi-tenancy)
+	var namespace string
+	if c.ServiceNamespace != "" {
+		namespace = c.ServiceNamespace
+	} else {
+		namespace = metav1.NamespaceSystem
+	}
+
 	// build environment variables
 	newEnvironment := []corev1.EnvVar{
 		{
@@ -340,7 +348,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-vip",
-			Namespace: "kube-system",
+			Namespace: namespace,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -428,6 +436,14 @@ func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster boo
 // GenerateDaemonsetManifestFromConfig will take a kube-vip config and generate a manifest
 func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
 
+	// Determine where the pod should be deployed
+	var namespace string
+	if c.ServiceNamespace != "" {
+		namespace = c.ServiceNamespace
+	} else {
+		namespace = metav1.NamespaceSystem
+	}
+
 	podSpec := generatePodSpec(c, imageVersion, inCluster).Spec
 	newManifest := &appv1.DaemonSet{
 		TypeMeta: metav1.TypeMeta{
@@ -436,7 +452,7 @@ func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inClust
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-vip-ds",
-			Namespace: "kube-system",
+			Namespace: namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":    "kube-vip-ds",
 				"app.kubernetes.io/version": imageVersion,

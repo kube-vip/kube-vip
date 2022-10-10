@@ -40,11 +40,18 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	if err != nil {
 		return err
 	}
+	if sm.config.ServiceNamespace == "" {
+		// v1.NamespaceAll is actually "", but we'll stay with the const incase things change upstream
+		sm.config.ServiceNamespace = v1.NamespaceAll
+		log.Infof("starting services watcher for all namespaces")
+	} else {
+		log.Infof("starting services watcher for services in namespace [%s]", sm.config.ServiceNamespace)
+	}
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Services(v1.NamespaceAll).Watch(ctx, metav1.ListOptions{})
+			return sm.clientSet.CoreV1().Services(sm.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
 		},
 	})
 	if err != nil {

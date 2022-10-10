@@ -158,6 +158,12 @@ func ParseEnvironment(c *Config) error {
 			}
 			c.LoadBalancerClassOnly = b
 		}
+
+		// Find the namespace that the control pane should use (for leaderElection lock)
+		env = os.Getenv(svcNamespace)
+		if env != "" {
+			c.ServiceNamespace = env
+		}
 	}
 
 	// Find vip address cidr range

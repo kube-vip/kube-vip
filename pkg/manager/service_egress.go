@@ -11,6 +11,10 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// DEBUG
+const podCIDR = "10.0.0.0/26"
+const serviceCIDR = "10.96.0.0/12"
+
 func (sm *Manager) iptablesCheck() error {
 	file, err := os.Open("/proc/modules")
 	if err != nil {
@@ -37,12 +41,12 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP string) error {
-	serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
-	if err != nil {
-		serviceCIDR = "10.96.0.0/12"
-		podCIDR = "10.0.0.0/16"
-	}
+func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts string) error {
+	// serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
+	// if err != nil {
+	// 	serviceCIDR = "10.96.0.0/12"
+	// 	podCIDR = "10.0.0.0/16"
+	// }
 	i, err := vip.CreateIptablesClient()
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
@@ -60,28 +64,54 @@ func (sm *Manager) configureEgress(vipIP, podIP string) error {
 	}
 	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, podCIDR)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCIDR)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 	err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+"/32")
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
 	err = i.InsertMangeTableIntoPrerouting(vip.MangleChainName)
 	if err != nil {
-		panic(err)
-	}
-	err = i.InsertSourceNat(vipIP, podIP)
-	if err != nil {
-		panic(err)
+		return fmt.Errorf("error adding prerouting mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
+	if destinationPorts != "" {
+
+		fixedPorts := strings.Split(destinationPorts, ",")
+
+		for _, fixedPort := range fixedPorts {
+			var proto, port string
+
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			} else if len(data) == 1 {
+				proto = "tcp"
+				port = data[0]
+			} else {
+				proto = data[0]
+				port = data[1]
+			}
+
+			err = i.InsertSourceNatForDestinationPort(vipIP, podIP, port, proto)
+			if err != nil {
+				return fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+
+		}
+	} else {
+		err = i.InsertSourceNat(vipIP, podIP)
+		if err != nil {
+			return fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
+		}
+	}
 	//_ = i.DumpChain(vip.MangleChainName)
-	err = i.DeleteExistingSessions(vipIP, podIP)
+	err = i.DeleteExistingSessions(podIP)
 	if err != nil {
 		return err
 	}
@@ -109,16 +139,42 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	return
 }
 
-func TeardownEgress(podIP, serviceIP string) error {
+func TeardownEgress(podIP, vipIP, destinationPorts string) error {
 	i, err := vip.CreateIptablesClient()
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
-	err = i.DeleteSourceNat(podIP, serviceIP)
-	if err != nil {
-		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	if destinationPorts != "" {
+
+		fixedPorts := strings.Split(destinationPorts, ",")
+
+		for _, fixedPort := range fixedPorts {
+			var proto, port string
+
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			} else if len(data) == 1 {
+				proto = "tcp"
+				port = data[0]
+			} else {
+				proto = data[0]
+				port = data[1]
+			}
+
+			err = i.DeleteSourceNatForDestinationPort(podIP, vipIP, port, proto)
+			if err != nil {
+				return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+			}
+
+		}
+	} else {
+		err = i.DeleteSourceNat(podIP, vipIP)
+		if err != nil {
+			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+		}
 	}
-	err = i.DeleteExistingSessions(serviceIP, podIP)
+	err = i.DeleteExistingSessions(podIP)
 	if err != nil {
 		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 	}

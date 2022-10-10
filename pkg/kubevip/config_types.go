@@ -60,6 +60,9 @@ type Config struct {
 	// Namespace will define which namespace the control plane pods will run in
 	Namespace string `yaml:"namespace"`
 
+	// Namespace will define which namespace the control plane pods will run in
+	ServiceNamespace string `yaml:"serviceNamespace"`
+
 	// use DDNS to allocate IP when Address is set to a DNS Name
 	DDNS bool `yaml:"ddns"`
 

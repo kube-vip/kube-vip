@@ -110,7 +110,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma separated BGP Peer, format: address:as:password:multihop")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
 
-	// Control plane specific flags
+	// Namespace for kube-vip
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging

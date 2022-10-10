@@ -40,7 +40,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 	}
 
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", service.Namespace, serviceLease, id)
+	log.Infof("beginning leadership for service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{

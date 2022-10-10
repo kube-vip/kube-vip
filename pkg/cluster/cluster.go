@@ -3,7 +3,6 @@ package cluster
 import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 )
 
 // Cluster - The Cluster object manages the state of the cluster for a particular node
@@ -57,6 +56,4 @@ func (cluster *Cluster) Stop() {
 
 	// Wait until the completed channel is closed, signallign all shutdown tasks completed
 	<-cluster.completed
-
-	log.Info("Stopped")
 }
