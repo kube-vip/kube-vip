@@ -70,7 +70,8 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				if lastKnownGoodEndpoint == "" {
 					lastKnownGoodEndpoint = localendpoints[0]
 					// Create new context
-					endpointContext, cancel = context.WithCancel(context.Background()) //nolint
+					endpointContext, cancel = context.WithCancel(context.Background()) //nolint:govet
+					defer cancel()                                                     //nolint
 					wg.Add(1)
 					if service.Annotations["kube-vip.io/egress"] == "true" {
 						service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
@@ -116,7 +117,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 		}
 	}
 	log.Infof("stopping watching endpoints for [%s]", service.Name)
-	return nil //nolint
+	return nil //nolint:govet
 }
 
 func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.Service) error {
