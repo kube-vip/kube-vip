@@ -25,11 +25,6 @@ import (
 // Test to find out what exists before hand
 
 const MangleChainName = "KUBE-VIP-EGRESS"
-const iptableCommentSuffiv = "KUBE-VIP-"
-
-// DEBUG
-const podSubnet = "10.0.0.0/26"
-const serviceSubnet = "10.96.0.0/12"
 
 // Create new table
 
@@ -75,9 +70,19 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
 
 	if !exists {
-		return fmt.Errorf("Unable to find source Nat rule for [%s]", podIP)
+		return fmt.Errorf("unable to find source Nat rule for [%s]", podIP)
 	}
 	return e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
+}
+
+func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
+
+	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port)
+
+	if !exists {
+		return fmt.Errorf("unable to find source Nat rule for [%s], with destination port [%s]", podIP, port)
+	}
+	return e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port)
 }
 
 func (e *Egress) CreateMangleChain(name string) error {
@@ -119,7 +124,7 @@ func (e *Egress) InsertMangeTableIntoPrerouting(name string) error {
 }
 
 func (e *Egress) InsertSourceNat(vip, podIP string) error {
-	log.Infof("[Egress] Adding jump from mangle prerouting to [%s]", "name")
+	log.Infof("[Egress] Adding source nat from [%s] => [%s]", podIP, vip)
 	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip); err != nil {
 		return err
 	} else if exists {
@@ -131,7 +136,20 @@ func (e *Egress) InsertSourceNat(vip, podIP string) error {
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip)
 }
 
-func (e *Egress) DeleteExistingSessions(vip, podIP string) error {
+func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) error {
+	log.Infof("[Egress] Adding source nat from [%s] => [%s], with destination port [%s]", podIP, vip, port)
+	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port); err != nil {
+		return err
+	} else if exists {
+		if err2 := e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port); err2 != nil {
+			return err2
+		}
+	}
+
+	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port)
+}
+
+func (e *Egress) DeleteExistingSessions(podIP string) error {
 
 	nfct, err := ct.Open(&ct.Config{})
 	if err != nil {

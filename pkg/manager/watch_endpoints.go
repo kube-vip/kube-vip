@@ -17,7 +17,7 @@ import (
 )
 
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
-	log.Infof("Watching endpoints for service [%s]", service.Name)
+	log.Infof("watching endpoints for service [%s]", service.Name)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	var cancel context.CancelFunc
 	var endpointContext context.Context
@@ -63,7 +63,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 				}
 			}
-			log.Infof("[%d], endpoints, last known good [%s]", len(localendpoints), lastKnownGoodEndpoint)
+			log.Debugf("[%d], endpoints, last known good [%s]", len(localendpoints), lastKnownGoodEndpoint)
 			// Check how many local endpoints exist (should ideally be 1)
 			stillExists := false
 			if len(localendpoints) != 0 {
@@ -115,8 +115,8 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 			log.Errorf("%v", statusErr)
 		}
 	}
-	log.Infof("Stopping watching endpoints for [%s]", service.Name)
-	return nil
+	log.Infof("stopping watching endpoints for [%s]", service.Name)
+	return nil //nolint
 }
 
 func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.Service) error {
