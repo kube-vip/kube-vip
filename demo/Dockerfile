@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:experimental
 
-FROM golang:1.13-alpine as dev
+FROM golang:1.19-alpine as dev
 RUN apk add --no-cache git ca-certificates
 RUN adduser -D appuser
 COPY main.go /src/
