@@ -71,11 +71,11 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	// If we're doing the hybrid mode
-	if c.EnableControlPane {
+	if c.EnableControlPlane {
 		cp := []corev1.EnvVar{
 			{
 				Name:  cpEnable,
-				Value: strconv.FormatBool(c.EnableControlPane),
+				Value: strconv.FormatBool(c.EnableControlPlane),
 			},
 			{
 				Name:  cpNamespace,

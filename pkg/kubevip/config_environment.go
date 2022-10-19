@@ -114,7 +114,7 @@ func ParseEnvironment(c *Config) error {
 		c.DDNS = b
 	}
 
-	// Find the namespace that the control pane should use (for leaderElection lock)
+	// Find the namespace that the control plane should use (for leaderElection lock)
 	env = os.Getenv(cpNamespace)
 	if env != "" {
 		c.Namespace = env
@@ -127,7 +127,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.EnableControlPane = b
+		c.EnableControlPlane = b
 	}
 
 	// Find Services toggle
@@ -159,7 +159,7 @@ func ParseEnvironment(c *Config) error {
 			c.LoadBalancerClassOnly = b
 		}
 
-		// Find the namespace that the control pane should use (for leaderElection lock)
+		// Find the namespace that the control plane should use (for leaderElection lock)
 		env = os.Getenv(svcNamespace)
 		if env != "" {
 			c.ServiceNamespace = env

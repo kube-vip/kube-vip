@@ -46,7 +46,7 @@ var kubeManifestPod = &cobra.Command{
 		}
 
 		// The control plane has a requirement for a VIP being specified
-		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
+		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
@@ -71,7 +71,7 @@ var kubeManifestDaemon = &cobra.Command{
 		// TODO - check for certain things VIP/interfaces
 
 		// The control plane has a requirement for a VIP being specified
-		if initConfig.EnableControlPane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
+		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
