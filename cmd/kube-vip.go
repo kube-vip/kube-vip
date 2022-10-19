@@ -123,7 +123,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableID, "tableID", 198, "The routing table used for all table entries")
 
 	// Behaviour flags
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPane, "controlplane", false, "Enable HA for control plane")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPlane, "controlplane", false, "Enable HA for control plane")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services")
 
 	// Extended behaviour flags
@@ -246,10 +246,10 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Provide configuration to output/logging
-		log.Infof("namespace [%s], Mode: [%s], Features(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, mode, initConfig.EnableControlPane, initConfig.EnableServices)
+		log.Infof("namespace [%s], Mode: [%s], Features(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, mode, initConfig.EnableControlPlane, initConfig.EnableServices)
 
 		// End if nothing is enabled
-		if !initConfig.EnableServices && !initConfig.EnableControlPane {
+		if !initConfig.EnableServices && !initConfig.EnableControlPlane {
 			log.Fatalln("no features are enabled")
 		}
 

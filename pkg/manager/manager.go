@@ -62,8 +62,8 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	switch {
 	case fileExists(adminConfigPath):
-		if config.EnableControlPane {
-			// If this is a control pane host it will likely have started as a static pod or won't have the
+		if config.EnableControlPlane {
+			// If this is a control plane host it will likely have started as a static pod or won't have the
 			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 			// ensure connectivity.
 			clientset, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))

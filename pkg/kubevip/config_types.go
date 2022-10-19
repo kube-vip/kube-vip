@@ -21,10 +21,10 @@ type Config struct {
 	// EnableRoutingTable, will use the routing table to advertise the VIP address
 	EnableRoutingTable bool `yaml:"enableRoutingTable"`
 
-	// EnableControlPane, will enable the control plane functionality (used for hybrid behaviour)
-	EnableControlPane bool `yaml:"enableControlPane"`
+	// EnableControlPlane, will enable the control plane functionality (used for hybrid behaviour)
+	EnableControlPlane bool `yaml:"enableControlPlane"`
 
-	// EnableControlPane, will enable the services functionality (used for hybrid behaviour)
+	// EnableServices, will enable the services functionality (used for hybrid behaviour)
 	EnableServices bool `yaml:"enableServices"`
 
 	// EnableServicesElection, will enable leaderElection per service

@@ -31,14 +31,14 @@ func (sm *Manager) startARP() error {
 	go func() {
 		<-sm.signalChan
 		log.Info("Received termination, signaling shutdown")
-		if sm.config.EnableControlPane {
+		if sm.config.EnableControlPlane {
 			cpCluster.Stop()
 		}
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
 	}()
 
-	if sm.config.EnableControlPane {
+	if sm.config.EnableControlPlane {
 		cpCluster, err = cluster.InitCluster(sm.config, false)
 		if err != nil {
 			return err
@@ -52,7 +52,7 @@ func (sm *Manager) startARP() error {
 		go func() {
 			err := cpCluster.StartCluster(sm.config, clusterManager, nil)
 			if err != nil {
-				log.Errorf("Control Pane Error [%v]", err)
+				log.Errorf("Control Plane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
 				sm.signalChan <- syscall.SIGINT
 
