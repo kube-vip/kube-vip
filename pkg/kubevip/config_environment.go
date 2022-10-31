@@ -382,5 +382,16 @@ func ParseEnvironment(c *Config) error {
 		c.PrometheusHTTPServer = env
 	}
 
+	// Set Egress configuration(s)
+	env = os.Getenv(egressPodCidr)
+	if env != "" {
+		c.EgressPodCidr = env
+	}
+
+	env = os.Getenv(egressServiceCidr)
+	if env != "" {
+		c.EgressServiceCidr = env
+	}
+
 	return nil
 }

@@ -30,6 +30,12 @@ const (
 	//vipCidr - defines the cidr that the vip will use
 	vipCidr = "vip_cidr"
 
+	//egressPodCidr - defines the cidr that egress will ignore
+	egressPodCidr = "egress_podcidr"
+
+	//egressServiceCidr - defines the cidr that egress will ignore
+	egressServiceCidr = "egress_servicecidr"
+
 	/////////////////////////////////////
 	// TO DO:
 	// Determine how to tidy this mess up
