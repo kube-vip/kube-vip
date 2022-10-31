@@ -13,6 +13,11 @@ func ParseEnvironment(c *Config) error {
 
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
+	// Set default value
+	if env == "" {
+		env = "4"
+	}
+
 	if env != "" {
 		logLevel, err := strconv.ParseUint(env, 10, 32)
 		if err != nil {
