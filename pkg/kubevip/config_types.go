@@ -9,6 +9,9 @@ import (
 // Config defines all of the settings for the Kube-Vip Pod
 type Config struct {
 
+	// Logging, settings
+	Logging int `yaml:"logging"`
+
 	// EnableARP, will use ARP to advertise the VIP address
 	EnableARP bool `yaml:"enableARP"`
 
