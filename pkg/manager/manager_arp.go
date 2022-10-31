@@ -131,9 +131,9 @@ func (sm *Manager) startARP() error {
 			// get elected before your background loop finished, violating
 			// the stated goal of the lease.
 			ReleaseOnCancel: true,
-			LeaseDuration:   10 * time.Second,
-			RenewDeadline:   5 * time.Second,
-			RetryPeriod:     1 * time.Second,
+			LeaseDuration:   time.Duration(sm.config.LeaseDuration) * time.Second,
+			RenewDeadline:   time.Duration(sm.config.RenewDeadline) * time.Second,
+			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					err = sm.servicesWatcher(ctx, sm.syncServices)
