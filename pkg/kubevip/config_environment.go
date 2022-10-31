@@ -6,7 +6,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/detector"
-	log "github.com/sirupsen/logrus"
 )
 
 // ParseEnvironment - will popultate the configuration from environment variables
@@ -19,7 +18,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			panic("Unable to parse environment variable [vip_loglevel], should be int")
 		}
-		log.SetLevel(log.Level(logLevel))
+		c.Logging = int(logLevel)
 	}
 
 	// Find interface

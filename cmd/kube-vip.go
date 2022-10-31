@@ -218,7 +218,7 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLevel(log.Level(initConfig.Logging))
 
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
