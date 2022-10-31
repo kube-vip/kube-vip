@@ -98,7 +98,7 @@ type Config struct {
 	BGPPeerConfig bgp.Peer
 	BGPPeers      []string
 
-	// EnablePacket, will use the metal API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
+	// EnableMetal, will use the metal API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
 	EnableMetal bool `yaml:"enableMetal"`
 
 	// MetalAPIKey, is the API token used to authenticate to the API
@@ -118,6 +118,14 @@ type Config struct {
 
 	// The hostport used to expose Prometheus metrics over an HTTP server
 	PrometheusHTTPServer string `yaml:"prometheusHTTPServer,omitempty"`
+
+	// Egress configuration
+
+	// EgressPodCidr, this contains the pod cidr range to ignore Egress
+	EgressPodCidr string
+
+	// EgressServiceCidr, this contains the service cidr range to ignore
+	EgressServiceCidr string
 }
 
 // LeaderElection defines all of the settings for Kubernetes LeaderElection

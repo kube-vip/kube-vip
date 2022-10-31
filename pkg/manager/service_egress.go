@@ -12,8 +12,10 @@ import (
 )
 
 // DEBUG
-const podCIDR = "10.0.0.0/26"
-const serviceCIDR = "10.96.0.0/12"
+const (
+	defaultPodCIDR     = "10.0.0.0/16"
+	defaultServiceCIDR = "10.96.0.0/12"
+)
 
 func (sm *Manager) iptablesCheck() error {
 	file, err := os.Open("/proc/modules")
@@ -47,6 +49,21 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts s
 	// 	serviceCIDR = "10.96.0.0/12"
 	// 	podCIDR = "10.0.0.0/16"
 	// }
+
+	var podCidr, serviceCidr string
+
+	if sm.config.EgressPodCidr != "" {
+		podCidr = sm.config.EgressPodCidr
+	} else {
+		podCidr = defaultPodCIDR
+	}
+
+	if sm.config.EgressServiceCidr != "" {
+		serviceCidr = sm.config.EgressServiceCidr
+	} else {
+		serviceCidr = defaultServiceCIDR
+	}
+
 	i, err := vip.CreateIptablesClient()
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
@@ -62,11 +79,11 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts s
 			return fmt.Errorf("error creating mangle chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
-	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, podCIDR)
+	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, podCidr)
 	if err != nil {
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
-	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCIDR)
+	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCidr)
 	if err != nil {
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
