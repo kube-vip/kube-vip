@@ -20,11 +20,13 @@ first_node() {
   logr "INFO" "Creating First node!" 
   #ssh $NODE01  "sudo modprobe ip_vs_rr"
   #ssh $NODE01  "sudo modprobe nf_conntrack"
-  logr "INFO" "$(ssh $NODE01  "docker rmi ghcr.io/kube-vip/kube-vip:$kube_vip_version" 2>&1)"
+  logr "INFO" "$(ssh $NODE01  "ctr images rm ghcr.io/kube-vip/kube-vip:$kube_vip_version" 2>&1)"
 
   # echo "echo "ip_vs | tee -a /etc/modules"
   logr "INFO" "Creating Kube-vip.io Manifest" 
-  ssh $NODE01 "sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:$kube_vip_version manifest pod  --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\" | sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
+
+  ssh $NODE01 "sudo ctr image pull ghcr.io/kube-vip/kube-vip:$kube_vip_version"
+  ssh $NODE01 "sudo mkdir -p /etc/kubernetes/manifests/; sudo ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$kube_vip_version vip /kube-vip manifest pod  --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\" | sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
   logr "INFO" "Deploying first Kubernetes node $NODE01"
   FIRST_NODE=$(ssh $NODE01 "sudo kubeadm init --kubernetes-version $kubernetes_version --control-plane-endpoint $kube_vip_vip --upload-certs --pod-network-cidr=10.0.0.0/16")
   echo "$FIRST_NODE" >> $logfile
@@ -48,11 +50,11 @@ additional_controlplane() {
   logr "INFO" "Adding $NODE02"
   ssh $NODE02 "sudo $JOIN_CMD $CONTROLPLANE_CMD" >> $logfile
   sleep 1
-  ssh $NODE02 "sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:$kube_vip_version manifest pod --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\"| sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
+  ssh $NODE02 "sudo ctr image pull ghcr.io/kube-vip/kube-vip:$kube_vip_version; sudo mkdir -p /etc/kubernetes/manifests/; sudo ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$kube_vip_version vip /kube-vip manifest pod --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\"| sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
   logr "INFO" "Adding $NODE03"
   ssh $NODE03 "sudo $JOIN_CMD $CONTROLPLANE_CMD" >> $logfile
   sleep 1
-  ssh $NODE03 "sudo docker run --network host --rm ghcr.io/kube-vip/kube-vip:$kube_vip_version manifest pod --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\"| sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
+  ssh $NODE03 "sudo ctr image pull ghcr.io/kube-vip/kube-vip:$kube_vip_version; sudo mkdir -p /etc/kubernetes/manifests/; sudo ctr run --rm --net-host ghcr.io/kube-vip/kube-vip:$kube_vip_version vip /kube-vip manifest pod --interface ens160 --vip $kube_vip_vip --arp --leaderElection --enableLoadBalancer $kube_vip_mode | sed  \"s/image:.*/image: plndr\/kube-vip:$kube_vip_version/\"| sudo tee /etc/kubernetes/manifests/vip.yaml" >> $logfile
 }
 
 ## Main() 

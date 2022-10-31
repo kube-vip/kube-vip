@@ -1,6 +1,11 @@
 # Home lab (for testing)
-NODE01=k8s01.fnnrn.me
-NODE02=k8s02.fnnrn.me
-NODE03=k8s03.fnnrn.me
-NODE04=k8s04.fnnrn.me
-NODE05=k8s05.fnnrn.me
+#NODE01=k8s01.fnnrn.me
+#NODE02=k8s02.fnnrn.me
+#NODE03=k8s03.fnnrn.me
+#NODE04=k8s04.fnnrn.me
+#NODE05=k8s05.fnnrn.me
+NODE01=192.168.0.31
+NODE02=192.168.0.32
+NODE03=192.168.0.33
+NODE04=192.168.0.34
+NODE05=192.168.0.35
