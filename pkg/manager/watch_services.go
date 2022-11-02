@@ -26,15 +26,17 @@ var activeService map[string]bool
 // watchedService keeps track of services that are already being watched
 var watchedService map[string]bool
 
+func init() {
+	// Set up the caches for monitoring existing active or watched services
+	activeServiceLoadBalancer = make(map[string]context.Context)
+	activeService = make(map[string]bool)
+	watchedService = make(map[string]bool)
+}
+
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service, *sync.WaitGroup) error) error {
 	// Watch function
 	var wg sync.WaitGroup
-
-	// Set up the activeServiceLoadBalancer
-	activeServiceLoadBalancer = make(map[string]context.Context)
-	activeService = make(map[string]bool)
-	watchedService = make(map[string]bool)
 
 	id, err := os.Hostname()
 	if err != nil {
@@ -107,33 +109,32 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			//log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 
 			// Scenarios:
 			// 1.
-
 			if !activeService[string(svc.UID)] {
 				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)] = context.TODO()
 				// Background the services election
 				if sm.config.EnableServicesElection {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-						// Start an endpoint watcher if we're not watching it alredy
+						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
-							watchedService[string(svc.UID)] = true
-
+							log.Warnf("[RACE] now watching [%s]", svc.Name)
 							// background the endpoint watcher
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint watcher
 									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
 									if err != nil {
-										log.Errorf("%v", err)
+										log.Error(err)
 									}
-									watchedService[string(svc.UID)] = false
 									wg.Wait()
 								}
 							}()
+							// We're now watching this service
+							watchedService[string(svc.UID)] = true
 						}
 					} else {
 						go func() {
@@ -158,6 +159,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if !ok {
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
+
 			if activeService[string(svc.UID)] {
 				// We only care about LoadBalancer services
 				if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
@@ -169,12 +171,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
 					break
 				}
-				// If this is a watched service then and additional leaderElection will handle stopping
-				if !watchedService[string(svc.UID)] {
-					err := sm.deleteService(string(svc.UID))
-					if err != nil {
-						log.Error(err)
-					}
+				// If this is an active service then and additional leaderElection will handle stopping
+				err := sm.deleteService(string(svc.UID))
+				if err != nil {
+					log.Error(err)
 				}
 				activeServiceLoadBalancer[string(svc.UID)].Done()
 				activeService[string(svc.UID)] = false
