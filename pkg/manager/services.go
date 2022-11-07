@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -86,6 +87,7 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")
+
 	// Iterate through the synchronising services
 	foundInstance := false
 	newServiceAddress := service.Spec.LoadBalancerIP
@@ -119,6 +121,8 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 }
 
 func (sm *Manager) addService(service *v1.Service) error {
+	startTime := time.Now()
+
 	newService, err := NewInstance(service, sm.config)
 	if err != nil {
 		return err
@@ -157,7 +161,8 @@ func (sm *Manager) addService(service *v1.Service) error {
 			}
 		}
 	}
-	log.Debugf("[COMPLETE] Service Sync")
+	finishTime := time.Since(startTime)
+	log.Infof("[service] synchronised in %dms", finishTime.Milliseconds())
 
 	return nil
 }

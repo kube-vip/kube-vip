@@ -176,6 +176,12 @@ func ParseEnvironment(c *Config) error {
 		c.VIPCIDR = env
 	}
 
+	// Find vip address subnet
+	env = os.Getenv(vipSubnet)
+	if env != "" {
+		c.VIPSubnet = env
+	}
+
 	// Find Single Node
 	env = os.Getenv(vipSingleNode)
 	if env != "" {
