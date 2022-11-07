@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -68,6 +69,14 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts s
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
+	if os.Getenv("EGRESS_CLEAN") != "" {
+		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
+		cleanErr := i.CleanIPtables()
+		if cleanErr != nil {
+			log.Errorf("Error cleaning rules [%v]", cleanErr)
+		}
+	}
+
 	// Check if the kube-vip mangle chain exists, if not create it
 	exists, err := i.CheckMangleChain(vip.MangleChainName)
 	if err != nil {
@@ -161,8 +170,15 @@ func TeardownEgress(podIP, vipIP, destinationPorts string) error {
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
-	if destinationPorts != "" {
 
+	// Remove the marking of egress packets
+	err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
+	if err != nil {
+		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	}
+
+	// Clear up SNAT rules
+	if destinationPorts != "" {
 		fixedPorts := strings.Split(destinationPorts, ",")
 
 		for _, fixedPort := range fixedPorts {
