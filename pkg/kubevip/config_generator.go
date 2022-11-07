@@ -67,7 +67,18 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 		}
 		newEnvironment = append(newEnvironment, cidr...)
+	}
 
+	// If a subnet is required for the VIP
+	if c.VIPSubnet != "" {
+		// build environment variables
+		cidr := []corev1.EnvVar{
+			{
+				Name:  vipSubnet,
+				Value: c.VIPSubnet,
+			},
+		}
+		newEnvironment = append(newEnvironment, cidr...)
 	}
 
 	// If we're doing the hybrid mode
