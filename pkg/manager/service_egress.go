@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -68,13 +67,6 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts s
 	i, err := vip.CreateIptablesClient()
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
-	}
-	if os.Getenv("EGRESS_CLEAN") != "" {
-		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
-		cleanErr := i.CleanIPtables()
-		if cleanErr != nil {
-			log.Errorf("Error cleaning rules [%v]", cleanErr)
-		}
 	}
 
 	// Check if the kube-vip mangle chain exists, if not create it
