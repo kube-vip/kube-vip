@@ -121,7 +121,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
-							log.Warnf("[RACE] now watching [%s]", svc.Name)
 							// background the endpoint watcher
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
