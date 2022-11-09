@@ -12,8 +12,6 @@ import (
 	"net"
 	"syscall"
 	"unsafe"
-
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -169,7 +167,6 @@ func ARPSendGratuitous(address, ifaceName string) error {
 	}
 
 	// This is a debug message, enable debugging to ensure that the gratuitous arp is repeating
-	log.Debugf("Broadcasting ARP update for %s (%s) via %s", address, iface.HardwareAddr, iface.Name)
 	m, err := gratuitousARP(ip, iface.HardwareAddr)
 	if err != nil {
 		return err

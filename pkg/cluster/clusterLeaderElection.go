@@ -268,7 +268,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 		case watch.Added, watch.Modified:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 			//Find the node IP address (this isn't foolproof)
 			for x := range node.Status.Addresses {
@@ -276,14 +276,14 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
-						log.Errorf("Add IPVS backend [%v]", err)
+						log.Errorf("add IPVS backend [%v]", err)
 					}
 				}
 			}
 		case watch.Deleted:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
-				return fmt.Errorf("Unable to parse Kubernetes Node from Annotation watcher")
+				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 
 			//Find the node IP address (this isn't foolproof)

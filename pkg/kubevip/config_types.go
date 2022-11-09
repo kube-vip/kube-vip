@@ -36,6 +36,9 @@ type Config struct {
 	// LoadBalancerClassOnly, will enable load balancing only for services with LoadBalancerClass set to "kube-vip.io/kube-vip-class"
 	LoadBalancerClassOnly bool `yaml:"lbClassOnly"`
 
+	// ArpBroadcastRate, defines how often kube-vip will update the network about updates to the network
+	ArpBroadcastRate int64 `yaml:"arpBroadcastRate"`
+
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 

@@ -167,9 +167,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
 func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) {
-	// Start a kube-vip loadbalancer service
-	log.Infof("Starting advertising address [%s] with kube-vip", c.VIP)
-
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
@@ -209,6 +206,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			if ndp != nil {
 				defer ndp.Close()
 			}
+			log.Debugf("Broadcasting ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
 
 			for {
 				select {
@@ -242,9 +240,14 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 						}
 					}
 				}
-				time.Sleep(3 * time.Second)
+				if c.ArpBroadcastRate < 500 {
+					log.Errorf("arp broadcast rate is [%d], this shouldn't be lower that 300ms (defaulting to 3000)", c.ArpBroadcastRate)
+					c.ArpBroadcastRate = 3000
+				}
+				time.Sleep(time.Duration(c.ArpBroadcastRate) * time.Millisecond)
 			}
 		}(ctxArp)
+		log.Debugf("ending ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
 	}
 
 	if c.EnableBGP {
@@ -277,5 +280,4 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			}
 		}
 	}()
-	log.Infoln("Started Load Balancer and Virtual IP")
 }

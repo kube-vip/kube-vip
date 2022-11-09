@@ -40,7 +40,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 	}
 
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Infof("beginning leadership for service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
+	log.Infof("[services election] for service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -54,6 +54,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 		},
 	}
 
+	activeService[string(service.UID)] = true
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -70,7 +71,6 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// Mark this service as active (as we've started leading)
-				activeService[string(service.UID)] = true
 				// we run this in background as it's blocking
 				go func() {
 					if err := sm.syncServices(ctx, service, wg); err != nil {
@@ -81,7 +81,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("service [%s] leader lost: %s", service.Name, id)
+				log.Infof("[services election] service [%s] leader lost: [%s]", service.Name, id)
 				if activeService[string(service.UID)] {
 					if err := sm.deleteService(string(service.UID)); err != nil {
 						log.Errorln(err)
@@ -96,7 +96,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 					// I just got the lock
 					return
 				}
-				log.Infof("new leader elected: %s", identity)
+				log.Infof("[services election] new leader elected: %s", identity)
 			},
 		},
 	})

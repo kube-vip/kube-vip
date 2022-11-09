@@ -210,7 +210,7 @@ func ParseEnvironment(c *Config) error {
 		c.StartAsLeader = b
 	}
 
-	// Find ARP
+	// Find if ARP is enabled
 	env = os.Getenv(vipArp)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -218,6 +218,19 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableARP = b
+	}
+
+	// Find if ARP is enabled
+	env = os.Getenv(vipArpRate)
+	if env != "" {
+		i64, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.ArpBroadcastRate = i64
+	} else {
+		// default to three seconds
+		c.ArpBroadcastRate = 3000
 	}
 
 	// Wireguard Mode
