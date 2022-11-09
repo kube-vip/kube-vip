@@ -128,7 +128,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 		return err
 	}
 
-	log.Infof("adding VIP [%s] for [%s/%s] ", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
+	log.Infof("[service] adding VIP [%s] for [%s/%s] ", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
@@ -173,10 +173,10 @@ func (sm *Manager) upnpMap(s *Instance) {
 	if sm.upnp != nil {
 		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.Vip, s.Port, s.serviceSnapshot.Name)
 		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, s.Vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
-			log.Infof("Service should be accessible externally on port [%d]", s.Port)
+			log.Infof("service should be accessible externally on port [%d]", s.Port)
 		} else {
 			sm.upnp.Reclaim()
-			log.Errorf("Unable to map port to gateway [%s]", err.Error())
+			log.Errorf("unable to map port to gateway [%s]", err.Error())
 		}
 	}
 }

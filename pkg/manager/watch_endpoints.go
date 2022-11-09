@@ -17,7 +17,7 @@ import (
 )
 
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
-	log.Infof("watching endpoints for service [%s]", service.Name)
+	log.Infof("[endpoint] watching for service [%s] in namespace [%s]", service.Name, service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	var cancel context.CancelFunc
 	var endpointContext context.Context
@@ -116,7 +116,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 			log.Errorf("%v", statusErr)
 		}
 	}
-	log.Infof("stopping watching endpoints for [%s]", service.Name)
+	log.Infof("[endpoints] stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
 	return nil //nolint:govet
 }
 

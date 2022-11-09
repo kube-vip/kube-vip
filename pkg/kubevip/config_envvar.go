@@ -6,6 +6,9 @@ const (
 	//vipArp - defines if the arp broadcast should be enabled
 	vipArp = "vip_arp"
 
+	//vip_arpRate - defines the rate of gARP broadcasts
+	vipArpRate = "vip_arpRate"
+
 	//vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaderElection = "vip_leaderelection"
 

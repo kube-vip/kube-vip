@@ -40,7 +40,7 @@ func CreateIptablesClient() (*Egress, error) {
 }
 
 func (e *Egress) CheckMangleChain(name string) (bool, error) {
-	log.Infof("[egress] Cheching for Chain [%s]", name)
+	log.Infof("[egress] Checking for Chain [%s]", name)
 	return e.ipTablesClient.ChainExists("mangle", name)
 }
 
