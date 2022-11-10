@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"syscall"
@@ -100,15 +99,16 @@ func (sm *Manager) startARP() error {
 	}
 
 	// This will tidy any dangling kube-vip iptables rules
-	i, err := vip.CreateIptablesClient()
-	if err != nil {
-		return fmt.Errorf("error Creating iptables client [%s]", err)
-	}
 	if os.Getenv("EGRESS_CLEAN") != "" {
-		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
-		cleanErr := i.CleanIPtables()
-		if cleanErr != nil {
-			log.Errorf("Error cleaning rules [%v]", cleanErr)
+		i, err := vip.CreateIptablesClient()
+		if err != nil {
+			log.Warnf("[egress] Unable to clean any dangling egress rules [%v]", err)
+		} else {
+			log.Info("[egress] Cleaning any dangling kube-vip egress rules")
+			cleanErr := i.CleanIPtables()
+			if cleanErr != nil {
+				log.Errorf("Error cleaning rules [%v]", cleanErr)
+			}
 		}
 	}
 
