@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -23,69 +24,8 @@ const (
 	egressDestinationPorts = "kube-vip.io/egress-destination-ports"
 	egressSourcePorts      = "kube-vip.io/egress-source-ports"
 	endpoint               = "kube-vip.io/active-endpoint"
+	flushContrack          = "kube-vip.io/flush-conntrack"
 )
-
-func (sm *Manager) deleteService(uid string) error {
-	//pretect multiple calls
-	sm.mutex.Lock()
-	defer sm.mutex.Unlock()
-
-	var updatedInstances []*Instance
-	found := false
-	for x := range sm.serviceInstances {
-		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].UID)
-		// Add the running services to the new array
-		if sm.serviceInstances[x].UID != uid {
-			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
-		} else {
-			// Flip the found when we match
-			found = true
-			sm.serviceInstances[x].cluster.Stop()
-			if sm.serviceInstances[x].isDHCP {
-				sm.serviceInstances[x].dhcpClient.Stop()
-				macvlan, err := netlink.LinkByName(sm.serviceInstances[x].dhcpInterface)
-				if err != nil {
-					return fmt.Errorf("error finding VIP Interface: %v", err)
-				}
-
-				err = netlink.LinkDel(macvlan)
-				if err != nil {
-					return fmt.Errorf("error deleting DHCP Link : %v", err)
-				}
-			}
-			if sm.serviceInstances[x].vipConfig.EnableBGP {
-				cidrVip := fmt.Sprintf("%s/%s", sm.serviceInstances[x].vipConfig.VIP, sm.serviceInstances[x].vipConfig.VIPCIDR)
-				err := sm.bgpServer.DelHost(cidrVip)
-				return err
-			}
-
-			// We will need to tear down the egress
-			if sm.serviceInstances[x].serviceSnapshot.Annotations[egress] == "true" {
-				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
-
-					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
-					if err != nil {
-						log.Errorf("%v", err)
-					}
-				}
-			}
-		}
-	}
-	// If we've been through all services and not found the correct one then error
-	if !found {
-		// TODO: - fix UX
-		//return fmt.Errorf("unable to find/stop service [%s]", uid)
-		return nil
-	}
-
-	// Update the service array
-	sm.serviceInstances = updatedInstances
-
-	log.Infof("Removed [%s] from manager, [%d] advertised services remain", uid, len(sm.serviceInstances))
-
-	return nil
-}
 
 func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
@@ -147,7 +87,23 @@ func (sm *Manager) addService(service *v1.Service) error {
 		}
 		return err
 	}
+
+	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
+	if service.Annotations[flushContrack] == "true" {
+		log.Debugf("Flushing conntrack rules for service [%s]", service.Name)
+		err = vip.DeleteExistingSessions(service.Spec.LoadBalancerIP, false)
+		if err != nil {
+			log.Errorf("Error flushing any remaining egress connections [%s]", err)
+		}
+		err = vip.DeleteExistingSessions(service.Spec.LoadBalancerIP, true)
+		if err != nil {
+			log.Errorf("Error flushing any remaining ingress connections [%s]", err)
+		}
+	}
+
+	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if service.Annotations[egress] == "true" {
+		log.Debugf("Enabling egress for the service [%s]", service.Name)
 		if service.Annotations[endpoint] != "" {
 			// We will need to modify the iptables rules
 			err = sm.iptablesCheck()
@@ -167,6 +123,68 @@ func (sm *Manager) addService(service *v1.Service) error {
 	}
 	finishTime := time.Since(startTime)
 	log.Infof("[service] synchronised in %dms", finishTime.Milliseconds())
+
+	return nil
+}
+
+func (sm *Manager) deleteService(uid string) error {
+	//pretect multiple calls
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	var updatedInstances []*Instance
+	found := false
+	for x := range sm.serviceInstances {
+		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].UID)
+		// Add the running services to the new array
+		if sm.serviceInstances[x].UID != uid {
+			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
+		} else {
+			// Flip the found when we match
+			found = true
+			sm.serviceInstances[x].cluster.Stop()
+			if sm.serviceInstances[x].isDHCP {
+				sm.serviceInstances[x].dhcpClient.Stop()
+				macvlan, err := netlink.LinkByName(sm.serviceInstances[x].dhcpInterface)
+				if err != nil {
+					return fmt.Errorf("error finding VIP Interface: %v", err)
+				}
+
+				err = netlink.LinkDel(macvlan)
+				if err != nil {
+					return fmt.Errorf("error deleting DHCP Link : %v", err)
+				}
+			}
+			if sm.serviceInstances[x].vipConfig.EnableBGP {
+				cidrVip := fmt.Sprintf("%s/%s", sm.serviceInstances[x].vipConfig.VIP, sm.serviceInstances[x].vipConfig.VIPCIDR)
+				err := sm.bgpServer.DelHost(cidrVip)
+				return err
+			}
+
+			// We will need to tear down the egress
+			if sm.serviceInstances[x].serviceSnapshot.Annotations[egress] == "true" {
+				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
+
+					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
+					if err != nil {
+						log.Errorf("%v", err)
+					}
+				}
+			}
+		}
+	}
+	// If we've been through all services and not found the correct one then error
+	if !found {
+		// TODO: - fix UX
+		//return fmt.Errorf("unable to find/stop service [%s]", uid)
+		return nil
+	}
+
+	// Update the service array
+	sm.serviceInstances = updatedInstances
+
+	log.Infof("Removed [%s] from manager, [%d] advertised services remain", uid, len(sm.serviceInstances))
 
 	return nil
 }

@@ -129,7 +129,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts s
 		}
 	}
 	//_ = i.DumpChain(vip.MangleChainName)
-	err = i.DeleteExistingSessions(podIP)
+	err = vip.DeleteExistingSessions(podIP, false)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func TeardownEgress(podIP, vipIP, destinationPorts string) error {
 			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 		}
 	}
-	err = i.DeleteExistingSessions(podIP)
+	err = vip.DeleteExistingSessions(podIP, false)
 	if err != nil {
 		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 	}

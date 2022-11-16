@@ -144,7 +144,7 @@ func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto strin
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", Comment)
 }
 
-func (e *Egress) DeleteExistingSessions(podIP string) error {
+func DeleteExistingSessions(sessionIP string, destination bool) error {
 
 	nfct, err := ct.Open(&ct.Config{})
 	if err != nil {
@@ -157,17 +157,34 @@ func (e *Egress) DeleteExistingSessions(podIP string) error {
 		log.Errorf("could not dump sessions: %v", err)
 		return err
 	}
+	// by default we only clear source (i.e. connections going from the vip (egress))
+	if !destination {
+		for _, session := range sessions {
+			//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
 
-	for _, session := range sessions {
-		//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
-		if session.Origin.Src.String() == podIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
-			//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
-			err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
-			if err != nil {
-				log.Errorf("could not delete sessions: %v", err)
+			if session.Origin.Src.String() == sessionIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
+				//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
+				err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				if err != nil {
+					log.Errorf("could not delete sessions: %v", err)
+				}
+			}
+		}
+	} else {
+		// This will clear any "dangling" outbound connections.
+		for _, session := range sessions {
+			//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
+
+			if session.Origin.Dst.String() == sessionIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
+				//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
+				err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				if err != nil {
+					log.Errorf("could not delete sessions: %v", err)
+				}
 			}
 		}
 	}
+
 	return nil
 }
 
