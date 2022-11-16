@@ -16,9 +16,13 @@ import (
 )
 
 const (
-	hwAddrKey   = "kube-vip.io/hwaddr"
-	requestedIP = "kube-vip.io/requestedIP"
-	vipHost     = "kube-vip.io/vipHost"
+	hwAddrKey              = "kube-vip.io/hwaddr"
+	requestedIP            = "kube-vip.io/requestedIP"
+	vipHost                = "kube-vip.io/vipHost"
+	egress                 = "kube-vip.io/egress"
+	egressDestinationPorts = "kube-vip.io/egress-destination-ports"
+	egressSourcePorts      = "kube-vip.io/egress-source-ports"
+	endpoint               = "kube-vip.io/active-endpoint"
 )
 
 func (sm *Manager) deleteService(uid string) error {
@@ -56,11 +60,11 @@ func (sm *Manager) deleteService(uid string) error {
 			}
 
 			// We will need to tear down the egress
-			if sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/egress"] == "true" {
-				if sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"] != "" {
+			if sm.serviceInstances[x].serviceSnapshot.Annotations[egress] == "true" {
+				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
 
 					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/active-endpoint"], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations["kube-vip.io/egress-destination-ports"])
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
 					if err != nil {
 						log.Errorf("%v", err)
 					}
@@ -143,18 +147,18 @@ func (sm *Manager) addService(service *v1.Service) error {
 		}
 		return err
 	}
-	if service.Annotations["kube-vip.io/egress"] == "true" {
-		if service.Annotations["kube-vip.io/active-endpoint"] != "" {
+	if service.Annotations[egress] == "true" {
+		if service.Annotations[endpoint] != "" {
 			// We will need to modify the iptables rules
 			err = sm.iptablesCheck()
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
-			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations["kube-vip.io/active-endpoint"], service.Annotations["kube-vip.io/egress-destination-ports"], service.Annotations["kube-vip.io/egress-source-ports"])
+			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations[endpoint], service.Annotations[egressDestinationPorts], service.Annotations[egressSourcePorts])
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			} else {
-				err = sm.updateServiceEndpointAnnotation(service.Annotations["kube-vip.io/active-endpoint"], service)
+				err = sm.updateServiceEndpointAnnotation(service.Annotations[endpoint], service)
 				if err != nil {
 					log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
 				}
