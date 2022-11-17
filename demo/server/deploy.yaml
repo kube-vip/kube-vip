@@ -6,7 +6,7 @@ metadata:
     app: kube-vip-demo
   name: kube-vip-demo
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: kube-vip-demo
@@ -31,3 +31,24 @@ spec:
             - containerPort: 10001
             - containerPort: 10002
 status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-service
+  namespace: default
+  labels:
+    app: demo-service
+  annotations:
+    kube-vip.io/egress: "true"
+spec:
+  type: LoadBalancer
+  # "Local" preserves the client source IP and avoids a second hop for
+  # LoadBalancer and NodePort
+  externalTrafficPolicy: Local
+  ports:
+  - name: demo-udp
+    port: 10002
+    protocol: UDP
+  selector:
+    app: kube-vip-demo
