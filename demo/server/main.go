@@ -60,7 +60,7 @@ func main() {
 				fmt.Println("error: ", err)
 			}
 
-			ServerConn.WriteTo(buf[0:n], addr)
+			ServerConn.WriteTo(buf[0:n],  )
 		}
 	}
 }
