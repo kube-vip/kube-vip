@@ -16,41 +16,56 @@ func main() {
 	interval := flag.Float64("interval", 1000, "Interval in milliseconds")
 	flag.Parse()
 	var errorTime time.Time
-	var errorOccured bool
+	var errorOccurred bool
 	for {
 		p := make([]byte, 2048)
 		conn, err := net.Dial("udp", fmt.Sprintf("%s:%d", *address, *port))
-		conn.SetDeadline(time.Now().Add(time.Duration(*interval) * time.Millisecond))
 		if err != nil {
-			//fmt.Printf("Connectivity error [%v]", err)
-			if !errorOccured {
+			if !errorOccurred {
 				errorTime = time.Now()
-				errorOccured = true
+				errorOccurred = true
 			}
-			conn.Close()
 			continue
 		}
 
-		fmt.Fprintf(conn, udpdata)
+		err = conn.SetDeadline(time.Now().Add(time.Duration(*interval) * time.Millisecond))
+		if err != nil {
+			//fmt.Printf("Connectivity error [%v]", err)
+			if !errorOccurred {
+				errorTime = time.Now()
+				errorOccurred = true
+			}
+			if err = conn.Close(); err != nil {
+				fmt.Printf("Error closing connection [%v]", err)
+			}
+			continue
+		}
+
+		_, err = fmt.Fprint(conn, udpdata)
+		if err != nil {
+			fmt.Printf("Error writing data [%v]", err)
+		}
 
 		_, err = bufio.NewReader(conn).Read(p)
 		if err != nil {
 			//fmt.Printf("read error %v\n", err)
-			if !errorOccured {
+			if !errorOccurred {
 				errorTime = time.Now()
-				errorOccured = true
+				errorOccurred = true
 			}
-			conn.Close()
+			if err = conn.Close(); err != nil {
+				fmt.Printf("Error closing connection [%v]", err)
+			}
 			continue
 		}
 		time.Sleep(time.Duration(*interval) * time.Millisecond)
-		if errorOccured {
+		if errorOccurred {
 			finishTime := time.Since(errorTime)
 			//fmt.Printf("connectivity reconciled in %dms\n", finishTime.Milliseconds())
 			//t :=time.Now().Format("15:04:05.000000")
 			fmt.Printf("%s %d\n", time.Now().Format("15:04:05.000000"), finishTime.Milliseconds())
 
-			errorOccured = false
+			errorOccurred = false
 		}
 	}
 }

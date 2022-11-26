@@ -110,7 +110,7 @@ func (sm *Manager) addService(service *v1.Service) error {
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
-			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations[endpoint], service.Annotations[egressDestinationPorts], service.Annotations[egressSourcePorts])
+			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations[endpoint], service.Annotations[egressDestinationPorts])
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			} else {
