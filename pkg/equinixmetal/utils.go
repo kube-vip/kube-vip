@@ -3,7 +3,6 @@ package equinixmetal
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"github.com/packethost/packngo"
@@ -46,7 +45,7 @@ func GetPacketConfig(providerConfig string) (string, string, error) {
 	}
 	// get our token and project
 	if providerConfig != "" {
-		configBytes, err := ioutil.ReadFile(providerConfig)
+		configBytes, err := os.ReadFile(providerConfig)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to get read configuration file at path %s: %v", providerConfig, err)
 		}

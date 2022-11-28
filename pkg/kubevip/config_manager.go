@@ -2,7 +2,6 @@ package kubevip
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -36,7 +35,7 @@ func OpenConfig(path string) (*Config, error) {
 	// Check the actual path from the string
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		// Attempt to read the data
-		configData, err := ioutil.ReadFile(path)
+		configData, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}

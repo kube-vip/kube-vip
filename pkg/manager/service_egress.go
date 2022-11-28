@@ -43,7 +43,7 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, sourcePorts string) error {
+func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts string) error {
 	// serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
 	// if err != nil {
 	// 	serviceCIDR = "10.96.0.0/12"
