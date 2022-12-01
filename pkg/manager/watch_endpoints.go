@@ -38,8 +38,28 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 		return fmt.Errorf("error creating endpoint watcher: %s", err.Error())
 	}
 
+	exitFunction := make(chan struct{})
+	go func() {
+		select {
+		case <-sm.shutdownChan:
+			log.Debug("[endpoint] shutdown called")
+			// Stop the retry watcher
+			rw.Stop()
+			// Cancel the context, which will in turn cancel the leadership
+			cancel()
+			return
+		case <-exitFunction:
+			log.Debug("[endpoint] function ending")
+			// Stop the retry watcher
+			rw.Stop()
+			// Cancel the context, which will in turn cancel the leadership
+			cancel()
+			return
+		}
+	}()
+
 	ch := rw.ResultChan()
-	//defer rw.Stop()
+
 	var lastKnownGoodEndpoint string
 	for event := range ch {
 
@@ -108,14 +128,17 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 			}
 
 		case watch.Deleted:
-			cancel()
-			rw.Stop()
+			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
+			close(exitFunction)
+			log.Infof("[endpoints] deleted stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
+			return nil
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Errorf("%v", statusErr)
+			log.Errorf("endpoint -> %v", statusErr)
 		}
 	}
+	close(exitFunction)
 	log.Infof("[endpoints] stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
 	return nil //nolint:govet
 }
