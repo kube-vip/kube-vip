@@ -122,7 +122,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	go func() {
 		<-signalChan
-		log.Info("Received termination, signaling shutdown")
+		log.Info("Received termination, signaling cluster shutdown")
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
 		// Cancel the arp context, which will in turn stop any broadcasts
@@ -318,7 +318,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 		}
 	}
 
-	log.Infoln("Exiting Annotations watcher")
+	log.Infoln("Exiting Node watcher")
 	return nil
 
 }

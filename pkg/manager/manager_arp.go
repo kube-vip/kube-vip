@@ -31,10 +31,12 @@ func (sm *Manager) startARP() error {
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
 		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
+		log.Info("Received kube-vip termination, signaling shutdown")
 		if sm.config.EnableControlPlane {
 			cpCluster.Stop()
 		}
+		// Close all go routines
+		close(sm.shutdownChan)
 		// Cancel the context, which will in turn cancel the leadership
 		cancel()
 	}()

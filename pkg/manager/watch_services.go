@@ -59,13 +59,22 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	if err != nil {
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
+	exitFunction := make(chan struct{})
 	go func() {
-		<-sm.signalChan
-		// Cancel the context
-		rw.Stop()
+		select {
+		case <-sm.shutdownChan:
+			log.Debug("[endpoint] shutdown called")
+			// Stop the retry watcher
+			rw.Stop()
+			return
+		case <-exitFunction:
+			log.Debug("[endpoint] function ending")
+			// Stop the retry watcher
+			rw.Stop()
+			return
+		}
 	}()
 	ch := rw.ResultChan()
-	//defer rw.Stop()
 
 	// Used for tracking an active endpoint / pod
 	for event := range ch {
@@ -195,10 +204,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			}
 
 			status := statusErr.ErrStatus
-			log.Errorf("%v", status)
+			log.Errorf("services -> %v", status)
 		default:
 		}
 	}
+	close(exitFunction)
 	log.Warnln("Stopping watching services for type: LoadBalancer in all namespaces")
 	return nil
 }

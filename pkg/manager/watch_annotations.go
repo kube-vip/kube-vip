@@ -69,15 +69,23 @@ func (sm *Manager) annotationsWatcher() error {
 		return fmt.Errorf("error creating annotations watcher: %s", err.Error())
 	}
 
+	exitFunction := make(chan struct{})
 	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-		// Cancel the context
-		rw.Stop()
+		select {
+		case <-sm.shutdownChan:
+			log.Debug("[annotations] shutdown called")
+			// Stop the retry watcher
+			rw.Stop()
+			return
+		case <-exitFunction:
+			log.Debug("[annotations] function ending")
+			// Stop the retry watcher
+			rw.Stop()
+			return
+		}
 	}()
 
 	ch := rw.ResultChan()
-	//defer rw.Stop()
 
 	for event := range ch {
 		// We need to inspect the event and get ResourceVersion out of it
@@ -124,7 +132,7 @@ func (sm *Manager) annotationsWatcher() error {
 		default:
 		}
 	}
-
+	close(exitFunction)
 	log.Infoln("Exiting Annotations watcher")
 	return nil
 

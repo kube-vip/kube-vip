@@ -40,8 +40,11 @@ type Manager struct {
 	//BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 
-	// This channel is used to signal a shutdown
+	// This channel is used to catch an OS signal and trigger a shutdown
 	signalChan chan os.Signal
+
+	// This channel is used to signal a shutdown
+	shutdownChan chan struct{}
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -114,8 +117,8 @@ func (sm *Manager) Start() error {
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(sm.signalChan, syscall.SIGTERM)
 
-	// Add Notification for SIGKILL (sent from Kubernetes)
-	signal.Notify(sm.signalChan, syscall.SIGKILL) //nolint
+	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
+	sm.shutdownChan = make(chan struct{})
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {
