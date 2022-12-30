@@ -36,7 +36,7 @@ curl https://kube-vip.io/manifests/rbac.yaml > /var/lib/rancher/k3s/server/manif
 
 ## Step 3: Generate a Kube-Vip DaemonSet Manifest
 
-Refer to the [DaemonSet manifest generation documentation](/install_daemonset/#generating-a-manifest) for the process to complete this step.
+Refer to the [DaemonSet manifest generation documentation](/installation/daemonset/#generating-a-manifest) for the process to complete this step.
 
 Either store this generated manifest separately in the `/var/lib/rancher/k3s/server/manifests/` directory, or append to the existing RBAC manifest called `kube-vip-rbac.yaml`. As a general best practice, it is a cleaner approach to place all related resources into a single YAML file.
 
@@ -50,4 +50,4 @@ Once the cluster is installed, you should be able to edit the `kubeconfig` file 
 
 ## Step 5: Service Load Balancing
 
-If wanting to use the `kube-vip` [cloud controller](/usage/on-prem), pass the `--disable servicelb` flag so K3s will not attempt to render Kubernetes Service resources of type `LoadBalancer`. If building with `k3sup`, the flag should be given as an argument to the `--k3s-extra-args` flag itself: `--k3s-extra-args "--disable servicelb"`. To install the `kube-vip` cloud controller, follow the additional steps in the [cloud controller guide](/on-prem/#install-the-kube-vip-cloud-provider).
+If wanting to use the `kube-vip` [cloud controller](/docs/usage/cloud-provider/), pass the `--disable servicelb` flag so K3s will not attempt to render Kubernetes Service resources of type `LoadBalancer`. If building with `k3sup`, the flag should be given as an argument to the `--k3s-extra-args` flag itself: `--k3s-extra-args "--disable servicelb"`. To install the `kube-vip` cloud controller, follow the additional steps in the [cloud controller guide](/docs/usage/cloud-provider/#install-the-kube-vip-cloud-provider).
