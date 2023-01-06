@@ -63,40 +63,60 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 	})
 }
 
-func (b *Server) getPath(ip net.IP) *api.Path {
-	var pfxLen uint32 = 32
-	if ip.To4() == nil {
-		if !b.c.IPv6 {
-			return nil
-		}
-
-		pfxLen = 128
-	}
+func (b *Server) getPath(ip net.IP) (path *api.Path) {
+	isV6 := ip.To4() == nil
 
 	//nolint
-	nlri, _ := ptypes.MarshalAny(&api.IPAddressPrefix{
-		Prefix:    ip.String(),
-		PrefixLen: pfxLen,
-	})
-
-	//nolint
-	a1, _ := ptypes.MarshalAny(&api.OriginAttribute{
+	originAttr, _ := ptypes.MarshalAny(&api.OriginAttribute{
 		Origin: 0,
 	})
 
-	//nolint
-	a2, _ := ptypes.MarshalAny(&api.NextHopAttribute{
-		NextHop: "0.0.0.0", // gobgp will fill this
-	})
+	if !isV6 {
+		//nolint
+		nlri, _ := ptypes.MarshalAny(&api.IPAddressPrefix{
+			Prefix:    ip.String(),
+			PrefixLen: 32,
+		})
 
-	return &api.Path{
-		Family: &api.Family{
-			Afi:  api.Family_AFI_IP,
+		//nolint
+		nhAttr, _ := ptypes.MarshalAny(&api.NextHopAttribute{
+			NextHop: "0.0.0.0", // gobgp will fill this
+		})
+
+		path = &api.Path{
+			Family: &api.Family{
+				Afi:  api.Family_AFI_IP,
+				Safi: api.Family_SAFI_UNICAST,
+			},
+			Nlri:   nlri,
+			Pattrs: []*any.Any{originAttr, nhAttr},
+		}
+	} else {
+		//nolint
+		nlri, _ := ptypes.MarshalAny(&api.IPAddressPrefix{
+			Prefix:    ip.String(),
+			PrefixLen: 128,
+		})
+
+		v6Family := &api.Family{
+			Afi:  api.Family_AFI_IP6,
 			Safi: api.Family_SAFI_UNICAST,
-		},
-		Nlri:   nlri,
-		Pattrs: []*any.Any{a1, a2},
+		}
+
+		//nolint
+		mpAttr, _ := ptypes.MarshalAny(&api.MpReachNLRIAttribute{
+			Family:   v6Family,
+			NextHops: []string{"::"}, // gobgp will fill this
+			Nlris:    []*any.Any{nlri},
+		})
+
+		path = &api.Path{
+			Family: v6Family,
+			Nlri:   nlri,
+			Pattrs: []*any.Any{originAttr, mpAttr},
+		}
 	}
+	return
 }
 
 // ParseBGPPeerConfig - take a string and parses it into an array of peers
