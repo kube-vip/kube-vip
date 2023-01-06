@@ -14,16 +14,6 @@ import (
 
 // AddPeer will add peers to the BGP configuration
 func (b *Server) AddPeer(peer Peer) (err error) {
-	port := 179
-
-	if t := strings.SplitN(peer.Address, ":", 2); len(t) == 2 {
-		peer.Address = t[0]
-
-		if port, err = strconv.Atoi(t[1]); err != nil {
-			return fmt.Errorf("unable to parse port '%s' as int: %s", t[1], err)
-		}
-	}
-
 	p := &api.Peer{
 		Conf: &api.PeerConf{
 			NeighborAddress: peer.Address,
@@ -46,7 +36,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		Transport: &api.Transport{
 			MtuDiscovery:  true,
 			RemoteAddress: peer.Address,
-			RemotePort:    uint32(port),
+			RemotePort:    uint32(179),
 		},
 	}
 
@@ -127,10 +117,30 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 	}
 
 	for x := range peers {
-		peer := strings.Split(peers[x], ":")
+		peerStr := peers[x]
+		if peerStr == "" {
+			continue
+		}
+		isV6Peer := peerStr[0] == '['
+
+		address := ""
+		if isV6Peer {
+			addressEndPos := strings.IndexByte(peerStr, ']')
+			if addressEndPos == -1 {
+				return nil, fmt.Errorf("no matching ] found for IPv6 BGP Peer")
+			}
+			address = peerStr[1:addressEndPos]
+			peerStr = peerStr[addressEndPos+1:]
+		}
+
+		peer := strings.Split(peerStr, ":")
 		if len(peer) != 4 {
 			return nil, fmt.Errorf("BGP Peer configuration format error <host>:<AS>:<password>:<multihop>")
 		}
+		if !isV6Peer {
+			address = peer[0]
+		}
+
 		ASNumber, err := strconv.Atoi(peer[1])
 		if err != nil {
 			return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
@@ -142,7 +152,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 		}
 
 		peerConfig := Peer{
-			Address:  peer[0],
+			Address:  address,
 			AS:       uint32(ASNumber),
 			Password: peer[2],
 			MultiHop: multiHop,
