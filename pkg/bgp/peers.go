@@ -84,18 +84,9 @@ func (b *Server) getPath(ip net.IP) *api.Path {
 		Origin: 0,
 	})
 
-	var nh string
-	if b.c.NextHop != "" {
-		nh = b.c.NextHop
-	} else if b.c.SourceIP != "" {
-		nh = b.c.SourceIP
-	} else {
-		nh = b.c.RouterID
-	}
-
 	//nolint
 	a2, _ := ptypes.MarshalAny(&api.NextHopAttribute{
-		NextHop: nh,
+		NextHop: "0.0.0.0", // gobgp will fill this
 	})
 
 	return &api.Path{
