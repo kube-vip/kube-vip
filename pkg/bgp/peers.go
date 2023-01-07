@@ -134,27 +134,36 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 		}
 
 		peer := strings.Split(peerStr, ":")
-		if len(peer) != 4 {
-			return nil, fmt.Errorf("BGP Peer configuration format error <host>:<AS>:<password>:<multihop>")
+		if len(peer) < 2 {
+			return nil, fmt.Errorf("mandatory peering params <host>:<AS> incomplete")
 		}
+
 		if !isV6Peer {
 			address = peer[0]
 		}
 
-		ASNumber, err := strconv.Atoi(peer[1])
+		ASNumber, err := strconv.ParseUint(peer[1], 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
-
 		}
-		multiHop, err := strconv.ParseBool(peer[3])
-		if err != nil {
-			return nil, fmt.Errorf("BGP MultiHop format error (true/false) [%s]", peer[1])
+
+		password := ""
+		if len(peer) >= 3 {
+			password = peer[2]
+		}
+
+		multiHop := false
+		if len(peer) >= 4 {
+			multiHop, err = strconv.ParseBool(peer[3])
+			if err != nil {
+				return nil, fmt.Errorf("BGP MultiHop format error (true/false) [%s]", peer[1])
+			}
 		}
 
 		peerConfig := Peer{
 			Address:  address,
 			AS:       uint32(ASNumber),
-			Password: peer[2],
+			Password: password,
 			MultiHop: multiHop,
 		}
 
