@@ -57,7 +57,7 @@ These environment variables are usually part of a `kube-vip` manifest and used w
 More environment variables can be read through the `pkg/kubevip/config_envvar.go` file.
 
 | Category            | Environment Variable   | Usage                                                       | Notes                                                                           |
-| ------------------- | ---------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| ------------------- | ---------------------- |-------------------------------------------------------------|---------------------------------------------------------------------------------|
 | **Troubleshooting** |                        |                                                             |                                                                                 |
 |                     | `vip_loglevel`         | default 4                                                   | Set to `5` for debugging logs                                                   |
 | **Mode**            |                        |                                                             |                                                                                 |
@@ -85,7 +85,7 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `bgp_routerid`         | `<IP Address>`                                              | Typically the address of the local node                                         |
 |                     | `bgp_routerinterface`  | Interface name                                              | Used to associate the `routerID` with the control plane's interface.            |
 |                     | `bgp_as`               | default 65000                                               | The AS we peer from                                                             |
-|                     | `bgp_peers`            | `<address:AS:password:multihop>`                            | Comma separated list of BGP peers                                               |
+|                     | `bgp_peers`            | `<address:AS[:password[:multihop]]>`                        | Comma separated list of BGP peers (IPv6 addresses should be enclosed with `[]`) |
 |                     | `bgp_peeraddress`      | `<IP Address>`                                              | Address of a single BGP Peer                                                    |
 |                     | `bgp_peeras`           | default 65000                                               | AS of a single BGP Peer                                                         |
 |                     | `bgp_peerpass`         | ""                                                          | Password to work with a single BGP Peer                                         |

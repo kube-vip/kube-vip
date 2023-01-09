@@ -14,12 +14,10 @@ type Peer struct {
 type Config struct {
 	AS       uint32
 	RouterID string
-	NextHop  string
 	SourceIP string
 	SourceIF string
 
 	Peers []Peer
-	IPv6  bool
 }
 
 // Server manages a server object
