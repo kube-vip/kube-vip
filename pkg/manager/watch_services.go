@@ -118,7 +118,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			//log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			log.Debugf("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
 
 			// Scenarios:
 			// 1.
@@ -138,7 +138,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									if err != nil {
 										log.Error(err)
 									}
-									wg.Wait()
+									wg.Done()
 								}
 							}()
 							// We're now watching this service
@@ -150,7 +150,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							if err != nil {
 								log.Error(err)
 							}
-							wg.Wait()
+							wg.Done()
 						}()
 					}
 				} else {
@@ -158,7 +158,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					if err != nil {
 						log.Error(err)
 					}
-					wg.Wait()
+					wg.Done()
 				}
 
 			}

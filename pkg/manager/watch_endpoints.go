@@ -22,7 +22,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 	var cancel context.CancelFunc
 	var endpointContext context.Context
 	endpointContext, cancel = context.WithCancel(context.Background())
-
+	var electionActive bool
 	defer cancel()
 
 	opts := metav1.ListOptions{
@@ -71,6 +71,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				cancel()
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
+			// Build endpoints
 			var localendpoints []string
 			for subset := range ep.Subsets {
 				for address := range ep.Subsets[subset].Addresses {
@@ -83,27 +84,19 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 				}
 			}
-			log.Debugf("[%d], endpoints, last known good [%s]", len(localendpoints), lastKnownGoodEndpoint)
-			// Check how many local endpoints exist (should ideally be 1)
+			log.Debugf("[endpoint watcher] local endpoint(s) [%d], last known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, electionActive)
+
 			stillExists := false
 			if len(localendpoints) != 0 {
 				if lastKnownGoodEndpoint == "" {
 					lastKnownGoodEndpoint = localendpoints[0]
 					// Create new context
-					endpointContext, cancel = context.WithCancel(context.Background()) //nolint:govet
-					defer cancel()                                                     //nolint
+					//endpointContext, cancel = context.WithCancel(context.Background()) //nolint:govet
+					//defer cancel()                                                     //nolint
 					wg.Add(1)
 					if service.Annotations["kube-vip.io/egress"] == "true" {
 						service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
 					}
-					go func() {
-						err = sm.StartServicesLeaderElection(endpointContext, service, wg)
-						if err != nil {
-							log.Error(err)
-						}
-						wg.Wait()
-					}()
-
 				} else {
 					// check out previous endpoint exists
 					for x := range localendpoints {
@@ -117,6 +110,26 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						cancel()
 						//rw.Stop()
 					}
+				}
+				if !electionActive {
+					go func() {
+						// This is a blocking function, that will restart (in the event of failure)
+						for {
+							// if the context isn't cancelled restart
+							if endpointContext.Err() != context.Canceled {
+								electionActive = true
+								err = sm.StartServicesLeaderElection(endpointContext, service, wg)
+								electionActive = false
+								if err != nil {
+									log.Error(err)
+								}
+							} else {
+								electionActive = false
+								break
+							}
+						}
+						wg.Done()
+					}()
 				}
 			} else {
 				if lastKnownGoodEndpoint != "" {
