@@ -160,7 +160,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 					wg.Done()
 				}
-
+				activeService[string(svc.UID)] = true
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
