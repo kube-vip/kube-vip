@@ -134,6 +134,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint watcher
+									wg.Add(1)
 									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
 									if err != nil {
 										log.Error(err)
@@ -145,6 +146,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							watchedService[string(svc.UID)] = true
 						}
 					} else {
+						// Increment the waitGroup before the service Func is called (Done is completed in there)
+						wg.Add(1)
 						go func() {
 							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 							if err != nil {
@@ -154,6 +157,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						}()
 					}
 				} else {
+					// Increment the waitGroup before the service Func is called (Done is completed in there)
+					wg.Add(1)
 					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 					if err != nil {
 						log.Error(err)
