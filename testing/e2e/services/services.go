@@ -203,9 +203,10 @@ func createService(ctx context.Context, name string, clientset *kubernetes.Clien
 	}
 
 	for _, backoff := range backoffSchedule {
+		//nolint
 		_, err = Client.Get(fmt.Sprintf("http://%s", testAddress))
 		if err == nil {
-			log.Info("🕸️  succesfully retrieved web data")
+			log.Info("🕸️  successfully retrieved web data")
 			return nil
 		}
 		log.Errorf("⏰ retry in [%v] : [%+v]", backoff, err)
