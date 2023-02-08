@@ -17,8 +17,13 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
+// TODO: Fix the naming of these contexts
+
 // activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
 var activeServiceLoadBalancer map[string]context.Context
+
+// activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
+var activeServiceLoadBalancerCancel map[string]func()
 
 // activeService keeps track of services that already have a leaderElection in place
 var activeService map[string]bool
@@ -28,6 +33,7 @@ var watchedService map[string]bool
 
 func init() {
 	// Set up the caches for monitoring existing active or watched services
+	activeServiceLoadBalancerCancel = make(map[string]func())
 	activeServiceLoadBalancer = make(map[string]context.Context)
 	activeService = make(map[string]bool)
 	watchedService = make(map[string]bool)
@@ -124,7 +130,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			// 1.
 			if !activeService[string(svc.UID)] {
 				wg.Add(1)
-				activeServiceLoadBalancer[string(svc.UID)] = context.TODO()
+				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
 				// Background the services election
 				if sm.config.EnableServicesElection {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
@@ -189,7 +195,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				if err != nil {
 					log.Error(err)
 				}
-				activeServiceLoadBalancer[string(svc.UID)].Done()
+				// Calls the cancel function of the context
+				activeServiceLoadBalancerCancel[string(svc.UID)]()
 				activeService[string(svc.UID)] = false
 				watchedService[string(svc.UID)] = false
 
