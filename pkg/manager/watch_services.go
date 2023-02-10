@@ -69,12 +69,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	go func() {
 		select {
 		case <-sm.shutdownChan:
-			log.Debug("[endpoint] shutdown called")
+			log.Debug("[services] shutdown called")
 			// Stop the retry watcher
 			rw.Stop()
 			return
 		case <-exitFunction:
-			log.Debug("[endpoint] function ending")
+			log.Debug("[services] function ending")
 			// Stop the retry watcher
 			rw.Stop()
 			return
@@ -124,7 +124,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			log.Debugf("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			log.Debugf("service [%s] has been added/modified with addresses [%s] and is active [%t]", svc.Name, svc.Spec.LoadBalancerIP, activeService[string(svc.UID)])
 
 			// Scenarios:
 			// 1.
@@ -171,7 +171,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 					wg.Done()
 				}
-
+				activeService[string(svc.UID)] = true
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)

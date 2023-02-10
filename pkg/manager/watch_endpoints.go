@@ -19,10 +19,8 @@ import (
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
 	log.Infof("[endpoint] watching for service [%s] in namespace [%s]", service.Name, service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	var cancel context.CancelFunc
-	var endpointContext context.Context
-	endpointContext, cancel = context.WithCancel(context.Background())
-	var electionActive bool
+	leaderContext, cancel := context.WithCancel(context.Background())
+	var leaderElectionActive bool
 	defer cancel()
 
 	opts := metav1.ListOptions{
@@ -41,6 +39,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 	exitFunction := make(chan struct{})
 	go func() {
 		select {
+		case <-ctx.Done():
+			log.Debug("[endpoint] context cancelled")
+			// Stop the retry watcher
+			rw.Stop()
+			// Cancel the context, which will in turn cancel the leadership
+			cancel()
+			return
 		case <-sm.shutdownChan:
 			log.Debug("[endpoint] shutdown called")
 			// Stop the retry watcher
@@ -84,59 +89,68 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 				}
 			}
-			log.Debugf("[endpoint watcher] local endpoint(s) [%d], last known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, electionActive)
+			log.Debugf("[endpoint watcher] local endpoint(s) [%d], last known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
-			stillExists := false
+			// Find out if we have any local endpoints
+			// if out endpoint is empty then populate it
+			// if not, go through the endpoints and see if ours still exists
+			// If we have a local endpoint then begin the leader Election, unless it's already running
+			//
+
+			// Check that we have local endpoints
 			if len(localendpoints) != 0 {
-				if lastKnownGoodEndpoint == "" {
-					lastKnownGoodEndpoint = localendpoints[0]
-					// Create new context
-					//endpointContext, cancel = context.WithCancel(context.Background()) //nolint:govet
-					//defer cancel()                                                     //nolint
-					wg.Add(1)
-					if service.Annotations["kube-vip.io/egress"] == "true" {
-						service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
-					}
-				} else {
+				// if we haven't populated one, then do so
+				if lastKnownGoodEndpoint != "" {
+
 					// check out previous endpoint exists
+					stillExists := false
+
 					for x := range localendpoints {
 						if localendpoints[x] == lastKnownGoodEndpoint {
 							stillExists = true
 						}
 					}
-					if stillExists {
-						break
-					} else {
+					// If the last endpoint no longer exists, we cancel our leader Election
+					if !stillExists && leaderElectionActive {
 						cancel()
-						//rw.Stop()
 					}
+
+				} else {
+					lastKnownGoodEndpoint = localendpoints[0]
 				}
-				if !electionActive {
+
+				// Set the service accordingly
+				if service.Annotations["kube-vip.io/egress"] == "true" {
+					service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
+				}
+
+				if !leaderElectionActive {
 					go func() {
+						leaderContext, cancel = context.WithCancel(context.Background())
+
 						// This is a blocking function, that will restart (in the event of failure)
 						for {
 							// if the context isn't cancelled restart
-							if endpointContext.Err() != context.Canceled {
-								electionActive = true
-								err = sm.StartServicesLeaderElection(endpointContext, service, wg)
-								electionActive = false
+							if leaderContext.Err() != context.Canceled {
+								leaderElectionActive = true
+								err = sm.StartServicesLeaderElection(leaderContext, service, wg)
 								if err != nil {
 									log.Error(err)
 								}
+								leaderElectionActive = false
 							} else {
-								electionActive = false
+								leaderElectionActive = false
 								break
 							}
 						}
-						wg.Done()
 					}()
 				}
 			} else {
+				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
 					lastKnownGoodEndpoint = ""
 					cancel()
-					//rw.Stop()
-					//return nil
+					leaderElectionActive = false
 				}
 			}
 
@@ -148,7 +162,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Errorf("endpoint -> %v", statusErr)
+			log.Errorf("[endpoint] -> %v", statusErr)
 		}
 	}
 	close(exitFunction)
@@ -165,11 +179,6 @@ func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.
 			return err
 		}
 
-		// id, err := os.Hostname()
-		// if err != nil {
-		// 	return err
-		// }
-
 		currentServiceCopy := currentService.DeepCopy()
 		if currentServiceCopy.Annotations == nil {
 			currentServiceCopy.Annotations = make(map[string]string)
@@ -182,13 +191,6 @@ func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.
 			log.Errorf("Error updating Service Spec [%s] : %v", currentServiceCopy.Name, err)
 			return err
 		}
-
-		// updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: i.vipConfig.VIP}}
-		// _, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
-		// if err != nil {
-		// 	log.Errorf("Error updating Service %s/%s Status: %v", i.ServiceNamespace, i.ServiceName, err)
-		// 	return err
-		// }
 		return nil
 	})
 
