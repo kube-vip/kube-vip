@@ -1,5 +1,4 @@
-// !codeanalysis
-
+//nolint:govet
 package main
 
 import (
