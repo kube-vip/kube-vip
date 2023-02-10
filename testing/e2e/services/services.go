@@ -1,3 +1,5 @@
+// !codeanalysis
+
 package main
 
 import (
