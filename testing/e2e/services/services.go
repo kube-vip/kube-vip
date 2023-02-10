@@ -318,12 +318,13 @@ func httpTest(address string) error {
 	var err error
 	for i := 0; i < 5; i++ {
 		//nolint
+		r, err := Client.Get(fmt.Sprintf("http://%s", address)) //nolint
 
-		_, err = Client.Get(fmt.Sprintf("http://%s", address))
 		if err == nil {
 			log.Infof("🕸️  successfully retrieved web data in [%ds]", i)
 			return nil
 		}
+		r.Body.Close()
 		time.Sleep(time.Second)
 	}
 	return err
@@ -480,7 +481,9 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
 					log.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
-					log.Fatal(err)
+					if err != nil {
+						log.Fatal(err)
+					}
 					*leaderNode = svc.Annotations["kube-vip.io/vipHost"]
 				}
 			}
