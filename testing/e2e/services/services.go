@@ -27,11 +27,11 @@ import (
 // 2. Expose the deployment
 
 func main() {
-	_, ignore_simple := os.LookupEnv("IGNORE_SIMPLE")
-	_, ignore_deployments := os.LookupEnv("IGNORE_DEPLOY")
-	_, ignore_leaderFailover := os.LookupEnv("IGNORE_LEADER")
-	_, ignore_leaderActive := os.LookupEnv("IGNORE_ACTIVE")
-	_, ignore_localDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
+	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
+	_, ignoreDeployments := os.LookupEnv("IGNORE_DEPLOY")
+	_, ignoreLeaderFailover := os.LookupEnv("IGNORE_LEADER")
+	_, ignoreLeaderActive := os.LookupEnv("IGNORE_ACTIVE")
+	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
 
 	d := "kube-vip-deploy"
 	s := "kube-vip-service"
@@ -46,14 +46,14 @@ func main() {
 	}
 	log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
 
-	if !ignore_simple {
+	if !ignoreSimple {
 		// Simple Deployment test
 		log.Infof("🧪 ---> simple deployment <---")
 		err = createDeployment(ctx, d, 2, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
-		_, _, err = createService(ctx, s, clientset, false)
+		_, err = createService(ctx, s, clientset, false)
 		if err != nil {
 			log.Error(err)
 		}
@@ -70,7 +70,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignore_deployments {
+	if !ignoreDeployments {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments <---")
 
@@ -79,7 +79,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for i := 1; i < 5; i++ {
-			_, _, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, false)
+			_, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, false)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -97,7 +97,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignore_leaderFailover {
+	if !ignoreLeaderFailover {
 		// Failover tests
 		log.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
@@ -105,7 +105,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		_, leader, err := createService(ctx, s, clientset, true)
+		leader, err := createService(ctx, s, clientset, true)
 		if err != nil {
 			log.Error(err)
 		}
@@ -128,7 +128,7 @@ func main() {
 		}
 	}
 
-	if !ignore_leaderActive {
+	if !ignoreLeaderActive {
 		// pod Failover tests
 		log.Infof("🧪 ---> active pod failover deployment (local policy) <---")
 
@@ -136,7 +136,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		_, leader, err := createService(ctx, s, clientset, true)
+		leader, err := createService(ctx, s, clientset, true)
 		if err != nil {
 			log.Error(err)
 		}
@@ -158,7 +158,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignore_localDeploy {
+	if !ignoreLocalDeploy {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments (local policy) <---")
 
@@ -167,7 +167,7 @@ func main() {
 			log.Fatal(err)
 		}
 		for i := 1; i < 5; i++ {
-			_, _, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, true)
+			_, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, true)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -233,7 +233,7 @@ func createDeployment(ctx context.Context, name string, replica int, clientset *
 	return nil
 }
 
-func createService(ctx context.Context, name string, clientset *kubernetes.Clientset, localTraffic bool) (string, string, error) {
+func createService(ctx context.Context, name string, clientset *kubernetes.Clientset, localTraffic bool) (string, error) {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -306,9 +306,9 @@ func createService(ctx context.Context, name string, clientset *kubernetes.Clien
 	}
 	err = httpTest(testAddress)
 	if err == nil {
-		return testAddress, currentLeader, nil
+		return currentLeader, nil
 	}
-	return "", "", fmt.Errorf("web retrieval timeout ")
+	return "", fmt.Errorf("web retrieval timeout ")
 }
 
 func httpTest(address string) error {
@@ -362,7 +362,7 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	ch := rw.ResultChan()
 
@@ -395,7 +395,10 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
 					log.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
-					httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
+					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
+					if err != nil {
+						return err
+					}
 					*leaderNode = svc.Annotations["kube-vip.io/vipHost"]
 				}
 			}
@@ -443,7 +446,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	ch := rw.ResultChan()
 
@@ -476,7 +479,8 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
 					log.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
-					httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
+					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
+					log.Fatal(err)
 					*leaderNode = svc.Annotations["kube-vip.io/vipHost"]
 				}
 			}
