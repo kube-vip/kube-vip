@@ -76,11 +76,12 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				cancel()
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
+
 			// Build endpoints
 			var localendpoints []string
 			for subset := range ep.Subsets {
 				for address := range ep.Subsets[subset].Addresses {
-
+					log.Debugf("[endpoint] %s", ep.Subsets[subset].Addresses[address].IP)
 					// Check the node is populated
 					if ep.Subsets[subset].Addresses[address].NodeName != nil {
 						if id == *ep.Subsets[subset].Addresses[address].NodeName {
@@ -89,7 +90,6 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 				}
 			}
-			log.Debugf("[endpoint watcher] local endpoint(s) [%d], last known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
 			// Find out if we have any local endpoints
 			// if out endpoint is empty then populate it
@@ -112,7 +112,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 					// If the last endpoint no longer exists, we cancel our leader Election
 					if !stillExists && leaderElectionActive {
+						log.Warnf("[endpoint] existing [%s] has been removed, restarting leaderElection", lastKnownGoodEndpoint)
+						// Stop the existing leaderElection
 						cancel()
+						// Set our active endpoint to an existing one
+						lastKnownGoodEndpoint = localendpoints[0]
+						// disable last leaderElection flag
+						leaderElectionActive = false
 					}
 
 				} else {
@@ -148,11 +154,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 			} else {
 				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
-					lastKnownGoodEndpoint = ""
-					cancel()
+					log.Warnf("[endpoint] existing [%s] has been removed, no remaining endpoints for leaderElection", lastKnownGoodEndpoint)
+					lastKnownGoodEndpoint = "" // reset endpoint
+					cancel()                   // stop services watcher
 					leaderElectionActive = false
 				}
 			}
+			log.Debugf("[endpoint watcher] local endpoint(s) [%d], known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
 		case watch.Deleted:
 			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
