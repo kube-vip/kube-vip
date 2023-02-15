@@ -32,6 +32,7 @@ func main() {
 	_, ignoreLeaderFailover := os.LookupEnv("IGNORE_LEADER")
 	_, ignoreLeaderActive := os.LookupEnv("IGNORE_ACTIVE")
 	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
+	nodeTolerate := os.Getenv("NODE_TOLERATE")
 
 	d := "kube-vip-deploy"
 	s := "kube-vip-service"
@@ -49,7 +50,7 @@ func main() {
 	if !ignoreSimple {
 		// Simple Deployment test
 		log.Infof("🧪 ---> simple deployment <---")
-		err = createDeployment(ctx, d, 2, clientset)
+		err = createDeployment(ctx, d, nodeTolerate, 2, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -74,7 +75,7 @@ func main() {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments <---")
 
-		err = createDeployment(ctx, l, 2, clientset)
+		err = createDeployment(ctx, l, nodeTolerate, 2, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -101,7 +102,7 @@ func main() {
 		// Failover tests
 		log.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
-		err = createDeployment(ctx, d, 2, clientset)
+		err = createDeployment(ctx, d, nodeTolerate, 2, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -132,7 +133,7 @@ func main() {
 		// pod Failover tests
 		log.Infof("🧪 ---> active pod failover deployment (local policy) <---")
 
-		err = createDeployment(ctx, d, 1, clientset)
+		err = createDeployment(ctx, d, nodeTolerate, 1, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -162,7 +163,7 @@ func main() {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments (local policy) <---")
 
-		err = createDeployment(ctx, l, 2, clientset)
+		err = createDeployment(ctx, l, nodeTolerate, 2, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -187,7 +188,7 @@ func main() {
 	}
 }
 
-func createDeployment(ctx context.Context, name string, replica int, clientset *kubernetes.Clientset) error {
+func createDeployment(ctx context.Context, name, nodeName string, replica int, clientset *kubernetes.Clientset) error {
 	replicas := int32(replica)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -224,6 +225,10 @@ func createDeployment(ctx context.Context, name string, replica int, clientset *
 			},
 		},
 	}
+
+	if nodeName != "" {
+		deployment.Spec.Template.Spec.NodeName = nodeName
+	}
 	result, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -241,6 +246,9 @@ func createService(ctx context.Context, name string, clientset *kubernetes.Clien
 			Labels: map[string]string{
 				"app": "kube-vip",
 			},
+			// Annotations: map[string]string{//kube-vip.io/egress: "true"
+			// 	"kube-vip.io/egress":"true",
+			// },
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{
@@ -254,6 +262,7 @@ func createService(ctx context.Context, name string, clientset *kubernetes.Clien
 			},
 			ClusterIP: "",
 			Type:      v1.ServiceTypeLoadBalancer,
+			// ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
 		},
 	}
 	if localTraffic {
@@ -322,9 +331,10 @@ func httpTest(address string) error {
 
 		if err == nil {
 			log.Infof("🕸️  successfully retrieved web data in [%ds]", i)
+			r.Body.Close()
+
 			return nil
 		}
-		r.Body.Close()
 		time.Sleep(time.Second)
 	}
 	return err
