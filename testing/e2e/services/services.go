@@ -288,7 +288,7 @@ func main() {
 			egress:      true,
 		}
 
-		_, egress, err := svc.createService(ctx, clientset)
+		ldr, egress, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -302,7 +302,7 @@ func main() {
 		}
 
 		if !found {
-			log.Errorf("%s %s", egress)
+			log.Errorf("%s %s", ldr, egress)
 		}
 		log.Warnf("🧹 deleting Service [%s]", s)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
