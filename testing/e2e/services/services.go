@@ -4,12 +4,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
@@ -27,11 +27,21 @@ import (
 // 2. Expose the deployment
 
 func main() {
+	log.Info("🔬 beginning e2e tests")
+	err := createKind()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer deleteKind()
+	//return
+
 	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
 	_, ignoreDeployments := os.LookupEnv("IGNORE_DEPLOY")
 	_, ignoreLeaderFailover := os.LookupEnv("IGNORE_LEADER")
 	_, ignoreLeaderActive := os.LookupEnv("IGNORE_ACTIVE")
 	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
+	_, ignoreEgress := os.LookupEnv("IGNORE_EGRESS")
+
 	nodeTolerate := os.Getenv("NODE_TOLERATE")
 
 	d := "kube-vip-deploy"
@@ -47,14 +57,29 @@ func main() {
 	}
 	log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
 
+	deploy := deployment{}
+	err = deploy.createKVDs(ctx, clientset)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if !ignoreSimple {
 		// Simple Deployment test
 		log.Infof("🧪 ---> simple deployment <---")
-		err = createDeployment(ctx, d, nodeTolerate, 2, clientset)
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     2,
+			server:       true,
+		}
+		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
-		_, err = createService(ctx, s, clientset, false)
+		svc := service{
+			name: s,
+		}
+		_, _, err = svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
 		}
@@ -74,13 +99,24 @@ func main() {
 	if !ignoreDeployments {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments <---")
-
-		err = createDeployment(ctx, l, nodeTolerate, 2, clientset)
+		deploy := deployment{
+			name:         l,
+			nodeAffinity: nodeTolerate,
+			replicas:     2,
+			server:       true,
+		}
+		err = deploy.createDeployment(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
 		if err != nil {
 			log.Fatal(err)
 		}
 		for i := 1; i < 5; i++ {
-			_, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, false)
+			svc := service{
+				name: fmt.Sprintf("%s-%d", s, i),
+			}
+			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -102,11 +138,22 @@ func main() {
 		// Failover tests
 		log.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
-		err = createDeployment(ctx, d, nodeTolerate, 2, clientset)
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     2,
+			server:       true,
+		}
+		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
-		leader, err := createService(ctx, s, clientset, true)
+		svc := service{
+			name:        s,
+			egress:      false,
+			policyLocal: true,
+		}
+		leader, _, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
 		}
@@ -132,12 +179,21 @@ func main() {
 	if !ignoreLeaderActive {
 		// pod Failover tests
 		log.Infof("🧪 ---> active pod failover deployment (local policy) <---")
-
-		err = createDeployment(ctx, d, nodeTolerate, 1, clientset)
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     1,
+			server:       true,
+		}
+		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
-		leader, err := createService(ctx, s, clientset, true)
+		svc := service{
+			name:        s,
+			policyLocal: true,
+		}
+		leader, _, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
 		}
@@ -162,13 +218,22 @@ func main() {
 	if !ignoreLocalDeploy {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments (local policy) <---")
-
-		err = createDeployment(ctx, l, nodeTolerate, 2, clientset)
+		deploy := deployment{
+			name:         l,
+			nodeAffinity: nodeTolerate,
+			replicas:     2,
+			server:       true,
+		}
+		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
 		for i := 1; i < 5; i++ {
-			_, err = createService(ctx, fmt.Sprintf("%s-%d", s, i), clientset, true)
+			svc := service{
+				policyLocal: true,
+				name:        fmt.Sprintf("%s-%d", s, i),
+			}
+			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -186,138 +251,66 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-}
 
-func createDeployment(ctx context.Context, name, nodeName string, replica int, clientset *kubernetes.Clientset) error {
-	replicas := int32(replica)
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "kube-vip",
-				},
-			},
-			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "kube-vip",
-					},
-				},
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Name:  "kube-vip-web",
-							Image: "nginx:1.14.2",
-							Ports: []v1.ContainerPort{
-								{
-									Name:          "http",
-									Protocol:      v1.ProtocolTCP,
-									ContainerPort: 80,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	if !ignoreEgress {
+		// pod Failover tests
+		log.Infof("🧪 ---> egress IP re-write (local policy) <---")
+		var egress string
+		var found bool
+		go func() {
+			found = tcpServer(&egress)
+		}()
 
-	if nodeName != "" {
-		deployment.Spec.Template.Spec.NodeName = nodeName
-	}
-	result, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-
-	log.Infof("📝 created deployment [%s]", result.GetObjectMeta().GetName())
-	return nil
-}
-
-func createService(ctx context.Context, name string, clientset *kubernetes.Clientset, localTraffic bool) (string, error) {
-	service := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: "default",
-			Labels: map[string]string{
-				"app": "kube-vip",
-			},
-			// Annotations: map[string]string{//kube-vip.io/egress: "true"
-			// 	"kube-vip.io/egress":"true",
-			// },
-		},
-		Spec: v1.ServiceSpec{
-			Ports: []v1.ServicePort{
-				{
-					Port:     80,
-					Protocol: v1.ProtocolTCP,
-				},
-			},
-			Selector: map[string]string{
-				"app": "kube-vip",
-			},
-			ClusterIP: "",
-			Type:      v1.ServiceTypeLoadBalancer,
-			// ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
-		},
-	}
-	if localTraffic {
-		service.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
-	}
-	log.Infof("🌍 creating service [%s]", service.Name)
-	_, err := clientset.CoreV1().Services(v1.NamespaceDefault).Create(ctx, service, metav1.CreateOptions{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
-		},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	ch := rw.ResultChan()
-
-	ready := false
-	testAddress := ""
-	currentLeader := ""
-	// Used for tracking an active endpoint / pod
-	for event := range ch {
-
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			// log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
-			svc, ok := event.Object.(*v1.Service)
-			if !ok {
-				log.Fatalf("unable to parse Kubernetes services from API watcher")
-			}
-			if svc.Name == name {
-				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					log.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
-					ready = true
-					testAddress = svc.Status.LoadBalancer.Ingress[0].IP
-					currentLeader = svc.Annotations["kube-vip.io/vipHost"]
-				}
-			}
-		default:
-
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     1,
+			client:       true,
 		}
-		if ready {
-			break
+		deploy.address = GetLocalIP()
+		if deploy.address == "" {
+			log.Fatalf("Unable to detect local IP address")
+		} else {
+			log.Infof("📠 found local address [%s]", deploy.address)
+		}
+		err = deploy.createDeployment(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
+		svc := service{
+			policyLocal: true,
+			name:        s,
+			egress:      true,
+		}
+
+		_, egress, err := svc.createService(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for i := 1; i < 5; i++ {
+			if found {
+				log.Infof("🕵️  egress has correct IP address")
+				break
+			}
+			time.Sleep(time.Second * 1)
+		}
+
+		if !found {
+			log.Errorf("%s %s", egress)
+		}
+		log.Warnf("🧹 deleting Service [%s]", s)
+		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Warnf("🧹 deleting deployment [%s]", d)
+		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
-	err = httpTest(testAddress)
-	if err == nil {
-		return currentLeader, nil
-	}
-	return "", fmt.Errorf("web retrieval timeout ")
 }
 
 func httpTest(address string) error {
@@ -502,4 +495,62 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 		}
 	}
 	return nil
+}
+
+func tcpServer(egressAddress *string) bool {
+	listen, err := net.Listen("tcp", ":12345")
+	if err != nil {
+		log.Error(err)
+	}
+	// close listener
+	go func() {
+		time.Sleep(time.Second * 10)
+		listen.Close()
+	}()
+	for {
+		conn, err := listen.Accept()
+		if err != nil {
+			return false
+			//log.Fatal(err)
+		} else {
+			remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+			log.Infof("📞 incoming from [%s]", remoteAddress)
+			if remoteAddress == *egressAddress {
+				return true
+			}
+		}
+		go handleRequest(conn)
+	}
+}
+
+func handleRequest(conn net.Conn) {
+	// incoming request
+	buffer := make([]byte, 1024)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		log.Error(err)
+	}
+	// write data to response
+	time := time.Now().Format(time.ANSIC)
+	responseStr := fmt.Sprintf("Your message is: %v. Received time: %v", string(buffer[:]), time)
+	conn.Write([]byte(responseStr))
+
+	// close conn
+	conn.Close()
+}
+
+func GetLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }
