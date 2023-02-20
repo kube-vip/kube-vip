@@ -22,9 +22,7 @@ jobs:
       run: make check
     - name: test docker build
       run: make dockerx86Action
-    - name: Manifest generate
-      run: ./testing/testing.sh
-    - name: e2e controlplan e
+    - name: e2e controlplane
       run: DOCKERTAG=action make e2e-tests
     - name: e2e services
       run: DOCKERTAG=action make service-tests
