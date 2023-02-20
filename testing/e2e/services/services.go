@@ -32,7 +32,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer deleteKind()
+	defer func() {
+		err := deleteKind()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
 	//return
 
 	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
@@ -283,7 +288,7 @@ func main() {
 			egress:      true,
 		}
 
-		_, egress, err := svc.createService(ctx, clientset)
+		ldr, egress, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -297,7 +302,7 @@ func main() {
 		}
 
 		if !found {
-			log.Errorf("%s %s", egress)
+			log.Errorf("%s %s", ldr, egress)
 		}
 		log.Warnf("🧹 deleting Service [%s]", s)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
@@ -498,7 +503,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 }
 
 func tcpServer(egressAddress *string) bool {
-	listen, err := net.Listen("tcp", ":12345")
+	listen, err := net.Listen("tcp", ":12345") //nolint
 	if err != nil {
 		log.Error(err)
 	}
@@ -512,13 +517,13 @@ func tcpServer(egressAddress *string) bool {
 		if err != nil {
 			return false
 			//log.Fatal(err)
-		} else {
-			remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-			log.Infof("📞 incoming from [%s]", remoteAddress)
-			if remoteAddress == *egressAddress {
-				return true
-			}
 		}
+		remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		log.Infof("📞 incoming from [%s]", remoteAddress)
+		if remoteAddress == *egressAddress {
+			return true
+		}
+
 		go handleRequest(conn)
 	}
 }
@@ -533,8 +538,10 @@ func handleRequest(conn net.Conn) {
 	// write data to response
 	time := time.Now().Format(time.ANSIC)
 	responseStr := fmt.Sprintf("Your message is: %v. Received time: %v", string(buffer[:]), time)
-	conn.Write([]byte(responseStr))
-
+	_, err = conn.Write([]byte(responseStr))
+	if err != nil {
+		log.Error(err)
+	}
 	// close conn
 	conn.Close()
 }

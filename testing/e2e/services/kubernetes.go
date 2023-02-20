@@ -21,7 +21,7 @@ type service struct {
 	name        string
 	egress      bool // enable egress
 	policyLocal bool // set the policy to local pods
-	testHttp    bool
+	testHTTP    bool
 }
 
 type deployment struct {
@@ -271,7 +271,7 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 			break
 		}
 	}
-	if s.testHttp {
+	if s.testHTTP {
 		err = httpTest(testAddress)
 		if err != nil {
 			return "", "", fmt.Errorf("web retrieval timeout ")
