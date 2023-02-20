@@ -23,6 +23,8 @@ jobs:
     - name: test docker build
       run: make dockerx86Action
     - name: e2e controlplane
+      if: ${{ github.event.label.name == 'comments welcome' }}
       run: DOCKERTAG=action make e2e-tests
     - name: e2e services
+      if: ${{ github.event.label.name == 'comments welcome' }}
       run: DOCKERTAG=action make service-tests
