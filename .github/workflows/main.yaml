@@ -5,7 +5,7 @@ on:
     - cron: '25 0 * * *'
 
 jobs:
-  nightly build:
+  nightly_build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,7 +36,7 @@ jobs:
             plndr/kube-vip:${{ github.ref_name }},
             ghcr.io/kube-vip/kube-vip:${{ github.ref_name }}
       - name: Build iptables version
-        id: docker_build
+        id: docker_build_iptables
         uses: docker/build-push-action@v2
         with:
           context: .
