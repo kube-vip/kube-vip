@@ -37,7 +37,7 @@ func (sm *Manager) startBGP() error {
 			log.Error(err)
 		}
 
-		// We're using Packet with BGP, popuplate the Peer information from the API
+		// We're using Packet with BGP, populate the Peer information from the API
 		if sm.config.EnableBGP {
 			log.Infoln("Looking up the BGP configuration from packet")
 			err = equinixmetal.BGPLookup(packetClient, sm.config)
