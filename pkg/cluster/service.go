@@ -52,10 +52,10 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	}
 
 	if c.EnableMetal {
-		// We're not using Packet with BGP
+		// We're not using Equinix Metal with BGP
 		if !c.EnableBGP {
 			// Attempt to attach the EIP in the standard manner
-			log.Debugf("Attaching the Packet EIP through the API to this host")
+			log.Debugf("Attaching the Equinix Metal EIP through the API to this host")
 			err = equinixmetal.AttachEIP(packetClient, c, id)
 			if err != nil {
 				log.Error(err)
@@ -101,7 +101,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	}
 
 	if c.EnableARP {
-		//ctxArp, cancelArp = context.WithCancel(context.Background())
+		// ctxArp, cancelArp = context.WithCancel(context.Background())
 
 		ipString := cluster.Network.IP()
 
@@ -191,7 +191,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		}
 	}
 	if c.EnableARP {
-		//ctxArp, cancelArp = context.WithCancel(context.Background())
+		// ctxArp, cancelArp = context.WithCancel(context.Background())
 
 		ipString := cluster.Network.IP()
 
