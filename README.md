@@ -58,3 +58,7 @@ All of these would require a separate level of configuration and in some infrast
 ## Troubleshooting and Feedback
 
 Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=kube-vip/kube-vip&type=Date)](https://star-history.com/#kube-vip/kube-vip&Date)
