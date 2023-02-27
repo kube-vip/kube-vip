@@ -10,7 +10,6 @@ import (
 
 // ParseEnvironment - will popultate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
-
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
 	// Set default value
@@ -345,7 +344,7 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Peers = append(c.BGPConfig.Peers, c.BGPPeerConfig)
 	}
 
-	// Enable the Packet API calls
+	// Enable the Equinix Metal API calls
 	env = os.Getenv(vipPacket)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -355,14 +354,14 @@ func ParseEnvironment(c *Config) error {
 		c.EnableMetal = b
 	}
 
-	// Find the Packet project name
+	// Find the Equinix Metal project name
 	env = os.Getenv(vipPacketProject)
 	if env != "" {
 		// TODO - parse address net.Host()
 		c.MetalProject = env
 	}
 
-	// Find the Packet project ID
+	// Find the Equinix Metal project ID
 	env = os.Getenv(vipPacketProjectID)
 	if env != "" {
 		// TODO - parse address net.Host()

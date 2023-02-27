@@ -9,9 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// AttachEIP will use the packet APIs to move an EIP and attach to a host
+// AttachEIP will use the Equinix Metal APIs to move an EIP and attach to a host
 func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
-
 	// Use MetalProjectID if it is defined
 	projID := k.MetalProjectID
 
@@ -33,7 +32,6 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 
 	ips, _, _ := c.ProjectIPs.List(projID, &packngo.ListOptions{})
 	for _, ip := range ips {
-
 		// Find the device id for our EIP
 		if ip.Address == vip {
 			log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
@@ -48,10 +46,10 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
 		}
 	}
 
-	// Lookup this server through the packet API
+	// Lookup this server through the Equinix Metal API
 	thisDevice := findSelf(c, projID)
 	if thisDevice == nil {
-		return fmt.Errorf("unable to find local/this device in packet API")
+		return fmt.Errorf("unable to find local/this device in Equinix Metal API")
 	}
 
 	// Assign the EIP to this device

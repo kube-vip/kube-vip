@@ -191,7 +191,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, provider...)
 	}
 
-	// If Packet is enabled then add it to the manifest
+	// If Equinix Metal is enabled then add it to the manifest
 	if c.EnableMetal {
 		packet := []corev1.EnvVar{
 			{
@@ -343,7 +343,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 
 	if c.PrometheusHTTPServer != "" {
 		prometheus := []corev1.EnvVar{
-
 			{
 				Name:  prometheusServer,
 				Value: c.PrometheusHTTPServer,
@@ -434,7 +433,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	return newManifest
-
 }
 
 // GeneratePodManifestFromConfig will take a kube-vip config and generate a manifest
@@ -446,7 +444,6 @@ func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster boo
 
 // GenerateDaemonsetManifestFromConfig will take a kube-vip config and generate a manifest
 func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
-
 	// Determine where the pod should be deployed
 	var namespace string
 	if c.ServiceNamespace != "" {

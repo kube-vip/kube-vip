@@ -153,7 +153,23 @@ kube-vip manifest daemonset \
 
 ### Troubleshooting
 
-If `kube-vip` has been sat waiting for a long time then you may need to investigate that the annotations have been applied correctly by doing running the `describe` on the node:
+If `kube-vip` has been sat waiting for a long time then you may need to investigate that the annotations have been applied correctly by doing running the `describe` on the node.
+As of Equinix Metal's CCM v3.3.0, the annotations format was changed. This means, you should expect either of the following:
+
+1. Equinix Metal's CCM v3.3.0 onwards:
+
+```
+kubectl describe node k8s.bgp02
+...
+Annotations:        kubeadm.alpha.kubernetes.io/cri-socket: /var/run/dockershim.sock
+                    node.alpha.kubernetes.io/ttl: 0
+                    metal.equinix.com/bgp-peers-0-node-asn: 65000
+                    metal.equinix.com/bgp-peers-0-peer-asn: 65530
+                    metal.equinix.com/bgp-peers-0-peer-ip: x.x.x.x
+                    metal.equinix.com/bgp-peers-0-src-ip: x.x.x.x
+```
+
+2. Equinix Metal's CCM before v3.0.0:
 
 ```
 kubectl describe node k8s.bgp02
