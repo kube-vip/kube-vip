@@ -44,6 +44,7 @@ To manage the IP address ranges for Services of type `LoadBalancer`, the `kube-v
 - IP ranges [start address - end address]
 - Multiple pools by CIDR per Namespace
 - Multiple IP ranges per Namespace (handles overlapping ranges)
+- Setting of static addresses through service.spec.annotations `kube-vip.io/loadbalancerIPs`
 - Setting of static addresses through --load-balancer-ip=x.x.x.x (`kubectl expose` command)
 
 To control which IP address range is used for which Service, the following rules are applied:
@@ -92,18 +93,15 @@ spec:
   type: LoadBalancer
   ```
 
-We can also expose a specific address by specifying it imperatively on the command line:
+We can also expose a specific address by specifying it imperatively in the Service definition:
 
-```
-kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
-```
-
-or including it in the Service definition:
 
 ```
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    "kube-vip.io/loadbalancerIPs": "1.1.1.1"
   name: nginx
 spec:
   ports:
@@ -113,8 +111,15 @@ spec:
   selector:
     app: nginx
   type: LoadBalancer
-  loadBalancerIP: "1.1.1.1"
 ```
+
+Or set it through command line.
+
+```
+kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx --load-balancer-ip=1.1.1.1
+```
+
+Since k8s 1.24, loadbalancerIP field [is deprecated](https://github.com/kubernetes/kubernetes/pull/107235). It's recommended to use the annotations instead of command line or `service.spec.loadBalancerIP` to specify the ip.
 
 ### Using DHCP for Load Balancers (experimental)
 

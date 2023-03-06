@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	hwAddrKey   = "kube-vip.io/hwaddr"
-	requestedIP = "kube-vip.io/requestedIP"
+	hwAddrKey                = "kube-vip.io/hwaddr"
+	requestedIP              = "kube-vip.io/requestedIP"
+	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 )
 
 func (sm *Manager) stopService(uid string) error {
