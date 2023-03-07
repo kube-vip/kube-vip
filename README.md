@@ -1,6 +1,6 @@
 # kube-vip
 
-High Availability and Load-Balancing 
+High Availability and Load-Balancing
 
 ![](https://github.com/kube-vip/kube-vip/raw/main/kube-vip.png)
 
@@ -32,7 +32,7 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Service LoadBalancer address pools per namespace or global
 - Service LoadBalancer address via (existing network DHCP)
 - Service LoadBalancer address exposure to gateway via UPNP
-- ... manifest generation, vendor API integrations and many nore... 
+- ... manifest generation, vendor API integrations and many nore...
 
 ## Why?
 
@@ -58,6 +58,12 @@ All of these would require a separate level of configuration and in some infrast
 ## Troubleshooting and Feedback
 
 Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
+
+## Contributing
+
+Thanks for taking the time to join our community and start contributing! We welcome pull requests. Feel free to dig through the [issues](https://github.com/kube-vip/kube-vip/issues) and jump in.
+
+:warning: This project has issue compiling on MacOS, please compile it on linux distribution
 
 ## Star History
 
