@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ghodss/yaml"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"sigs.k8s.io/yaml"
 )
 
 // ParseBackendConfig -

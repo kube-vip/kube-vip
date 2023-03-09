@@ -22,7 +22,9 @@ jobs:
       run: make check
     - name: test docker build
       run: make dockerx86Action
-    - name: Manifest generate
-      run: ./testing/testing.sh
-    - name: e2e tests
+    - name: e2e controlplane
+      if: ${{ github.event.label.name == 'control plane' }}
       run: DOCKERTAG=action make e2e-tests
+    - name: e2e services
+      if: ${{ github.event.label.name == 'services' }}
+      run: DOCKERTAG=action make service-tests

@@ -15,10 +15,10 @@ import (
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startBGP() error {
 	var cpCluster *cluster.Cluster
-	//var ns string
+	// var ns string
 	var err error
 
-	// If Packet is enabled then we can begin our preparation work
+	// If Equinix Metal is enabled then we can begin our preparation work
 	var packetClient *packngo.Client
 	if sm.config.EnableMetal {
 		if sm.config.ProviderConfig != "" {
@@ -37,9 +37,9 @@ func (sm *Manager) startBGP() error {
 			log.Error(err)
 		}
 
-		// We're using Packet with BGP, popuplate the Peer information from the API
+		// We're using Equinix Metal with BGP, populate the Peer information from the API
 		if sm.config.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from packet")
+			log.Infoln("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, sm.config)
 			if err != nil {
 				log.Error(err)

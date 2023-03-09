@@ -17,8 +17,13 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
+// TODO: Fix the naming of these contexts
+
 // activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
 var activeServiceLoadBalancer map[string]context.Context
+
+// activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
+var activeServiceLoadBalancerCancel map[string]func()
 
 // activeService keeps track of services that already have a leaderElection in place
 var activeService map[string]bool
@@ -28,6 +33,7 @@ var watchedService map[string]bool
 
 func init() {
 	// Set up the caches for monitoring existing active or watched services
+	activeServiceLoadBalancerCancel = make(map[string]func())
 	activeServiceLoadBalancer = make(map[string]context.Context)
 	activeService = make(map[string]bool)
 	watchedService = make(map[string]bool)
@@ -63,12 +69,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	go func() {
 		select {
 		case <-sm.shutdownChan:
-			log.Debug("[endpoint] shutdown called")
+			log.Debug("[services] shutdown called")
 			// Stop the retry watcher
 			rw.Stop()
 			return
 		case <-exitFunction:
-			log.Debug("[endpoint] function ending")
+			log.Debug("[services] function ending")
 			// Stop the retry watcher
 			rw.Stop()
 			return
@@ -118,13 +124,13 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			//log.Infof("service [%s] has been added/modified it has an assigned external addresses [%s]", svc.Name, svc.Spec.LoadBalancerIP)
+			log.Debugf("service [%s] has been added/modified with addresses [%s] and is active [%t]", svc.Name, svc.Spec.LoadBalancerIP, activeService[string(svc.UID)])
 
 			// Scenarios:
 			// 1.
 			if !activeService[string(svc.UID)] {
 				wg.Add(1)
-				activeServiceLoadBalancer[string(svc.UID)] = context.TODO()
+				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
 				// Background the services election
 				if sm.config.EnableServicesElection {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
@@ -134,33 +140,38 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint watcher
+									wg.Add(1)
 									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
 									if err != nil {
 										log.Error(err)
 									}
-									wg.Wait()
+									wg.Done()
 								}
 							}()
 							// We're now watching this service
 							watchedService[string(svc.UID)] = true
 						}
 					} else {
+						// Increment the waitGroup before the service Func is called (Done is completed in there)
+						wg.Add(1)
 						go func() {
 							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 							if err != nil {
 								log.Error(err)
 							}
-							wg.Wait()
+							wg.Done()
 						}()
 					}
 				} else {
+					// Increment the waitGroup before the service Func is called (Done is completed in there)
+					wg.Add(1)
 					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 					if err != nil {
 						log.Error(err)
 					}
-					wg.Wait()
+					wg.Done()
 				}
-
+				activeService[string(svc.UID)] = true
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
@@ -184,7 +195,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				if err != nil {
 					log.Error(err)
 				}
-				activeServiceLoadBalancer[string(svc.UID)].Done()
+				// Calls the cancel function of the context
+				activeServiceLoadBalancerCancel[string(svc.UID)]()
 				activeService[string(svc.UID)] = false
 				watchedService[string(svc.UID)] = false
 
