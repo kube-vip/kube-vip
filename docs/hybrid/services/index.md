@@ -1,4 +1,4 @@
-# Kube-vip services 
+# Kube-vip services
 
 We've designed `kube-vip` to be as de-coupled or agnostic from other components that may exist within a Kubernetes cluster as possible. This has lead to `kube-vip` having a very simplistic but robust approach to advertising Kubernetes services to the outside world and marking these services as ready to use.
 
@@ -10,14 +10,14 @@ This section details the flow of events in order for `kube-vip` to advertise a K
 2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = LoadBalancer`
 3. A controller (typically a Cloud Controller) has a loop that "watches" for services of the type `LoadBalancer`.
 4. The controller now has the responsibility of providing an IP address for this service along with doing anything that is network specific for the environment where the cluster is running.
-5. Once the controller has an IP address it will update the service `svc.Spec.LoadBalancerIP` with it's new IP address.
-6. The `kube-vip` pods also implement a "watcher" for services that have a `svc.Spec.LoadBalancerIP` address attached.
+5. Once the controller has an IP address, it will update the Service field `spec.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
+6. `kube-vip` Pods implement a "watcher" for Services that have a `spec.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `svc.Spec.loadBalancerIP`.
 7. When a new service appears `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the service network.
 8. Finally `kube-vip` will update the service status so that the API reflects that this LoadBalancer is ready. This is done by updating the `svc.Status.LoadBalancer.Ingress` with the VIP address.
 
 ## CCM
 
-We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anything other than the Kubernetes API, and will only act upon an existing Kubernetes primative (in this case the object of type `Service`). This makes it easy for existing CCMs to simply apply their logic to services of type LoadBalancer and leave `kube-vip` to take the next steps to advertise these load-balancers to the outside world. 
+We can see from the [flow](#Flow) above that `kube-vip` isn't coupled to anything other than the Kubernetes API, and will only act upon an existing Kubernetes primative (in this case the object of type `Service`). This makes it easy for existing CCMs to simply apply their logic to services of type LoadBalancer and leave `kube-vip` to take the next steps to advertise these load-balancers to the outside world.
 
 
 ## Using the Kube-vip Cloud Provider
@@ -48,7 +48,7 @@ or
 kubectl create configmap --namespace kube-system kubevip --from-literal range-global=192.168.1.220-192.168.1.230
 ```
 
-Creating services of `type: LoadBalancer` in *any namespace* will now take addresses from the **global** cidr defined in the `configmap` unless a specific 
+Creating services of `type: LoadBalancer` in *any namespace* will now take addresses from the **global** cidr defined in the `configmap` unless a specific
 
 
 ## The Detailed guide
@@ -61,7 +61,7 @@ Creating services of `type: LoadBalancer` in *any namespace* will now take addre
 $ kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
 ```
 
-The following output should appear when the manifest is applied: 
+The following output should appear when the manifest is applied:
 
 ```
 serviceaccount/kube-vip-cloud-controller created
@@ -161,9 +161,9 @@ spec:
 ### Using DHCP for Load Balancers (experimental)
 
 With the latest release of `kube-vip` > 0.2.1, it is possible to use the local network DHCP server to provide `kube-vip` with a load-balancer address that can be used to access a
- Kubernetes service on the network. 
+ Kubernetes service on the network.
 
-In order to do this we need to signify to `kube-vip` and the cloud-provider that we don't need one of their managed addresses. We do this by explicitly exposing a service on the 
+In order to do this we need to signify to `kube-vip` and the cloud-provider that we don't need one of their managed addresses. We do this by explicitly exposing a service on the
 address `0.0.0.0`. When `kube-vip` sees a service on this address it will create a `macvlan` interface on the host and request a DHCP address, once this address is provided it will assign it as the VIP and update the Kubernetes service!
 
 ```
@@ -194,7 +194,7 @@ Using UPNP we can create a matching port on the `<external network address>` all
 
 #### Enable UPNP
 
-Add the following to the `kube-vip` `env:` section, and the rest should be completely automated. 
+Add the following to the `kube-vip` `env:` section, and the rest should be completely automated.
 
 **Note** some environments may require (Unifi) will require `Secure mode` being `disabled` (this allows a host with a different address to register a port)
 
@@ -226,7 +226,7 @@ $ curl externalIP:32380
 Either through the CLI or through the UI, create a public IPv4 EIP address.. and this is the address you can expose through BGP!
 
 ```
-# packet ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4                                                                   
+# packet ip request -p xxx-bbb-ccc -f ams1 -q 1 -t public_ipv4
 +-------+---------------+--------+----------------------+
 |   ID  |    ADDRESS    | PUBLIC |       CREATED        |
 +-------+---------------+--------+----------------------+
@@ -238,7 +238,7 @@ kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=
 
 ## Equinix Metal Overview (using the [Equinix Metal CCM](https://github.com/packethost/packet-ccm))
 
-Below are two examples for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`. 
+Below are two examples for running `type:LoadBalancer` services on worker nodes only and will create a daemonset that will run `kube-vip`.
 
 **NOTE** This use-case requires the [Equinix Metal CCM](https://github.com/packethost/packet-ccm) to be installed and that the cluster/kubelet is configured to use an "external" cloud provider.
 
@@ -255,7 +255,7 @@ kube-vip manifest daemonset \
   --inCluster | k apply -f -
 ```
 
-### Using the existing CCM secret 
+### Using the existing CCM secret
 
 Alternatively it is possible to create a daemonset that will use the existing CCM secret to do an API lookup, this will allow for discovering the networking configuration needed to advertise loadbalancer addresses through BGP.
 

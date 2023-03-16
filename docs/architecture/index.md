@@ -36,17 +36,17 @@ Below we can see that the failover is typically done within a few seconds as the
 64 bytes from 192.168.0.75: icmp_seq=147 ttl=64 time=0.240 ms
 92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
 Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
-4  5  00 0054 bc98   0 0000  3f  01 3d16 192.168.0.95  192.168.0.75 
+4  5  00 0054 bc98   0 0000  3f  01 3d16 192.168.0.95  192.168.0.75
 
 Request timeout for icmp_seq 148
 92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
 Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
-4  5  00 0054 75ff   0 0000  3f  01 83af 192.168.0.95  192.168.0.75 
+4  5  00 0054 75ff   0 0000  3f  01 83af 192.168.0.95  192.168.0.75
 
 Request timeout for icmp_seq 149
 92 bytes from 192.168.0.70: Redirect Host(New addr: 192.168.0.75)
 Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst
-4  5  00 0054 2890   0 0000  3f  01 d11e 192.168.0.95  192.168.0.75 
+4  5  00 0054 2890   0 0000  3f  01 d11e 192.168.0.95  192.168.0.75
 
 Request timeout for icmp_seq 150
 64 bytes from 192.168.0.75: icmp_seq=151 ttl=64 time=0.245 ms
@@ -71,8 +71,8 @@ This section details the flow of events in order for `kube-vip` to advertise a K
 2. Within the Kubernetes cluster, a Service object is created with the `spec.type` set to `LoadBalancer`.
 3. A controller (typically a [Cloud Controller](/usage/cloud-provider)) has a loop that "watches" for Services of the type `LoadBalancer`.
 4. The controller now has the responsibility of providing an IP address for this Service along with doing anything that is network specific for the environment where the cluster is running.
-5. Once the controller has an IP address, it will update the Service field `spec.loadBalancerIP` with the IP address.
-6. `kube-vip` Pods implement a "watcher" for Services that have a `svc.Spec.loadBalancerIP` address attached.
+5. Once the controller has an IP address, it will update the Service field `spec.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
+6. `kube-vip` Pods implement a "watcher" for Services that have a `spec.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `svc.Spec.loadBalancerIP`.
 7. When a new Service appears, `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the Service network.
 8. Finally, `kube-vip` will update the Service status so that the API reflects the object is ready. This is done by updating the `status.loadBalancer.ingress` with the VIP address.
 

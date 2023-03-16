@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/service"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -27,15 +28,15 @@ const (
 	flushContrack          = "kube-vip.io/flush-conntrack"
 )
 
-func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")
 
 	// Iterate through the synchronising services
 	foundInstance := false
-	newServiceAddress := service.Spec.LoadBalancerIP
-	newServiceUID := string(service.UID)
+	newServiceAddress := service.FetchServiceAddress(svc)
+	newServiceUID := string(svc.UID)
 
 	for x := range sm.serviceInstances {
 		if sm.serviceInstances[x].UID == newServiceUID {
@@ -43,8 +44,8 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 			// If the found instance's DHCP configuration doesn't match the new service, delete it.
 			if sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0" ||
 				!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0" ||
-				!sm.serviceInstances[x].isDHCP && len(service.Status.LoadBalancer.Ingress) > 0 &&
-					newServiceAddress != service.Status.LoadBalancer.Ingress[0].IP {
+				!sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
+					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP {
 				if err := sm.deleteService(newServiceUID); err != nil {
 					return err
 				}
@@ -56,7 +57,7 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance && newServiceAddress != "" {
-		if err := sm.addService(service); err != nil {
+		if err := sm.addService(svc); err != nil {
 			return err
 		}
 	}
@@ -64,10 +65,10 @@ func (sm *Manager) syncServices(ctx context.Context, service *v1.Service, wg *sy
 	return nil
 }
 
-func (sm *Manager) addService(service *v1.Service) error {
+func (sm *Manager) addService(svc *v1.Service) error {
 	startTime := time.Now()
 
-	newService, err := NewInstance(service, sm.config)
+	newService, err := NewInstance(svc, sm.config)
 	if err != nil {
 		return err
 	}
@@ -88,33 +89,35 @@ func (sm *Manager) addService(service *v1.Service) error {
 		return err
 	}
 
+	serviceIP := service.FetchServiceAddress(svc)
+
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
-	if service.Annotations[flushContrack] == "true" {
-		log.Debugf("Flushing conntrack rules for service [%s]", service.Name)
-		err = vip.DeleteExistingSessions(service.Spec.LoadBalancerIP, false)
+	if svc.Annotations[flushContrack] == "true" {
+		log.Debugf("Flushing conntrack rules for service [%s]", svc.Name)
+		err = vip.DeleteExistingSessions(serviceIP, false)
 		if err != nil {
 			log.Errorf("Error flushing any remaining egress connections [%s]", err)
 		}
-		err = vip.DeleteExistingSessions(service.Spec.LoadBalancerIP, true)
+		err = vip.DeleteExistingSessions(serviceIP, true)
 		if err != nil {
 			log.Errorf("Error flushing any remaining ingress connections [%s]", err)
 		}
 	}
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
-	if service.Annotations[egress] == "true" {
-		log.Debugf("Enabling egress for the service [%s]", service.Name)
-		if service.Annotations[endpoint] != "" {
+	if svc.Annotations[egress] == "true" {
+		log.Debugf("Enabling egress for the service [%s]", svc.Name)
+		if svc.Annotations[endpoint] != "" {
 			// We will need to modify the iptables rules
 			err = sm.iptablesCheck()
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
-			err = sm.configureEgress(service.Spec.LoadBalancerIP, service.Annotations[endpoint], service.Annotations[egressDestinationPorts])
+			err = sm.configureEgress(serviceIP, svc.Annotations[endpoint], svc.Annotations[egressDestinationPorts])
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			} else {
-				err = sm.updateServiceEndpointAnnotation(service.Annotations[endpoint], service)
+				err = sm.updateServiceEndpointAnnotation(svc.Annotations[endpoint], svc)
 				if err != nil {
 					log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
 				}
@@ -166,7 +169,7 @@ func (sm *Manager) deleteService(uid string) error {
 				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
 
 					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], service.FetchServiceAddress(sm.serviceInstances[x].serviceSnapshot), sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
 					if err != nil {
 						log.Errorf("%v", err)
 					}

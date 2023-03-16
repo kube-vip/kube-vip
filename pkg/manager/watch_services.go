@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kube-vip/kube-vip/pkg/service"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -101,7 +102,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			}
 
 			// We only care about LoadBalancer services that have been allocated an address
-			if svc.Spec.LoadBalancerIP == "" {
+			if service.FetchServiceAddress(svc) == "" {
 				break
 			}
 
@@ -124,7 +125,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			log.Debugf("service [%s] has been added/modified with addresses [%s] and is active [%t]", svc.Name, svc.Spec.LoadBalancerIP, activeService[string(svc.UID)])
+			log.Debugf("service [%s] has been added/modified with addresses [%s] and is active [%t]", svc.Name, service.FetchServiceAddress(svc), activeService[string(svc.UID)])
 
 			// Scenarios:
 			// 1.

@@ -1,8 +1,8 @@
 # Kube-vip as a Static Pod
 
-In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
+In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `service.spec.annotations["kube-vip.io/loadbalancerIPs"]` or `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
 
-The "hybrid" mode is now the default mode in `kube-vip` from `0.2.3` onwards, and allows both modes to be enabled at the same time. 
+The "hybrid" mode is now the default mode in `kube-vip` from `0.2.3` onwards, and allows both modes to be enabled at the same time.
 
 ## Generating a Manifest
 
@@ -43,7 +43,7 @@ kube-vip manifest pod \
 
 ### BGP
 
-This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses. 
+This configuration will create a manifest that will start `kube-vip` providing **controlplane** and **services** management. **Unlike** ARP, all nodes in the BGP configuration will advertise virtual IP addresses.
 
 **Note** we bind the address to `lo` as we don't want multiple devices that have the same address on public interfaces. We can specify all the peers in a comma seperate list in the format of `address:AS:password:multihop`.
 
@@ -85,7 +85,7 @@ kube-vip manifest pod \
 
 #### Creating a manifest using the metadata
 
-We can parse the metadata, *however* it requires that the tools `curl` and `jq` are installed. 
+We can parse the metadata, *however* it requires that the tools `curl` and `jq` are installed.
 
 ```
 kube-vip manifest pod \
@@ -117,7 +117,7 @@ Due to an oddity with `kubeadm` we can't have our `kube-vip` manifest present **
 
 ```
 sudo kubeadm join $VIP:6443 \
-    --token w5atsr.blahblahblah 
+    --token w5atsr.blahblahblah
     --control-plane \
     --certificate-key abc123
 ```
@@ -126,4 +126,4 @@ sudo kubeadm join $VIP:6443 \
 
 ## Services
 
-At this point your `kube-vip` static pods will be up and running and where used with the `--services` flag will also be watching for Kubernetes services that they can advertise. In order for `kube-vip` to advertise a service it needs a CCM or other controller to apply an IP address to the `spec.LoadBalancerIP`, which marks the loadbalancer as defined. 
+At this point your `kube-vip` static pods will be up and running and where used with the `--services` flag will also be watching for Kubernetes services that they can advertise. In order for `kube-vip` to advertise a service it needs a CCM or other controller to apply an IP address to the `spec.LoadBalancerIP`, which marks the loadbalancer as defined.
