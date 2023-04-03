@@ -102,7 +102,7 @@ func (sm *Manager) startARP() error {
 
 	// This will tidy any dangling kube-vip iptables rules
 	if os.Getenv("EGRESS_CLEAN") != "" {
-		i, err := vip.CreateIptablesClient()
+		i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables)
 		if err != nil {
 			log.Warnf("[egress] Unable to clean any dangling egress rules [%v]", err)
 		} else {

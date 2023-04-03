@@ -59,14 +59,6 @@ var kubeVipStart = &cobra.Command{
 
 		// If a configuration file is loaded, then it will overwrite flags
 
-		if configPath != "" {
-			c, err := kubevip.OpenConfig(configPath)
-			if err != nil {
-				log.Fatalf("%v", err)
-			}
-			startConfig = *c
-		}
-
 		// parse environment variables, these will overwrite anything loaded or flags
 		err = kubevip.ParseEnvironment(&startConfig)
 		if err != nil {

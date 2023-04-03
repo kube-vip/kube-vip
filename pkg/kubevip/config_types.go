@@ -129,6 +129,9 @@ type Config struct {
 
 	// EgressServiceCidr, this contains the service cidr range to ignore
 	EgressServiceCidr string
+
+	// EgressWithNftables, this will use the iptables-nftables OVER iptables
+	EgressWithNftables bool
 }
 
 // LeaderElection defines all of the settings for Kubernetes LeaderElection
