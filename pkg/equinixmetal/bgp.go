@@ -22,7 +22,7 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 		thisDevice = findSelf(c, k.MetalProjectID)
 	}
 	if thisDevice == nil {
-		return fmt.Errorf("Unable to find local/this device in packet API")
+		return fmt.Errorf("Unable to find local/this device in Equinix Metal API")
 	}
 
 	fmt.Printf("Querying BGP settings for [%s]", thisDevice.Hostname)

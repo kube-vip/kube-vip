@@ -22,6 +22,7 @@ type Network interface {
 	IP() string
 	SetIP(ip string) error
 	Interface() string
+	IsDADFAIL() bool
 	IsDNS() bool
 	IsDDNS() bool
 	DDNSHostName() string
@@ -158,6 +159,32 @@ func (configurator *network) DeleteIP() error {
 	}
 
 	return nil
+}
+
+// IsDADFAIL - Returns true if the address is IPv6 and has DADFAILED flag
+func (configurator *network) IsDADFAIL() bool {
+	if configurator.address == nil || !IsIPv6(configurator.address.IP.String()) {
+		return false
+	}
+
+	// Get all the address
+	addresses, err := netlink.AddrList(configurator.link, netlink.FAMILY_V6)
+	if err != nil {
+		return false
+	}
+
+	// Find the VIP and check if it is DADFAILED
+	for _, address := range addresses {
+		if address.IP.Equal(configurator.address.IP) && addressHasDADFAILEDFlag(address) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func addressHasDADFAILEDFlag(address netlink.Addr) bool {
+	return address.Flags&unix.IFA_F_DADFAILED != 0
 }
 
 // IsSet - Check to see if VIP is set

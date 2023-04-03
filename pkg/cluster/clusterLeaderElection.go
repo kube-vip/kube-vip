@@ -74,7 +74,6 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 
 // StartCluster - Begins a running instance of the Leader Election cluster
 func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
-
 	id, err := os.Hostname()
 	if err != nil {
 		return err
@@ -141,7 +140,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		}
 	}()
 
-	// If Packet is enabled then we can begin our preparation work
+	// If Equinix Metal is enabled then we can begin our preparation work
 	var packetClient *packngo.Client
 	if c.EnableMetal {
 		if c.ProviderConfig != "" {
@@ -160,9 +159,9 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 			log.Error(err)
 		}
 
-		// We're using Packet with BGP, popuplate the Peer information from the API
+		// We're using Equinix Metal with BGP, populate the Peer information from the API
 		if c.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from packet")
+			log.Infoln("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, c)
 			if err != nil {
 				log.Error(err)
@@ -199,7 +198,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 				if err != nil {
 					log.Errorf("Error starting the VIP service on the leader [%s]", err)
 				}
-
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
@@ -260,7 +258,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 	}()
 
 	ch := rw.ResultChan()
-	//defer rw.Stop()
+	// defer rw.Stop()
 
 	for event := range ch {
 		// We need to inspect the event and get ResourceVersion out of it
@@ -270,9 +268,8 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 			if !ok {
 				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
-			//Find the node IP address (this isn't foolproof)
+			// Find the node IP address (this isn't foolproof)
 			for x := range node.Status.Addresses {
-
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
@@ -286,9 +283,8 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			//Find the node IP address (this isn't foolproof)
+			// Find the node IP address (this isn't foolproof)
 			for x := range node.Status.Addresses {
-
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
@@ -309,7 +305,6 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 			statusErr, ok := errObject.(*apierrors.StatusError)
 			if !ok {
 				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-
 			}
 
 			status := statusErr.ErrStatus
@@ -320,5 +315,4 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 
 	log.Infoln("Exiting Node watcher")
 	return nil
-
 }

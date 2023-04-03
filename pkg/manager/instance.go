@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/service"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
-
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 )
 
 const dhcpTimeout = 10 * time.Second
@@ -41,9 +41,9 @@ type Instance struct {
 	serviceSnapshot *v1.Service
 }
 
-func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error) {
-	instanceAddress := service.Spec.LoadBalancerIP
-	instanceUID := string(service.UID)
+func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
+	instanceAddress := service.FetchServiceAddress(svc)
+	instanceUID := string(svc.UID)
 
 	// Detect if we're using a specific interface for services
 	var serviceInterface string
@@ -71,20 +71,20 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 	instance := &Instance{
 		UID:             instanceUID,
 		Vip:             instanceAddress,
-		serviceSnapshot: service,
+		serviceSnapshot: svc,
 	}
-	if len(service.Spec.Ports) > 0 {
-		instance.Type = string(service.Spec.Ports[0].Protocol)
-		instance.Port = service.Spec.Ports[0].Port
+	if len(svc.Spec.Ports) > 0 {
+		instance.Type = string(svc.Spec.Ports[0].Protocol)
+		instance.Port = svc.Spec.Ports[0].Port
 	}
-	if service.Annotations != nil {
-		instance.dhcpInterfaceHwaddr = service.Annotations[hwAddrKey]
-		instance.dhcpInterfaceIP = service.Annotations[requestedIP]
+	if svc.Annotations != nil {
+		instance.dhcpInterfaceHwaddr = svc.Annotations[hwAddrKey]
+		instance.dhcpInterfaceIP = svc.Annotations[requestedIP]
 	}
 
 	// Generate Load Balancer config
 	newLB := kubevip.LoadBalancer{
-		Name:      fmt.Sprintf("%s-load-balancer", service.Name),
+		Name:      fmt.Sprintf("%s-load-balancer", svc.Name),
 		Port:      int(instance.Port),
 		Type:      instance.Type,
 		BindToVip: true,
@@ -113,7 +113,7 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 
 	c, err := cluster.InitCluster(instance.vipConfig, false)
 	if err != nil {
-		log.Errorf("Failed to add Service %s/%s", service.Namespace, service.Name)
+		log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 		return nil, err
 	}
 	instance.cluster = c
