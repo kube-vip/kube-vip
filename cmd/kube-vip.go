@@ -314,7 +314,7 @@ var kubeVipManager = &cobra.Command{
 			configMap = envConfigMap
 		}
 
-		// If Packet is enabled and there is a provider configuration passed
+		// If Equinix Metal is enabled and there is a provider configuration passed
 		if initConfig.EnableMetal {
 			if providerConfig != "" {
 				providerAPI, providerProject, err := equinixmetal.GetPacketConfig(providerConfig)

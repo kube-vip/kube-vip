@@ -5,7 +5,7 @@ on:
     - cron: '25 0 * * *'
 
 jobs:
-  docker:
+  nightly_build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,7 +25,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}   
-      - name: Build and push main branch
+      - name: Build standard version
         id: docker_build
         uses: docker/build-push-action@v2
         with:
@@ -35,5 +35,16 @@ jobs:
           tags: >-
             plndr/kube-vip:${{ github.ref_name }},
             ghcr.io/kube-vip/kube-vip:${{ github.ref_name }}
+      - name: Build iptables version
+        id: docker_build_iptables
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: Dockerfile_iptables
+          platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: >-
+            plndr/kube-vip-iptables:${{ github.ref_name }},
+            ghcr.io/kube-vip/kube-vip-iptables:${{ github.ref_name }}
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
