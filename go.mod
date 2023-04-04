@@ -6,7 +6,6 @@ replace github.com/insomniacslk/dhcp => github.com/harvester/dhcp v0.0.0-2022042
 
 require (
 	github.com/cloudflare/ipvs v0.8.0
-	github.com/coreos/go-iptables v0.6.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/golang/protobuf v1.5.2

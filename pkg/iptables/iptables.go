@@ -585,7 +585,7 @@ func getIptablesCommand(proto Protocol, nftables bool) string {
 
 // Checks if iptables has the "-C" and "--wait" flag
 func getIptablesCommandSupport(v1 int, v2 int, v3 int) (bool, bool, bool, bool) {
-	return iptablesHasCheckCommand(v1, v2, v3), iptablesHasWaitCommand(v1, v2, v3), iptablesWaitSupportSecond(v1, v2, v3), iptablesHasRandomFully(v1, v2, v3)
+	return iptablesHasCheckCommand(v1, v2, v3), iptablesHasWaitCommand(v1, v2, v3), iptablesWaitSupportSecond(v1, v2), iptablesHasRandomFully(v1, v2, v3)
 }
 
 // getIptablesVersion returns the first three components of the iptables version
@@ -661,7 +661,7 @@ func iptablesHasWaitCommand(v1 int, v2 int, v3 int) bool { //nolint
 }
 
 // Checks if an iptablse version is after 1.6.0, when --wait support second
-func iptablesWaitSupportSecond(v1 int, v2 int, v3 int) bool {
+func iptablesWaitSupportSecond(v1 int, v2 int) bool {
 	if v1 > 1 {
 		return true
 	}
