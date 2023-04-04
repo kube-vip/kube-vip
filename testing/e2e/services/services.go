@@ -32,12 +32,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() {
-		err := deleteKind()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
+
 	//return
 
 	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
@@ -46,6 +41,16 @@ func main() {
 	_, ignoreLeaderActive := os.LookupEnv("IGNORE_ACTIVE")
 	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
 	_, ignoreEgress := os.LookupEnv("IGNORE_EGRESS")
+	_, retainCluster := os.LookupEnv("RETAIN_CLUSTER")
+
+	if !retainCluster {
+		defer func() {
+			err := deleteKind()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
+	}
 
 	nodeTolerate := os.Getenv("NODE_TOLERATE")
 

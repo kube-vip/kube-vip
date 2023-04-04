@@ -42,6 +42,9 @@ const (
 	//egressServiceCidr - defines the cidr that egress will ignore
 	egressServiceCidr = "egress_servicecidr"
 
+	//egressWithNftables - enables using nftables over iptables
+	egressWithNftables = "egress_withnftables"
+
 	/////////////////////////////////////
 	// TO DO:
 	// Determine how to tidy this mess up

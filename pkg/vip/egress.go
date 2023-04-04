@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	iptables "github.com/coreos/go-iptables/iptables"
+	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
 	log "github.com/sirupsen/logrus"
 
 	ct "github.com/florianl/go-conntrack"
@@ -32,10 +32,10 @@ type Egress struct {
 	ipTablesClient *iptables.IPTables
 }
 
-func CreateIptablesClient() (*Egress, error) {
+func CreateIptablesClient(nftables bool) (*Egress, error) {
 	e := new(Egress)
 	var err error
-	e.ipTablesClient, err = iptables.New()
+	e.ipTablesClient, err = iptables.New(iptables.EnableNFTables(nftables))
 	return e, err
 }
 

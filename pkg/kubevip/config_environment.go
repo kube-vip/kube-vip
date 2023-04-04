@@ -411,5 +411,15 @@ func ParseEnvironment(c *Config) error {
 		c.EgressServiceCidr = env
 	}
 
+	// if this is set then we're enabling nftables
+	env = os.Getenv(egressWithNftables)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EgressWithNftables = b
+	}
+
 	return nil
 }

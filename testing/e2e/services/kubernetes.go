@@ -87,6 +87,10 @@ func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clien
 									Name:  "vip_loglevel",
 									Value: "5",
 								},
+								{
+									Name:  "egress_withnftables",
+									Value: "true",
+								},
 							},
 							Image: "plndr/kube-vip:dev",
 							Name:  "kube-vip",
