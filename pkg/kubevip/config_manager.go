@@ -5,7 +5,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"sigs.k8s.io/yaml"
 )
 
 func (c *Config) CheckInterface() error {
