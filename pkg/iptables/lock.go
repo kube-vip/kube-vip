@@ -37,7 +37,7 @@ type Unlocker interface {
 
 type nopUnlocker struct{}
 
-func (_ nopUnlocker) Unlock() error { return nil }
+func (n nopUnlocker) Unlock() error { return nil }
 
 type fileLock struct {
 	// mu is used to protect against concurrent invocations from within this process

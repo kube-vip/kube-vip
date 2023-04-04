@@ -93,21 +93,21 @@ type Stat struct {
 	Options     string     `json:"options"`
 }
 
-type option func(*IPTables)
+type Option func(*IPTables)
 
-func IPFamily(proto Protocol) option {
+func IPFamily(proto Protocol) Option {
 	return func(ipt *IPTables) {
 		ipt.proto = proto
 	}
 }
 
-func Timeout(timeout int) option {
+func Timeout(timeout int) Option {
 	return func(ipt *IPTables) {
 		ipt.timeout = timeout
 	}
 }
 
-func EnableNFTables(enable bool) option {
+func EnableNFTables(enable bool) Option {
 	return func(ipt *IPTables) {
 		ipt.nftables = enable
 	}
@@ -119,7 +119,7 @@ func EnableNFTables(enable bool) option {
 // the IPFamily and Timeout options as follow:
 //
 //	ip6t := New(IPFamily(ProtocolIPv6), Timeout(5))
-func New(opts ...option) (*IPTables, error) {
+func New(opts ...Option) (*IPTables, error) {
 
 	ipt := &IPTables{
 		proto:   ProtocolIPv4,
@@ -575,12 +575,12 @@ func getIptablesCommand(proto Protocol, nftables bool) string {
 			return "ip6tables-nft"
 		}
 		return "ip6tables-legacy"
-	} else {
-		if nftables {
-			return "iptables-nft"
-		}
-		return "iptables-legacy"
 	}
+
+	if nftables {
+		return "iptables-nft"
+	}
+	return "iptables-legacy"
 }
 
 // Checks if iptables has the "-C" and "--wait" flag
@@ -647,7 +647,7 @@ func iptablesHasCheckCommand(v1 int, v2 int, v3 int) bool {
 }
 
 // Checks if an iptables version is after 1.4.20, when --wait was added
-func iptablesHasWaitCommand(v1 int, v2 int, v3 int) bool {
+func iptablesHasWaitCommand(v1 int, v2 int, v3 int) bool { //nolint
 	if v1 > 1 {
 		return true
 	}
