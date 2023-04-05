@@ -5,7 +5,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL: $(TARGET)
 
 # These will be provided to the target
-VERSION := v0.5.10
+VERSION ?= v0.5.11
 BUILD := `git rev-parse HEAD`
 
 # Operating System Default (LINUX)
@@ -55,7 +55,7 @@ dockerx86Dev:
 
 dockerx86Iptables:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --push -t $(REPOSITORY)/$(TARGET):dev .  
+	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --push -t $(REPOSITORY)/$(TARGET):dev .
 	@echo New single x86 Architecture Docker image created
 
 dockerx86:
@@ -94,7 +94,7 @@ check:
 	test -z $(shell gofmt -l main.go | tee /dev/stderr) || echo "[WARN] Fix formatting issues with 'make fmt'"
 	golangci-lint run
 	go vet ./...
-	
+
 run: install
 	@$(TARGET)
 
