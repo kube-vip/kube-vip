@@ -11,9 +11,9 @@ In order to make ARP work on Equinix Metal, follow the [metal-gateway](https://m
 This step is optional but recommended if a K3s installation previously existed.
 
 ```
-rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; \ 
+rm -rf /var/lib/rancher /etc/rancher ~/.kube/*; \
 ip addr flush dev lo; \
-ip addr add 127.0.0.1/8 dev lo; 
+ip addr add 127.0.0.1/8 dev lo;
 ```
 
 ## Step 1: Create Manifests Folder
@@ -36,7 +36,7 @@ curl https://kube-vip.io/manifests/rbac.yaml > /var/lib/rancher/k3s/server/manif
 
 ## Step 3: Generate a Kube-Vip DaemonSet Manifest
 
-Refer to the [DaemonSet manifest generation documentation](/installation/daemonset/#generating-a-manifest) for the process to complete this step.
+Refer to the [DaemonSet manifest generation documentation](/docs/install_daemonset/index.md#generating-a-manifest) for the process to complete this step.
 
 Either store this generated manifest separately in the `/var/lib/rancher/k3s/server/manifests/` directory, or append to the existing RBAC manifest called `kube-vip-rbac.yaml`. As a general best practice, it is a cleaner approach to place all related resources into a single YAML file.
 
