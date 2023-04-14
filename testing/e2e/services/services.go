@@ -28,10 +28,6 @@ import (
 
 func main() {
 	log.Info("🔬 beginning e2e tests")
-	err := createKind()
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	//return
 
@@ -42,14 +38,22 @@ func main() {
 	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
 	_, ignoreEgress := os.LookupEnv("IGNORE_EGRESS")
 	_, retainCluster := os.LookupEnv("RETAIN_CLUSTER")
+	err := createKind()
 
 	if !retainCluster {
+		if err != nil {
+			log.Fatal(err)
+		}
 		defer func() {
 			err := deleteKind()
 			if err != nil {
 				log.Fatal(err)
 			}
 		}()
+	} else {
+		if err != nil {
+			log.Warn(err)
+		}
 	}
 
 	nodeTolerate := os.Getenv("NODE_TOLERATE")
@@ -70,7 +74,7 @@ func main() {
 	deploy := deployment{}
 	err = deploy.createKVDs(ctx, clientset)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
 	}
 
 	if !ignoreSimple {

@@ -33,6 +33,7 @@ type Egress struct {
 }
 
 func CreateIptablesClient(nftables bool) (*Egress, error) {
+	log.Infof("[egress] Creating an iptables client, nftables mode [%t]", nftables)
 	e := new(Egress)
 	var err error
 	e.ipTablesClient, err = iptables.New(iptables.EnableNFTables(nftables))
@@ -53,6 +54,8 @@ func (e *Egress) DeleteManglePrerouting(name string) error {
 }
 
 func (e *Egress) DeleteMangleMarking(podIP, name string) error {
+	log.Infof("[egress] Stopping marking packets on network [%s]", podIP)
+
 	exists, _ := e.ipTablesClient.Exists("mangle", name, "-s", podIP, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", Comment)
 
 	if !exists {
@@ -62,6 +65,8 @@ func (e *Egress) DeleteMangleMarking(podIP, name string) error {
 }
 
 func (e *Egress) DeleteSourceNat(podIP, vip string) error {
+	log.Infof("[egress] Removing source nat from [%s] => [%s]", podIP, vip)
+
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", Comment)
 
 	if !exists {
@@ -71,6 +76,7 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 }
 
 func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
+	log.Infof("[egress] Adding source nat from [%s] => [%s]", podIP, vip)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", Comment)
 
@@ -215,18 +221,31 @@ func (e *Egress) CleanIPtables() error {
 			log.Errorf("[egress] Error removing rule [%v]", err)
 		}
 	}
-
-	mangleRules, err := e.ipTablesClient.List("mangle", MangleChainName)
+	exists, err := e.CheckMangleChain(MangleChainName)
 	if err != nil {
-		return err
+		log.Debugf("[egress] No Mangle chain exists [%v]", err)
 	}
-	foundNatRules = findRules(mangleRules)
-	log.Warnf("[egress] Cleaning [%d] dangling prerouting mangle rules", len(foundNatRules))
-	for x := range foundNatRules {
-		err = e.ipTablesClient.Delete("mangle", MangleChainName, foundNatRules[x][2:]...)
+	if exists {
+		mangleRules, err := e.ipTablesClient.List("mangle", MangleChainName)
 		if err != nil {
-			log.Errorf("[egress] Error removing rule [%v]", err)
+			return err
 		}
+		foundNatRules = findRules(mangleRules)
+		log.Warnf("[egress] Cleaning [%d] dangling prerouting mangle rules", len(foundNatRules))
+		for x := range foundNatRules {
+			err = e.ipTablesClient.Delete("mangle", MangleChainName, foundNatRules[x][2:]...)
+			if err != nil {
+				log.Errorf("[egress] Error removing rule [%v]", err)
+			}
+		}
+		// For unknown reasons RHEL and the nftables wrapper sometimes leave dangling rules
+		// So we shall nuke them from orbit (just to be sure)
+		err = e.ipTablesClient.ClearChain("mangle", MangleChainName)
+		if err != nil {
+			log.Errorf("[egress] Error removing flushing table [%v]", err)
+		}
+	} else {
+		log.Warnf("No existing mangle chain [%s] exists", MangleChainName)
 	}
 	return nil
 }

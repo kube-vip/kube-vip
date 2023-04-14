@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"sync"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
@@ -9,6 +11,7 @@ import (
 type Cluster struct {
 	stop      chan bool
 	completed chan bool
+	once      sync.Once
 	Network   vip.Network
 }
 
@@ -51,7 +54,9 @@ func startNetworking(c *kubevip.Config) (vip.Network, error) {
 func (cluster *Cluster) Stop() {
 	// Close the stop chanel, which will shut down the VIP (if needed)
 	if cluster.stop != nil {
-		close(cluster.stop)
+		cluster.once.Do(func() { // Ensure that the close channel can only ever be called once
+			close(cluster.stop)
+		})
 	}
 
 	// Wait until the completed channel is closed, signallign all shutdown tasks completed
