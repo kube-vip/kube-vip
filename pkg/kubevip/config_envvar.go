@@ -133,6 +133,9 @@ const (
 	//lbClassOnly enables load-balancer for class "kube-vip.io/kube-vip-class" only
 	lbClassOnly = "lb_class_only"
 
+	//lbClassName enables load-balancer for a specific class only
+	lbClassName = "lb_class_name"
+	
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
