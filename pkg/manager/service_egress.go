@@ -64,7 +64,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts string) error 
 		serviceCidr = defaultServiceCIDR
 	}
 
-	i, err := vip.CreateIptablesClient()
+	i, err := vip.CreateIptablesClient(sm.config.ServiceNamespace)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
@@ -157,8 +157,8 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	return
 }
 
-func TeardownEgress(podIP, vipIP, destinationPorts string) error {
-	i, err := vip.CreateIptablesClient()
+func TeardownEgress(podIP, vipIP, destinationPorts, namespace string) error {
+	i, err := vip.CreateIptablesClient(namespace)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}

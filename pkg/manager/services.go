@@ -166,7 +166,7 @@ func (sm *Manager) deleteService(uid string) error {
 				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
 
 					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
+					err := TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts], sm.serviceInstances[x].serviceSnapshot.Namespace)
 					if err != nil {
 						log.Errorf("%v", err)
 					}

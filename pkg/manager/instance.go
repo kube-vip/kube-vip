@@ -73,6 +73,7 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 		Vip:             instanceAddress,
 		serviceSnapshot: service,
 	}
+
 	if len(service.Spec.Ports) > 0 {
 		instance.Type = string(service.Spec.Ports[0].Protocol)
 		instance.Port = service.Spec.Ports[0].Port
@@ -89,8 +90,10 @@ func NewInstance(service *v1.Service, config *kubevip.Config) (*Instance, error)
 		Type:      instance.Type,
 		BindToVip: true,
 	}
+
 	// Add Load Balancer Configuration
 	newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)
+
 	// Create Add configuration to the new service
 	instance.vipConfig = newVip
 
