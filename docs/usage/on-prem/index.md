@@ -44,7 +44,7 @@ To manage the IP address ranges for Services of type `LoadBalancer`, the `kube-v
 - IP ranges [start address - end address]
 - Multiple pools by CIDR per Namespace
 - Multiple IP ranges per Namespace (handles overlapping ranges)
-- Setting of static addresses through service.spec.annotations `kube-vip.io/loadbalancerIPs`
+- Setting of static addresses through service.metadata.annotations `kube-vip.io/loadbalancerIPs`
 - Setting of static addresses through --load-balancer-ip=x.x.x.x (`kubectl expose` command)
 
 To control which IP address range is used for which Service, the following rules are applied:

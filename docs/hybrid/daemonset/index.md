@@ -1,6 +1,6 @@
 # Kube-Vip as a daemonset
 
-In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `service.spec.annotations["kube-vip.io/loadbalancerIPs"]` or `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
+In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `service.metadata.annotations["kube-vip.io/loadbalancerIPs"]` or `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
 
 
 **Note about Daemonsets**

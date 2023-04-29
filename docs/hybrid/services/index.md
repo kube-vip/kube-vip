@@ -7,13 +7,13 @@ We've designed `kube-vip` to be as de-coupled or agnostic from other components 
 This section details the flow of events in order for `kube-vip` to advertise a Kubernetes service:
 
 1. An end user exposes a application through Kubernetes as a LoadBalancer => `kubectl expose deployment nginx-deployment --port=80 --type=LoadBalancer --name=nginx`
-2. Within the Kubernetes cluster a service object is created with the `svc.Spec.Type = LoadBalancer`
+2. Within the Kubernetes cluster a service object is created with the `spec.Type = LoadBalancer`
 3. A controller (typically a Cloud Controller) has a loop that "watches" for services of the type `LoadBalancer`.
 4. The controller now has the responsibility of providing an IP address for this service along with doing anything that is network specific for the environment where the cluster is running.
-5. Once the controller has an IP address, it will update the Service field `spec.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
-6. `kube-vip` Pods implement a "watcher" for Services that have a `spec.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `svc.Spec.loadBalancerIP`.
+5. Once the controller has an IP address, it will update the Service field `metadata.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
+6. `kube-vip` Pods implement a "watcher" for Services that have a `metadata.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `spec.loadBalancerIP`.
 7. When a new service appears `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the service network.
-8. Finally `kube-vip` will update the service status so that the API reflects that this LoadBalancer is ready. This is done by updating the `svc.Status.LoadBalancer.Ingress` with the VIP address.
+8. Finally `kube-vip` will update the service status so that the API reflects that this LoadBalancer is ready. This is done by updating the `status.LoadBalancer.Ingress` with the VIP address.
 
 ## CCM
 

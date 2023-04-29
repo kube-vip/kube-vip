@@ -71,8 +71,8 @@ This section details the flow of events in order for `kube-vip` to advertise a K
 2. Within the Kubernetes cluster, a Service object is created with the `spec.type` set to `LoadBalancer`.
 3. A controller (typically a [Cloud Controller](/usage/cloud-provider)) has a loop that "watches" for Services of the type `LoadBalancer`.
 4. The controller now has the responsibility of providing an IP address for this Service along with doing anything that is network specific for the environment where the cluster is running.
-5. Once the controller has an IP address, it will update the Service field `spec.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
-6. `kube-vip` Pods implement a "watcher" for Services that have a `spec.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `svc.Spec.loadBalancerIP`.
+5. Once the controller has an IP address, it will update the Service field `metadata.annotations["kube-vip.io/loadbalancerIPs"]` and `spec.loadBalancerIP` with the IP address. `spec.loadBalancerIP` is deprecated in k8s 1.24, will not be updated in future release
+6. `kube-vip` Pods implement a "watcher" for Services that have a `metadata.annotations["kube-vip.io/loadbalancerIPs"]` address attached. If the annotation is not presented, it will fallback to check `spec.loadBalancerIP`.
 7. When a new Service appears, `kube-vip` will start advertising this address to the wider network (through BGP/ARP) which will allow traffic to come into the cluster and hit the Service network.
 8. Finally, `kube-vip` will update the Service status so that the API reflects the object is ready. This is done by updating the `status.loadBalancer.ingress` with the VIP address.
 
