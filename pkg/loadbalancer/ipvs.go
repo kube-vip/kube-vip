@@ -160,6 +160,10 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 
 func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
 	ip, family := ipAndFamily(address)
+	if family != lb.loadBalancerService.Family {
+		return nil
+	}
+
 	dst := ipvs.Destination{
 		Address: ip,
 		Port:    uint16(port),
