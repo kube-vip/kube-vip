@@ -1,6 +1,6 @@
 # Kube-vip as a Static Pod
 
-In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `service.spec.annotations["kube-vip.io/loadbalancerIPs"]` or `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
+In Hybrid mode `kube-vip` will manage a virtual IP address that is passed through it's configuration for a Highly Available Kubernetes cluster, it will also "watch" services of `type:LoadBalancer` and once their `service.metadata.annotations["kube-vip.io/loadbalancerIPs"]` or `spec.LoadBalancerIP` is updated (typically by a cloud controller) it will advertise this address using BGP/ARP.
 
 The "hybrid" mode is now the default mode in `kube-vip` from `0.2.3` onwards, and allows both modes to be enabled at the same time.
 
