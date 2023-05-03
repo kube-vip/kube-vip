@@ -39,7 +39,6 @@ type IPVSLoadBalancer struct {
 }
 
 func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBalancer, error) {
-
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
@@ -53,12 +52,14 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 	}
 	log.Infof("IPVS Loadbalancer enabled for %d.%d.%d", i.Version[0], i.Version[1], i.Version[2])
 
+	ip, family := ipAndFamily(address)
+
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
-		Family:    ipvs.INET,
+		Family:    family,
 		Protocol:  ipvs.TCP,
 		Port:      uint16(port),
-		Address:   ipvs.NewIP(net.ParseIP(address)),
+		Address:   ip,
 		Scheduler: ROUNDROBIN,
 	}
 
@@ -95,11 +96,9 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 		return fmt.Errorf("error removing existing IPVS service: %v", err)
 	}
 	return nil
-
 }
 
 func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
-
 	// Check if this is the first backend
 	backends, err := lb.client.Destinations(lb.loadBalancerService)
 	if err != nil && strings.Contains(err.Error(), "file does not exist") {
@@ -125,13 +124,21 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 			log.Errorf("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
 			log.Fatalf("IPVS service error: %v", err)
 		}
-		log.Infof("Created Load-Balancer services on [%s:%d]", lb.loadBalancerService.Address.Net(ipvs.INET).String(), lb.Port)
+		log.Infof("Created Load-Balancer services on [%s:%d]", lb.addrString(), lb.Port)
+	}
+
+	ip, family := ipAndFamily(address)
+
+	// Ignore backends that use a different address family.
+	// Looks like different families could be supported in tunnel mode...
+	if family != lb.loadBalancerService.Family {
+		return nil
 	}
 
 	dst := ipvs.Destination{
-		Address:   ipvs.NewIP(net.ParseIP(address)),
+		Address:   ip,
 		Port:      uint16(port),
-		Family:    ipvs.INET,
+		Family:    family,
 		Weight:    1,
 		FwdMethod: lb.forwardingMethod,
 	}
@@ -146,16 +153,17 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 		// file exists is fine, we will just return at this point
 		return nil
 	}
-	log.Infof("Added backend for [%s:%d] on [%s:%d]", lb.loadBalancerService.Address.Net(ipvs.INET).String(), lb.Port, address, port)
+	log.Infof("Added backend for [%s:%d] on [%s:%d]", lb.addrString(), lb.Port, address, port)
 
 	return nil
 }
 
 func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
+	ip, family := ipAndFamily(address)
 	dst := ipvs.Destination{
-		Address: ipvs.NewIP(net.ParseIP(address)),
+		Address: ip,
 		Port:    uint16(port),
-		Family:  ipvs.INET,
+		Family:  family,
 		Weight:  1,
 	}
 	err := lb.client.RemoveDestination(lb.loadBalancerService, dst)
@@ -163,4 +171,16 @@ func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
 		return fmt.Errorf("error removing backend: %v", err)
 	}
 	return nil
+}
+
+func (lb *IPVSLoadBalancer) addrString() string {
+	return lb.loadBalancerService.Address.Net(lb.loadBalancerService.Family).String()
+}
+
+func ipAndFamily(address string) (ipvs.IP, ipvs.AddressFamily) {
+	ipAddr := net.ParseIP(address)
+	if ipAddr.To4() == nil {
+		return ipvs.NewIP(ipAddr), ipvs.INET6
+	}
+	return ipvs.NewIP(ipAddr), ipvs.INET
 }
