@@ -29,7 +29,7 @@ const (
 	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 )
 
-func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")

@@ -19,9 +19,5 @@ func (cluster *Cluster) StartDDNS(ctx context.Context) error {
 		return err
 	}
 
-	if err = cluster.Network.SetIP(ip); err != nil {
-		return err
-	}
-
-	return nil
+	return cluster.Network.SetIP(ip)
 }
