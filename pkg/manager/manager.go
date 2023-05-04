@@ -49,6 +49,10 @@ type Manager struct {
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
 
+	// This is a prometheus gauge indicating the state of the sessions.
+	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
+	bgpSessionInfoGauge *prometheus.GaugeVec
+
 	// This mutex is to protect calls from various goroutines
 	mutex sync.Mutex
 }
@@ -100,6 +104,12 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			Name:      "all_services_events",
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
+		bgpSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "kube_vip",
+			Subsystem: "manager",
+			Name:      "bgp_session_info",
+			Help:      "Display state of session by setting metric for label value with current state to 1",
+		}, []string{"state", "peer"}),
 	}, nil
 }
 

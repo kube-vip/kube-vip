@@ -42,6 +42,10 @@ type Manager struct {
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
+
+	// This is a prometheus gauge indicating the state of the sessions.
+	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
+	bgpSessionInfoGauge *prometheus.GaugeVec
 }
 
 // Instance defines an instance of everything needed to manage a vip
