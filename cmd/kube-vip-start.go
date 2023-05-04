@@ -89,7 +89,7 @@ var kubeVipStart = &cobra.Command{
 
 				if startConfig.EnableBGP {
 					log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
-					bgpServer, err = bgp.NewBGPServer(&startConfig.BGPConfig)
+					bgpServer, err = bgp.NewBGPServer(&startConfig.BGPConfig, nil)
 					if err != nil {
 						log.Fatalf("%v", err)
 					}

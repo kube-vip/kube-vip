@@ -8,6 +8,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
+	api "github.com/osrg/gobgp/v3/api"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
 )
@@ -48,7 +49,7 @@ func (sm *Manager) startBGP() error {
 	}
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
-	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
+	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {})
 	if err != nil {
 		return err
 	}

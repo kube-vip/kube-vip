@@ -36,7 +36,7 @@ func (sm *Manager) startBGP() error {
 	}
 
 	log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
-	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
+	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, nil)
 	if err != nil {
 		return err
 	}
