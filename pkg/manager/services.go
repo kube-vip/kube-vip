@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kube-vip/kube-vip/pkg/service"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+
+	"github.com/kube-vip/kube-vip/pkg/service"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 const (
@@ -45,7 +46,8 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 			if sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0" ||
 				!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0" ||
 				!sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
-					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP {
+					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP ||
+				len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
 				if err := sm.deleteService(newServiceUID); err != nil {
 					return err
 				}
@@ -63,6 +65,19 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 	}
 
 	return nil
+}
+
+func comparePortsAndPortStatuses(svc *v1.Service) bool {
+	portsStatus := svc.Status.LoadBalancer.Ingress[0].Ports
+	if len(portsStatus) != len(svc.Spec.Ports) {
+		return false
+	}
+	for i, portSpec := range svc.Spec.Ports {
+		if portsStatus[i].Port != portSpec.Port || portsStatus[i].Protocol != portSpec.Protocol {
+			return false
+		}
+	}
+	return true
 }
 
 func (sm *Manager) addService(svc *v1.Service) error {
@@ -241,7 +256,17 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			return err
 		}
 
-		updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: i.vipConfig.VIP}}
+		ports := make([]v1.PortStatus, 0, len(i.serviceSnapshot.Spec.Ports))
+		for _, port := range i.serviceSnapshot.Spec.Ports {
+			ports = append(ports, v1.PortStatus{
+				Port:     port.Port,
+				Protocol: port.Protocol,
+			})
+		}
+		updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{
+			IP:    i.vipConfig.VIP,
+			Ports: ports,
+		}}
 		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
 		if err != nil {
 			log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)

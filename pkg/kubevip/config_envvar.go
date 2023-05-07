@@ -135,7 +135,7 @@ const (
 
 	//lbClassName enables load-balancer for a specific class only
 	lbClassName = "lb_class_name"
-	
+
 	//lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 
@@ -144,6 +144,9 @@ const (
 
 	//lbForwardingMethod defines the forwarding method of load-balancer
 	lbForwardingMethod = "lb_fwdmethod"
+
+	// EnableServiceSecurity defines if the load-balancer should only allow traffic to service ports
+	EnableServiceSecurity = "enable_service_security"
 
 	//prometheusServer defines the address prometheus listens on
 	prometheusServer = "prometheus_server"

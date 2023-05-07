@@ -1,15 +1,24 @@
 package vip
 
 import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	v1 "k8s.io/api/core/v1"
+
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 )
 
 const (
 	defaultValidLft = 60
+	iptablesComment = "%s kube-vip load balancer IP"
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -21,6 +30,7 @@ type Network interface {
 	IsSet() (bool, error)
 	IP() string
 	SetIP(ip string) error
+	SetServicePorts(service *v1.Service)
 	Interface() string
 	IsDADFAIL() bool
 	IsDNS() bool
@@ -33,8 +43,10 @@ type Network interface {
 type network struct {
 	mu sync.Mutex
 
-	address *netlink.Addr
-	link    netlink.Link
+	address     *netlink.Addr
+	link        netlink.Link
+	ports       []v1.ServicePort
+	serviceName string
 
 	dnsName string
 	isDDNS  bool
@@ -139,6 +151,141 @@ func (configurator *network) AddIP() error {
 	if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
 		return errors.Wrap(err, "could not add ip")
 	}
+
+	if os.Getenv("enable_service_security") == "true" {
+		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
+			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
+		}
+	}
+
+	return nil
+}
+
+func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
+	ipt, err := iptables.New()
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
+	if err := insertCommonIPTablesRules(ipt, vip, comment); err != nil {
+		return fmt.Errorf("could not add common iptables rules: %w", err)
+	}
+	log.Debugf("add iptables rules, vip: %s, ports: %+v", vip, configurator.ports)
+	if err := configurator.insertIPTablesRulesForServicePorts(ipt, vip, comment); err != nil {
+		return fmt.Errorf("could not add iptables rules for service ports: %v", err)
+	}
+
+	return nil
+}
+
+func (configurator *network) insertIPTablesRulesForServicePorts(ipt *iptables.IPTables, vip, comment string) error {
+	isPortsRuleExisting := make([]bool, len(configurator.ports))
+
+	// delete rules of ports that are not in the service
+	rules, err := ipt.List(iptables.TableFilter, iptables.ChainInput)
+	if err != nil {
+		return fmt.Errorf("could not list iptables rules: %w", err)
+	}
+	for _, rule := range rules {
+		// only handle rules with kube-vip comment
+		if iptables.GetIPTablesRuleSpecification(rule, "--comment") != comment {
+			continue
+		}
+		// if the rule is not for the vip, delete it
+		if iptables.GetIPTablesRuleSpecification(rule, "-d") != vip {
+			if err := ipt.Delete(iptables.TableFilter, iptables.ChainInput, rule); err != nil {
+				return fmt.Errorf("could not delete iptables rule: %w", err)
+			}
+		}
+
+		protocol := iptables.GetIPTablesRuleSpecification(rule, "-p")
+		port := iptables.GetIPTablesRuleSpecification(rule, "--dport")
+		// ignore DHCP client port
+		if protocol == string(v1.ProtocolUDP) && port == dhcpClientPort {
+			continue
+		}
+		// if the rule is for the vip, but its protocol and port are not in the service, delete it
+		toBeDeleted := true
+		for i, p := range configurator.ports {
+			if string(p.Protocol) == protocol && strconv.Itoa(int(p.Port)) == port {
+				// the rule is for the vip and its protocol and port are in the service, keep it and mark it as existing
+				toBeDeleted = false
+				isPortsRuleExisting[i] = true
+			}
+		}
+		if toBeDeleted {
+			if err := ipt.Delete(iptables.TableFilter, iptables.ChainInput, strings.Split(rule, "")...); err != nil {
+				return fmt.Errorf("could not delete iptables rule: %w", err)
+			}
+		}
+	}
+	// add rules of ports that are not existing
+	// iptables -A INPUT -d <vip> -p <protocol> --dport <port> -j ACCEPT -m comment —comment “<namespace/service-name> kube-vip load balancer IP”
+	for i, ok := range isPortsRuleExisting {
+		if !ok {
+			if err := ipt.InsertUnique(iptables.TableFilter, iptables.ChainInput, 1, "-d", vip, "-p",
+				string(configurator.ports[i].Protocol), "--dport", strconv.Itoa(int(configurator.ports[i].Port)),
+				"-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
+				return fmt.Errorf("could not add iptables rule to accept the traffic to VIP %s for allowed "+
+					"port %d: %v", vip, configurator.ports[i].Port, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func insertCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) error {
+	if err := ipt.InsertUnique(iptables.TableFilter, iptables.ChainInput, 1, "-d", vip, "-p",
+		string(v1.ProtocolUDP), "--dport", dhcpClientPort, "-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
+		return fmt.Errorf("could not add iptables rule to accept the traffic to VIP %s for DHCP client port: %w", vip, err)
+	}
+	// add rule to drop the traffic to VIP that is not allowed
+	// iptables -A INPUT -d <vip> -j DROP
+	if err := ipt.InsertUnique(iptables.TableFilter, iptables.ChainInput, 2, "-d", vip, "-m",
+		"comment", "--comment", comment, "-j", "DROP"); err != nil {
+		return fmt.Errorf("could not add iptables rule to drop the traffic to VIP %s: %v", vip, err)
+	}
+	return nil
+}
+
+func deleteCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) error {
+	if err := ipt.DeleteIfExists(iptables.TableFilter, iptables.ChainInput, "-d", vip, "-p",
+		string(v1.ProtocolUDP), "--dport", dhcpClientPort, "-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
+		return fmt.Errorf("could not delete iptables rule to accept the traffic to VIP %s for DHCP client port: %w", vip, err)
+	}
+	// add rule to drop the traffic to VIP that is not allowed
+	// iptables -A INPUT -d <vip> -j DROP
+	if err := ipt.DeleteIfExists(iptables.TableFilter, iptables.ChainInput, "-d", vip, "-m", "comment",
+		"--comment", comment, "-j", "DROP"); err != nil {
+		return fmt.Errorf("could not delete iptables rule to drop the traffic to VIP %s: %v", vip, err)
+	}
+	return nil
+}
+
+func (configurator *network) removeIptablesRuleToLimitTrafficPorts() error {
+	ipt, err := iptables.New()
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
+
+	if err := deleteCommonIPTablesRules(ipt, vip, comment); err != nil {
+		return fmt.Errorf("could not delete common iptables rules: %w", err)
+	}
+
+	log.Debugf("remove iptables rules, vip: %s, ports: %+v", vip, configurator.ports)
+	for _, port := range configurator.ports {
+		// iptables -D INPUT -d  <VIP> -p <protocol> --dport <port> -j ACCEPT
+		if err := ipt.DeleteIfExists(iptables.TableFilter, iptables.ChainInput, "-d", vip, "-p", string(port.Protocol),
+			"--dport", strconv.Itoa(int(port.Port)), "-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
+			return fmt.Errorf("could not delete iptables rule to accept the traffic to VIP %s for allowed port %d: %v", vip, port.Port, err)
+		}
+	}
+
 	return nil
 }
 
@@ -156,6 +303,12 @@ func (configurator *network) DeleteIP() error {
 
 	if err = netlink.AddrDel(configurator.link, configurator.address); err != nil {
 		return errors.Wrap(err, "could not delete ip")
+	}
+
+	if os.Getenv("enable_service_security") == "true" {
+		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
+			return errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
+		}
 	}
 
 	return nil
@@ -225,6 +378,16 @@ func (configurator *network) SetIP(ip string) error {
 	}
 	configurator.address = addr
 	return nil
+}
+
+// SetServicePorts updates the service ports from the service
+// If you want to limit traffic to the VIP to only the service ports, add service ports to the network firstly.
+func (configurator *network) SetServicePorts(service *v1.Service) {
+	configurator.mu.Lock()
+	defer configurator.mu.Unlock()
+
+	configurator.ports = service.Spec.Ports
+	configurator.serviceName = service.Namespace + "/" + service.Name
 }
 
 // IP - return the IP Address

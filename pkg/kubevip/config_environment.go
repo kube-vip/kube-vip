@@ -167,7 +167,7 @@ func ParseEnvironment(c *Config) error {
 		if env != "" {
 			c.LoadBalancerClassName = env
 		}
-		
+
 		// Find the namespace that the control plane should use (for leaderElection lock)
 		env = os.Getenv(svcNamespace)
 		if env != "" {
@@ -398,6 +398,15 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(lbForwardingMethod)
 	if env != "" {
 		c.LoadBalancerForwardingMethod = env
+	}
+
+	env = os.Getenv(EnableServiceSecurity)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableServiceSecurity = b
 	}
 
 	// Find Prometheus configuration
