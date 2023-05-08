@@ -52,17 +52,19 @@ func (sm *Manager) startBGP() error {
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
 	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
+		ipaddr := p.GetPeer().GetState().GetNeighborAddress()
+		port := uint64(179)
+		peerDescription := fmt.Sprintf("%s:%d", ipaddr, port)
+
 		for stateName, stateValue := range api.PeerState_SessionState_value {
 			metricValue := 0.0
 			if stateValue == int32(p.GetPeer().GetState().GetSessionState().Number()) {
 				metricValue = 1
 			}
-			ipaddr := p.GetPeer().GetState().GetNeighborAddress()
-			port := uint64(179)
 
 			sm.bgpSessionInfoGauge.With(prometheus.Labels{
 				"state": stateName,
-				"peer":  fmt.Sprintf("%s:%d", ipaddr, port),
+				"peer":  peerDescription,
 			}).Set(metricValue)
 		}
 	})
