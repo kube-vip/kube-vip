@@ -113,7 +113,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			}
-			err = sm.configureEgress(serviceIP, svc.Annotations[endpoint], svc.Annotations[egressDestinationPorts])
+			err = sm.configureEgress(serviceIP, svc.Annotations[endpoint], svc.Annotations[egressDestinationPorts], svc.Namespace)
 			if err != nil {
 				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 			} else {
@@ -169,7 +169,7 @@ func (sm *Manager) deleteService(uid string) error {
 				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
 
 					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := sm.TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts])
+					err := sm.TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts], sm.serviceInstances[x].serviceSnapshot.Namespace)
 					if err != nil {
 						log.Errorf("%v", err)
 					}
