@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"syscall"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/packethost/packngo"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -49,7 +51,21 @@ func (sm *Manager) startBGP() error {
 	}
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
-	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {})
+	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
+		for stateName, stateValue := range api.PeerState_SessionState_value {
+			metricValue := 0.0
+			if stateValue == int32(p.GetPeer().GetState().GetSessionState().Number()) {
+				metricValue = 1
+			}
+			ipaddr := p.GetPeer().GetState().GetNeighborAddress()
+			port := uint64(179)
+
+			sm.bgpSessionInfoGauge.With(prometheus.Labels{
+				"state": stateName,
+				"peer":  fmt.Sprintf("%s:%d", ipaddr, port),
+			}).Set(metricValue)
+		}
+	})
 	if err != nil {
 		return err
 	}
