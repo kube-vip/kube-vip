@@ -3,6 +3,8 @@ package cluster
 import (
 	"sync"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
@@ -31,6 +33,8 @@ func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 	newCluster := &Cluster{
 		Network: network,
 	}
+
+	log.Debugf("init enable service security: %t", c.EnableServiceSecurity)
 
 	return newCluster, nil
 }

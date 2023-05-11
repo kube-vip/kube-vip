@@ -14,6 +14,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const dhcpClientPort = "68"
+
 // Callback is a function called on certain events
 type Callback func(*nclient4.Lease)
 

@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
+	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+	v1 "k8s.io/api/core/v1"
+
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/service"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
-	"github.com/vishvananda/netlink"
-	v1 "k8s.io/api/core/v1"
 )
 
 const dhcpTimeout = 10 * time.Second
@@ -55,16 +56,17 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 
 	// Generate new Virtual IP configuration
 	newVip := &kubevip.Config{
-		VIP:                instanceAddress, //TODO support more than one vip?
-		Interface:          serviceInterface,
-		SingleNode:         true,
-		EnableARP:          config.EnableARP,
-		EnableBGP:          config.EnableBGP,
-		VIPCIDR:            config.VIPCIDR,
-		VIPSubnet:          config.VIPSubnet,
-		EnableRoutingTable: config.EnableRoutingTable,
-		RoutingTableID:     config.RoutingTableID,
-		ArpBroadcastRate:   config.ArpBroadcastRate,
+		VIP:                   instanceAddress, //TODO support more than one vip?
+		Interface:             serviceInterface,
+		SingleNode:            true,
+		EnableARP:             config.EnableARP,
+		EnableBGP:             config.EnableBGP,
+		VIPCIDR:               config.VIPCIDR,
+		VIPSubnet:             config.VIPSubnet,
+		EnableRoutingTable:    config.EnableRoutingTable,
+		RoutingTableID:        config.RoutingTableID,
+		ArpBroadcastRate:      config.ArpBroadcastRate,
+		EnableServiceSecurity: config.EnableServiceSecurity,
 	}
 
 	// Create new service
@@ -77,6 +79,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		instance.Type = string(svc.Spec.Ports[0].Protocol)
 		instance.Port = svc.Spec.Ports[0].Port
 	}
+
 	if svc.Annotations != nil {
 		instance.dhcpInterfaceHwaddr = svc.Annotations[hwAddrKey]
 		instance.dhcpInterfaceIP = svc.Annotations[requestedIP]
@@ -116,6 +119,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 		return nil, err
 	}
+	c.Network.SetServicePorts(svc)
 	instance.cluster = c
 
 	return instance, nil

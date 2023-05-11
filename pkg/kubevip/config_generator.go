@@ -127,6 +127,15 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			}
 			newEnvironment = append(newEnvironment, lbClassOnlyVar...)
 		}
+		if c.EnableServiceSecurity {
+			EnableServiceSecurityVar := []corev1.EnvVar{
+				{
+					Name:  EnableServiceSecurity,
+					Value: strconv.FormatBool(c.EnableServiceSecurity),
+				},
+			}
+			newEnvironment = append(newEnvironment, EnableServiceSecurityVar...)
+		}
 	}
 
 	// If Leader election is enabled then add the configuration to the manifest

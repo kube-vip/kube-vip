@@ -63,6 +63,11 @@ const (
 	ProtocolIPv6
 )
 
+const (
+	TableFilter = "filter"
+	ChainInput  = "INPUT"
+)
+
 type IPTables struct {
 	path              string
 	proto             Protocol
@@ -718,4 +723,15 @@ func filterRuleOutput(rule string) string {
 	}
 
 	return out
+}
+
+func GetIPTablesRuleSpecification(rule, specification string) string {
+	parts := strings.Split(rule, " ")
+	for i, part := range parts {
+		if part == specification && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+
+	return ""
 }

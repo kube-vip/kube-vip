@@ -38,7 +38,10 @@ type Config struct {
 
 	// LoadBalancerClassName, will limit the load balancing services to services with LoadBalancerClass set to this value
 	LoadBalancerClassName string `yaml:"lbClassName"`
-	
+
+	// EnableServiceSecurity, will enable the use of iptables to secure services
+	EnableServiceSecurity bool `yaml:"EnableServiceSecurity"`
+
 	// ArpBroadcastRate, defines how often kube-vip will update the network about updates to the network
 	ArpBroadcastRate int64 `yaml:"arpBroadcastRate"`
 
