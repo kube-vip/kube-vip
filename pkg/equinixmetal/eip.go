@@ -10,7 +10,7 @@ import (
 )
 
 // AttachEIP will use the Equinix Metal APIs to move an EIP and attach to a host
-func AttachEIP(c *packngo.Client, k *kubevip.Config, hostname string) error {
+func AttachEIP(c *packngo.Client, k *kubevip.Config, _ string) error {
 	// Use MetalProjectID if it is defined
 	projID := k.MetalProjectID
 

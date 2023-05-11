@@ -51,8 +51,10 @@ var Release struct {
 }
 
 // Structs used via the various subcommands
-var initConfig kubevip.Config
-var initLoadBalancer kubevip.LoadBalancer
+var (
+	initConfig       kubevip.Config
+	initLoadBalancer kubevip.LoadBalancer
+)
 
 // Points to a kubernetes configuration file
 var kubeConfigPath string
@@ -63,7 +65,6 @@ var kubeVipCmd = &cobra.Command{
 }
 
 func init() {
-
 	// Basic flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
@@ -211,7 +212,6 @@ var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) {
-
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
@@ -273,11 +273,10 @@ var kubeVipManager = &cobra.Command{
 					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
 					if err != nil {
 						log.Fatalln(err)
-					} else {
-						l, err = netlink.LinkByName(initConfig.Interface)
-						if err != nil {
-							log.Fatalln(err)
-						}
+					}
+					l, err = netlink.LinkByName(initConfig.Interface)
+					if err != nil {
+						log.Fatalln(err)
 					}
 				}
 			}
@@ -385,5 +384,4 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	if err == http.ErrServerClosed {
 		err = nil
 	}
-
 }

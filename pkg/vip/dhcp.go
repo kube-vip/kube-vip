@@ -131,9 +131,8 @@ func (c *DHCPClient) Start() {
 			log.Errorf("request failed, error: %s (waiting %v)", err.Error(), dur)
 			time.Sleep(dur)
 			continue
-		} else {
-			backoff.Reset()
 		}
+		backoff.Reset()
 
 		c.initRebootFlag = false
 		c.lease = lease

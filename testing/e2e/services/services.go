@@ -29,7 +29,7 @@ import (
 func main() {
 	log.Info("🔬 beginning e2e tests")
 
-	//return
+	// return
 
 	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
 	_, ignoreDeployments := os.LookupEnv("IGNORE_DEPLOY")
@@ -284,9 +284,8 @@ func main() {
 		deploy.address = GetLocalIP()
 		if deploy.address == "" {
 			log.Fatalf("Unable to detect local IP address")
-		} else {
-			log.Infof("📠 found local address [%s]", deploy.address)
 		}
+		log.Infof("📠 found local address [%s]", deploy.address)
 		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
@@ -391,7 +390,6 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 
 	// Used for tracking an active endpoint / pod
 	for event := range ch {
-
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added:
@@ -475,7 +473,6 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 
 	// Used for tracking an active endpoint / pod
 	for event := range ch {
-
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added:
@@ -525,7 +522,7 @@ func tcpServer(egressAddress *string) bool {
 		conn, err := listen.Accept()
 		if err != nil {
 			return false
-			//log.Fatal(err)
+			// log.Fatal(err)
 		}
 		remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 		log.Infof("📞 incoming from [%s]", remoteAddress)
