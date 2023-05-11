@@ -14,19 +14,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/kube-vip/kube-vip/pkg/service"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 const (
-	hwAddrKey              = "kube-vip.io/hwaddr"
-	requestedIP            = "kube-vip.io/requestedIP"
-	vipHost                = "kube-vip.io/vipHost"
-	egress                 = "kube-vip.io/egress"
-	egressDestinationPorts = "kube-vip.io/egress-destination-ports"
-	egressSourcePorts      = "kube-vip.io/egress-source-ports"
-	endpoint               = "kube-vip.io/active-endpoint"
-	flushContrack          = "kube-vip.io/flush-conntrack"
+	hwAddrKey                = "kube-vip.io/hwaddr"
+	requestedIP              = "kube-vip.io/requestedIP"
+	vipHost                  = "kube-vip.io/vipHost"
+	egress                   = "kube-vip.io/egress"
+	egressDestinationPorts   = "kube-vip.io/egress-destination-ports"
+	egressSourcePorts        = "kube-vip.io/egress-source-ports"
+	endpoint                 = "kube-vip.io/active-endpoint"
+	flushContrack            = "kube-vip.io/flush-conntrack"
+	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 )
 
 func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
@@ -36,7 +36,7 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 
 	// Iterate through the synchronising services
 	foundInstance := false
-	newServiceAddress := service.FetchServiceAddress(svc)
+	newServiceAddress := fetchServiceAddress(svc)
 	newServiceUID := string(svc.UID)
 
 	for x := range sm.serviceInstances {
@@ -104,7 +104,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		return err
 	}
 
-	serviceIP := service.FetchServiceAddress(svc)
+	serviceIP := fetchServiceAddress(svc)
 
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
@@ -146,7 +146,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 }
 
 func (sm *Manager) deleteService(uid string) error {
-	//pretect multiple calls
+	// pretect multiple calls
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
@@ -195,7 +195,7 @@ func (sm *Manager) deleteService(uid string) error {
 	// If we've been through all services and not found the correct one then error
 	if !found {
 		// TODO: - fix UX
-		//return fmt.Errorf("unable to find/stop service [%s]", uid)
+		// return fmt.Errorf("unable to find/stop service [%s]", uid)
 		return nil
 	}
 
@@ -280,4 +280,15 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		return retryErr
 	}
 	return nil
+}
+
+// fetchServiceAddress tries to get the address from annotations
+// kube-vip.io/loadbalancerIPs, then from spec.loadbalancerIP
+func fetchServiceAddress(s *v1.Service) string {
+	if s.Annotations != nil {
+		if v, ok := s.Annotations[loadbalancerIPAnnotation]; ok {
+			return v
+		}
+	}
+	return s.Spec.LoadBalancerIP
 }

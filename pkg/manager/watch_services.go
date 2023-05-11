@@ -15,8 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
-
-	"github.com/kube-vip/kube-vip/pkg/service"
 )
 
 // TODO: Fix the naming of these contexts
@@ -103,7 +101,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			}
 
 			// We only care about LoadBalancer services that have been allocated an address
-			if service.FetchServiceAddress(svc) == "" {
+			if fetchServiceAddress(svc) == "" {
 				break
 			}
 
@@ -126,7 +124,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			log.Debugf("service [%s] has been added/modified with addresses [%s]", svc.Name, service.FetchServiceAddress(svc))
+			log.Debugf("service [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddress(svc))
 
 			// Scenarios:
 			// 1.
@@ -209,7 +207,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			statusErr, ok := errObject.(*apierrors.StatusError)
 			if !ok {
 				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-
 			}
 
 			status := statusErr.ErrStatus
