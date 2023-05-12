@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	defaultValidLft = 60
-	iptablesComment = "%s kube-vip load balancer IP"
+	defaultValidLft                 = 60
+	iptablesComment                 = "%s kube-vip load balancer IP"
+	ignoreServiceSecurityAnnotation = "kube-vip.io/ignore-service-security"
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -43,10 +44,11 @@ type Network interface {
 type network struct {
 	mu sync.Mutex
 
-	address     *netlink.Addr
-	link        netlink.Link
-	ports       []v1.ServicePort
-	serviceName string
+	address        *netlink.Addr
+	link           netlink.Link
+	ports          []v1.ServicePort
+	serviceName    string
+	ignoreSecurity bool
 
 	dnsName string
 	isDDNS  bool
@@ -146,7 +148,7 @@ func (configurator *network) AddIP() error {
 		return errors.Wrap(err, "could not add ip")
 	}
 
-	if os.Getenv("enable_service_security") == "true" {
+	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
 		}
@@ -299,7 +301,7 @@ func (configurator *network) DeleteIP() error {
 		return errors.Wrap(err, "could not delete ip")
 	}
 
-	if os.Getenv("enable_service_security") == "true" {
+	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
 		}
@@ -382,6 +384,7 @@ func (configurator *network) SetServicePorts(service *v1.Service) {
 
 	configurator.ports = service.Spec.Ports
 	configurator.serviceName = service.Namespace + "/" + service.Name
+	configurator.ignoreSecurity = service.Annotations[ignoreServiceSecurityAnnotation] == "true"
 }
 
 // IP - return the IP Address
