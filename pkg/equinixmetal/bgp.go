@@ -54,6 +54,7 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 			Address:  neighbours[0].PeerIps[x],
 			AS:       uint32(neighbours[0].PeerAs),
 			MultiHop: neighbours[0].Multihop,
+			Password: neighbours[0].Md5Password,
 		}
 		k.BGPConfig.Peers = append(k.BGPConfig.Peers, peer)
 	}
