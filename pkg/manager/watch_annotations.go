@@ -214,7 +214,7 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 		}
 	}
 	peerIPString = strings.TrimRight(peerIPString, ",")
-	
+
 	peerIPs := strings.Split(peerIPString, ",")
 
 	for _, peerIP := range peerIPs {
