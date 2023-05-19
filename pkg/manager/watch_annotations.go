@@ -208,11 +208,13 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 
 	peerIPString := ""
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-ip", prefix))
+		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-[0-9]+-)?peer-ip", prefix))
 		if regex.Match([]byte(k)) {
-			peerIPString = v
+			peerIPString += v + ","
 		}
 	}
+	peerIPString = strings.TrimRight(peerIPString, ",")
+
 	peerIPs := strings.Split(peerIPString, ",")
 
 	for _, peerIP := range peerIPs {
