@@ -16,9 +16,4 @@ FROM alpine:3.16.2
 RUN apk add --no-cache iptables
 # Add kube-vip binary
 COPY --from=dev /src/kube-vip /
-COPY /entrypoint_iptables.sh /
-# Adding iptables-wrapper-installer from https://github.com/kubernetes-sigs/iptables-wrappers
-ADD https://raw.githubusercontent.com/kubernetes-sigs/iptables-wrappers/v2/iptables-wrapper-installer.sh /
-RUN chmod 755 /entrypoint_iptables.sh /iptables-wrapper-installer.sh
-
-ENTRYPOINT ["/entrypoint_iptables.sh"]
+ENTRYPOINT ["/kube-vip"]
