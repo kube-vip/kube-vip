@@ -191,8 +191,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if err != nil {
 				log.Error(err)
 			}
+
 			// Calls the cancel function of the context
-			activeServiceLoadBalancerCancel[string(svc.UID)]()
+			if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
+
+				activeServiceLoadBalancerCancel[string(svc.UID)]()
+			}
 			activeService[string(svc.UID)] = false
 			watchedService[string(svc.UID)] = false
 
