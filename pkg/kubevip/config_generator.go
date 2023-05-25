@@ -147,6 +147,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Value: strconv.FormatBool(c.EnableLeaderElection),
 			},
 			{
+				Name:  vipLeaseName,
+				Value: c.LeaseName,
+			},
+			{
 				Name:  vipLeaseDuration,
 				Value: fmt.Sprintf("%d", c.LeaseDuration),
 			},
