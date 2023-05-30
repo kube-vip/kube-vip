@@ -32,7 +32,16 @@ func NewClientset(configPath string, inCluster bool, hostname string) (*kubernet
 
 func restConfig(kubeconfig string, inCluster bool) (*rest.Config, error) {
 	if kubeconfig != "" && !inCluster {
-		return clientcmd.BuildConfigFromFlags("", kubeconfig)
+		cfg, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+	} else {
+		cfg, err = rest.InClusterConfig()
 	}
-	return rest.InClusterConfig()
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	cfg.QPS = 100
+	cfg.Burst = 250
+	return cfg, nil
 }
