@@ -53,6 +53,12 @@ func ParseEnvironment(c *Config) error {
 		c.EnableLeaderElection = b
 	}
 
+	// Attempt to find the Lease name from the environment variables
+	env = os.Getenv(vipLeaseName)
+	if env != "" {
+		c.LeaseName = env
+	}
+
 	// Attempt to find the Lease configuration from the environment variables
 	env = os.Getenv(vipLeaseDuration)
 	if env != "" {
