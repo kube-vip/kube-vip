@@ -144,6 +144,9 @@ type LeaderElection struct {
 	// EnableLeaderElection will use the Kubernetes leader election algorithm
 	EnableLeaderElection bool `yaml:"enableLeaderElection"`
 
+	// LeaseName - name of the lease for leader election
+	LeaseName string `yaml:"leaseName"`
+
 	// Lease Duration - length of time a lease can be held for
 	LeaseDuration int
 

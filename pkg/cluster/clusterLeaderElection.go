@@ -30,8 +30,6 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
-const plunderLock = "plndr-cp-lock"
-
 // Manager degines the manager of the load-balancing services
 type Manager struct {
 	KubernetesClient *kubernetes.Clientset
@@ -79,13 +77,13 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		return err
 	}
 
-	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, plunderLock, id)
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, c.LeaseName, id)
 
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      plunderLock,
+			Name:      c.LeaseName,
 			Namespace: c.Namespace,
 		},
 		Client: sm.KubernetesClient.CoordinationV1(),

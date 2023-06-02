@@ -12,6 +12,9 @@ const (
 	// vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaderElection = "vip_leaderelection"
 
+	// vipLeaseName - defines the name of the lease lock
+	vipLeaseName = "vip_leasename"
+
 	// vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaseDuration = "vip_leaseduration"
 
