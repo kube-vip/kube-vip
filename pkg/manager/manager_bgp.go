@@ -109,7 +109,11 @@ func (sm *Manager) startBGP() error {
 		}
 
 		go func() {
-			err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer, packetClient)
+			if sm.config.EnableLeaderElection {
+				err = cpCluster.StartCluster(sm.config, clusterManager, sm.bgpServer)
+			} else {
+				err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer, packetClient)
+			}
 			if err != nil {
 				log.Errorf("Control Plane Error [%v]", err)
 				// Trigger the shutdown of this manager instance
