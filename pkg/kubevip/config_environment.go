@@ -1,9 +1,9 @@
 package kubevip
 
 import (
+	"encoding/json"
 	"os"
 	"strconv"
-	"encoding/json"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/detector"
