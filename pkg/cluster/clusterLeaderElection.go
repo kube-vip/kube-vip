@@ -83,8 +83,9 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      c.LeaseName,
-			Namespace: c.Namespace,
+			Name:        c.LeaseName,
+			Namespace:   c.Namespace,
+			Annotations: c.LeaseAnnotations,
 		},
 		Client: sm.KubernetesClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{

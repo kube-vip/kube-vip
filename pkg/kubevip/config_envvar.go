@@ -24,6 +24,9 @@ const (
 	// vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipRetryPeriod = "vip_retryperiod"
 
+	// vipLeaderElection - defines the annotations given to the lease lock
+	vipLeaseAnnotations = "vip_leaseannotations"
+
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
 

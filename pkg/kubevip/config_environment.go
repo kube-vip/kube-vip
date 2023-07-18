@@ -1,6 +1,7 @@
 package kubevip
 
 import (
+	"encoding/json"
 	"os"
 	"strconv"
 
@@ -85,6 +86,15 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.RetryPeriod = int(i)
+	}
+
+	// Attempt to find the Lease annotations from the environment variables
+	env = os.Getenv(vipLeaseAnnotations)
+	if env != "" {
+		err := json.Unmarshal([]byte(env), &c.LeaseAnnotations)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Find vip address
