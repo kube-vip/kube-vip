@@ -185,8 +185,7 @@ func (i *Instance) startDHCP() (chan string, error) {
 
 	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP, func(lease *nclient4.Lease) {
 		ipChan <- lease.ACK.YourIPAddr.String()
-
-		log.Infof("DHCP VIP [%s] for [%s/%s] ", i.vipConfig.VIP, i.serviceSnapshot.Namespace, i.serviceSnapshot.Name)
+		log.Infof("DHCP VIP [%s] for [%s/%s] ", lease.ACK.YourIPAddr.String(), i.serviceSnapshot.Namespace, i.serviceSnapshot.Name)
 	})
 
 	go client.Start()
