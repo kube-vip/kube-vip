@@ -5,7 +5,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -99,15 +98,15 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	// If this was purposely created with the address 0.0.0.0,
 	// we will create a macvlan on the main interface and a DHCP client
 	if instanceAddress == "0.0.0.0" {
-		ipChan, err := instance.startDHCP()
+		err := instance.startDHCP()
 		if err != nil {
 			return nil, err
 		}
 		select {
-		case <-time.After(dhcpTimeout):
-			return nil, fmt.Errorf("timeout to request the IP from DHCP server for service %s/%s",
-				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name)
-		case ip := <-ipChan:
+		case err := <-instance.dhcpClient.ErrorChannel():
+			return nil, fmt.Errorf("error starting DHCP for %s/%s: error: %s",
+				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name, err)
+		case ip := <-instance.dhcpClient.IPChannel():
 			instance.vipConfig.VIP = ip
 			instance.dhcpInterfaceIP = ip
 		}
@@ -124,10 +123,10 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	return instance, nil
 }
 
-func (i *Instance) startDHCP() (chan string, error) {
+func (i *Instance) startDHCP() error {
 	parent, err := netlink.LinkByName(i.vipConfig.Interface)
 	if err != nil {
-		return nil, fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
+		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}
 
 	// Generate name from UID
@@ -140,11 +139,11 @@ func (i *Instance) startDHCP() (chan string, error) {
 
 		hwaddr, err := net.ParseMAC(i.dhcpInterfaceHwaddr)
 		if i.dhcpInterfaceHwaddr != "" && err != nil {
-			return nil, err
+			return err
 		} else if hwaddr == nil {
 			hwaddr, err = net.ParseMAC(vip.GenerateMac())
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 
@@ -160,17 +159,17 @@ func (i *Instance) startDHCP() (chan string, error) {
 
 		err = netlink.LinkAdd(mac)
 		if err != nil {
-			return nil, fmt.Errorf("could not add %s: %v", interfaceName, err)
+			return fmt.Errorf("could not add %s: %v", interfaceName, err)
 		}
 
 		err = netlink.LinkSetUp(mac)
 		if err != nil {
-			return nil, fmt.Errorf("could not bring up interface [%s] : %v", interfaceName, err)
+			return fmt.Errorf("could not bring up interface [%s] : %v", interfaceName, err)
 		}
 
 		iface, err = net.InterfaceByName(interfaceName)
 		if err != nil {
-			return nil, fmt.Errorf("error finding new DHCP interface by name [%v]", err)
+			return fmt.Errorf("error finding new DHCP interface by name [%v]", err)
 		}
 	} else {
 		log.Infof("Using existing macvlan interface for DHCP [%s]", interfaceName)
@@ -181,12 +180,7 @@ func (i *Instance) startDHCP() (chan string, error) {
 		initRebootFlag = true
 	}
 
-	ipChan := make(chan string)
-
-	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP, func(lease *nclient4.Lease) {
-		ipChan <- lease.ACK.YourIPAddr.String()
-		log.Infof("DHCP VIP [%s] for [%s/%s] ", lease.ACK.YourIPAddr.String(), i.serviceSnapshot.Namespace, i.serviceSnapshot.Name)
-	})
+	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP)
 
 	go client.Start()
 
@@ -198,5 +192,5 @@ func (i *Instance) startDHCP() (chan string, error) {
 	// Add the client so that we can call it to stop function
 	i.dhcpClient = client
 
-	return ipChan, nil
+	return nil
 }
