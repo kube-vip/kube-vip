@@ -3,7 +3,6 @@ package manager
 import (
 	"fmt"
 	"net"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -13,8 +12,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
-
-const dhcpTimeout = 10 * time.Second
 
 // Instance defines an instance of everything needed to manage a vip
 type Instance struct {
