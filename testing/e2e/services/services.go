@@ -136,9 +136,8 @@ func main() {
 			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
-			} else {
-				testCount++
 			}
+			testCount++
 		}
 		for i := 1; i < 5; i++ {
 			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
@@ -259,9 +258,8 @@ func main() {
 			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
-			} else {
-				testCount++
 			}
+			testCount++
 		}
 		for i := 1; i < 5; i++ {
 			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
@@ -545,10 +543,8 @@ func tcpServer(egressAddress *string) bool {
 		if remoteAddress == *egressAddress {
 			log.Infof("📞 👍 incoming from egress Address [%s]", remoteAddress)
 			return true
-		} else {
-			log.Infof("📞 👎 incoming from pod address [%s]", remoteAddress)
 		}
-
+		log.Infof("📞 👎 incoming from pod address [%s]", remoteAddress)
 		go handleRequest(conn)
 	}
 }
