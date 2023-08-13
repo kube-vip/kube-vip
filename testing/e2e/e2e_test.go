@@ -28,7 +28,7 @@ import (
 	load "sigs.k8s.io/kind/pkg/cmd/kind/load/docker-image"
 	"sigs.k8s.io/kind/pkg/log"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
 )
