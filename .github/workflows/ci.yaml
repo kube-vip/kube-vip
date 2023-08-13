@@ -23,8 +23,6 @@ jobs:
     - name: test docker build
       run: make dockerx86Action
     - name: e2e controlplane
-      if: ${{ github.event.label.name == 'control plane' }}
       run: DOCKERTAG=action make e2e-tests
     - name: e2e services
-      if: contains(github.event.pull_request.labels.*.name, 'services')
       run: DOCKERTAG=action make service-tests

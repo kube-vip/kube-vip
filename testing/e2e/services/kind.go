@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 
 var provider *cluster.Provider
 
-func createKind() error {
+func createKind(imagePath string) error {
 	clusterConfig := kindconfigv1alpha4.Cluster{
 		Networking: kindconfigv1alpha4.Networking{
 			IPFamily: kindconfigv1alpha4.IPv4Family,
@@ -34,8 +33,6 @@ func createKind() error {
 			},
 		},
 	}
-
-	imagePath := os.Getenv("E2E_IMAGE_PATH")
 
 	provider = cluster.NewProvider(cluster.ProviderWithLogger(cmd.NewLogger()), cluster.ProviderWithDocker())
 	clusters, err := provider.List()
