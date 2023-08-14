@@ -112,7 +112,7 @@ manifests:
 	@-rm ./kube-vip
 
 e2e-tests:
-	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/ginkgo -tags=e2e -v -p testing/e2e
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo  -tags=e2e -v -p testing/e2e
 
 service-tests:
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services
