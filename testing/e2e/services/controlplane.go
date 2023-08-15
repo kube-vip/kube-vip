@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -107,7 +106,7 @@ func (config *testConfig) manifestGen() error {
 	if err != nil {
 		return err
 	}
-	tempDirPath, err := ioutil.TempDir("", "kube-vip-test")
+	tempDirPath, err := os.MkdirTemp("", "kube-vip-test")
 	if err != nil {
 		return err
 	}

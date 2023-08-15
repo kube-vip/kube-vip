@@ -103,7 +103,7 @@ func (config *testConfig) createKind() error {
 		if config.ControlPlane {
 			for x := range nodes {
 				cmd := exec.Command("kubectl", "taint", "nodes", nodes[x].String(), "node-role.kubernetes.io/control-plane:NoSchedule-") //nolint:all
-				cmd.CombinedOutput()
+				_, _ = cmd.CombinedOutput()
 			}
 		}
 		cmd := exec.Command("kubectl", "create", "configmap", "--namespace", "kube-system", "kubevip", "--from-literal", "range-global=172.18.100.10-172.18.100.30")
