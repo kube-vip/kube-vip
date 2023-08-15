@@ -81,6 +81,11 @@ dockerx86Action:
 	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action .
 	@echo New Multi Architecture Docker image created
 
+dockerx86ActionIPTables:
+	@-rm ./kube-vip
+	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --load -t $(REPOSITORY)/$(TARGET):action .
+	@echo New Multi Architecture Docker image created
+
 dockerLocal:
 	@-rm ./kube-vip
 	@docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
@@ -115,4 +120,4 @@ e2e-tests:
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo  -tags=e2e -v -p testing/e2e
 
 service-tests:
-	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services -Services

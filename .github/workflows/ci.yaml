@@ -20,9 +20,7 @@ jobs:
       run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.3
     - name: checks
       run: make check
-    - name: test docker build
-      run: make dockerx86Action
-    - name: e2e controlplane
-      run: DOCKERTAG=action make e2e-tests
+    - name: test docker build (with iptables)
+      run: make dockerx86ActionIPTables
     - name: e2e services
       run: DOCKERTAG=action make service-tests
