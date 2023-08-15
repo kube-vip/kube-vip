@@ -15,9 +15,8 @@ import (
 )
 
 const dhcpClientPort = "68"
-
-// Callback is a function called on certain events
-type Callback func(*nclient4.Lease)
+const defaultDHCPRenew = time.Hour
+const maxBackoffAttempts = 3
 
 // DHCPClient is responsible for maintaining ipv4 lease for one specified interface
 type DHCPClient struct {
@@ -28,18 +27,20 @@ type DHCPClient struct {
 	requestedIP    net.IP
 	stopChan       chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
 	releasedChan   chan struct{} // indicate that the IP has been released
-	onBound        Callback
+	errorChan      chan error    // indicates there was an error on the IP request
+	ipChan         chan string
 }
 
 // NewDHCPClient returns a new DHCP Client.
-func NewDHCPClient(iface *net.Interface, initRebootFlag bool, requestedIP string, onBound Callback) *DHCPClient {
+func NewDHCPClient(iface *net.Interface, initRebootFlag bool, requestedIP string) *DHCPClient {
 	return &DHCPClient{
 		iface:          iface,
 		stopChan:       make(chan struct{}),
 		releasedChan:   make(chan struct{}),
+		errorChan:      make(chan error),
 		initRebootFlag: initRebootFlag,
 		requestedIP:    net.ParseIP(requestedIP),
-		onBound:        onBound,
+		ipChan:         make(chan string),
 	}
 }
 
@@ -50,9 +51,19 @@ func (c *DHCPClient) WithHostName(hostname string) *DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPClient) Stop() {
+	close(c.ipChan)
 	close(c.stopChan)
-
 	<-c.releasedChan
+}
+
+// Gets the IPChannel for consumption
+func (c *DHCPClient) IPChannel() chan string {
+	return c.ipChan
+}
+
+// Gets the ErrorChannel for consumption
+func (c *DHCPClient) ErrorChannel() chan error {
+	return c.errorChan
 }
 
 // Start state-transition process of dhcp client
@@ -110,109 +121,67 @@ func (c *DHCPClient) Stop() {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPClient) Start() {
-	backoff := backoff.Backoff{
-		Factor: 2,
-		Jitter: true,
-		Min:    10 * time.Second,
-		Max:    1 * time.Minute,
-	}
+	lease := c.requestWithBackoff()
+
+	c.initRebootFlag = false
+	c.lease = lease
+
+	// Set up two ticker to renew/rebind regularly
+	t1Timeout := c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 2
+	t2Timeout := (c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 8) * 7
+	log.Debugf("t1 %v t2 %v", t1Timeout, t2Timeout)
+	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
+
 	for {
-		var lease *nclient4.Lease
-		var err error
-		if c.initRebootFlag {
-			// DHCP State-transition: INIT-REBOOT --> BOUND
-			lease, err = c.initReboot()
-		} else {
-			// DHCP State-transition: INIT --> BOUND
-			lease, err = c.request()
-		}
-		if err != nil {
-			dur := backoff.Duration()
-			log.Errorf("request failed, error: %s (waiting %v)", err.Error(), dur)
-			time.Sleep(dur)
-			continue
-		}
-		backoff.Reset()
-
-		c.initRebootFlag = false
-		c.lease = lease
-		c.onBound(lease)
-
-		// Set up two ticker to renew/rebind regularly
-		t1Timeout := c.lease.ACK.IPAddressLeaseTime(0) / 2
-		t2Timeout := c.lease.ACK.IPAddressLeaseTime(0) / 8 * 7
-
-		t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
-
-		for {
-			select {
-			case <-t1.C:
-				// renew
-				lease, err := c.renew()
-				if err == nil {
-					c.lease = lease
-					log.Infof("renew, lease: %+v", lease)
-					t2.Reset(t2Timeout)
-				} else {
-					log.Errorf("renew failed, error: %s", err.Error())
-				}
-			case <-t2.C:
-				// rebind
-				lease, err := c.rebind()
-				if err == nil {
-					c.lease = lease
-					log.Infof("rebind, lease: %+v", lease)
-					t1.Reset(t1Timeout)
-				} else {
-					log.Errorf("rebind failed, error: %s", err.Error())
+		select {
+		case <-t1.C:
+			// renew is a unicast request of the IP renewal
+			// A point on renew is: the library does not return the right message (NAK)
+			// on renew error due to IP Change, but instead it returns a different error
+			// This way there's not much to do other than log and continue, as the renew error
+			// may be an offline server, or may be an incorrect package match
+			lease, err := c.renew()
+			if err == nil {
+				c.lease = lease
+				log.Infof("renew, lease: %+v", lease)
+				t2.Reset(t2Timeout)
+			} else {
+				log.Errorf("renew failed, error: %s", err.Error())
+			}
+		case <-t2.C:
+			// rebind is just like a request, but forcing to provide a new IP address
+			lease, err := c.request(true)
+			if err == nil {
+				c.lease = lease
+				log.Infof("rebind, lease: %+v", lease)
+			} else {
+				if _, ok := err.(*nclient4.ErrNak); !ok {
 					t1.Stop()
 					t2.Stop()
-					break
+					log.Errorf("rebind failed, error: %s", err.Error())
+					return
 				}
-			case <-c.stopChan:
-				// release
-				if err := c.release(); err != nil {
-					log.Errorf("release lease failed, error: %s, lease: %+v", err.Error(), c.lease)
-				} else {
-					log.Infof("release, lease: %+v", c.lease)
-				}
-				t1.Stop()
-				t2.Stop()
-
-				close(c.releasedChan)
-				return
+				log.Warnf("ip %s may have changed: %s", c.lease.ACK.YourIPAddr, err.Error())
+				c.initRebootFlag = false
+				c.lease = c.requestWithBackoff()
 			}
+			t1.Reset(t1Timeout)
+			t2.Reset(t2Timeout)
+
+		case <-c.stopChan:
+			// release is a unicast request of the IP release.
+			if err := c.release(); err != nil {
+				log.Errorf("release lease failed, error: %s, lease: %+v", err.Error(), c.lease)
+			} else {
+				log.Infof("release, lease: %+v", c.lease)
+			}
+			t1.Stop()
+			t2.Stop()
+
+			close(c.releasedChan)
+			return
 		}
 	}
-}
-
-func (c *DHCPClient) request() (*nclient4.Lease, error) {
-	broadcast, err := nclient4.New(c.iface.Name)
-	if err != nil {
-		return nil, fmt.Errorf("create a broadcast client for iface %s failed, error: %w", c.iface.Name, err)
-	}
-
-	defer broadcast.Close()
-
-	if c.ddnsHostName != "" {
-		return broadcast.Request(context.TODO(),
-			dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)),
-			dhcpv4.WithOption(dhcpv4.OptClientIdentifier([]byte(c.ddnsHostName))))
-	}
-
-	return broadcast.Request(context.TODO())
-}
-
-func (c *DHCPClient) release() error {
-	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(c.iface.Name, &net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}),
-		nclient4.WithServerAddr(&net.UDPAddr{IP: c.lease.ACK.ServerIPAddr, Port: nclient4.ServerPort}))
-	if err != nil {
-		return fmt.Errorf("create unicast client failed, error: %w, iface: %s, server ip: %v", err, c.iface.Name, c.lease.ACK.ServerIPAddr)
-	}
-	defer unicast.Close()
-
-	// TODO modify lease
-	return unicast.Release(c.lease)
 }
 
 // --------------------------------------------------------
@@ -223,76 +192,97 @@ func (c *DHCPClient) release() error {
 // |requested-ip  |MUST         | MUST NOT     |MUST NOT  |
 // |ciaddr        |zero         | IP address   |IP address|
 // --------------------------------------------------------
-func (c *DHCPClient) initReboot() (*nclient4.Lease, error) {
-	broadcast, err := nclient4.New(c.iface.Name)
-	if err != nil {
-		return nil, fmt.Errorf("create a broadcast client for iface %s failed, error: %w", c.iface.Name, err)
-	}
-	defer broadcast.Close()
-	message, err := dhcpv4.New(
-		dhcpv4.WithMessageType(dhcpv4.MessageTypeRequest),
-		dhcpv4.WithHwAddr(c.iface.HardwareAddr),
-		dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.requestedIP)))
-	if err != nil {
-		return nil, fmt.Errorf("new dhcp message failed, error: %w", err)
+
+func (c *DHCPClient) requestWithBackoff() *nclient4.Lease {
+	backoff := backoff.Backoff{
+		Factor: 2,
+		Jitter: true,
+		Min:    10 * time.Second,
+		Max:    1 * time.Minute,
 	}
 
-	return sendMessage(broadcast, message)
+	var lease *nclient4.Lease
+	var err error
+
+	for {
+		log.Debugf("trying to get a new IP, attempt %f", backoff.Attempt())
+		lease, err = c.request(false)
+		if err != nil {
+			dur := backoff.Duration()
+			if backoff.Attempt() > maxBackoffAttempts-1 {
+				errMsg := fmt.Errorf("failed to get an IP address after %d attempts, error %s, giving up", maxBackoffAttempts, err.Error())
+				log.Error(errMsg)
+				c.errorChan <- errMsg
+				c.Stop()
+				return nil
+			}
+			log.Errorf("request failed, error: %s (waiting %v)", err.Error(), dur)
+			time.Sleep(dur)
+			continue
+		}
+		backoff.Reset()
+		break
+	}
+
+	if c.ipChan != nil {
+		log.Debugf("using channel")
+		c.ipChan <- lease.ACK.YourIPAddr.String()
+	}
+
+	return lease
+}
+
+func (c *DHCPClient) request(rebind bool) (*nclient4.Lease, error) {
+	dhclient, err := nclient4.New(c.iface.Name)
+	if err != nil {
+		return nil, fmt.Errorf("create a client for iface %s failed, error: %w", c.iface.Name, err)
+	}
+
+	defer dhclient.Close()
+
+	modifiers := make([]dhcpv4.Modifier, 0)
+
+	if c.ddnsHostName != "" {
+		modifiers = append(modifiers,
+			dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)),
+			dhcpv4.WithOption(dhcpv4.OptClientIdentifier([]byte(c.ddnsHostName))),
+		)
+	}
+
+	// if initRebootFlag is set, this means we have an IP already set on c.requestedIP that should be used
+	if c.initRebootFlag {
+		log.Debugf("init-reboot ip %s", c.requestedIP)
+		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.requestedIP)))
+	}
+
+	// if this is a rebind, then the IP we should set is the one that already exists in lease
+	if rebind {
+		log.Debugf("rebinding ip %s", c.lease.ACK.YourIPAddr)
+		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.lease.ACK.YourIPAddr)))
+	}
+
+	return dhclient.Request(context.TODO(), modifiers...)
+}
+
+func (c *DHCPClient) release() error {
+	dhclient, err := nclient4.New(c.iface.Name)
+	if err != nil {
+		return fmt.Errorf("create release client failed, error: %w, iface: %s, server ip: %v", err, c.iface.Name, c.lease.ACK.ServerIPAddr)
+	}
+	defer dhclient.Close()
+
+	// TODO modify lease
+	return dhclient.Release(c.lease)
 }
 
 func (c *DHCPClient) renew() (*nclient4.Lease, error) {
-	unicast, err := nclient4.New(c.iface.Name, nclient4.WithUnicast(c.iface.Name, &net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}),
-		nclient4.WithServerAddr(&net.UDPAddr{IP: c.lease.ACK.ServerIPAddr, Port: nclient4.ServerPort}))
+	// renew needs a unicast client. This is due to some servers (like dnsmasq) require the exact request coming from the vip interface
+	dhclient, err := nclient4.New(c.iface.Name,
+		nclient4.WithUnicast(&net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}))
 	if err != nil {
-		return nil, fmt.Errorf("create unicast client failed, error: %w, server ip: %v", err, c.lease.ACK.ServerIPAddr)
+		return nil, fmt.Errorf("create renew client failed, error: %w, server ip: %v", err, c.lease.ACK.ServerIPAddr)
 	}
-	defer unicast.Close()
+	defer dhclient.Close()
 
-	message, err := dhcpv4.New(
-		dhcpv4.WithMessageType(dhcpv4.MessageTypeRequest),
-		dhcpv4.WithHwAddr(c.iface.HardwareAddr),
-		dhcpv4.WithClientIP(c.lease.ACK.ClientIPAddr))
-	if err != nil {
-		return nil, fmt.Errorf("new dhcp message failed, error: %w", err)
-	}
-
-	return sendMessage(unicast, message)
-}
-
-func (c *DHCPClient) rebind() (*nclient4.Lease, error) {
-	broadcast, err := nclient4.New(c.iface.Name)
-	if err != nil {
-		return nil, fmt.Errorf("create a broadcast client for iface %s failed, error: %s", c.iface.Name, err)
-	}
-	defer broadcast.Close()
-	message, err := dhcpv4.New(
-		dhcpv4.WithMessageType(dhcpv4.MessageTypeRequest),
-		dhcpv4.WithHwAddr(c.iface.HardwareAddr),
-		dhcpv4.WithClientIP(c.lease.ACK.ClientIPAddr))
-	if err != nil {
-		return nil, fmt.Errorf("new dhcp message failed, error: %w", err)
-	}
-
-	return sendMessage(broadcast, message)
-}
-
-func sendMessage(client *nclient4.Client, message *dhcpv4.DHCPv4) (*nclient4.Lease, error) {
-	response, err := client.SendAndRead(context.TODO(), client.RemoteAddr(), message,
-		nclient4.IsMessageType(dhcpv4.MessageTypeAck, dhcpv4.MessageTypeNak))
-	if err != nil {
-		return nil, fmt.Errorf("got an error while processing the request: %w", err)
-	}
-	if response.MessageType() == dhcpv4.MessageTypeNak {
-		return nil, &nclient4.ErrNak{
-			Offer: message,
-			Nak:   response,
-		}
-	}
-
-	lease := &nclient4.Lease{}
-	lease.ACK = response
-	lease.Offer = message
-	lease.CreationTime = time.Now()
-
-	return lease, nil
+	return dhclient.Renew(context.TODO(), c.lease)
 }

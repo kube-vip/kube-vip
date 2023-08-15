@@ -155,6 +155,9 @@ type LeaderElection struct {
 
 	// RetryPerion - Number of times the host will retry to hold a lease
 	RetryPeriod int
+
+	// LeaseAnnotations - annotations which will be given to the lease object
+	LeaseAnnotations map[string]string
 }
 
 // LoadBalancer contains the configuration of a load balancing instance

@@ -9,11 +9,11 @@ source ./testing/logging.bash
 
 install_deps() {
     echo "Installing Kubernetes dependencies for Kubernetes $kubernetes_version on all nodes"
-    ssh $NODE01 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE02 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE03 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE04 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
-    ssh $NODE05 "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE01 "sudo rm /etc/apt/sources.list.d/* && curl -4 -s -L https://dl.k8s.io/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE02 "sudo rm /etc/apt/sources.list.d/* && curl -4 -s -L https://dl.k8s.io/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE03 "sudo rm /etc/apt/sources.list.d/* && curl -4 -s -L https://dl.k8s.io/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE04 "sudo rm /etc/apt/sources.list.d/* && curl -4 -s -L https://dl.k8s.io/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
+    ssh $NODE05 "sudo rm /etc/apt/sources.list.d/* && curl -4 -s -L https://dl.k8s.io/apt/doc/apt-key.gpg | sudo apt-key add && sudo apt-add-repository \"deb http://apt.kubernetes.io/ kubernetes-xenial main\" && sudo apt-get update -q && sudo apt-get install -qy --allow-downgrades kubelet=$kubernetes_version-00 kubectl=$kubernetes_version-00 kubeadm=$kubernetes_version-00"
 }
 
 first_node() {
@@ -42,7 +42,7 @@ first_node() {
   logr "INFO" "Deploying Calico to the Kubernetes Cluster"
   ssh $NODE01 "kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml" >> $logfile
   logr "INFO" "Retrieving Join command"
-  JOIN_CMD=$(ssh $NODE01 " sudo kubeadm token create --print-join-command 2> /dev/null")
+  JOIN_CMD=$(ssh $NODE01 "kubeadm token create --print-join-command 2> /dev/null")
 }
 
 

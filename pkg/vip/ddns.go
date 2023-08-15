@@ -5,7 +5,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -39,12 +38,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 		return "", err
 	}
 
-	// channel to wait for IP
-	ipCh := make(chan string)
-
-	client := NewDHCPClient(iface, false, "", func(lease *nclient4.Lease) {
-		ipCh <- lease.ACK.YourIPAddr.String()
-	})
+	client := NewDHCPClient(iface, false, "")
 
 	client.WithHostName(ddns.network.DDNSHostName())
 
@@ -60,7 +54,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 	case <-timeout:
 		client.Stop()
 		return "", errors.New("failed to get IP from dhcp for ddns in 1 minutes")
-	case ip = <-ipCh:
+	case ip = <-client.IPChannel():
 		log.Info("got ip from dhcp: ", ip)
 	}
 
@@ -79,7 +73,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 				log.Info("stop dhclient for ddns")
 				client.Stop()
 				return
-			case ip := <-ipCh:
+			case ip := <-client.IPChannel():
 				log.Info("got ip from dhcp: ", ip)
 			}
 		}

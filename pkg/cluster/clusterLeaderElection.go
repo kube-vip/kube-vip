@@ -83,8 +83,9 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      c.LeaseName,
-			Namespace: c.Namespace,
+			Name:        c.LeaseName,
+			Namespace:   c.Namespace,
+			Annotations: c.LeaseAnnotations,
 		},
 		Client: sm.KubernetesClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
@@ -167,7 +168,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		}
 	}
 
-	if c.EnableBGP {
+	if c.EnableBGP && bgpServer == nil {
 		// Lets start BGP
 		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
 		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig, nil)

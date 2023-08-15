@@ -29,7 +29,8 @@ import (
 func main() {
 	log.Info("🔬 beginning e2e tests")
 
-	// return
+	var testCount int
+	imagePath := os.Getenv("E2E_IMAGE_PATH")
 
 	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
 	_, ignoreDeployments := os.LookupEnv("IGNORE_DEPLOY")
@@ -38,7 +39,7 @@ func main() {
 	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
 	_, ignoreEgress := os.LookupEnv("IGNORE_EGRESS")
 	_, retainCluster := os.LookupEnv("RETAIN_CLUSTER")
-	err := createKind()
+	err := createKind(imagePath)
 
 	if !retainCluster {
 		if err != nil {
@@ -91,20 +92,21 @@ func main() {
 			log.Fatal(err)
 		}
 		svc := service{
-			name: s,
+			name:     s,
+			testHTTP: true,
 		}
 		_, _, err = svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
+		} else {
+			testCount++
 		}
 
-		log.Warnf("🧹 deleting Service [%s]", s)
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		log.Warnf("🧹 deleting Deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
@@ -128,21 +130,23 @@ func main() {
 		}
 		for i := 1; i < 5; i++ {
 			svc := service{
-				name: fmt.Sprintf("%s-%d", s, i),
+				name:     fmt.Sprintf("%s-%d", s, i),
+				testHTTP: true,
 			}
 			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
+			testCount++
 		}
 		for i := 1; i < 5; i++ {
-			log.Warnf("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
+			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
 			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", s, i), metav1.DeleteOptions{})
 			if err != nil {
 				log.Fatal(err)
 			}
 		}
-		log.Warnf("🧹 deleting deployment [%s]", d)
+		log.Infof("🧹 deleting deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, l, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
@@ -166,6 +170,7 @@ func main() {
 			name:        s,
 			egress:      false,
 			policyLocal: true,
+			testHTTP:    true,
 		}
 		leader, _, err := svc.createService(ctx, clientset)
 		if err != nil {
@@ -175,15 +180,16 @@ func main() {
 		err = leaderFailover(ctx, &s, &leader, clientset)
 		if err != nil {
 			log.Error(err)
+		} else {
+			testCount++
 		}
 
-		log.Warnf("🧹 deleting Service [%s]", s)
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		log.Warnf("🧹 deleting Deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
@@ -206,6 +212,7 @@ func main() {
 		svc := service{
 			name:        s,
 			policyLocal: true,
+			testHTTP:    true,
 		}
 		leader, _, err := svc.createService(ctx, clientset)
 		if err != nil {
@@ -215,15 +222,15 @@ func main() {
 		err = podFailover(ctx, &s, &leader, clientset)
 		if err != nil {
 			log.Error(err)
+		} else {
+			testCount++
 		}
 
-		log.Warnf("🧹 deleting Service [%s]", s)
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		log.Warnf("🧹 deleting Deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
@@ -246,20 +253,22 @@ func main() {
 			svc := service{
 				policyLocal: true,
 				name:        fmt.Sprintf("%s-%d", s, i),
+				testHTTP:    true,
 			}
 			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
+			testCount++
 		}
 		for i := 1; i < 5; i++ {
-			log.Warnf("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
+			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
 			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", s, i), metav1.DeleteOptions{})
 			if err != nil {
 				log.Fatal(err)
 			}
 		}
-		log.Warnf("🧹 deleting deployment [%s]", d)
+		log.Infof("🧹 deleting deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, l, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
@@ -271,6 +280,7 @@ func main() {
 		log.Infof("🧪 ---> egress IP re-write (local policy) <---")
 		var egress string
 		var found bool
+		// Set up a local listener
 		go func() {
 			found = tcpServer(&egress)
 		}()
@@ -281,22 +291,27 @@ func main() {
 			replicas:     1,
 			client:       true,
 		}
+
+		// Find this machines IP address
 		deploy.address = GetLocalIP()
 		if deploy.address == "" {
 			log.Fatalf("Unable to detect local IP address")
 		}
 		log.Infof("📠 found local address [%s]", deploy.address)
+		// Create a deployment that connects back to this machines IP address
 		err = deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		svc := service{
 			policyLocal: true,
 			name:        s,
 			egress:      true,
+			testHTTP:    false,
 		}
 
-		ldr, egress, err := svc.createService(ctx, clientset)
+		_, egress, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -304,25 +319,25 @@ func main() {
 		for i := 1; i < 5; i++ {
 			if found {
 				log.Infof("🕵️  egress has correct IP address")
+				testCount++
 				break
 			}
 			time.Sleep(time.Second * 1)
 		}
 
 		if !found {
-			log.Errorf("%s %s", ldr, egress)
+			log.Error("😱 No traffic found from loadbalancer address ")
 		}
-		log.Warnf("🧹 deleting Service [%s]", s)
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		log.Warnf("🧹 deleting deployment [%s]", d)
 		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
+		log.Infof("🏆 Testing Complete [%d] passed", testCount)
 	}
 }
 
@@ -525,11 +540,11 @@ func tcpServer(egressAddress *string) bool {
 			// log.Fatal(err)
 		}
 		remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		log.Infof("📞 incoming from [%s]", remoteAddress)
 		if remoteAddress == *egressAddress {
+			log.Infof("📞 👍 incoming from egress Address [%s]", remoteAddress)
 			return true
 		}
-
+		log.Infof("📞 👎 incoming from pod address [%s]", remoteAddress)
 		go handleRequest(conn)
 	}
 }

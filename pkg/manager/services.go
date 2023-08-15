@@ -43,11 +43,13 @@ func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.Wai
 		if sm.serviceInstances[x].UID == newServiceUID {
 			log.Debugf("isDHCP: %t, newServiceAddress: %s", sm.serviceInstances[x].isDHCP, newServiceAddress)
 			// If the found instance's DHCP configuration doesn't match the new service, delete it.
-			if sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0" ||
-				!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0" ||
-				!sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
-					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP ||
-				len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
+			if (sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0") ||
+				(!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0") ||
+				(!sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
+					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP) ||
+				(len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc)) ||
+				(sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
+					sm.serviceInstances[x].dhcpInterfaceIP != svc.Status.LoadBalancer.Ingress[0].IP) {
 				if err := sm.deleteService(newServiceUID); err != nil {
 					return err
 				}
@@ -93,6 +95,20 @@ func (sm *Manager) addService(svc *v1.Service) error {
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
 	sm.upnpMap(newService)
+
+	if newService.isDHCP {
+		go func() {
+			for ip := range newService.dhcpClient.IPChannel() {
+				log.Debugf("IP %s may have changed", ip)
+				newService.vipConfig.VIP = ip
+				newService.dhcpInterfaceIP = ip
+				if err := sm.updateStatus(newService); err != nil {
+					log.Warnf("error updating svc: %s", err)
+				}
+			}
+			log.Debugf("IP update channel closed, stopping")
+		}()
+	}
 
 	sm.serviceInstances = append(sm.serviceInstances, newService)
 
