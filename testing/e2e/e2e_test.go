@@ -30,6 +30,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gexec"
 )
 
@@ -97,8 +98,9 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv4.yaml")
 
-			for i := 0; i < 3; i++ {
+			for i := 0; i < 2; i++ {
 				clusterConfig.Nodes = append(clusterConfig.Nodes, kindconfigv1alpha4.Node{
+					Role: kindconfigv1alpha4.ControlPlaneRole,
 					ExtraMounts: []kindconfigv1alpha4.Mount{
 						{
 							HostPath:      manifestPath,
@@ -211,7 +213,7 @@ func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName 
 		cluster.ProviderWithLogger(logger),
 		cluster.ProviderWithDocker(),
 	)
-
+	format.UseStringerRepresentation = true // Otherwise error stacks have binary format.
 	Expect(provider.Create(
 		clusterName,
 		cluster.CreateWithV1Alpha4Config(config),

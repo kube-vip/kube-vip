@@ -7,13 +7,11 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/kube-vip/kube-vip/pkg/k8s"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,59 +24,14 @@ import (
 // 1. Create a deployment
 // 2. Expose the deployment
 
-func main() {
-	log.Info("🔬 beginning e2e tests")
-
-	var testCount int
-	imagePath := os.Getenv("E2E_IMAGE_PATH")
-
-	_, ignoreSimple := os.LookupEnv("IGNORE_SIMPLE")
-	_, ignoreDeployments := os.LookupEnv("IGNORE_DEPLOY")
-	_, ignoreLeaderFailover := os.LookupEnv("IGNORE_LEADER")
-	_, ignoreLeaderActive := os.LookupEnv("IGNORE_ACTIVE")
-	_, ignoreLocalDeploy := os.LookupEnv("IGNORE_LOCALDEPLOY")
-	_, ignoreEgress := os.LookupEnv("IGNORE_EGRESS")
-	_, retainCluster := os.LookupEnv("RETAIN_CLUSTER")
-	err := createKind(imagePath)
-
-	if !retainCluster {
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer func() {
-			err := deleteKind()
-			if err != nil {
-				log.Fatal(err)
-			}
-		}()
-	} else {
-		if err != nil {
-			log.Warn(err)
-		}
-	}
-
+func (config *testConfig) startServiceTest(ctx context.Context, clientset *kubernetes.Clientset) {
 	nodeTolerate := os.Getenv("NODE_TOLERATE")
 
 	d := "kube-vip-deploy"
 	s := "kube-vip-service"
 	l := "kube-vip-deploy-leader"
 
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	clientset, err := k8s.NewClientset(homeConfigPath, false, "")
-	if err != nil {
-		log.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
-	}
-	log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
-
-	deploy := deployment{}
-	err = deploy.createKVDs(ctx, clientset)
-	if err != nil {
-		log.Error(err)
-	}
-
-	if !ignoreSimple {
+	if !config.ignoreSimple {
 		// Simple Deployment test
 		log.Infof("🧪 ---> simple deployment <---")
 		deploy := deployment{
@@ -87,7 +40,7 @@ func main() {
 			replicas:     2,
 			server:       true,
 		}
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -99,7 +52,7 @@ func main() {
 		if err != nil {
 			log.Error(err)
 		} else {
-			testCount++
+			config.successCounter++
 		}
 
 		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
@@ -112,7 +65,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignoreDeployments {
+	if !config.ignoreDeployments {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments <---")
 		deploy := deployment{
@@ -121,7 +74,7 @@ func main() {
 			replicas:     2,
 			server:       true,
 		}
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -137,7 +90,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			testCount++
+			config.successCounter++
 		}
 		for i := 1; i < 5; i++ {
 			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
@@ -152,7 +105,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignoreLeaderFailover {
+	if !config.ignoreLeaderFailover {
 		// Failover tests
 		log.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
@@ -162,7 +115,7 @@ func main() {
 			replicas:     2,
 			server:       true,
 		}
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -172,7 +125,7 @@ func main() {
 			policyLocal: true,
 			testHTTP:    true,
 		}
-		leader, _, err := svc.createService(ctx, clientset)
+		leader, lbAddress, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
 		}
@@ -181,7 +134,18 @@ func main() {
 		if err != nil {
 			log.Error(err)
 		} else {
-			testCount++
+			config.successCounter++
+		}
+
+		// Get all addresses on all nodes
+		nodes, err := getAddressesOnNodes()
+		if err != nil {
+			log.Error(err)
+		}
+		// Make sure we don't exist in two places
+		err = checkNodesForDuplicateAddresses(nodes, lbAddress)
+		if err != nil {
+			log.Fatal(err)
 		}
 
 		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
@@ -196,7 +160,7 @@ func main() {
 		}
 	}
 
-	if !ignoreLeaderActive {
+	if !config.ignoreLeaderActive {
 		// pod Failover tests
 		log.Infof("🧪 ---> active pod failover deployment (local policy) <---")
 		deploy := deployment{
@@ -205,7 +169,7 @@ func main() {
 			replicas:     1,
 			server:       true,
 		}
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -223,7 +187,7 @@ func main() {
 		if err != nil {
 			log.Error(err)
 		} else {
-			testCount++
+			config.successCounter++
 		}
 
 		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
@@ -236,7 +200,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	if !ignoreLocalDeploy {
+	if !config.ignoreLocalDeploy {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments (local policy) <---")
 		deploy := deployment{
@@ -245,7 +209,7 @@ func main() {
 			replicas:     2,
 			server:       true,
 		}
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -255,11 +219,19 @@ func main() {
 				name:        fmt.Sprintf("%s-%d", s, i),
 				testHTTP:    true,
 			}
-			_, _, err = svc.createService(ctx, clientset)
+			_, lbAddress, err := svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
-			testCount++
+			config.successCounter++
+			nodes, err := getAddressesOnNodes()
+			if err != nil {
+				log.Error(err)
+			}
+			err = checkNodesForDuplicateAddresses(nodes, lbAddress)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
 		for i := 1; i < 5; i++ {
 			log.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", s, i))
@@ -275,7 +247,7 @@ func main() {
 		}
 	}
 
-	if !ignoreEgress {
+	if !config.ignoreEgress {
 		// pod Failover tests
 		log.Infof("🧪 ---> egress IP re-write (local policy) <---")
 		var egress string
@@ -299,7 +271,7 @@ func main() {
 		}
 		log.Infof("📠 found local address [%s]", deploy.address)
 		// Create a deployment that connects back to this machines IP address
-		err = deploy.createDeployment(ctx, clientset)
+		err := deploy.createDeployment(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -311,7 +283,7 @@ func main() {
 			testHTTP:    false,
 		}
 
-		_, egress, err := svc.createService(ctx, clientset)
+		_, egress, err = svc.createService(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -319,7 +291,7 @@ func main() {
 		for i := 1; i < 5; i++ {
 			if found {
 				log.Infof("🕵️  egress has correct IP address")
-				testCount++
+				config.successCounter++
 				break
 			}
 			time.Sleep(time.Second * 1)
@@ -337,7 +309,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Infof("🏆 Testing Complete [%d] passed", testCount)
+		log.Infof("🏆 Testing Complete [%d] passed", config.successCounter)
 	}
 }
 

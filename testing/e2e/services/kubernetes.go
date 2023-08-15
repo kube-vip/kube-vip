@@ -33,7 +33,7 @@ type deployment struct {
 	name         string
 }
 
-func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clientset) error {
+func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clientset, imagepath string) error {
 	ds := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-vip-ds",
@@ -92,7 +92,7 @@ func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clien
 									Value: "true",
 								},
 							},
-							Image: "plndr/kube-vip:dev",
+							Image: imagepath,
 							Name:  "kube-vip",
 							SecurityContext: &v1.SecurityContext{
 								Capabilities: &v1.Capabilities{
@@ -193,7 +193,7 @@ func (d *deployment) createDeployment(ctx context.Context, clientset *kubernetes
 	return nil
 }
 
-func (s *service) createService(ctx context.Context, clientset *kubernetes.Clientset) (string, string, error) {
+func (s *service) createService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddress string, err error) {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.name,
@@ -228,7 +228,7 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 	}
 
 	log.Infof("🌍 creating service [%s]", svc.Name)
-	_, err := clientset.CoreV1().Services(v1.NamespaceDefault).Create(ctx, svc, metav1.CreateOptions{})
+	_, err = clientset.CoreV1().Services(v1.NamespaceDefault).Create(ctx, svc, metav1.CreateOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -247,8 +247,7 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		rw.Stop()
 	}()
 	ready := false
-	testAddress := ""
-	currentLeader := ""
+
 	// Used for tracking an active endpoint / pod
 	for event := range ch {
 
@@ -264,7 +263,7 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
 					log.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
 					ready = true
-					testAddress = svc.Status.LoadBalancer.Ingress[0].IP
+					loadBalancerAddress = svc.Status.LoadBalancer.Ingress[0].IP
 					currentLeader = svc.Annotations["kube-vip.io/vipHost"]
 				}
 			}
@@ -276,11 +275,11 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		}
 	}
 	if s.testHTTP {
-		err = httpTest(testAddress)
+		err = httpTest(loadBalancerAddress)
 		if err != nil {
 			return "", "", fmt.Errorf("web retrieval timeout ")
 
 		}
 	}
-	return currentLeader, testAddress, nil
+	return currentLeader, loadBalancerAddress, nil
 }
