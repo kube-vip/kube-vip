@@ -128,78 +128,82 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			// Scenarios:
 			// 1.
-			wg.Add(1)
-			activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
-			// Background the services election
-			if sm.config.EnableServicesElection {
-				if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-					// Start an endpoint watcher if we're not watching it already
-					if !watchedService[string(svc.UID)] {
-						// background the endpoint watcher
-						go func() {
-							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-								// Add Endpoint watcher
-								wg.Add(1)
-								err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-								if err != nil {
-									log.Error(err)
+			if !activeService[string(svc.UID)] {
+				wg.Add(1)
+				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
+				// Background the services election
+				if sm.config.EnableServicesElection {
+					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+						// Start an endpoint watcher if we're not watching it already
+						if !watchedService[string(svc.UID)] {
+							// background the endpoint watcher
+							go func() {
+								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+									// Add Endpoint watcher
+									wg.Add(1)
+									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+									if err != nil {
+										log.Error(err)
+									}
+									wg.Done()
 								}
-								wg.Done()
+							}()
+							// We're now watching this service
+							watchedService[string(svc.UID)] = true
+						}
+					} else {
+						// Increment the waitGroup before the service Func is called (Done is completed in there)
+						wg.Add(1)
+						go func() {
+							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+							if err != nil {
+								log.Error(err)
 							}
+							wg.Done()
 						}()
-						// We're now watching this service
-						watchedService[string(svc.UID)] = true
 					}
+					activeService[string(svc.UID)] = true
 				} else {
 					// Increment the waitGroup before the service Func is called (Done is completed in there)
 					wg.Add(1)
-					go func() {
-						err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
-						if err != nil {
-							log.Error(err)
-						}
-						wg.Done()
-					}()
+					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+					if err != nil {
+						log.Error(err)
+					}
+					wg.Done()
 				}
-			} else {
-				// Increment the waitGroup before the service Func is called (Done is completed in there)
-				wg.Add(1)
-				err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
-				if err != nil {
-					log.Error(err)
-				}
-				wg.Done()
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
+			if activeService[string(svc.UID)] {
 
-			// We only care about LoadBalancer services
-			if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-				break
+				// We only care about LoadBalancer services
+				if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
+					break
+				}
+
+				// We can ignore this service
+				if svc.Annotations["kube-vip.io/ignore"] == "true" {
+					log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
+					break
+				}
+				// If this is an active service then and additional leaderElection will handle stopping
+				err := sm.deleteService(string(svc.UID))
+				if err != nil {
+					log.Error(err)
+				}
+
+				// Calls the cancel function of the context
+				if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
+
+					activeServiceLoadBalancerCancel[string(svc.UID)]()
+				}
+				activeService[string(svc.UID)] = false
+				watchedService[string(svc.UID)] = false
 			}
-
-			// We can ignore this service
-			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
-				break
-			}
-			// If this is an active service then and additional leaderElection will handle stopping
-			err := sm.deleteService(string(svc.UID))
-			if err != nil {
-				log.Error(err)
-			}
-
-			// Calls the cancel function of the context
-			if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
-
-				activeServiceLoadBalancerCancel[string(svc.UID)]()
-			}
-			activeService[string(svc.UID)] = false
-			watchedService[string(svc.UID)] = false
-
 			log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
 		case watch.Bookmark:
 			// Un-used
