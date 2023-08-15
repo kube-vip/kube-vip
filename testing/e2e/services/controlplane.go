@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"html/template"
@@ -16,7 +15,6 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/kubernetes"
 )
 
 func getKindNetworkSubnetCIDRs() ([]string, error) {
@@ -151,10 +149,10 @@ func (config *testConfig) manifestGen() error {
 	return err
 }
 
-func (config *testConfig) startTest(ctx context.Context, clientset *kubernetes.Clientset) error {
-	if config.ControlPlaneAddress == "" {
-		log.Fatal("no control plane address exists")
-	}
+// func (config *testConfig) startTest(ctx context.Context, clientset *kubernetes.Clientset) error {
+// 	if config.ControlPlaneAddress == "" {
+// 		log.Fatal("no control plane address exists")
+// 	}
 
-	return nil
-}
+// 	return nil
+// }

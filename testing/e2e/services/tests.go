@@ -71,15 +71,18 @@ func main() {
 				log.Warn(err)
 			}
 		}
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-		homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		clientset, err := k8s.NewClientset(homeConfigPath, false, "")
-		if err != nil {
-			log.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
-		}
-		log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
-		t.startTest(ctx, clientset)
+		// ctx, cancel := context.WithCancel(context.TODO())
+		// defer cancel()
+		// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+		// clientset, err := k8s.NewClientset(homeConfigPath, false, "")
+		// if err != nil {
+		// 	log.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
+		// }
+		// log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
+		// err = t.startTest(ctx, clientset)
+		// if err != nil {
+		// 	log.Fatal(err)
+		// }
 	}
 
 	if t.Services {

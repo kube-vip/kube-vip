@@ -102,10 +102,8 @@ func (config *testConfig) createKind() error {
 		// HMMM, if we want to run workloads on the control planes (todo)
 		if config.ControlPlane {
 			for x := range nodes {
-				cmd := exec.Command("kubectl", "taint", "nodes", nodes[x].String(), "node-role.kubernetes.io/control-plane:NoSchedule-")
-				if _, err := cmd.CombinedOutput(); err != nil {
-					//return err
-				}
+				cmd := exec.Command("kubectl", "taint", "nodes", nodes[x].String(), "node-role.kubernetes.io/control-plane:NoSchedule-") //nolint:all
+				cmd.CombinedOutput()
 			}
 		}
 		cmd := exec.Command("kubectl", "create", "configmap", "--namespace", "kube-system", "kubevip", "--from-literal", "range-global=172.18.100.10-172.18.100.30")
@@ -166,7 +164,7 @@ func checkNodesForDuplicateAddresses(nodes []nodeAddresses, address string) erro
 			}
 		}
 	}
-	// If one address is on mulitple nodes, then something has gone wrong
+	// If one address is on multiple nodes, then something has gone wrong
 	if len(foundOnNode) > 1 {
 		return fmt.Errorf("‼️ multiple nodes [%s] have address [%s]", strings.Join(foundOnNode, " "), address)
 	}
