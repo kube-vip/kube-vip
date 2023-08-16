@@ -167,6 +167,7 @@ func (sm *Manager) deleteService(uid string) error {
 	defer sm.mutex.Unlock()
 
 	var updatedInstances []*Instance
+	var serviceInstance *Instance
 	found := false
 	for x := range sm.serviceInstances {
 		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].UID)
@@ -176,10 +177,26 @@ func (sm *Manager) deleteService(uid string) error {
 		} else {
 			// Flip the found when we match
 			found = true
-			sm.serviceInstances[x].cluster.Stop()
-			if sm.serviceInstances[x].isDHCP {
-				sm.serviceInstances[x].dhcpClient.Stop()
-				macvlan, err := netlink.LinkByName(sm.serviceInstances[x].dhcpInterface)
+			serviceInstance = sm.serviceInstances[x]
+		}
+	}
+	// If we've been through all services and not found the correct one then error
+	if !found {
+		// TODO: - fix UX
+		// return fmt.Errorf("unable to find/stop service [%s]", uid)
+		return nil
+	} else {
+		shared := false
+		for x := range updatedInstances {
+			if updatedInstances[x].Vip == serviceInstance.Vip {
+				shared = true
+			}
+		}
+		if !shared {
+			serviceInstance.cluster.Stop()
+			if serviceInstance.isDHCP {
+				serviceInstance.dhcpClient.Stop()
+				macvlan, err := netlink.LinkByName(serviceInstance.dhcpInterface)
 				if err != nil {
 					return fmt.Errorf("error finding VIP Interface: %v", err)
 				}
@@ -189,30 +206,24 @@ func (sm *Manager) deleteService(uid string) error {
 					return fmt.Errorf("error deleting DHCP Link : %v", err)
 				}
 			}
-			if sm.serviceInstances[x].vipConfig.EnableBGP {
-				cidrVip := fmt.Sprintf("%s/%s", sm.serviceInstances[x].vipConfig.VIP, sm.serviceInstances[x].vipConfig.VIPCIDR)
+			if serviceInstance.vipConfig.EnableBGP {
+				cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfig.VIP, serviceInstance.vipConfig.VIPCIDR)
 				err := sm.bgpServer.DelHost(cidrVip)
 				return err
 			}
 
 			// We will need to tear down the egress
-			if sm.serviceInstances[x].serviceSnapshot.Annotations[egress] == "true" {
-				if sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint] != "" {
+			if serviceInstance.serviceSnapshot.Annotations[egress] == "true" {
+				if serviceInstance.serviceSnapshot.Annotations[endpoint] != "" {
 
-					log.Infof("service [%s] has an egress re-write enabled", sm.serviceInstances[x].serviceSnapshot.Name)
-					err := sm.TeardownEgress(sm.serviceInstances[x].serviceSnapshot.Annotations[endpoint], sm.serviceInstances[x].serviceSnapshot.Spec.LoadBalancerIP, sm.serviceInstances[x].serviceSnapshot.Annotations[egressDestinationPorts], sm.serviceInstances[x].serviceSnapshot.Namespace)
+					log.Infof("service [%s] has an egress re-write enabled", serviceInstance.serviceSnapshot.Name)
+					err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[endpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Annotations[egressDestinationPorts], serviceInstance.serviceSnapshot.Namespace)
 					if err != nil {
 						log.Errorf("%v", err)
 					}
 				}
 			}
 		}
-	}
-	// If we've been through all services and not found the correct one then error
-	if !found {
-		// TODO: - fix UX
-		// return fmt.Errorf("unable to find/stop service [%s]", uid)
-		return nil
 	}
 
 	// Update the service array
