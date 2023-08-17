@@ -185,42 +185,41 @@ func (sm *Manager) deleteService(uid string) error {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
 		return nil
-	} else {
-		shared := false
-		for x := range updatedInstances {
-			if updatedInstances[x].Vip == serviceInstance.Vip {
-				shared = true
+	}
+	shared := false
+	for x := range updatedInstances {
+		if updatedInstances[x].Vip == serviceInstance.Vip {
+			shared = true
+		}
+	}
+	if !shared {
+		serviceInstance.cluster.Stop()
+		if serviceInstance.isDHCP {
+			serviceInstance.dhcpClient.Stop()
+			macvlan, err := netlink.LinkByName(serviceInstance.dhcpInterface)
+			if err != nil {
+				return fmt.Errorf("error finding VIP Interface: %v", err)
+			}
+
+			err = netlink.LinkDel(macvlan)
+			if err != nil {
+				return fmt.Errorf("error deleting DHCP Link : %v", err)
 			}
 		}
-		if !shared {
-			serviceInstance.cluster.Stop()
-			if serviceInstance.isDHCP {
-				serviceInstance.dhcpClient.Stop()
-				macvlan, err := netlink.LinkByName(serviceInstance.dhcpInterface)
+		if serviceInstance.vipConfig.EnableBGP {
+			cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfig.VIP, serviceInstance.vipConfig.VIPCIDR)
+			err := sm.bgpServer.DelHost(cidrVip)
+			return err
+		}
+
+		// We will need to tear down the egress
+		if serviceInstance.serviceSnapshot.Annotations[egress] == "true" {
+			if serviceInstance.serviceSnapshot.Annotations[endpoint] != "" {
+
+				log.Infof("service [%s] has an egress re-write enabled", serviceInstance.serviceSnapshot.Name)
+				err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[endpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Annotations[egressDestinationPorts], serviceInstance.serviceSnapshot.Namespace)
 				if err != nil {
-					return fmt.Errorf("error finding VIP Interface: %v", err)
-				}
-
-				err = netlink.LinkDel(macvlan)
-				if err != nil {
-					return fmt.Errorf("error deleting DHCP Link : %v", err)
-				}
-			}
-			if serviceInstance.vipConfig.EnableBGP {
-				cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfig.VIP, serviceInstance.vipConfig.VIPCIDR)
-				err := sm.bgpServer.DelHost(cidrVip)
-				return err
-			}
-
-			// We will need to tear down the egress
-			if serviceInstance.serviceSnapshot.Annotations[egress] == "true" {
-				if serviceInstance.serviceSnapshot.Annotations[endpoint] != "" {
-
-					log.Infof("service [%s] has an egress re-write enabled", serviceInstance.serviceSnapshot.Name)
-					err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[endpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Annotations[egressDestinationPorts], serviceInstance.serviceSnapshot.Namespace)
-					if err != nil {
-						log.Errorf("%v", err)
-					}
+					log.Errorf("%v", err)
 				}
 			}
 		}
