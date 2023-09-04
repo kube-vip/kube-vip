@@ -23,6 +23,9 @@ type Config struct {
 	// EnableRoutingTable, will use the routing table to advertise the VIP address
 	EnableRoutingTable bool `yaml:"enableRoutingTable"`
 
+	// EnableRoutingTable, what sort of route should be added to the routing table
+	RoutingTableType int `yaml:"routingTableType"`
+
 	// EnableControlPlane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableControlPlane bool `yaml:"enableControlPlane"`
 

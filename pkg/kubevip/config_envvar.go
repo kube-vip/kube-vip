@@ -121,6 +121,9 @@ const (
 	// vipRoutingTable - defines if table mode will be used for vips
 	vipRoutingTable = "vip_routingtable" //nolint
 
+	// vipRoutingTableType - defines which table type will be used for vip routes
+	vipRoutingTableType = "vip_routingtabletype" //nolint
+
 	// cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 

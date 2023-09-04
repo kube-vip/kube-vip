@@ -274,6 +274,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableRoutingTable = b
 	}
 
+	// Routing Table Type
+	env = os.Getenv(vipRoutingTableType)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.RoutingTableType = int(i)
+	}
+
 	// BGP Server options
 	env = os.Getenv(bgpEnable)
 	if env != "" {

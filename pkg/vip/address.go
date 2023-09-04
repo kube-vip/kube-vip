@@ -54,6 +54,7 @@ type network struct {
 	isDDNS  bool
 
 	routeTable int
+	routingTableType int
 }
 
 func netlinkParse(addr string) (*netlink.Addr, error) {
@@ -65,7 +66,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int) (Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int) (Network, error) {
 	result := &network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -75,6 +76,7 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 
 	result.link = link
 	result.routeTable = tableID
+	result.routingTableType = tableType
 
 	if IsIP(address) {
 		// Check if the subnet needs overriding
@@ -127,6 +129,7 @@ func (configurator *network) AddRoute() error {
 		Dst:       configurator.address.IPNet,
 		LinkIndex: configurator.link.Attrs().Index,
 		Table:     configurator.routeTable,
+		Type:	   configurator.routingTableType,
 	}
 	return netlink.RouteAdd(route)
 }
