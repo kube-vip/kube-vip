@@ -53,7 +53,7 @@ type network struct {
 	dnsName string
 	isDDNS  bool
 
-	routeTable int
+	routeTable       int
 	routingTableType int
 }
 
@@ -129,7 +129,7 @@ func (configurator *network) AddRoute() error {
 		Dst:       configurator.address.IPNet,
 		LinkIndex: configurator.link.Attrs().Index,
 		Table:     configurator.routeTable,
-		Type:	   configurator.routingTableType,
+		Type:      configurator.routingTableType,
 	}
 	return netlink.RouteAdd(route)
 }
