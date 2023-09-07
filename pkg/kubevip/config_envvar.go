@@ -122,6 +122,11 @@ const (
 	vipRoutingTable = "vip_routingtable" //nolint
 
 	// vipRoutingTableType - defines which table type will be used for vip routes
+	// 						 valid values for this variable can be found in:
+	//						 https://pkg.go.dev/golang.org/x/sys/unix#RTN_UNSPEC
+	//						 Note that route type have the prefix `RTN_`, and you
+	//						 specify the integer value, not the name. For example:
+	//						 you should say `vip_routingtabletype=2` for RTN_LOCAL
 	vipRoutingTableType = "vip_routingtabletype" //nolint
 
 	// cpNamespace defines the namespace the control plane pods will run in
