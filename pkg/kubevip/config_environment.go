@@ -274,6 +274,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableRoutingTable = b
 	}
 
+	// Routing Table ID
+	env = os.Getenv(vipRoutingTableID)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.RoutingTableID = int(i)
+	}
+
 	// Routing Table Type
 	env = os.Getenv(vipRoutingTableType)
 	if env != "" {

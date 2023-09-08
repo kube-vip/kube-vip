@@ -121,6 +121,9 @@ const (
 	// vipRoutingTable - defines if table mode will be used for vips
 	vipRoutingTable = "vip_routingtable" //nolint
 
+	// vipRoutingTableID - defines which table mode will be used for vips
+	vipRoutingTableID = "vip_routingtableid" //nolint
+
 	// vipRoutingTableType - defines which table type will be used for vip routes
 	// 						 valid values for this variable can be found in:
 	//						 https://pkg.go.dev/golang.org/x/sys/unix#RTN_UNSPEC
