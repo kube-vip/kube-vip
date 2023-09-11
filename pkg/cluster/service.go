@@ -226,6 +226,13 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 					log.Warnf("%v", err)
 				}
 
+				if c.EnableRoutingTable {
+					err = cluster.Network.DeleteRoute()
+					if err != nil {
+						log.Warnf("%v", err)
+					}
+				}
+
 				close(cluster.completed)
 				return
 			}

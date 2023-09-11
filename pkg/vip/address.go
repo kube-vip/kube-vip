@@ -124,9 +124,9 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 
 // AddRoute - Add an IP address to a route table
 func (configurator *network) AddRoute() error {
-	route_scope := netlink.SCOPE_UNIVERSE;
+	route_scope := netlink.SCOPE_UNIVERSE
 	if configurator.routingTableType == unix.RTN_LOCAL {
-		route_scope = netlink.SCOPE_HOST
+		route_scope = netlink.SCOPE_LINK
 	}
 	route := &netlink.Route{
 		Scope:     route_scope,
@@ -140,9 +140,9 @@ func (configurator *network) AddRoute() error {
 
 // DeleteRoute - Delete an IP address from a route table
 func (configurator *network) DeleteRoute() error {
-	route_scope := netlink.SCOPE_UNIVERSE;
+	route_scope := netlink.SCOPE_UNIVERSE
 	if configurator.routingTableType == unix.RTN_LOCAL {
-		route_scope = netlink.SCOPE_HOST
+		route_scope = netlink.SCOPE_LINK
 	}
 	route := &netlink.Route{
 		Scope:     route_scope,
