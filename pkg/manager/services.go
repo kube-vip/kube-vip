@@ -162,7 +162,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 }
 
 func (sm *Manager) deleteService(uid string) error {
-	// pretect multiple calls
+	// protect multiple calls
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
