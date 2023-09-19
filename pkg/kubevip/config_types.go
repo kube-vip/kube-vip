@@ -32,6 +32,9 @@ type Config struct {
 	// EnableServicesElection, will enable leaderElection per service
 	EnableServicesElection bool `yaml:"enableServicesElection"`
 
+	// EnableNodeLabeling, will enable node labeling as it becomes leader
+	EnableNodeLabeling bool `yaml:"enableNodeLabeling"`
+
 	// LoadBalancerClassOnly, will enable load balancing only for services with LoadBalancerClass set to "kube-vip.io/kube-vip-class"
 	LoadBalancerClassOnly bool `yaml:"lbClassOnly"`
 

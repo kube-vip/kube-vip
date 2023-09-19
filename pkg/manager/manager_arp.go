@@ -169,6 +169,9 @@ func (sm *Manager) startARP() error {
 				},
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
+					if sm.config.EnableNodeLabeling {
+						applyNodeLabel(sm.clientSet, sm.config.Address, id, identity)
+					}
 					if identity == id {
 						// I just got the lock
 						return
