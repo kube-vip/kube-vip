@@ -126,7 +126,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		// Cancel the arp context, which will in turn stop any broadcasts
 	}()
 
-	// (attempt to) Remove the virtual IP, incase it already exists
+	// (attempt to) Remove the virtual IP, in case it already exists
 	err = cluster.Network.DeleteIP()
 	if err != nil {
 		log.Errorf("could not delete virtualIP: %v", err)

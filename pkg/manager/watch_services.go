@@ -49,7 +49,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		return err
 	}
 	if sm.config.ServiceNamespace == "" {
-		// v1.NamespaceAll is actually "", but we'll stay with the const incase things change upstream
+		// v1.NamespaceAll is actually "", but we'll stay with the const in case things change upstream
 		sm.config.ServiceNamespace = v1.NamespaceAll
 		log.Infof("starting services watcher for all namespaces")
 	} else {

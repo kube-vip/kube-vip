@@ -97,7 +97,7 @@ case "$3" in
 esac
 
 if [[ -z "$DEPS" ]]; then
-  logr "INFO" "Installing specific version of Kubernetes Dependancies"
+  logr "INFO" "Installing specific version of Kubernetes Dependencies"
   install_deps
 fi
 

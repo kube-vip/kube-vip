@@ -220,7 +220,7 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find Start As Leader
-	// TODO - does this need depricating?
+	// TODO - does this need deprecating?
 	// Required when the host sets itself as leader before the state change
 	env = os.Getenv(vipStartLeader)
 	if env != "" {

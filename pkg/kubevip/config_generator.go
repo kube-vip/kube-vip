@@ -409,7 +409,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	if inCluster {
-		// If we're running this inCluster then the acccount name will be required
+		// If we're running this inCluster then the account name will be required
 		newManifest.Spec.ServiceAccountName = "kube-vip"
 	} else {
 		// If this isn't inside a cluster then add the external path mount

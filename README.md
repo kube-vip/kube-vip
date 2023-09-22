@@ -32,7 +32,7 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Service LoadBalancer address pools per namespace or global
 - Service LoadBalancer address via (existing network DHCP)
 - Service LoadBalancer address exposure to gateway via UPNP
-- ... manifest generation, vendor API integrations and many nore...
+- ... manifest generation, vendor API integrations and many more...
 
 ## Why?
 
