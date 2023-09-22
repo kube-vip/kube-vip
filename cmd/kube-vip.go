@@ -355,6 +355,15 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	var err error
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>
+			<head><title>kube-vip</title></head>
+			<body>
+			<h1>kube-vip Metrics</h1>
+			<p><a href="` + "/metrics" + `">Metrics</a></p>
+			</body>
+			</html>`))
+	})
 
 	srv := &http.Server{
 		Addr:              config.Addr,
