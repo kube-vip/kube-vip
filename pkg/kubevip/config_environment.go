@@ -425,6 +425,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableServiceSecurity = b
 	}
 
+	// Find if node labeling is enabled
+	env = os.Getenv(EnableNodeLabeling)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableNodeLabeling = b
+	}
+
 	// Find Prometheus configuration
 	env = os.Getenv(prometheusServer)
 	if env != "" {

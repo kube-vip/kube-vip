@@ -154,6 +154,9 @@ const (
 	// EnableServiceSecurity defines if the load-balancer should only allow traffic to service ports
 	EnableServiceSecurity = "enable_service_security"
 
+	// EnableNodeLabeling, will enable node labeling as the node becomes leader
+	EnableNodeLabeling = "enable_node_labeling"
+
 	// prometheusServer defines the address prometheus listens on
 	prometheusServer = "prometheus_server"
 

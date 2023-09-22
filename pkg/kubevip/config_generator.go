@@ -181,6 +181,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, leaderElection...)
 	}
 
+	// If we're enabling node labeling on leader election
+	if c.EnableNodeLabeling {
+		EnableNodeLabeling := []corev1.EnvVar{
+			{
+				Name:  EnableNodeLabeling,
+				Value: strconv.FormatBool(c.EnableNodeLabeling),
+			},
+		}
+		newEnvironment = append(newEnvironment, EnableNodeLabeling...)
+	}
+
 	// If we're specifying an annotation configuration
 	if c.Annotations != "" {
 		annotations := []corev1.EnvVar{
