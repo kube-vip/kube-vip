@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -81,11 +82,33 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 			var localendpoints []string
 			for subset := range ep.Subsets {
 				for address := range ep.Subsets[subset].Addresses {
-					log.Debugf("[endpoint] %s", ep.Subsets[subset].Addresses[address].IP)
-					// Check the node is populated
-					if ep.Subsets[subset].Addresses[address].NodeName != nil {
-						if id == *ep.Subsets[subset].Addresses[address].NodeName {
-							localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
+					// 1. Compare the hostname on the endpoint to the hostname
+					// 2. Compare the nodename on the endpoint to the hostname
+					// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
+
+					// 1. Compare the Hostname first (should be FQDN)
+					if id == ep.Subsets[subset].Addresses[address].Hostname {
+						log.Debugf("[endpoint] address: %s, hostname: %s", ep.Subsets[subset].Addresses[address].IP, ep.Subsets[subset].Addresses[address].Hostname)
+						localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
+					} else {
+						// 2. Compare the Nodename (from testing could be FQDN or short)
+						if ep.Subsets[subset].Addresses[address].NodeName != nil {
+							log.Debugf("[endpoint] address: %s, hostname: %s, node: %s", ep.Subsets[subset].Addresses[address].IP, ep.Subsets[subset].Addresses[address].Hostname, *ep.Subsets[subset].Addresses[address].NodeName)
+							if id == *ep.Subsets[subset].Addresses[address].NodeName {
+								localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
+							} else {
+								// 3. Compare to shortname
+								shortname, err := getShortname(id)
+								if err != nil {
+									log.Errorf("[endpoint] %v", err)
+								} else {
+									log.Debugf("[endpoint] address: %s, shortname: %s, node: %s", ep.Subsets[subset].Addresses[address].IP, shortname, *ep.Subsets[subset].Addresses[address].NodeName)
+
+									if shortname == *ep.Subsets[subset].Addresses[address].NodeName {
+										localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
+									}
+								}
+							}
 						}
 					}
 				}
@@ -207,4 +230,16 @@ func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.
 		return retryErr
 	}
 	return nil
+}
+
+// returns just the shortname (or first bit) of a FQDN
+func getShortname(hostname string) (string, error) {
+	if len(hostname) == 0 {
+		return "", fmt.Errorf("unable to find shortname from %s", hostname)
+	}
+	hostParts := strings.Split(hostname, ".")
+	if len(hostParts) > 1 {
+		return hostParts[0], nil
+	}
+	return "", fmt.Errorf("unable to find shortname from %s", hostname)
 }
