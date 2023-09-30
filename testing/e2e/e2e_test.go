@@ -4,14 +4,10 @@
 package e2e_test
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/tls"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,20 +20,15 @@ import (
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
-	"sigs.k8s.io/kind/pkg/cmd"
-	load "sigs.k8s.io/kind/pkg/cmd/kind/load/docker-image"
 	"sigs.k8s.io/kind/pkg/log"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gexec"
-)
 
-type kubevipManifestValues struct {
-	ControlPlaneVIP string
-	ImagePath       string
-}
+	"github.com/kube-vip/kube-vip/testing/e2e"
+)
 
 var _ = Describe("kube-vip broadcast neighbor", func() {
 	var (
@@ -50,7 +41,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 	BeforeEach(func() {
 		klog.SetOutput(GinkgoWriter)
-		logger = TestLogger{}
+		logger = e2e.TestLogger{}
 
 		imagePath = os.Getenv("E2E_IMAGE_PATH")
 
@@ -115,9 +106,9 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			defer manifestFile.Close()
 
-			ipv4VIP = generateIPv4VIP()
+			ipv4VIP = e2e.GenerateIPv4VIP()
 
-			Expect(kubeVIPManifestTemplate.Execute(manifestFile, kubevipManifestValues{
+			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv4VIP,
 				ImagePath:       imagePath,
 			})).To(Succeed())
@@ -128,7 +119,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			createKindCluster(logger, &clusterConfig, clusterName)
 
 			By(withTimestamp("loading local docker image to kind cluster"))
-			loadDockerImageToKind(logger, imagePath, clusterName)
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv4 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -173,14 +164,14 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				})
 			}
 
-			ipv6VIP = generateIPv6VIP()
+			ipv6VIP = e2e.GenerateIPv6VIP()
 
 			manifestFile, err := os.Create(manifestPath)
 			Expect(err).NotTo(HaveOccurred())
 
 			defer manifestFile.Close()
 
-			Expect(kubeVIPManifestTemplate.Execute(manifestFile, kubevipManifestValues{
+			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv6VIP,
 				ImagePath:       imagePath,
 			})).To(Succeed())
@@ -191,7 +182,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			createKindCluster(logger, &clusterConfig, clusterName)
 
 			By(withTimestamp("loading local docker image to kind cluster"))
-			loadDockerImageToKind(logger, imagePath, clusterName)
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv6 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -219,12 +210,6 @@ func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName 
 		cluster.CreateWithV1Alpha4Config(config),
 		cluster.CreateWithRetain(os.Getenv("E2E_PRESERVE_CLUSTER") == "true"), // If create fails, we'll need the cluster alive to debug
 	)).To(Succeed())
-}
-
-func loadDockerImageToKind(logger log.Logger, imagePath string, clusterName string) {
-	loadImageCmd := load.NewCommand(logger, cmd.StandardIOStreams())
-	loadImageCmd.SetArgs([]string{"--name", clusterName, imagePath})
-	Expect(loadImageCmd.Execute()).To(Succeed())
 }
 
 func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, eventuallyTimeout time.Duration) {
@@ -280,105 +265,4 @@ func killLeader(leaderIPAddr string, clusterName string) {
 
 func withTimestamp(text string) string {
 	return fmt.Sprintf("%s: %s", time.Now(), text)
-}
-
-func getKindNetworkSubnetCIDRs() []string {
-	cmd := exec.Command(
-		"docker", "inspect", "kind",
-		"--format", `{{ range $i, $a := .IPAM.Config }}{{ println .Subnet }}{{ end }}`,
-	)
-	cmdOut := new(bytes.Buffer)
-	cmd.Stdout = cmdOut
-	Expect(cmd.Run()).To(Succeed(), "The Docker \"kind\" network was not found.")
-	reader := bufio.NewReader(cmdOut)
-
-	cidrs := []string{}
-	for {
-		line, readErr := reader.ReadString('\n')
-		if readErr != nil && readErr != io.EOF {
-			Expect(readErr).NotTo(HaveOccurred(), "Error finding subnet CIDRs in the Docker \"kind\" network")
-		}
-
-		cidrs = append(cidrs, strings.TrimSpace(line))
-		if readErr == io.EOF {
-			break
-		}
-	}
-
-	return cidrs
-}
-
-func generateIPv4VIP() string {
-	cidrs := getKindNetworkSubnetCIDRs()
-
-	for _, cidr := range cidrs {
-		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		Expect(parseErr).NotTo(HaveOccurred())
-
-		if ip.To4() != nil {
-			mask := binary.BigEndian.Uint32(ipNet.Mask)
-			start := binary.BigEndian.Uint32(ipNet.IP)
-			end := (start & mask) | (^mask)
-
-			chosenVIP := make([]byte, 4)
-			binary.BigEndian.PutUint32(chosenVIP, end-5)
-			return net.IP(chosenVIP).String()
-		}
-	}
-	Fail("Could not find any IPv4 CIDRs in the Docker \"kind\" network")
-	return ""
-}
-
-func generateIPv6VIP() string {
-	cidrs := getKindNetworkSubnetCIDRs()
-
-	for _, cidr := range cidrs {
-		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		Expect(parseErr).NotTo(HaveOccurred())
-
-		if ip.To4() == nil {
-			lowerMask := binary.BigEndian.Uint64(ipNet.Mask[8:])
-			lowerStart := binary.BigEndian.Uint64(ipNet.IP[8:])
-			lowerEnd := (lowerStart & lowerMask) | (^lowerMask)
-
-			chosenVIP := make([]byte, 16)
-			// Copy upper half into chosenVIP
-			copy(chosenVIP, ipNet.IP[0:8])
-			// Copy lower half into chosenVIP
-			binary.BigEndian.PutUint64(chosenVIP[8:], lowerEnd-5)
-			return net.IP(chosenVIP).String()
-		}
-	}
-	Fail("Could not find any IPv6 CIDRs in the Docker \"kind\" network")
-	return ""
-}
-
-type TestLogger struct{}
-
-func (t TestLogger) Warnf(format string, args ...interface{}) {
-	klog.Warningf(format, args...)
-}
-
-func (t TestLogger) Warn(message string) {
-	klog.Warning(message)
-}
-
-func (t TestLogger) Error(message string) {
-	klog.Error(message)
-}
-
-func (t TestLogger) Errorf(format string, args ...interface{}) {
-	klog.Errorf(format, args...)
-}
-
-func (t TestLogger) V(level log.Level) log.InfoLogger {
-	return TestInfoLogger{Verbose: klog.V(klog.Level(level))}
-}
-
-type TestInfoLogger struct {
-	klog.Verbose
-}
-
-func (t TestInfoLogger) Info(message string) {
-	t.Verbose.Info(message)
 }

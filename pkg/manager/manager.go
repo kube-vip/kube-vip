@@ -67,6 +67,8 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	switch {
+	case config.LeaderElectionType == "etcd":
+		// Do nothing, we don't construct a k8s client for etcd leader election
 	case fileExists(adminConfigPath):
 		if config.EnableControlPlane {
 			// If this is a control plane host it will likely have started as a static pod or won't have the

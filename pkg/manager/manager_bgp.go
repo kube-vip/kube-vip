@@ -103,9 +103,9 @@ func (sm *Manager) startBGP() error {
 			return err
 		}
 
-		clusterManager := &cluster.Manager{
-			KubernetesClient: sm.clientSet,
-			SignalChan:       sm.signalChan,
+		clusterManager, err := initClusterManager(sm)
+		if err != nil {
+			return err
 		}
 
 		go func() {
