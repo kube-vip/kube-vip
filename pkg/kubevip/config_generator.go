@@ -107,6 +107,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  svcEnable,
 				Value: strconv.FormatBool(c.EnableServices),
 			},
+			{
+				Name:  svcLeaseName,
+				Value: c.ServicesLeaseName,
+			},
 		}
 		newEnvironment = append(newEnvironment, svc...)
 		if c.EnableServicesElection {
