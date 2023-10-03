@@ -124,12 +124,12 @@ func (sm *Manager) startARP() error {
 		}
 	} else {
 
-		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
+		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, sm.config.ServicesLeaseName, id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
-				Name:      plunderLock,
+				Name:      sm.config.ServicesLeaseName,
 				Namespace: ns,
 			},
 			Client: sm.clientSet.CoordinationV1(),

@@ -189,6 +189,12 @@ func ParseEnvironment(c *Config) error {
 		if env != "" {
 			c.ServiceNamespace = env
 		}
+
+		// Gets the leaseName for services in arp mode
+		env = os.Getenv(svcLeaseName)
+		if env != "" {
+			c.ServicesLeaseName = env
+		}
 	}
 
 	// Find vip address cidr range

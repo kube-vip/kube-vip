@@ -136,6 +136,9 @@ const (
 	// svcElection enables election per Kubernetes service
 	svcElection = "svc_election"
 
+	// svcLeaseName Name of the lease that is used for leader election for services (in arp mode)
+	svcLeaseName = "svc_leasename"
+
 	// lbClassOnly enables load-balancer for class "kube-vip.io/kube-vip-class" only
 	lbClassOnly = "lb_class_only"
 
