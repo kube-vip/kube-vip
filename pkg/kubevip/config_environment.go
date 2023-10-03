@@ -11,6 +11,9 @@ import (
 
 // ParseEnvironment - will popultate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
+	if c == nil {
+		return nil
+	}
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
 	// Set default value
