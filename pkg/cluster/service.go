@@ -48,7 +48,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 	err = cluster.Network.AddIP()
 	if err != nil {
-		log.Warnf("%v", err)
+		log.Fatalf("%v", err)
 	}
 
 	if c.EnableMetal {
