@@ -77,8 +77,8 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 	node.Annotations = map[string]string{
 		"bgp/bgp-peers-0-node-asn": "65000",
 		"bgp/bgp-peers-0-peer-asn": "64000",
-		"bgp/bgp-peers-0-peer-ip":  "10.0.0.254",
-		"bgp/bgp-peers-0-src-ip":   "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/bgp-peers-0-peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/bgp-peers-0-src-ip":   "10.0.0.254",
 		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // password
 	}
 
@@ -93,6 +93,8 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 		{Address: "10.0.0.3", AS: uint32(64000), Password: "password"},
 	}
 	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
+	assert.Equal(t, "10.0.0.254", bgpConfig.SourceIP, "bgpConfig.SourceIP parsed incorrectly")
+	assert.Equal(t, "10.0.0.254", bgpConfig.RouterID, "bgpConfig.RouterID parsed incorrectly")
 	assert.Equal(t, "10.0.0.3", bgpPeer.Address, "bgpPeer.Address parsed incorrectly")
 	assert.Equal(t, "password", bgpPeer.Password, "bgpPeer.Password parsed incorrectly")
 }

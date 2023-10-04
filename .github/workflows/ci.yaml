@@ -2,34 +2,80 @@ name: For each commit and PR
 on:
   push:
   pull_request:
+env:
+  GO_VERSION: "1.20"
 jobs:
   validation:
     runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: 0
+    name: Checks and linters
     steps:
-    - name: Init
-      run: sudo apt-get update && sudo apt-get install -y build-essential golint
-    - name: Checkout code
-      uses: actions/checkout@v3
-    - name: Install Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
-    - name: Install golangci-lint
-      run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.3
-    - name: checks
-      run: make check
-    - name: test docker build (with iptables)
-      run: make dockerx86ActionIPTables
-    - name: e2e services
-      run: DOCKERTAG=action make service-tests
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: 'plndr/kube-vip:action'
-        format: 'table'
-        exit-code: '1'
-        ignore-unfixed: true
-        vuln-type: 'os,library'
-        severity: 'CRITICAL,HIGH'
+      - name: Init
+        run: sudo apt-get update && sudo apt-get install -y build-essential golint
+      - name: Install golangci-lint
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.3
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: All checks
+        run: make check
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        run: make unit-tests
+  e2e-tests:
+    runs-on: ubuntu-latest
+    name: E2E ARP tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build image locally
+        run: make dockerx86Local
+      - name: Run tests
+        run: make e2e-tests
+  service-e2e-tests:
+    runs-on: ubuntu-latest
+    name: E2E service tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build image with iptables
+        run: make dockerx86ActionIPTables
+      - name: Run tests
+        run: DOCKERTAG=action make service-tests
+  image-vul-check:
+    runs-on: ubuntu-latest
+    name: Image vulnerability scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Build image with iptables
+        run: make dockerx86ActionIPTables
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'plndr/kube-vip:action'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+      

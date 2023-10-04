@@ -22,10 +22,12 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "E2E Suite")
 }
 
-var _ = SynchronizedBeforeSuite(func() []byte {
-	ensureKindNetwork()
-	return []byte{}
-}, func(_ []byte) {})
+var _ = SynchronizedBeforeSuite(
+	func() {
+		ensureKindNetwork()
+	},
+	func() {},
+)
 
 func ensureKindNetwork() {
 	By("checking if the Docker \"kind\" network exists")

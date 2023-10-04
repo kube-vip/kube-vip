@@ -98,7 +98,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv4.yaml")
 
-			for i := 0; i < 2; i++ {
+			for i := 0; i < 3; i++ {
 				clusterConfig.Nodes = append(clusterConfig.Nodes, kindconfigv1alpha4.Node{
 					Role: kindconfigv1alpha4.ControlPlaneRole,
 					ExtraMounts: []kindconfigv1alpha4.Mount{
@@ -217,6 +217,7 @@ func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName 
 	Expect(provider.Create(
 		clusterName,
 		cluster.CreateWithV1Alpha4Config(config),
+		cluster.CreateWithRetain(os.Getenv("E2E_PRESERVE_CLUSTER") == "true"), // If create fails, we'll need the cluster alive to debug
 	)).To(Succeed())
 }
 
