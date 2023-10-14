@@ -50,8 +50,15 @@ type Config struct {
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 
-	// LeaderElection defines the settings around Kubernetes LeaderElection
-	LeaderElection
+	// LeaderElectionType defines the backend to run the leader election: kubernetes or etcd. Defaults to kubernetes.
+	// Etcd doesn't support load balancer mode (EnableLoadBalancer=true) or any other feature that depends on the kube-api server.
+	LeaderElectionType string `yaml:"leaderElectionType"`
+
+	// KubernetesLeaderElection defines the settings around Kubernetes KubernetesLeaderElection
+	KubernetesLeaderElection
+
+	// Etcd defines all the settings for the etcd client.
+	Etcd Etcd
 
 	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
 	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
@@ -145,8 +152,8 @@ type Config struct {
 	ServicesLeaseName string `yaml:"servicesLeaseName"`
 }
 
-// LeaderElection defines all of the settings for Kubernetes LeaderElection
-type LeaderElection struct {
+// KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
+type KubernetesLeaderElection struct {
 	// EnableLeaderElection will use the Kubernetes leader election algorithm
 	EnableLeaderElection bool `yaml:"enableLeaderElection"`
 
@@ -164,6 +171,14 @@ type LeaderElection struct {
 
 	// LeaseAnnotations - annotations which will be given to the lease object
 	LeaseAnnotations map[string]string
+}
+
+// Etcd defines all the settings for the etcd client.
+type Etcd struct {
+	CAFile         string
+	ClientCertFile string
+	ClientKeyFile  string
+	Endpoints      []string
 }
 
 // LoadBalancer contains the configuration of a load balancing instance

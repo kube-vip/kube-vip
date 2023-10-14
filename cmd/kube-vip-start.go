@@ -9,11 +9,13 @@ import (
 )
 
 // Start as a single node (no cluster), start as a leader in the cluster
-var startConfig kubevip.Config
-var startConfigLB kubevip.LoadBalancer
-var startLocalPeer, startKubeConfigPath string
-var startRemotePeers, startBackends []string
-var inCluster bool
+var (
+	startConfig                         kubevip.Config
+	startConfigLB                       kubevip.LoadBalancer
+	startLocalPeer, startKubeConfigPath string
+	startRemotePeers, startBackends     []string
+	inCluster                           bool
+)
 
 func init() {
 	// Get the configuration file
@@ -65,6 +67,10 @@ var kubeVipStart = &cobra.Command{
 			log.Fatalln(err)
 		}
 
+		if startConfig.LeaderElectionType == "etcd" {
+			log.Fatalln("Leader election with etcd not supported in start command, use manager")
+		}
+
 		newCluster, err := cluster.InitCluster(&startConfig, disableVIP)
 		if err != nil {
 			log.Fatalf("%v", err)
@@ -109,6 +115,5 @@ var kubeVipStart = &cobra.Command{
 				}
 			}
 		}
-
 	},
 }

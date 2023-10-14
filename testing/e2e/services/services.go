@@ -23,7 +23,6 @@ import (
 
 // 1. Create a deployment
 // 2. Expose the deployment
-
 func (config *testConfig) startServiceTest(ctx context.Context, clientset *kubernetes.Clientset) {
 	nodeTolerate := os.Getenv("NODE_TOLERATE")
 
