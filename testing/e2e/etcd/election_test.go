@@ -24,7 +24,6 @@ type testConfig struct {
 	kubeVipImage        string
 	kubeVipManifestPath string
 	clusterName         string
-	tempDirPath         string
 	vip                 string
 	etcdCertsFolder     string
 	currentDir          string
@@ -37,7 +36,7 @@ func (t *testConfig) cleanup() {
 	}
 
 	t.cluster.Delete()
-	Expect(os.RemoveAll(t.tempDirPath)).To(Succeed())
+	Expect(os.RemoveAll(t.kubeVipManifestPath)).To(Succeed())
 	Expect(os.RemoveAll(t.etcdCertsFolder)).To(Succeed())
 }
 
@@ -67,10 +66,10 @@ var _ = Describe("kube-vip with etcd leader election", func() {
 			test.currentDir, err = os.Getwd()
 			Expect(err).NotTo(HaveOccurred())
 
-			test.tempDirPath, err = os.MkdirTemp("", "kube-vip-test")
+			tempDirPath, err := os.MkdirTemp("", "kube-vip-test")
 			Expect(err).NotTo(HaveOccurred())
 
-			test.kubeVipManifestPath = filepath.Join(test.tempDirPath, "etcd-vip-ipv4.yaml")
+			test.kubeVipManifestPath = filepath.Join(tempDirPath, "etcd-vip-ipv4.yaml")
 			manifestFile, err := os.Create(test.kubeVipManifestPath)
 			Expect(err).NotTo(HaveOccurred())
 			defer manifestFile.Close()
