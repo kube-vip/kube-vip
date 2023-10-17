@@ -18,3 +18,9 @@ podCIDR: 10.241.1.0/24
 staticPodPath: /etc/kubernetes/manifests
 cgroupDriver: systemd
 cgroupRoot: /kubelet
+failSwapOn: false
+imageGCHighThresholdPercent: 100
+evictionHard:
+  nodefs.available: "0%"
+  nodefs.inodesFree: "0%"
+  imagefs.available: "0%"
