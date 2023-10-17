@@ -26,7 +26,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.9
 	go.uber.org/zap v1.21.0
 	golang.org/x/exp v0.0.0-20231005195138-3e424a577f31
-	golang.org/x/sys v0.12.0
+	golang.org/x/sys v0.13.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	k8s.io/api v0.27.4
 	k8s.io/apimachinery v0.27.4
@@ -97,11 +97,11 @@ require (
 	github.com/vishvananda/netns v0.0.4 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
-	golang.org/x/crypto v0.13.0 // indirect
-	golang.org/x/net v0.15.0 // indirect
+	golang.org/x/crypto v0.14.0 // indirect
+	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect
-	golang.org/x/term v0.12.0 // indirect
+	golang.org/x/term v0.13.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.1.0 // indirect
 	golang.org/x/tools v0.13.0 // indirect
