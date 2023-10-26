@@ -46,7 +46,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/eapache/channels v1.1.0 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
+	github.com/emicklei/go-restful/v3 v3.10.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
