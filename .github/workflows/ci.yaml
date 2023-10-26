@@ -14,7 +14,7 @@ jobs:
       - name: Install golangci-lint
         run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.3
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v4
         with:
@@ -26,7 +26,7 @@ jobs:
     name: Unit tests
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v4
         with:
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Go ${{ env.GO_VERSION }}
       uses: actions/setup-go@v4
       with:
@@ -50,7 +50,7 @@ jobs:
     name: E2E ARP tests
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v4
         with:
@@ -64,7 +64,7 @@ jobs:
     name: E2E service tests
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v4
         with:
@@ -78,7 +78,7 @@ jobs:
     name: Image vulnerability scan
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Build image with iptables
         run: make dockerx86ActionIPTables
       - name: Run Trivy vulnerability scanner
