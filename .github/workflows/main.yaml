@@ -29,7 +29,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}   
       - name: Build standard version
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x
@@ -39,7 +39,7 @@ jobs:
             ghcr.io/kube-vip/kube-vip:${{ github.ref_name }}
       - name: Build iptables version
         id: docker_build_iptables
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile_iptables
