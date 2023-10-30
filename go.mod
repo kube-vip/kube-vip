@@ -3,7 +3,7 @@ module github.com/kube-vip/kube-vip
 go 1.19
 
 require (
-	github.com/cloudflare/ipvs v0.9.1
+	github.com/cloudflare/ipvs v0.10.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/golang/protobuf v1.5.3
