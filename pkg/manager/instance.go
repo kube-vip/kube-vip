@@ -26,7 +26,7 @@ type Instance struct {
 	dhcpInterface       string
 	dhcpInterfaceHwaddr string
 	dhcpInterfaceIP     string
-	dhcpHostname		string
+	dhcpHostname        string
 	dhcpClient          *vip.DHCPClient
 
 	// Kubernetes service mapping
