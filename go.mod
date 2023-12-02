@@ -12,7 +12,7 @@ require (
 	github.com/kamhlos/upnp v0.0.0-20210324072331-5661950dff08
 	github.com/mdlayher/ndp v1.0.1
 	github.com/onsi/ginkgo/v2 v2.13.0
-	github.com/onsi/gomega v1.27.10
+	github.com/onsi/gomega v1.30.0
 	github.com/osrg/gobgp/v3 v3.19.0
 	github.com/packethost/packngo v0.30.0
 	github.com/pkg/errors v0.9.1
@@ -33,7 +33,7 @@ require (
 	k8s.io/client-go v0.28.3
 	k8s.io/klog/v2 v2.100.1
 	sigs.k8s.io/kind v0.20.0
-	sigs.k8s.io/yaml v1.3.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (
@@ -56,7 +56,7 @@ require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20210720184732-4bb14d4b1be1 // indirect
 	github.com/google/safetext v0.0.0-20220905092116-b49f7bc46da2 // indirect

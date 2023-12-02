@@ -27,6 +27,7 @@ const (
 	endpoint                 = "kube-vip.io/active-endpoint"
 	flushContrack            = "kube-vip.io/flush-conntrack"
 	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
+	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
 )
 
 func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {

@@ -5,7 +5,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL := $(TARGET)
 
 # These will be provided to the target
-VERSION := v0.6.3
+VERSION := v0.6.4
 
 BUILD := `git rev-parse HEAD`
 
@@ -127,3 +127,14 @@ e2e-tests:
 
 service-tests:
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services -Services
+
+trivy: dockerx86ActionIPTables
+	docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.47.0 \
+		image  \
+		--format table \
+		--exit-code  1 \
+		--ignore-unfixed \
+		--vuln-type  'os,library' \
+		--severity  'CRITICAL,HIGH'  \
+		$(REPOSITORY)/$(TARGET):action
+

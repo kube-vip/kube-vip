@@ -26,6 +26,7 @@ type Instance struct {
 	dhcpInterface       string
 	dhcpInterfaceHwaddr string
 	dhcpInterfaceIP     string
+	dhcpHostname        string
 	dhcpClient          *vip.DHCPClient
 
 	// Kubernetes service mapping
@@ -78,6 +79,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	if svc.Annotations != nil {
 		instance.dhcpInterfaceHwaddr = svc.Annotations[hwAddrKey]
 		instance.dhcpInterfaceIP = svc.Annotations[requestedIP]
+		instance.dhcpHostname = svc.Annotations[loadbalancerHostname]
 	}
 
 	// Generate Load Balancer config
@@ -178,6 +180,12 @@ func (i *Instance) startDHCP() error {
 	}
 
 	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP)
+
+	// Add hostname to dhcp client if annotated
+	if i.dhcpHostname != "" {
+		log.Infof("Hostname specified for dhcp lease: [%s] - [%s]", interfaceName, i.dhcpHostname)
+		client.WithHostName(i.dhcpHostname)
+	}
 
 	go client.Start()
 
