@@ -45,23 +45,17 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	}
 
 	go func() {
-		//nolint
-		for {
-			select {
-			case <-cluster.stop:
+		<-cluster.stop
 
-				if !disableVIP {
+		if !disableVIP {
 
-					log.Info("[VIP] Releasing the Virtual IP")
-					err := cluster.Network.DeleteIP()
-					if err != nil {
-						log.Warnf("%v", err)
-					}
-				}
-				close(cluster.completed)
-				return
+			log.Info("[VIP] Releasing the Virtual IP")
+			err := cluster.Network.DeleteIP()
+			if err != nil {
+				log.Warnf("%v", err)
 			}
 		}
+		close(cluster.completed)
 	}()
 	log.Infoln("Started Load Balancer and Virtual IP")
 	return nil
