@@ -1,8 +1,6 @@
 package kubevip
 
 import (
-	"net/url"
-
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 )
 
@@ -195,27 +193,6 @@ type LoadBalancer struct {
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
 
-	// BackendPort, is a port that all backends are listening on (To be used to simplify building a list of backends)
-	BackendPort int `yaml:"backendPort"`
-
-	// Backends, is an array of backend servers
-	Backends []BackEnd `yaml:"backends"`
-
 	// Forwarding method of LoadBalancer, either Local, Tunnel, DirectRoute or Bypass
 	ForwardingMethod string `yaml:"forwardingMethod"`
-}
-
-// BackEnd is a server we will load balance over
-type BackEnd struct {
-	// Backend Port to Load Balance to
-	Port int `yaml:"port"`
-
-	// Address of a server/service
-	Address string `yaml:"address"`
-
-	// URL is a raw URL to a backend service
-	RawURL string `yaml:"url,omitempty"`
-
-	// ParsedURL - A validated URL to a backend
-	ParsedURL *url.URL `yaml:"parsedURL,omitempty"`
 }

@@ -91,7 +91,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		return err
 	}
 
-	log.Infof("[service] adding VIP [%s] for [%s/%s]", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
+	log.Infof("(svcs) adding VIP [%s] for [%s/%s]", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 

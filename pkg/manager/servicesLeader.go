@@ -40,7 +40,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 	}
 
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Infof("[services election] for service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
+	log.Infof("(svc election) service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -82,7 +82,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("[services election] service [%s] leader lost: [%s]", service.Name, id)
+				log.Infof("(svc election) service [%s] leader lost: [%s]", service.Name, id)
 				if activeService[string(service.UID)] {
 					if err := sm.deleteService(string(service.UID)); err != nil {
 						log.Errorln(err)
@@ -97,10 +97,10 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 					// I just got the lock
 					return
 				}
-				log.Infof("[services election] new leader elected: %s", identity)
+				log.Infof("(svc election) new leader elected: %s", identity)
 			},
 		},
 	})
-	log.Infof("[services election] for service [%s] stopping", service.Name)
+	log.Infof("(svc election) for service [%s] stopping", service.Name)
 	return nil
 }
