@@ -53,7 +53,8 @@ type network struct {
 	dnsName string
 	isDDNS  bool
 
-	routeTable int
+	routeTable       int
+	routingTableType int
 }
 
 func netlinkParse(addr string) (*netlink.Addr, error) {
@@ -65,7 +66,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int) (Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int) (Network, error) {
 	result := &network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -75,6 +76,7 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 
 	result.link = link
 	result.routeTable = tableID
+	result.routingTableType = tableType
 
 	if IsIP(address) {
 		// Check if the subnet needs overriding
@@ -122,22 +124,32 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 
 // AddRoute - Add an IP address to a route table
 func (configurator *network) AddRoute() error {
+	route_scope := netlink.SCOPE_UNIVERSE
+	if configurator.routingTableType == unix.RTN_LOCAL {
+		route_scope = netlink.SCOPE_LINK
+	}
 	route := &netlink.Route{
-		Scope:     netlink.SCOPE_UNIVERSE,
+		Scope:     route_scope,
 		Dst:       configurator.address.IPNet,
 		LinkIndex: configurator.link.Attrs().Index,
 		Table:     configurator.routeTable,
+		Type:      configurator.routingTableType,
 	}
 	return netlink.RouteAdd(route)
 }
 
-// AddRoute - Add an IP address to a route table
+// DeleteRoute - Delete an IP address from a route table
 func (configurator *network) DeleteRoute() error {
+	route_scope := netlink.SCOPE_UNIVERSE
+	if configurator.routingTableType == unix.RTN_LOCAL {
+		route_scope = netlink.SCOPE_LINK
+	}
 	route := &netlink.Route{
-		Scope:     netlink.SCOPE_UNIVERSE,
+		Scope:     route_scope,
 		Dst:       configurator.address.IPNet,
 		LinkIndex: configurator.link.Attrs().Index,
 		Table:     configurator.routeTable,
+		Type:      configurator.routingTableType,
 	}
 	return netlink.RouteDel(route)
 }
@@ -421,4 +433,33 @@ func (configurator *network) DDNSHostName() string {
 // Interface - return the Interface name
 func (configurator *network) Interface() string {
 	return configurator.link.Attrs().Name
+}
+
+func GarbageCollect(adapter, address string) (found bool, err error) {
+
+	// Get adapter
+	link, err := netlink.LinkByName(adapter)
+	if err != nil {
+		return true, errors.Wrapf(err, "could not get link for interface '%s'", adapter)
+	}
+
+	// Get addresses on adapter
+	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+	if err != nil {
+		return false, err
+	}
+
+	// Compare all addresses to new service address, and remove if needed
+	for _, existing := range addrs {
+		if existing.IP.String() == address {
+			// We've found the existing address
+			found = true
+			// linting issue
+			existing := existing
+			if err = netlink.AddrDel(link, &existing); err != nil {
+				return true, errors.Wrap(err, "could not delete ip")
+			}
+		}
+	}
+	return // Didn't find the address on the adapter
 }

@@ -142,6 +142,27 @@ kubernetes   ClusterIP      10.96.0.1       <none>          443/TCP        17m
 nginx-dhcp   LoadBalancer   10.97.150.208   192.168.0.155   80:31184/TCP   3s
 ```
 
+You can also specify a hostname used for the DHCP lease by adding an annotation to your service.
+
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-dhcp
+  annotations:
+    kube-vip.io/loadbalancerHostname: mydhcp-test
+spec:
+  loadBalancerIP: 0.0.0.0
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: hello-world
+  type: LoadBalancer
+```
+
 ### Using UPnP to expose a Service to the outside world
 
 With `kube-vip` > 0.2.1, it is possible to expose a Service of type `LoadBalancer` on a specific port to the Internet by using UPnP (on a supported gateway).
