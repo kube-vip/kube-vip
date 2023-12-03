@@ -1,7 +1,7 @@
 //go:build e2e
 // +build e2e
 
-package e2e_test
+package etcd_test
 
 import (
 	"testing"
@@ -12,9 +12,9 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
 
-func TestE2E(t *testing.T) {
+func TestEtcd(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "E2E Suite")
+	RunSpecs(t, "Etcd Suite")
 }
 
 var _ = SynchronizedBeforeSuite(

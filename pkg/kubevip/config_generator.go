@@ -107,6 +107,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  svcEnable,
 				Value: strconv.FormatBool(c.EnableServices),
 			},
+			{
+				Name:  svcLeaseName,
+				Value: c.ServicesLeaseName,
+			},
 		}
 		newEnvironment = append(newEnvironment, svc...)
 		if c.EnableServicesElection {
@@ -179,6 +183,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 
 		newEnvironment = append(newEnvironment, leaderElection...)
+	}
+
+	// If we're enabling node labeling on leader election
+	if c.EnableNodeLabeling {
+		EnableNodeLabeling := []corev1.EnvVar{
+			{
+				Name:  EnableNodeLabeling,
+				Value: strconv.FormatBool(c.EnableNodeLabeling),
+			},
+		}
+		newEnvironment = append(newEnvironment, EnableNodeLabeling...)
 	}
 
 	// If we're specifying an annotation configuration
@@ -398,7 +413,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 
 	if inCluster {
-		// If we're running this inCluster then the acccount name will be required
+		// If we're running this inCluster then the account name will be required
 		newManifest.Spec.ServiceAccountName = "kube-vip"
 	} else {
 		// If this isn't inside a cluster then add the external path mount

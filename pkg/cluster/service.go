@@ -48,7 +48,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 	err = cluster.Network.AddIP()
 	if err != nil {
-		log.Warnf("%v", err)
+		log.Fatalf("%v", err)
 	}
 
 	if c.EnableMetal {
@@ -182,11 +182,12 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			if ndp != nil {
 				defer ndp.Close()
 			}
-			log.Debugf("Broadcasting ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
+			log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
 
 			for {
 				select {
 				case <-ctx.Done(): // if cancel() execute
+					log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
 					return
 				default:
 					cluster.ensureIPAndSendGratuitous(c.Interface, ndp)
@@ -198,13 +199,12 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				time.Sleep(time.Duration(c.ArpBroadcastRate) * time.Millisecond)
 			}
 		}(ctxArp)
-		log.Debugf("ending ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
 	}
 
 	if c.EnableBGP {
 		// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 		cidrVip := fmt.Sprintf("%s/%s", cluster.Network.IP(), c.VIPCIDR)
-		log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+		log.Debugf("(svcs) attempting to advertise the address [%s] over BGP", cidrVip)
 		err = bgp.AddHost(cidrVip)
 		if err != nil {
 			log.Error(err)
@@ -212,19 +212,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	}
 
 	go func() {
-		//nolint
-		for {
-			select {
-			case <-cluster.stop:
-				// Stop the Arp context if it is running
-				cancelArp()
-
-				log.Info("[LOADBALANCER] Stopping load balancers")
-				log.Infof("[VIP] Releasing the Virtual IP [%s]", c.VIP)
-				err = cluster.Network.DeleteIP()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
+		<-cluster.stop
+		// Stop the Arp context if it is running
+		cancelArp()
 
 				if c.EnableRoutingTable {
 					err = cluster.Network.DeleteRoute()
@@ -236,7 +226,14 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				close(cluster.completed)
 				return
 			}
+		log.Info("[LOADBALANCER] Stopping load balancers")
+		log.Infof("[VIP] Releasing the Virtual IP [%s]", c.VIP)
+		err = cluster.Network.DeleteIP()
+		if err != nil {
+			log.Warnf("%v", err)
 		}
+
+		close(cluster.completed)
 	}()
 }
 

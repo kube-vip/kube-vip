@@ -27,6 +27,7 @@ const (
 	endpoint                 = "kube-vip.io/active-endpoint"
 	flushContrack            = "kube-vip.io/flush-conntrack"
 	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
+	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
 )
 
 func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
@@ -90,7 +91,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		return err
 	}
 
-	log.Infof("[service] adding VIP [%s] for [%s/%s]", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
+	log.Infof("(svcs) adding VIP [%s] for [%s/%s]", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 
 	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
 
@@ -162,7 +163,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 }
 
 func (sm *Manager) deleteService(uid string) error {
-	// pretect multiple calls
+	// protect multiple calls
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 

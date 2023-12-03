@@ -11,6 +11,9 @@ import (
 
 // ParseEnvironment - will popultate the configuration from environment variables
 func ParseEnvironment(c *Config) error {
+	if c == nil {
+		return nil
+	}
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
 	// Set default value
@@ -189,6 +192,12 @@ func ParseEnvironment(c *Config) error {
 		if env != "" {
 			c.ServiceNamespace = env
 		}
+
+		// Gets the leaseName for services in arp mode
+		env = os.Getenv(svcLeaseName)
+		if env != "" {
+			c.ServicesLeaseName = env
+		}
 	}
 
 	// Find vip address cidr range
@@ -220,7 +229,7 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	// Find Start As Leader
-	// TODO - does this need depricating?
+	// TODO - does this need deprecating?
 	// Required when the host sets itself as leader before the state change
 	env = os.Getenv(vipStartLeader)
 	if env != "" {
@@ -443,6 +452,16 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableServiceSecurity = b
+	}
+
+	// Find if node labeling is enabled
+	env = os.Getenv(EnableNodeLabeling)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableNodeLabeling = b
 	}
 
 	// Find Prometheus configuration

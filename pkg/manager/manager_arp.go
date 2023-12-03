@@ -47,9 +47,9 @@ func (sm *Manager) startARP() error {
 			return err
 		}
 
-		clusterManager := &cluster.Manager{
-			KubernetesClient: sm.clientSet,
-			SignalChan:       sm.signalChan,
+		clusterManager, err := initClusterManager(sm)
+		if err != nil {
+			return err
 		}
 
 		go func() {
@@ -104,9 +104,10 @@ func (sm *Manager) startARP() error {
 	if os.Getenv("EGRESS_CLEAN") != "" {
 		i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, sm.config.ServiceNamespace)
 		if err != nil {
-			log.Warnf("[egress] Unable to clean any dangling egress rules [%v]", err)
+			log.Warnf("(egress) Unable to clean any dangling egress rules [%v]", err)
+			log.Warn("(egress) Can be ignored in non iptables release of kube-vip")
 		} else {
-			log.Info("[egress] Cleaning any dangling kube-vip egress rules")
+			log.Info("(egress) Cleaning any dangling kube-vip egress rules")
 			cleanErr := i.CleanIPtables()
 			if cleanErr != nil {
 				log.Errorf("Error cleaning rules [%v]", cleanErr)
@@ -124,12 +125,12 @@ func (sm *Manager) startARP() error {
 		}
 	} else {
 
-		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
+		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, sm.config.ServicesLeaseName, id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
-				Name:      plunderLock,
+				Name:      sm.config.ServicesLeaseName,
 				Namespace: ns,
 			},
 			Client: sm.clientSet.CoordinationV1(),
@@ -169,6 +170,9 @@ func (sm *Manager) startARP() error {
 				},
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
+					if sm.config.EnableNodeLabeling {
+						applyNodeLabel(sm.clientSet, sm.config.Address, id, identity)
+					}
 					if identity == id {
 						// I just got the lock
 						return

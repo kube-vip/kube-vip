@@ -38,7 +38,7 @@ var disableVIP bool
 // ConfigMap name within a Kubernetes cluster
 var configMap string
 
-// Configure the level of loggin
+// Configure the level of logging
 var logLevel uint32
 
 // Provider Config
@@ -87,6 +87,7 @@ func init() {
 
 	// Clustering type (leaderElection)
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LeaderElectionType, "leaderElectionType", "kubernetes", "Defines the backend to run the leader election: kubernetes or etcd. Defaults to kubernetes.")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LeaseName, "leaseName", "plndr-cp-lock", "Name of the lease that is used for leader election")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LeaseDuration, "leaseDuration", 5, "Length of time a Kubernetes leader lease can be held for")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time a Kubernetes leader can attempt to renew its lease")
@@ -134,9 +135,17 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoadBalancerClassOnly, "lbClassOnly", false, "Enable load balancing only for services with LoadBalancerClass \"kube-vip.io/kube-vip-class\"")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerClassName, "lbClassName", "kube-vip.io/kube-vip-class", "Name of load balancer class for kube-VIP, defaults to \"kube-vip.io/kube-vip-class\"")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServiceSecurity, "onlyAllowTrafficServicePorts", false, "Only allow traffic to service ports, others will be dropped, defaults to false")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableNodeLabeling, "enableNodeLabeling", false, "Enable leader node labeling with \"kube-vip.io/has-ip=<VIP address>\", defaults to false")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesLeaseName, "servicesLeaseName", "plndr-svcs-lock", "Name of the lease that is used for leader election for services (in arp mode)")
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
+
+	// Etcd
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.CAFile, "etcdCACert", "", "Verify certificates of TLS-enabled secure servers using this CA bundle file")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.ClientCertFile, "etcdCert", "", "Identify secure client using this TLS certificate file")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.ClientKeyFile, "etcdKey", "", "Identify secure client using this TLS key file")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.Etcd.Endpoints, "etcdEndpoints", nil, "Etcd member endpoints")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
@@ -355,6 +364,15 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	var err error
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>
+			<head><title>kube-vip</title></head>
+			<body>
+			<h1>kube-vip Metrics</h1>
+			<p><a href="` + "/metrics" + `">Metrics</a></p>
+			</body>
+			</html>`))
+	})
 
 	srv := &http.Server{
 		Addr:              config.Addr,

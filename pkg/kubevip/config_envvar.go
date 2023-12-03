@@ -147,6 +147,9 @@ const (
 	// svcElection enables election per Kubernetes service
 	svcElection = "svc_election"
 
+	// svcLeaseName Name of the lease that is used for leader election for services (in arp mode)
+	svcLeaseName = "svc_leasename"
+
 	// lbClassOnly enables load-balancer for class "kube-vip.io/kube-vip-class" only
 	lbClassOnly = "lb_class_only"
 
@@ -164,6 +167,9 @@ const (
 
 	// EnableServiceSecurity defines if the load-balancer should only allow traffic to service ports
 	EnableServiceSecurity = "enable_service_security"
+
+	// EnableNodeLabeling, will enable node labeling as the node becomes leader
+	EnableNodeLabeling = "enable_node_labeling"
 
 	// prometheusServer defines the address prometheus listens on
 	prometheusServer = "prometheus_server"

@@ -5,7 +5,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL := $(TARGET)
 
 # These will be provided to the target
-VERSION := v0.6.2
+VERSION := v0.6.4
 
 BUILD := `git rev-parse HEAD`
 
@@ -15,7 +15,7 @@ TARGETOS=linux
 # Use linker flags to provide version/build settings to the target
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
-REPOSITORY = plndr
+REPOSITORY ?= plndr
 
 .PHONY: all build clean install uninstall fmt simplify check run e2e-tests
 
@@ -116,8 +116,25 @@ manifests:
 	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --bgp --leaderElection --controlplane --services --inCluster --provider-config /etc/cloud-sa/cloud-sa.json > ./docs/manifests/$(VERSION)/kube-vip-bgp-em-ds.yaml
 	@-rm ./kube-vip
 
+unit-tests:
+	go test ./...
+
+integration-tests:
+	go test -tags=integration,e2e -v ./pkg/etcd
+
 e2e-tests:
-	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo  -tags=e2e -v -p testing/e2e
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e ./testing/e2e/etcd
 
 service-tests:
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services -Services
+
+trivy: dockerx86ActionIPTables
+	docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.47.0 \
+		image  \
+		--format table \
+		--exit-code  1 \
+		--ignore-unfixed \
+		--vuln-type  'os,library' \
+		--severity  'CRITICAL,HIGH'  \
+		$(REPOSITORY)/$(TARGET):action
+

@@ -12,6 +12,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
+	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
@@ -19,6 +20,7 @@ import (
 	"github.com/packethost/packngo"
 
 	log "github.com/sirupsen/logrus"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +37,8 @@ type Manager struct {
 	KubernetesClient *kubernetes.Clientset
 	// This channel is used to signal a shutdown
 	SignalChan chan os.Signal
+
+	EtcdClient *clientv3.Client
 }
 
 // NewManager will create a new managing object
@@ -79,20 +83,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, c.LeaseName, id)
 
-	// we use the Lease lock type since edits to Leases are less common
-	// and fewer objects in the cluster watch "all Leases".
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:        c.LeaseName,
-			Namespace:   c.Namespace,
-			Annotations: c.LeaseAnnotations,
-		},
-		Client: sm.KubernetesClient.CoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: id,
-		},
-	}
-
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,7 +116,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		// Cancel the arp context, which will in turn stop any broadcasts
 	}()
 
-	// (attempt to) Remove the virtual IP, incase it already exists
+	// (attempt to) Remove the virtual IP, in case it already exists
 	err = cluster.Network.DeleteIP()
 	if err != nil {
 		log.Errorf("could not delete virtualIP: %v", err)
@@ -177,6 +167,89 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		}
 	}
 
+	run := &runConfig{
+		config:  c,
+		leaseID: id,
+		sm:      sm,
+		onStartedLeading: func(ctx context.Context) {
+			// As we're leading lets start the vip service
+			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
+			if err != nil {
+				log.Errorf("Error starting the VIP service on the leader [%s]", err)
+			}
+		},
+		onStoppedLeading: func() {
+			// we can do cleanup here
+			log.Info("This node is becoming a follower within the cluster")
+
+			// Stop the dns context
+			cancelDNS()
+			// Stop the Arp context if it is running
+			cancelArp()
+
+			// Stop the BGP server
+			if bgpServer != nil {
+				err := bgpServer.Close()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
+			}
+
+			err := cluster.Network.DeleteIP()
+			if err != nil {
+				log.Warnf("%v", err)
+			}
+
+			log.Fatal("lost leadership, restarting kube-vip")
+		},
+		onNewLeader: func(identity string) {
+			// we're notified when new leader elected
+			log.Infof("Node [%s] is assuming leadership of the cluster", identity)
+		},
+	}
+
+	switch c.LeaderElectionType {
+	case "kubernetes", "":
+		cluster.runKubernetesLeaderElectionOrDie(ctx, run)
+	case "etcd":
+		cluster.runEtcdLeaderElectionOrDie(ctx, run)
+	default:
+		log.Info(fmt.Sprintf("LeaderElectionMode %s not supported, exiting", c.LeaderElectionType))
+	}
+
+	return nil
+}
+
+type runConfig struct {
+	config  *kubevip.Config
+	leaseID string
+	sm      *Manager
+
+	// onStartedLeading is called when this member starts leading.
+	onStartedLeading func(context.Context)
+	// onStoppedLeading is called when this member stops leading.
+	onStoppedLeading func()
+	// onNewLeader is called when the client observes a leader that is
+	// not the previously observed leader. This includes the first observed
+	// leader when the client starts.
+	onNewLeader func(identity string)
+}
+
+func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, run *runConfig) {
+	// we use the Lease lock type since edits to Leases are less common
+	// and fewer objects in the cluster watch "all Leases".
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:        run.config.LeaseName,
+			Namespace:   run.config.Namespace,
+			Annotations: run.config.LeaseAnnotations,
+		},
+		Client: run.sm.KubernetesClient.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: run.leaseID,
+		},
+	}
+
 	// start the leader election code loop
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -187,49 +260,29 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		// get elected before your background loop finished, violating
 		// the stated goal of the lease.
 		ReleaseOnCancel: true,
-		LeaseDuration:   time.Duration(c.LeaseDuration) * time.Second,
-		RenewDeadline:   time.Duration(c.RenewDeadline) * time.Second,
-		RetryPeriod:     time.Duration(c.RetryPeriod) * time.Second,
+		LeaseDuration:   time.Duration(run.config.LeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(run.config.RenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(run.config.RetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				// As we're leading lets start the vip service
-				err = cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
-				if err != nil {
-					log.Errorf("Error starting the VIP service on the leader [%s]", err)
-				}
-			},
-			OnStoppedLeading: func() {
-				// we can do cleanup here
-				log.Info("This node is becoming a follower within the cluster")
-
-				// Stop the dns context
-				cancelDNS()
-				// Stop the Arp context if it is running
-				cancelArp()
-
-				// Stop the BGP server
-				if bgpServer != nil {
-					err = bgpServer.Close()
-					if err != nil {
-						log.Warnf("%v", err)
-					}
-				}
-
-				err = cluster.Network.DeleteIP()
-				if err != nil {
-					log.Warnf("%v", err)
-				}
-
-				log.Fatal("lost leadership, restarting kube-vip")
-			},
-			OnNewLeader: func(identity string) {
-				// we're notified when new leader elected
-				log.Infof("Node [%s] is assuming leadership of the cluster", identity)
-			},
+			OnStartedLeading: run.onStartedLeading,
+			OnStoppedLeading: run.onStoppedLeading,
+			OnNewLeader:      run.onNewLeader,
 		},
 	})
+}
 
-	return nil
+func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) {
+	etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
+		EtcdConfig:           etcd.ClientConfig{Client: run.sm.EtcdClient},
+		Name:                 run.config.LeaseName,
+		MemberID:             run.leaseID,
+		LeaseDurationSeconds: int64(run.config.LeaseDuration),
+		Callbacks: etcd.LeaderCallbacks{
+			OnStartedLeading: run.onStartedLeading,
+			OnStoppedLeading: run.onStoppedLeading,
+			OnNewLeader:      run.onNewLeader,
+		},
+	})
 }
 
 func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) error {

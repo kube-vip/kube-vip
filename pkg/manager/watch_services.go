@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -49,11 +50,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		return err
 	}
 	if sm.config.ServiceNamespace == "" {
-		// v1.NamespaceAll is actually "", but we'll stay with the const incase things change upstream
+		// v1.NamespaceAll is actually "", but we'll stay with the const in case things change upstream
 		sm.config.ServiceNamespace = v1.NamespaceAll
-		log.Infof("starting services watcher for all namespaces")
+		log.Infof("(svcs) starting services watcher for all namespaces")
 	} else {
-		log.Infof("starting services watcher for services in namespace [%s]", sm.config.ServiceNamespace)
+		log.Infof("(svcs) starting services watcher for services in namespace [%s]", sm.config.ServiceNamespace)
 	}
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
@@ -69,12 +70,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	go func() {
 		select {
 		case <-sm.shutdownChan:
-			log.Debug("[services] shutdown called")
+			log.Debug("(svcs) shutdown called")
 			// Stop the retry watcher
 			rw.Stop()
 			return
 		case <-exitFunction:
-			log.Debug("[services] function ending")
+			log.Debug("(svcs) function ending")
 			// Stop the retry watcher
 			rw.Stop()
 			return
@@ -109,26 +110,37 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if svc.Spec.LoadBalancerClass != nil {
 				// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
 				if *svc.Spec.LoadBalancerClass != sm.config.LoadBalancerClassName {
-					log.Infof("service [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
+					log.Infof("(svcs) [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
 					break
 				}
 			} else if sm.config.LoadBalancerClassOnly {
 				// if kube-vip is configured to only recognize services with kube-vip's lb class, then ignore the services without any lb class
-				log.Infof("kube-vip configured to only recognize services with kube-vip's lb class but the service [%s] didn't specify any loadBalancer class, ignoring", svc.Name)
+				log.Infof("(svcs) kube-vip configured to only recognize services with kube-vip's lb class but the service [%s] didn't specify any loadBalancer class, ignoring", svc.Name)
 				break
 			}
 
 			// Check if we ignore this service
 			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
+				log.Infof("(svcs) [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
 
-			log.Debugf("service [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddress(svc))
-
+			// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
+			if event.Type == watch.Modified {
+				//log.Debugf("(svcs) Retreiving local addresses, to ensure that this modified address doesn't exist")
+				f, err := vip.GarbageCollect(sm.config.Interface, svc.Spec.LoadBalancerIP)
+				if err != nil {
+					log.Errorf("(svcs) cleaning existing address error: [%s]", err.Error())
+				}
+				if f {
+					log.Warnf("(svcs) already found existing address [%s] on adapter [%s]", svc.Spec.LoadBalancerIP, sm.config.Interface)
+				}
+			}
 			// Scenarios:
 			// 1.
 			if !activeService[string(svc.UID)] {
+				log.Debugf("(svcs) [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddress(svc))
+
 				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
 				// Background the services election
@@ -187,7 +199,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 				// We can ignore this service
 				if svc.Annotations["kube-vip.io/ignore"] == "true" {
-					log.Infof("service [%s] has an ignore annotation for kube-vip", svc.Name)
+					log.Infof("(svcs) [%s] has an ignore annotation for kube-vip", svc.Name)
 					break
 				}
 				// If this is an active service then and additional leaderElection will handle stopping
@@ -204,7 +216,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				activeService[string(svc.UID)] = false
 				watchedService[string(svc.UID)] = false
 			}
-			log.Infof("service [%s/%s] has been deleted", svc.Namespace, svc.Name)
+			log.Infof("(svcs) [%s/%s] has been deleted", svc.Namespace, svc.Name)
 		case watch.Bookmark:
 			// Un-used
 		case watch.Error:

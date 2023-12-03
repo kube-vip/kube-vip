@@ -12,7 +12,6 @@ import (
 var startConfig kubevip.Config
 var startConfigLB kubevip.LoadBalancer
 var startLocalPeer, startKubeConfigPath string
-var startRemotePeers, startBackends []string
 var inCluster bool
 
 func init() {
@@ -30,14 +29,12 @@ func init() {
 	kubeVipStart.Flags().BoolVar(&startConfig.StartAsLeader, "startAsLeader", false, "Start this instance as the cluster leader")
 	kubeVipStart.Flags().BoolVar(&startConfig.EnableARP, "arp", false, "Use ARP broadcasts to improve VIP re-allocations")
 	kubeVipStart.Flags().StringVar(&startLocalPeer, "localPeer", "server1:192.168.0.1:10000", "Settings for this peer, format: id:address:port")
-	kubeVipStart.Flags().StringSliceVar(&startRemotePeers, "remotePeers", []string{"server2:192.168.0.2:10000", "server3:192.168.0.3:10000"}, "Comma separated remotePeers, format: id:address:port")
+
 	// Load Balancer flags
 	kubeVipStart.Flags().BoolVar(&startConfigLB.BindToVip, "lbBindToVip", false, "Bind example load balancer to VIP")
 	kubeVipStart.Flags().StringVar(&startConfigLB.Type, "lbType", "tcp", "Type of load balancer instance (TCP/HTTP)")
 	kubeVipStart.Flags().StringVar(&startConfigLB.Name, "lbName", "Example Load Balancer", "The name of a load balancer instance")
 	kubeVipStart.Flags().IntVar(&startConfigLB.Port, "lbPort", 8080, "Port that load balancer will expose on")
-	kubeVipStart.Flags().IntVar(&startConfigLB.BackendPort, "lbBackEndPort", 6443, "A port that all backends may be using (optional)")
-	kubeVipStart.Flags().StringSliceVar(&startBackends, "lbBackends", []string{"192.168.0.1:8080", "192.168.0.2:8080"}, "Comma separated backends, format: address:port")
 	kubeVipStart.Flags().StringVar(&startConfigLB.ForwardingMethod, "lbForwardingMethod", "local", "The forwarding method of a load balancer instance")
 
 	// Cluster configuration
@@ -63,6 +60,10 @@ var kubeVipStart = &cobra.Command{
 		err = kubevip.ParseEnvironment(&startConfig)
 		if err != nil {
 			log.Fatalln(err)
+		}
+
+		if startConfig.LeaderElectionType == "etcd" {
+			log.Fatalln("Leader election with etcd not supported in start command, use manager")
 		}
 
 		newCluster, err := cluster.InitCluster(&startConfig, disableVIP)
@@ -109,6 +110,5 @@ var kubeVipStart = &cobra.Command{
 				}
 			}
 		}
-
 	},
 }

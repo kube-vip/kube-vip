@@ -4,6 +4,7 @@
 
 [Static Pods](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) are Kubernetes Pods that are run by the `kubelet` on a single node and are not managed by the Kubernetes cluster itself. This means that whilst the Pod can appear within Kubernetes, it can't make use of a variety of Kubernetes functionality (such as the Kubernetes token or ConfigMap resources). The static Pod approach is primarily required for [kubeadm](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/) as this is due to the sequence of actions performed by `kubeadm`. Ideally, we want `kube-vip` to be part of the Kubernetes cluster, but for various bits of functionality we also need `kube-vip` to provide a HA virtual IP as part of the installation.
 
+### with kubeadm
 The sequence of events for building a highly available Kubernetes cluster with `kubeadm` and `kube-vip` are as follows:
 
 1. Generate a `kube-vip` manifest in the static Pods manifest directory (see the [generating a manifest](#generating-a-manifest) section below).
@@ -14,6 +15,34 @@ The sequence of events for building a highly available Kubernetes cluster with `
 6. `kubeadm init` finishes successfully on the first control plane.
 7. Using the output from the `kubeadm init` command on the first control plane, run the `kubeadm join` command on the remainder of the control planes.
 8. Copy the generated `kube-vip` manifest to the remainder of the control planes and place in their static Pods manifest directory (default of `/etc/kubernetes/manifests/`).
+
+### with k0sctl
+The sequence of events for building a highly available Kubernetes cluster with `k0sctl` and `kube-vip` are as follows:
+
+
+1. Generate a `kube-vip` manifest in the static Pods manifest directory (see the [generating a manifest](#generating-a-manifest) section below).
+2. Run `k0sctl init > k0sctl.yaml` edit the manifest to change and add your host IPs. Controller need to have both role by using `role: controller+worker`
+3. Add in `installFlags` option `--kubelet-extra-args=--pod-manifest-path=/etc/k0s/manifests/` and `--disable-components=konnectivity-server`
+4. On the first controller in the list add a `hooks` options like bellow and replace value:
+   ```yaml
+   hooks:
+     apply:
+       before:
+         - /usr/sbin/ip addr add ${VIP} dev ${INTERFACE} || exit 0
+       after:
+         - /usr/sbin/ip addr del ${VIP} dev ${INTERFACE} || exit 0
+   ```
+5. On every controller in the list configure the `files` options to upload the `kube-vip` manifest into `/etc/k0s/manifests/`
+   ```yaml
+    files:
+      - name: kube-vip.yaml
+        src: kube-vip.yaml
+        dstDir: /etc/k0s/manifests/
+        perm: 0655
+   ```
+6. Configure the `k0s.config.spec.api.externalAddress` in the `k0s` config section in `k0sctl.yaml`
+7. Deploy your cluster with `k0sctl apply`
+
 
 ## Kube-Vip as HA, Load Balancer, or both
 

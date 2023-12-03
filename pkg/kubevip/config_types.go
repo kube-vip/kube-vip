@@ -1,8 +1,6 @@
 package kubevip
 
 import (
-	"net/url"
-
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 )
 
@@ -32,6 +30,9 @@ type Config struct {
 	// EnableServicesElection, will enable leaderElection per service
 	EnableServicesElection bool `yaml:"enableServicesElection"`
 
+	// EnableNodeLabeling, will enable node labeling as it becomes leader
+	EnableNodeLabeling bool `yaml:"enableNodeLabeling"`
+
 	// LoadBalancerClassOnly, will enable load balancing only for services with LoadBalancerClass set to "kube-vip.io/kube-vip-class"
 	LoadBalancerClassOnly bool `yaml:"lbClassOnly"`
 
@@ -47,8 +48,15 @@ type Config struct {
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 
-	// LeaderElection defines the settings around Kubernetes LeaderElection
-	LeaderElection
+	// LeaderElectionType defines the backend to run the leader election: kubernetes or etcd. Defaults to kubernetes.
+	// Etcd doesn't support load balancer mode (EnableLoadBalancer=true) or any other feature that depends on the kube-api server.
+	LeaderElectionType string `yaml:"leaderElectionType"`
+
+	// KubernetesLeaderElection defines the settings around Kubernetes KubernetesLeaderElection
+	KubernetesLeaderElection
+
+	// Etcd defines all the settings for the etcd client.
+	Etcd Etcd
 
 	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
 	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
@@ -140,10 +148,13 @@ type Config struct {
 
 	// EgressWithNftables, this will use the iptables-nftables OVER iptables
 	EgressWithNftables bool
+
+	// ServicesLeaseName, this will set the lease name for services leader in arp mode
+	ServicesLeaseName string `yaml:"servicesLeaseName"`
 }
 
-// LeaderElection defines all of the settings for Kubernetes LeaderElection
-type LeaderElection struct {
+// KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
+type KubernetesLeaderElection struct {
 	// EnableLeaderElection will use the Kubernetes leader election algorithm
 	EnableLeaderElection bool `yaml:"enableLeaderElection"`
 
@@ -163,6 +174,14 @@ type LeaderElection struct {
 	LeaseAnnotations map[string]string
 }
 
+// Etcd defines all the settings for the etcd client.
+type Etcd struct {
+	CAFile         string
+	ClientCertFile string
+	ClientKeyFile  string
+	Endpoints      []string
+}
+
 // LoadBalancer contains the configuration of a load balancing instance
 type LoadBalancer struct {
 	// Name of a LoadBalancer
@@ -177,27 +196,6 @@ type LoadBalancer struct {
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
 
-	// BackendPort, is a port that all backends are listening on (To be used to simplify building a list of backends)
-	BackendPort int `yaml:"backendPort"`
-
-	// Backends, is an array of backend servers
-	Backends []BackEnd `yaml:"backends"`
-
 	// Forwarding method of LoadBalancer, either Local, Tunnel, DirectRoute or Bypass
 	ForwardingMethod string `yaml:"forwardingMethod"`
-}
-
-// BackEnd is a server we will load balance over
-type BackEnd struct {
-	// Backend Port to Load Balance to
-	Port int `yaml:"port"`
-
-	// Address of a server/service
-	Address string `yaml:"address"`
-
-	// URL is a raw URL to a backend service
-	RawURL string `yaml:"url,omitempty"`
-
-	// ParsedURL - A validated URL to a backend
-	ParsedURL *url.URL `yaml:"parsedURL,omitempty"`
 }
