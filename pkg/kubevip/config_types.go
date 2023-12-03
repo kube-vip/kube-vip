@@ -109,6 +109,9 @@ type Config struct {
 	// Routing Table ID for when using routing table mode
 	RoutingTableID int `yaml:"routingTableID"`
 
+	// Routing Table Type, what sort of route should be added to the routing table
+	RoutingTableType int `yaml:"routingTableType"`
+
 	// BGP Configuration
 	BGPConfig     bgp.Config
 	BGPPeerConfig bgp.Peer

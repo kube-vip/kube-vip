@@ -61,6 +61,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		VIPSubnet:             config.VIPSubnet,
 		EnableRoutingTable:    config.EnableRoutingTable,
 		RoutingTableID:        config.RoutingTableID,
+		RoutingTableType:      config.RoutingTableType,
 		ArpBroadcastRate:      config.ArpBroadcastRate,
 		EnableServiceSecurity: config.EnableServiceSecurity,
 	}
