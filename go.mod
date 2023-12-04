@@ -26,7 +26,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.10
 	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20231005195138-3e424a577f31
-	golang.org/x/sys v0.13.0
+	golang.org/x/sys v0.15.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	k8s.io/api v0.28.3
 	k8s.io/apimachinery v0.28.3
