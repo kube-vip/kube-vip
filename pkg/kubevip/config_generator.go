@@ -170,6 +170,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, cidr...)
 	}
 
+	if c.DNSMode != "" {
+		// build environment variables
+		dnsModeSelector := []corev1.EnvVar{
+			{
+				Name:  dnsMode,
+				Value: c.DNSMode,
+			},
+		}
+		newEnvironment = append(newEnvironment, dnsModeSelector...)
+	}
+
 	// If we're doing the hybrid mode
 	if c.EnableControlPlane {
 		cp := []corev1.EnvVar{
@@ -481,6 +492,17 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name:  enableEndpointSlices,
 			Value: strconv.FormatBool(c.EnableEndpointSlices),
 		})
+	}
+
+	if c.DisableServiceUpdates {
+		// Disable service updates
+		disServiceUpdates := []corev1.EnvVar{
+			{
+				Name:  disableServiceUpdates,
+				Value: strconv.FormatBool(c.DisableServiceUpdates),
+			},
+		}
+		newEnvironment = append(newEnvironment, disServiceUpdates...)
 	}
 
 	newManifest := &corev1.Pod{

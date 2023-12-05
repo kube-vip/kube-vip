@@ -139,7 +139,6 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							} else {
 								leaderElectionActive = false
 								break
-
 							}
 						}
 					}()
@@ -149,12 +148,14 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && sm.config.EnableRoutingTable && !configuredLocalRoutes[string(service.UID)] {
 					if instance := sm.findServiceInstance(service); instance != nil {
 						for _, cluster := range instance.clusters {
-							err := cluster.Network.AddRoute()
-							if err != nil {
-								log.Errorf("[endpoint] error adding route: %s\n", err.Error())
-							} else {
-								log.Infof("[endpoint] added route: %s, service: %s/%s, interface: %s, table: %d",
-									cluster.Network.IP(), service.Namespace, service.Name, cluster.Network.Interface(), sm.config.RoutingTableID)
+							for i := range cluster.Network {
+								err := cluster.Network[i].AddRoute()
+								if err != nil {
+									log.Errorf("[endpoint] error adding route: %s\n", err.Error())
+								} else {
+									log.Infof("[endpoint]  added route: %s, service: %s/%s, interface: %s, table: %d",
+										cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+								}
 							}
 						}
 					}
@@ -254,12 +255,14 @@ func getLocalEndpoints(ep *v1.Endpoints, id string, config *kubevip.Config) []st
 func (sm *Manager) clearRoutes(service *v1.Service) {
 	if instance := sm.findServiceInstance(service); instance != nil {
 		for _, cluster := range instance.clusters {
-			err := cluster.Network.DeleteRoute()
-			if err != nil && !strings.Contains(err.Error(), "no such process") {
-				log.Errorf("failed to delete route for %s: %s", cluster.Network.IP(), err.Error())
-			} else {
-				log.Infof("deleted route: %s, service: %s/%s, interface: %s, table: %d",
-					cluster.Network.IP(), service.Namespace, service.Name, cluster.Network.Interface(), sm.config.RoutingTableID)
+			for i := range cluster.Network {
+				err := cluster.Network[i].DeleteRoute()
+				if err != nil && !strings.Contains(err.Error(), "no such process") {
+					log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
+				} else {
+					log.Infof("deleted route: %s, service: %s/%s, interface: %s, table: %d",
+						cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+				}
 			}
 		}
 	}

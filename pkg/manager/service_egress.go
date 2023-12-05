@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -43,6 +44,16 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
+func getSameFamilyCidr(source, ip string) string {
+	cidrs := strings.Split(source, ",")
+	for _, cidr := range cidrs {
+		if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
+			return cidr
+		}
+	}
+	return ""
+}
+
 func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
 	// serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
 	// if err != nil {
@@ -53,18 +64,32 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	var podCidr, serviceCidr string
 
 	if sm.config.EgressPodCidr != "" {
-		podCidr = sm.config.EgressPodCidr
+		podCidr = getSameFamilyCidr(sm.config.EgressPodCidr, podIP)
 	} else {
+		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
+		if !vip.IsIPv4(podIP) {
+			return nil
+		}
 		podCidr = defaultPodCIDR
 	}
 
 	if sm.config.EgressServiceCidr != "" {
-		serviceCidr = sm.config.EgressServiceCidr
+		serviceCidr = getSameFamilyCidr(sm.config.EgressServiceCidr, vipIP)
 	} else {
+		// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
+		if !vip.IsIPv4(vipIP) {
+			return nil
+		}
 		serviceCidr = defaultServiceCIDR
 	}
 
-	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace)
+	protocol := iptables.ProtocolIPv4
+
+	if vip.IsIPv6(vipIP) {
+		protocol = iptables.ProtocolIPv6
+	}
+
+	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
@@ -88,7 +113,13 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	if err != nil {
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
-	err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+"/32")
+
+	mask := "/32"
+	if !vip.IsIPv4(podIP) {
+		mask = "/128"
+	}
+
+	err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
 	if err != nil {
 		return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
@@ -158,7 +189,12 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 }
 
 func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace string) error {
-	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace)
+	protocol := iptables.ProtocolIPv4
+	if vip.IsIPv6(podIP) {
+		protocol = iptables.ProtocolIPv6
+	}
+
+	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}

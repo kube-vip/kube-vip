@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -102,7 +103,7 @@ func (sm *Manager) startARP() error {
 
 	// This will tidy any dangling kube-vip iptables rules
 	if os.Getenv("EGRESS_CLEAN") != "" {
-		i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, sm.config.ServiceNamespace)
+		i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 		if err != nil {
 			log.Warnf("(egress) Unable to clean any dangling egress rules [%v]", err)
 			log.Warn("(egress) Can be ignored in non iptables release of kube-vip")

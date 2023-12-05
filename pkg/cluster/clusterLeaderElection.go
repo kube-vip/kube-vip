@@ -117,9 +117,12 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	}()
 
 	// (attempt to) Remove the virtual IP, in case it already exists
-	err = cluster.Network.DeleteIP()
-	if err != nil {
-		log.Errorf("could not delete virtualIP: %v", err)
+
+	for i := range cluster.Network {
+		err = cluster.Network[i].DeleteIP()
+		if err != nil {
+			log.Errorf("could not delete virtualIP: %v", err)
+		}
 	}
 
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
@@ -195,9 +198,11 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 				}
 			}
 
-			err := cluster.Network.DeleteIP()
-			if err != nil {
-				log.Warnf("%v", err)
+			for i := range cluster.Network {
+				err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
 			}
 
 			log.Fatal("lost leadership, restarting kube-vip")

@@ -23,24 +23,26 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
-	if !disableVIP {
-		err := cluster.Network.DeleteIP()
-		if err != nil {
-			log.Warnf("Attempted to clean existing VIP => %v", err)
+	for i := range cluster.Network {
+		if !disableVIP {
+			err := cluster.Network[i].DeleteIP()
+			if err != nil {
+				log.Warnf("Attempted to clean existing VIP => %v", err)
+			}
+
+			err = cluster.Network[i].AddIP()
+			if err != nil {
+				log.Warnf("%v", err)
+			}
+
 		}
 
-		err = cluster.Network.AddIP()
-		if err != nil {
-			log.Warnf("%v", err)
-		}
-
-	}
-
-	if c.EnableARP {
-		// Gratuitous ARP, will broadcast to new MAC <-> IP
-		err := vip.ARPSendGratuitous(cluster.Network.IP(), c.Interface)
-		if err != nil {
-			log.Warnf("%v", err)
+		if c.EnableARP {
+			// Gratuitous ARP, will broadcast to new MAC <-> IP
+			err := vip.ARPSendGratuitous(cluster.Network[i].IP(), c.Interface)
+			if err != nil {
+				log.Warnf("%v", err)
+			}
 		}
 	}
 
@@ -48,11 +50,12 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		<-cluster.stop
 
 		if !disableVIP {
-
-			log.Info("[VIP] Releasing the Virtual IP")
-			err := cluster.Network.DeleteIP()
-			if err != nil {
-				log.Warnf("%v", err)
+			for i := range cluster.Network {
+				log.Infof("[VIP] Releasing the Virtual IP [%s]", cluster.Network[i].IP())
+				err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warnf("%v", err)
+				}
 			}
 		}
 		close(cluster.completed)

@@ -14,24 +14,24 @@ type Cluster struct {
 	stop      chan bool
 	completed chan bool
 	once      sync.Once
-	Network   vip.Network
+	Network   []vip.Network
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
 func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
-	var network vip.Network
+	var networks []vip.Network
 	var err error
 
 	if !disableVIP {
 		// Start the Virtual IP Networking configuration
-		network, err = startNetworking(c)
+		networks, err = startNetworking(c)
 		if err != nil {
 			return nil, err
 		}
 	}
 	// Initialise the Cluster structure
 	newCluster := &Cluster{
-		Network: network,
+		Network: networks,
 	}
 
 	log.Debugf("init enable service security: %t", c.EnableServiceSecurity)
@@ -39,19 +39,25 @@ func InitCluster(c *kubevip.Config, disableVIP bool) (*Cluster, error) {
 	return newCluster, nil
 }
 
-func startNetworking(c *kubevip.Config) (vip.Network, error) {
+func startNetworking(c *kubevip.Config) ([]vip.Network, error) {
 	address := c.VIP
 
 	if c.Address != "" {
 		address = c.Address
 	}
 
-	network, err := vip.NewConfig(address, c.Interface, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType)
-	if err != nil {
-		return nil, err
+	addresses := vip.GetIPs(address)
+
+	networks := []vip.Network{}
+	for _, addr := range addresses {
+		network, err := vip.NewConfig(addr, c.Interface, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType, c.DNSMode)
+		if err != nil {
+			return nil, err
+		}
+		networks = append(networks, network...)
 	}
 
-	return network, nil
+	return networks, nil
 }
 
 // Stop - Will stop the Cluster and release VIP if needed

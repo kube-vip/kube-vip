@@ -48,6 +48,7 @@ func main() {
 	_, t.ignoreEgress = os.LookupEnv("IGNORE_EGRESS")
 	_, t.ignoreDualStack = os.LookupEnv("IGNORE_DUALSTACK")
 	_, t.retainCluster = os.LookupEnv("RETAIN_CLUSTER")
+	_, t.IPv6 = os.LookupEnv("IPV6_FAMILY")
 
 	flag.StringVar(&t.ImagePath, "imagepath", "plndr/kube-vip:action", "")
 	flag.BoolVar(&t.ControlPlane, "ControlPlane", false, "")

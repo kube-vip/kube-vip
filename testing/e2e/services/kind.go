@@ -110,7 +110,13 @@ func (config *testConfig) createKind() error {
 				_, _ = cmd.CombinedOutput()
 			}
 		}
-		cmd := exec.Command("kubectl", "create", "configmap", "--namespace", "kube-system", "kubevip", "--from-literal", "range-global=172.18.100.10-172.18.100.30")
+
+		globalRange := "172.18.100.10-172.18.100.30"
+		if config.IPv6 {
+			globalRange = "fd34:70db:8529:1e3d:0000:0000:0000:0010-fd34:70db:8529:1e3d:0000:0000:0000:0030"
+		}
+
+		cmd := exec.Command("kubectl", "create", "configmap", "--namespace", "kube-system", "kubevip", "--from-literal", "range-global="+globalRange)
 		if _, err := cmd.CombinedOutput(); err != nil {
 			return err
 		}

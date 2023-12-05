@@ -33,11 +33,19 @@ type Egress struct {
 	comment        string
 }
 
-func CreateIptablesClient(nftables bool, namespace string) (*Egress, error) {
+func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Protocol) (*Egress, error) {
 	log.Infof("[egress] Creating an iptables client, nftables mode [%t]", nftables)
 	e := new(Egress)
 	var err error
-	e.ipTablesClient, err = iptables.New(iptables.EnableNFTables(nftables))
+
+	options := []iptables.Option{}
+	options = append(options, iptables.EnableNFTables(nftables))
+
+	if protocol == iptables.ProtocolIPv6 {
+		options = append(options, iptables.IPFamily(iptables.ProtocolIPv6), iptables.Timeout(5))
+	}
+
+	e.ipTablesClient, err = iptables.New(options...)
 	e.comment = Comment + "-" + namespace
 	return e, err
 }

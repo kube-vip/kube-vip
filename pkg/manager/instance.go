@@ -67,6 +67,8 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			RoutingTableType:      config.RoutingTableType,
 			ArpBroadcastRate:      config.ArpBroadcastRate,
 			EnableServiceSecurity: config.EnableServiceSecurity,
+			DNSMode:               config.DNSMode,
+			DisableServiceUpdates: config.DisableServiceUpdates,
 		})
 	}
 
@@ -124,9 +126,12 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 			return nil, err
 		}
-		c.Network.SetServicePorts(svc)
-		instance.clusters = append(instance.clusters, c)
 
+		for i := range c.Network {
+			c.Network[i].SetServicePorts(svc)
+		}
+
+		instance.clusters = append(instance.clusters, c)
 	}
 
 	return instance, nil
