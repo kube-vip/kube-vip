@@ -50,7 +50,7 @@ func (sm *Manager) startTableMode() error {
 		if err != nil {
 			return err
 		}
-	} else {
+	} else if sm.config.EnableLeaderElection {
 
 		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
 		// we use the Lease lock type since edits to Leases are less common
@@ -65,7 +65,6 @@ func (sm *Manager) startTableMode() error {
 				Identity: id,
 			},
 		}
-
 		// start the leader election code loop
 		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 			Lock: lock,
@@ -105,6 +104,18 @@ func (sm *Manager) startTableMode() error {
 				},
 			},
 		})
+	} else {
+		// TODO: this needs to be called periodically or do I need to wrap it somehow with a cancel context?
+		log.Infof("beginning watching services without leader election")
+		err = sm.servicesWatcher(ctx, sm.syncServices)
+		if err != nil {
+			log.Error(err)
+		}
+		cancel = func() {
+			for x := range sm.serviceInstances {
+				sm.serviceInstances[x].cluster.Stop()
+			}
+		}
 	}
 	return nil
 }
