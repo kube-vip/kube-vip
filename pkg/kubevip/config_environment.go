@@ -524,5 +524,15 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		c.K8sConfigFile = env
 	}
+
+	env = os.Getenv(enableEndpointSlices)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableEndpointSlices = b
+	}
+
 	return nil
 }
