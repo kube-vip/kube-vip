@@ -18,10 +18,11 @@ import (
 
 // service defines the settings for a new service
 type service struct {
-	name        string
-	egress      bool // enable egress
-	policyLocal bool // set the policy to local pods
-	testHTTP    bool
+	name          string
+	egress        bool // enable egress
+	policyLocal   bool // set the policy to local pods
+	testHTTP      bool
+	testDualstack bool // test dualstack loadbalancer services
 }
 
 type deployment struct {
@@ -193,7 +194,7 @@ func (d *deployment) createDeployment(ctx context.Context, clientset *kubernetes
 	return nil
 }
 
-func (s *service) createService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddress string, err error) {
+func (s *service) createService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddresses []string, err error) {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.name,
@@ -225,6 +226,25 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 	}
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
+	}
+
+	if s.testDualstack {
+		if svc.Annotations == nil {
+			svc.Annotations = make(map[string]string)
+		}
+		ipv4VIP, err := generateIPv4VIP()
+		if err != nil {
+			log.Fatal(err)
+		}
+		ipv6VIP, err := generateIPv6VIP()
+		if err != nil {
+			log.Fatal(err)
+		}
+		svc.Annotations["kube-vip.io/loadbalancerIPs"] = fmt.Sprintf("%s,%s", ipv4VIP, ipv6VIP)
+		svc.Labels["implementation"] = "kube-vip"
+		svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol}
+		ipfPolicy := v1.IPFamilyPolicyRequireDualStack
+		svc.Spec.IPFamilyPolicy = &ipfPolicy
 	}
 
 	log.Infof("🌍 creating service [%s]", svc.Name)
@@ -261,9 +281,11 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 			}
 			if svc.Name == s.name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					log.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
+					for _, ingress := range svc.Status.LoadBalancer.Ingress {
+						loadBalancerAddresses = append(loadBalancerAddresses, ingress.IP)
+					}
+					log.Infof("🔎 found load balancer addresses [%s] on node [%s]", loadBalancerAddresses, svc.Annotations["kube-vip.io/vipHost"])
 					ready = true
-					loadBalancerAddress = svc.Status.LoadBalancer.Ingress[0].IP
 					currentLeader = svc.Annotations["kube-vip.io/vipHost"]
 				}
 			}
@@ -275,11 +297,13 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		}
 	}
 	if s.testHTTP {
-		err = httpTest(loadBalancerAddress)
-		if err != nil {
-			return "", "", fmt.Errorf("web retrieval timeout ")
+		for _, lbAddress := range loadBalancerAddresses {
+			err = httpTest(lbAddress)
+			if err != nil {
+				return "", nil, fmt.Errorf("web retrieval timeout ")
 
+			}
 		}
 	}
-	return currentLeader, loadBalancerAddress, nil
+	return currentLeader, loadBalancerAddresses, nil
 }
