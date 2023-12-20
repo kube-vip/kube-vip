@@ -109,12 +109,7 @@ func (sm *Manager) startTableMode() error {
 		log.Infof("beginning watching services without leader election")
 		err = sm.servicesWatcher(ctx, sm.syncServices)
 		if err != nil {
-			log.Error(err)
-		}
-		cancel = func() {
-			for x := range sm.serviceInstances {
-				sm.serviceInstances[x].cluster.Stop()
-			}
+			log.Errorf("Cannot watch services, %v", err)
 		}
 	}
 	return nil
