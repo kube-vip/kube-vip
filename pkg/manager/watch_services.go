@@ -144,7 +144,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
 				// Background the services election
-				if sm.config.EnableServicesElection || sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection {
+				// EnableServicesElection enabled
+				// watchEndpoint will do a ServicesElection by Service and understands local endpoints
+				//
+				// EnableRoutingTable enabled and EnableLeaderElection disabled
+				// watchEndpoint will also not do a leaderElection by service.
+				if sm.config.EnableServicesElection || (sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection) {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
