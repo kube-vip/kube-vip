@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -277,12 +278,13 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			currentServiceCopy.Annotations[requestedIP] = i.dhcpInterfaceIP
 		}
 
-		updatedService, err := sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
-			return err
+		if !cmp.Equal(currentService, currentServiceCopy) {
+			currentService, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+			if err != nil {
+				log.Errorf("Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
+				return err
+			}
 		}
-
 		ports := make([]v1.PortStatus, 0, len(i.serviceSnapshot.Spec.Ports))
 		for _, port := range i.serviceSnapshot.Spec.Ports {
 			ports = append(ports, v1.PortStatus{
@@ -290,14 +292,17 @@ func (sm *Manager) updateStatus(i *Instance) error {
 				Protocol: port.Protocol,
 			})
 		}
-		updatedService.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{
+		lbIngress := []v1.LoadBalancerIngress{{
 			IP:    i.vipConfig.VIP,
 			Ports: ports,
 		}}
-		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
-			return err
+		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, lbIngress) {
+			currentService.Status.LoadBalancer.Ingress = lbIngress
+			_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
+			if err != nil {
+				log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
+				return err
+			}
 		}
 		return nil
 	})
