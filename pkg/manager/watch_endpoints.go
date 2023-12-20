@@ -153,7 +153,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					service.Annotations["kube-vip.io/active-endpoint"] = lastKnownGoodEndpoint
 				}
 
-				if !leaderElectionActive {
+				if !leaderElectionActive && sm.config.EnableServicesElection {
 					go func() {
 						leaderContext, cancel = context.WithCancel(context.Background())
 
