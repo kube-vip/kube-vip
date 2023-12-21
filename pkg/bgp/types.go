@@ -17,6 +17,9 @@ type Config struct {
 	SourceIP string
 	SourceIF string
 
+	HoldTime          uint64
+	KeepaliveInterval uint64
+
 	Peers []Peer
 }
 
