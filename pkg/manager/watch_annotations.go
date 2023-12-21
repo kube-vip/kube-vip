@@ -49,7 +49,7 @@ func (sm *Manager) annotationsWatcher() error {
 	// there's probably bigger problems
 	node := nodeList.Items[0]
 
-	bgpConfig, bgpPeer, err := parseBgpAnnotations(&node, sm.config.Annotations)
+	bgpConfig, bgpPeer, err := parseBgpAnnotations(sm.config.BGPConfig, &node, sm.config.Annotations)
 	if err == nil {
 		// No error, the annotations already exist
 		sm.config.BGPConfig = bgpConfig
@@ -97,7 +97,7 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			bgpConfig, bgpPeer, err := parseBgpAnnotations(node, sm.config.Annotations)
+			bgpConfig, bgpPeer, err := parseBgpAnnotations(sm.config.BGPConfig, node, sm.config.Annotations)
 			if err != nil {
 				log.Error(err)
 				continue
@@ -143,6 +143,9 @@ func (sm *Manager) annotationsWatcher() error {
 // returning an error if the annotations are not valid or missing; and nil if everything is OK
 // to continue
 //
+// Parsed annotation config overlays config in passed bgpConfig in order to preserve configs
+// set by other means with the exception that bgpConfig.Peers is overwritten.
+//
 // The regex expression for each annotation ensures (at least in terms of annotations) backwards
 // compatibility with the Equinix Metal annotation format changed in
 // https://github.com/equinix/cloud-provider-equinix-metal/releases/tag/v3.3.0
@@ -151,8 +154,7 @@ func (sm *Manager) annotationsWatcher() error {
 // * `<info>` is the relevant information, such as `node-asn` or `peer-ip`
 // * `{{n}}` is the number of the peer, always starting with `0`
 // * kube-vip is only designed to manage one peer, just look for {{n}} == 0
-func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
-	bgpConfig := bgp.Config{}
+func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
 	bgpPeer := bgp.Peer{}
 
 	nodeASN := ""
@@ -217,6 +219,7 @@ func parseBgpAnnotations(node *v1.Node, prefix string) (bgp.Config, bgp.Peer, er
 
 	peerIPs := strings.Split(peerIPString, ",")
 
+	bgpConfig.Peers = make([]bgp.Peer, 0, len(peerIPs))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 
