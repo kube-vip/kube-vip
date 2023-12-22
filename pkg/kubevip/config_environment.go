@@ -395,6 +395,24 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Peers = append(c.BGPConfig.Peers, c.BGPPeerConfig)
 	}
 
+	// BGP Timers options
+	env = os.Getenv(bgpHoldTime)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.HoldTime = u64
+	}
+	env = os.Getenv(bgpKeepaliveInterval)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.KeepaliveInterval = u64
+	}
+
 	// Enable the Equinix Metal API calls
 	env = os.Getenv(vipPacket)
 	if env != "" {
