@@ -42,6 +42,10 @@ func (config *testConfig) createKind() error {
 		// Change Networking Family
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.IPv6Family
 	}
+	if config.Dualstack {
+		// Change Networking Family
+		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.DualStackFamily
+	}
 
 	if config.ControlPlane {
 		err := config.manifestGen()

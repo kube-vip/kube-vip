@@ -102,7 +102,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			}
 
 			// We only care about LoadBalancer services that have been allocated an address
-			if fetchServiceAddress(svc) == "" {
+			serviceAddresses := fetchServiceAddresses(svc)
+			if len(serviceAddresses) == 0 || serviceAddresses[0] == "" {
 				break
 			}
 
@@ -139,7 +140,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			// Scenarios:
 			// 1.
 			if !activeService[string(svc.UID)] {
-				log.Debugf("(svcs) [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddress(svc))
+				log.Debugf("(svcs) [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddresses(svc))
 
 				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
