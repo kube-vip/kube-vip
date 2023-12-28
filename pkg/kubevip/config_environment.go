@@ -152,6 +152,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableControlPlane = b
 	}
 
+	// Find controlplane toggle
+	env = os.Getenv(cpDetect)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.DetectControlPlane = b
+	}
+
 	// Find Services toggle
 	env = os.Getenv(svcEnable)
 	if env != "" {

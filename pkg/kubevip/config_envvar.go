@@ -138,6 +138,9 @@ const (
 	// cpEnable enables the control plane feature
 	cpEnable = "cp_enable"
 
+	// cpDetect will attempt to automatically find a working address for the control plane from loopback
+	cpDetect = "cp_detect"
+
 	// svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"
 
