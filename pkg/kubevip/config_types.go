@@ -24,6 +24,9 @@ type Config struct {
 	// EnableControlPlane, will enable the control plane functionality (used for hybrid behaviour)
 	EnableControlPlane bool `yaml:"enableControlPlane"`
 
+	// DetectControlPlane, will attempt to find the control plane from loopback (127.0.0.1)
+	DetectControlPlane bool `yaml:"detectControlPlane"`
+
 	// EnableServices, will enable the services functionality (used for hybrid behaviour)
 	EnableServices bool `yaml:"enableServices"`
 
