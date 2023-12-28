@@ -114,6 +114,10 @@ const (
 	bgpSourceIF = "bgp_sourceif"
 	// bgpSourceIP defines the source address for BGP peering
 	bgpSourceIP = "bgp_sourceip"
+	// bgpHoldTime defines bgp timers hold time
+	bgpHoldTime = "bgp_hold_time"
+	// bgpKeepaliveInterval defines bgp timers keepalive interval
+	bgpKeepaliveInterval = "bgp_keepalive_interval"
 
 	// vipWireguard - defines if wireguard will be used for vips
 	vipWireguard = "vip_wireguard" //nolint
@@ -137,6 +141,9 @@ const (
 
 	// cpEnable enables the control plane feature
 	cpEnable = "cp_enable"
+
+	// cpDetect will attempt to automatically find a working address for the control plane from loopback
+	cpDetect = "cp_detect"
 
 	// svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"

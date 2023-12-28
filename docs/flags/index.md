@@ -92,6 +92,8 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `bgp_multihop`         | Enables eBGP MultiHop                                       | Enable multiHop with a single BGP Peer                                          |
 |                     | `bgp_sourceif`         | Source Interface                                            | Determines which interface BGP should peer _from_                               |
 |                     | `bgp_sourceip`         | Source Address                                              | Determines which IP address BGP should peer _from_                              |
+|                     | `bgp_hold_time`        | default 0                                                   | BGP timer HoldTime config. Defaults to 0, using the peer's default              |
+|                     | `bgp_keepalive_interval`| default 0                                                  | BGP timer KeepaliveInterval config. Defaults to 0, using peer's default         |
 |                     | `annotations`          | `<provider string>`                                         | Startup will be paused until the node annotations contain the BGP configuration |
 | **Equinix Metal**   |                        |                                                             | (May be deprecated)                                                             |
 |                     | `vip_packet`           | Enables Equinix Metal API calls                             |                                                                                 |

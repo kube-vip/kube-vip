@@ -89,8 +89,10 @@ func (sm *Manager) startTableMode() error {
 				OnStoppedLeading: func() {
 					// we can do cleanup here
 					log.Infof("leader lost: %s", id)
-					for x := range sm.serviceInstances {
-						sm.serviceInstances[x].cluster.Stop()
+					for _, instance := range sm.serviceInstances {
+						for _, cluster := range instance.clusters {
+							cluster.Stop()
+						}
 					}
 
 					log.Fatal("lost leadership, restarting kube-vip")

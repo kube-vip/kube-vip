@@ -7,8 +7,97 @@ import (
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	applyCoreV1 "k8s.io/client-go/applyconfigurations/core/v1"
+	applyMetaV1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
+
 	"sigs.k8s.io/yaml"
 )
+
+// GenerateSA will create the service account for kube-vip
+func GenerateSA() *applyCoreV1.ServiceAccountApplyConfiguration {
+	kind := "ServiceAccount"
+	name := "kube-vip"
+	namespace := "kube-system"
+	newManifest := &applyCoreV1.ServiceAccountApplyConfiguration{
+		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &corev1.SchemeGroupVersion.Version, Kind: &kind},
+		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
+			Name:      &name,
+			Namespace: &namespace,
+		},
+	}
+	return newManifest
+}
+
+// GenerateCR will generate the Cluster role for kube-vip
+func GenerateCR() *applyRbacV1.ClusterRoleApplyConfiguration {
+	name := "system:kube-vip-role"
+	roleRefKind := "ClusterRole"
+	apiVersion := "rbac.authorization.k8s.io/v1"
+
+	newManifest := &applyRbacV1.ClusterRoleApplyConfiguration{
+		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &apiVersion, Kind: &roleRefKind},
+		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
+			Name: &name,
+		},
+		Rules: []applyRbacV1.PolicyRuleApplyConfiguration{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"services/status"},
+				Verbs:     []string{"update"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"services", "endpoints"},
+				Verbs:     []string{"list", "get", "watch", "endoints"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"nodes"},
+				Verbs:     []string{"list", "get", "watch", "update", "patch"},
+			},
+			{
+				APIGroups: []string{"coordination.k8s.io"},
+				Resources: []string{"leases"},
+				Verbs:     []string{"list", "get", "watch", "update", "create"},
+			},
+		},
+	}
+	return newManifest
+}
+
+// GenerateCRB will generate the clusterRoleBinding
+func GenerateCRB() *applyRbacV1.ClusterRoleBindingApplyConfiguration {
+	kind := "ClusterRoleBinding"
+	apiVersion := "rbac.authorization.k8s.io/v1"
+	subjectKind := "ServiceAccount"
+	apiGroup := "rbac.authorization.k8s.io"
+	roleRefKind := "ClusterRole"
+	roleRefName := "system:kube-vip-role"
+	name := "kube-vip"
+	bindName := "system:kube-vip-role-binding"
+	namespace := "kube-system"
+
+	newManifest := &applyRbacV1.ClusterRoleBindingApplyConfiguration{
+		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &apiVersion, Kind: &kind},
+		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
+			Name: &bindName,
+		},
+		RoleRef: &applyRbacV1.RoleRefApplyConfiguration{
+			APIGroup: &apiGroup,
+			Kind:     &roleRefKind,
+			Name:     &roleRefName,
+		},
+		Subjects: []applyRbacV1.SubjectApplyConfiguration{
+			{
+				Kind:      &subjectKind,
+				Name:      &name,
+				Namespace: &namespace,
+			},
+		},
+	}
+	return newManifest
+}
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
 func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod {
@@ -92,10 +181,18 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Name:  cpNamespace,
 				Value: c.Namespace,
 			},
-			{
+		}
+		if c.DDNS {
+			cp = append(cp, corev1.EnvVar{
 				Name:  vipDdns,
 				Value: strconv.FormatBool(c.DDNS),
-			},
+			})
+		}
+		if c.DetectControlPlane {
+			cp = append(cp, corev1.EnvVar{
+				Name:  cpDetect,
+				Value: strconv.FormatBool(c.DetectControlPlane),
+			})
 		}
 		newEnvironment = append(newEnvironment, cp...)
 	}

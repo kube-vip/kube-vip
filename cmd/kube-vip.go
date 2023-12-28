@@ -128,6 +128,7 @@ func init() {
 
 	// Behaviour flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPlane, "controlplane", false, "Enable HA for control plane")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DetectControlPlane, "autodetectcp", false, "Determine working address for control plane (from loopback)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServices, "services", false, "Enable Kubernetes services")
 
 	// Extended behaviour flags
