@@ -21,6 +21,7 @@ type testConfig struct {
 	ControlPlaneAddress string
 	ManifestPath        string
 	IPv6                bool
+	Dualstack           bool
 
 	Services bool
 	// service tests
@@ -29,6 +30,7 @@ type testConfig struct {
 	ignoreLeaderFailover bool
 	ignoreLeaderActive   bool
 	ignoreLocalDeploy    bool
+	ignoreDualStack      bool
 	ignoreEgress         bool
 	retainCluster        bool
 }
@@ -44,6 +46,7 @@ func main() {
 	_, t.ignoreLeaderActive = os.LookupEnv("IGNORE_ACTIVE")
 	_, t.ignoreLocalDeploy = os.LookupEnv("IGNORE_LOCALDEPLOY")
 	_, t.ignoreEgress = os.LookupEnv("IGNORE_EGRESS")
+	_, t.ignoreDualStack = os.LookupEnv("IGNORE_DUALSTACK")
 	_, t.retainCluster = os.LookupEnv("RETAIN_CLUSTER")
 
 	flag.StringVar(&t.ImagePath, "imagepath", "plndr/kube-vip:action", "")
@@ -53,6 +56,10 @@ func main() {
 	flag.Parse()
 
 	log.Infof("🔬 beginning e2e tests, image: [%s]", t.ImagePath)
+
+	if !t.ignoreDualStack {
+		t.Dualstack = true
+	}
 
 	if t.ControlPlane {
 		err := t.createKind()

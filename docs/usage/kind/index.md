@@ -4,6 +4,12 @@
 
 The documentation for KIND is fantastic and its [quick start](https://kind.sigs.k8s.io/docs/user/quick-start/) guide will have you up and running in no time.
 
+## Create RBAC settings
+
+```
+kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+```
+
 ## Find Address Pool for Kube-Vip
 
 We will need to find addresses that can be used by Kube-Vip:
