@@ -372,10 +372,10 @@ github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9dec
 github.com/yuin/goldmark v1.4.0/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
 go.etcd.io/etcd/api/v3 v3.5.11 h1:B54KwXbWDHyD3XYAwprxNzTe7vlhR69LuBgZnMVvS7E=
 go.etcd.io/etcd/api/v3 v3.5.11/go.mod h1:Ot+o0SWSyT6uHhA56al1oCED0JImsRiU9Dc26+C2a+4=
-go.etcd.io/etcd/client/pkg/v3 v3.5.10 h1:kfYIdQftBnbAq8pUWFXfpuuxFSKzlmM5cSn76JByiT0=
-go.etcd.io/etcd/client/pkg/v3 v3.5.10/go.mod h1:DYivfIviIuQ8+/lCq4vcxuseg2P2XbHygkKwFo9fc8U=
-go.etcd.io/etcd/client/v3 v3.5.10 h1:W9TXNZ+oB3MCd/8UjxHTWK5J9Nquw9fQBLJd5ne5/Ao=
-go.etcd.io/etcd/client/v3 v3.5.10/go.mod h1:RVeBnDz2PUEZqTpgqwAtUd8nAPf5kjyFyND7P1VkOKc=
+go.etcd.io/etcd/client/pkg/v3 v3.5.11 h1:bT2xVspdiCj2910T0V+/KHcVKjkUrCZVtk8J2JF2z1A=
+go.etcd.io/etcd/client/pkg/v3 v3.5.11/go.mod h1:seTzl2d9APP8R5Y2hFL3NVlD6qC/dOT+3kvrqPyTas4=
+go.etcd.io/etcd/client/v3 v3.5.11 h1:ajWtgoNSZJ1gmS8k+icvPtqsqEav+iUorF7b0qozgUU=
+go.etcd.io/etcd/client/v3 v3.5.11/go.mod h1:a6xQUEqFJ8vztO1agJh/KQKOMfFI8og52ZconzcDJwE=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
 go.opencensus.io v0.22.2/go.mod h1:yxeiOL68Rb0Xd1ddK5vPZ/oVn4vY4Ynel7k9FzqtOIw=
