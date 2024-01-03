@@ -13,13 +13,13 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
-// Instance defines an instance of everything needed to manage a vip
+// Instance defines an instance of everything needed to manage vips
 type Instance struct {
 	// Virtual IP / Load Balancer configuration
-	vipConfig *kubevip.Config
+	vipConfigs []*kubevip.Config
 
-	// cluster instance
-	cluster *cluster.Cluster
+	// cluster instances
+	clusters []*cluster.Cluster
 
 	// Service uses DHCP
 	isDHCP              bool
@@ -30,7 +30,7 @@ type Instance struct {
 	dhcpClient          *vip.DHCPClient
 
 	// Kubernetes service mapping
-	Vip  string
+	VIPs []string
 	Port int32
 	UID  string
 	Type string
@@ -39,7 +39,7 @@ type Instance struct {
 }
 
 func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
-	instanceAddress := fetchServiceAddress(svc)
+	instanceAddresses := fetchServiceAddresses(svc)
 	instanceUID := string(svc.UID)
 
 	// Detect if we're using a specific interface for services
@@ -50,26 +50,30 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		serviceInterface = config.Interface
 	}
 
-	// Generate new Virtual IP configuration
-	newVip := &kubevip.Config{
-		VIP:                   instanceAddress, // TODO support more than one vip?
-		Interface:             serviceInterface,
-		SingleNode:            true,
-		EnableARP:             config.EnableARP,
-		EnableBGP:             config.EnableBGP,
-		VIPCIDR:               config.VIPCIDR,
-		VIPSubnet:             config.VIPSubnet,
-		EnableRoutingTable:    config.EnableRoutingTable,
-		RoutingTableID:        config.RoutingTableID,
-		RoutingTableType:      config.RoutingTableType,
-		ArpBroadcastRate:      config.ArpBroadcastRate,
-		EnableServiceSecurity: config.EnableServiceSecurity,
+	var newVips []*kubevip.Config
+
+	for _, address := range instanceAddresses {
+		// Generate new Virtual IP configuration
+		newVips = append(newVips, &kubevip.Config{
+			VIP:                   address,
+			Interface:             serviceInterface,
+			SingleNode:            true,
+			EnableARP:             config.EnableARP,
+			EnableBGP:             config.EnableBGP,
+			VIPCIDR:               config.VIPCIDR,
+			VIPSubnet:             config.VIPSubnet,
+			EnableRoutingTable:    config.EnableRoutingTable,
+			RoutingTableID:        config.RoutingTableID,
+			RoutingTableType:      config.RoutingTableType,
+			ArpBroadcastRate:      config.ArpBroadcastRate,
+			EnableServiceSecurity: config.EnableServiceSecurity,
+		})
 	}
 
 	// Create new service
 	instance := &Instance{
 		UID:             instanceUID,
-		Vip:             instanceAddress,
+		VIPs:            instanceAddresses,
 		serviceSnapshot: svc,
 	}
 	if len(svc.Spec.Ports) > 0 {
@@ -90,14 +94,17 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		Type:      instance.Type,
 		BindToVip: true,
 	}
-	// Add Load Balancer Configuration
-	newVip.LoadBalancers = append(newVip.LoadBalancers, newLB)
+	for _, vip := range newVips {
+		// Add Load Balancer Configuration
+		vip.LoadBalancers = append(vip.LoadBalancers, newLB)
+	}
 	// Create Add configuration to the new service
-	instance.vipConfig = newVip
+	instance.vipConfigs = newVips
 
 	// If this was purposely created with the address 0.0.0.0,
 	// we will create a macvlan on the main interface and a DHCP client
-	if instanceAddress == "0.0.0.0" {
+	// TODO: Consider how best to handle DHCP with multiple addresses
+	if len(instanceAddresses) == 1 && instanceAddresses[0] == "0.0.0.0" {
 		err := instance.startDHCP()
 		if err != nil {
 			return nil, err
@@ -107,24 +114,29 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			return nil, fmt.Errorf("error starting DHCP for %s/%s: error: %s",
 				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name, err)
 		case ip := <-instance.dhcpClient.IPChannel():
-			instance.vipConfig.VIP = ip
+			instance.vipConfigs[0].VIP = ip
 			instance.dhcpInterfaceIP = ip
 		}
 	}
+	for _, vipConfig := range instance.vipConfigs {
+		c, err := cluster.InitCluster(vipConfig, false)
+		if err != nil {
+			log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
+			return nil, err
+		}
+		c.Network.SetServicePorts(svc)
+		instance.clusters = append(instance.clusters, c)
 
-	c, err := cluster.InitCluster(instance.vipConfig, false)
-	if err != nil {
-		log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
-		return nil, err
 	}
-	c.Network.SetServicePorts(svc)
-	instance.cluster = c
 
 	return instance, nil
 }
 
 func (i *Instance) startDHCP() error {
-	parent, err := netlink.LinkByName(i.vipConfig.Interface)
+	if len(i.vipConfigs) != 1 {
+		return fmt.Errorf("DHCP requires exactly 1 VIP config, got: %v", len(i.vipConfigs))
+	}
+	parent, err := netlink.LinkByName(i.vipConfigs[0].Interface)
 	if err != nil {
 		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}

@@ -152,6 +152,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableControlPlane = b
 	}
 
+	// Find controlplane toggle
+	env = os.Getenv(cpDetect)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.DetectControlPlane = b
+	}
+
 	// Find Services toggle
 	env = os.Getenv(svcEnable)
 	if env != "" {
@@ -393,6 +403,24 @@ func ParseEnvironment(c *Config) error {
 		c.BGPPeerConfig.Address = env
 		// If we've added in a peer configuration, then we should add it to the BGP configuration
 		c.BGPConfig.Peers = append(c.BGPConfig.Peers, c.BGPPeerConfig)
+	}
+
+	// BGP Timers options
+	env = os.Getenv(bgpHoldTime)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.HoldTime = u64
+	}
+	env = os.Getenv(bgpKeepaliveInterval)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.KeepaliveInterval = u64
 	}
 
 	// Enable the Equinix Metal API calls

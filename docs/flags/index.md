@@ -20,9 +20,9 @@ These flags are typically used in the `kube-vip` manifest generation process.
 |                     | `--leaderElection`     | Enables Kubernetes LeaderElection                                  | Used by ARP, as only the leader can broadcast                                   |
 |                     | `--enableLoadBalancer` | Enables IPVS load balancer                                         | `kube-vip` ≥ 0.4.0                                                              |
 |                     | `--lbPort`             | 6443                                                               | The port that the api server will load-balanced on                              |
-|                     | `--lbForwardingMethod` | Select the forwarding method (default local)                       | The IPVS forwarding method (local, masquerade, tunnel, direct, bypass)          |
+|                     | `--lbForwardingMethod` | Select the forwarding method (default local)                       | The IPVS forwarding method (local, masquerade, tunnel, directroute, bypass)     |
 | **Services**        |                        |                                                                    |                                                                                 |
-|                     | `--serviceInterface`   | ""                                                          | Defines an optional different interface to bind services too                    |
+|                     | `--serviceInterface`   | ""                                                                 | Defines an optional different interface to bind services too                    |
 |                     | `--cidr`               | Defaults "32"                                                      | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
 | **Kubernetes**      |                        |                                                                    |                                                                                 |
 |                     | `--inCluster`          | Required for `kube-vip` as DaemonSet.                              |  Runs `kube-vip` with a ServiceAccount called `kube-vip`.                       |
@@ -72,7 +72,7 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `vip_leaderelection`   | Enables Kubernetes LeaderElection                           | Used by ARP, as only the leader can broadcast                                   |
 |                     | `lb_enable`            | Enables IPVS LoadBalancer                                   | `kube-vip` ≥ 0.4.0. Adds nodes to the IPVS load balancer                        |
 |                     | `lb_port`              | 6443                                                        | The IPVS port that will be used to load-balance control plane requests          |
-|                     | `lb_fwdmethod`         | Select the forwarding method (default local)                | The IPVS forwarding method (local, masquerade, tunnel, direct, bypass)          |
+|                     | `lb_fwdmethod`         | Select the forwarding method (default local)                | The IPVS forwarding method (local, masquerade, tunnel, directroute, bypass)     |
 | **Services**        |                        |                                                             |                                                                                 |
 |                     | `vip_servicesinterface`| ""                                                          | Defines an optional different interface to bind services too                    |
 |                     | `vip_cidr`             | Defaults "32"                                               | Used when advertising BGP addresses (typically as `x.x.x.x/32`)                 |
@@ -92,6 +92,8 @@ More environment variables can be read through the `pkg/kubevip/config_envvar.go
 |                     | `bgp_multihop`         | Enables eBGP MultiHop                                       | Enable multiHop with a single BGP Peer                                          |
 |                     | `bgp_sourceif`         | Source Interface                                            | Determines which interface BGP should peer _from_                               |
 |                     | `bgp_sourceip`         | Source Address                                              | Determines which IP address BGP should peer _from_                              |
+|                     | `bgp_hold_time`        | default 0                                                   | BGP timer HoldTime config. Defaults to 0, using the peer's default              |
+|                     | `bgp_keepalive_interval`| default 0                                                  | BGP timer KeepaliveInterval config. Defaults to 0, using peer's default         |
 |                     | `annotations`          | `<provider string>`                                         | Startup will be paused until the node annotations contain the BGP configuration |
 | **Equinix Metal**   |                        |                                                             | (May be deprecated)                                                             |
 |                     | `vip_packet`           | Enables Equinix Metal API calls                             |                                                                                 |
