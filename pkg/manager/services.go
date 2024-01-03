@@ -38,17 +38,22 @@ func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.Wai
 
 	// Iterate through the synchronising services
 	foundInstance := false
-	newServiceAddress := fetchServiceAddress(svc)
+	newServiceAddresses := fetchServiceAddresses(svc)
 	newServiceUID := string(svc.UID)
+
+	firstServiceAddress := ""
+	if len(newServiceAddresses) > 0 {
+		firstServiceAddress = newServiceAddresses[0]
+	}
 
 	for x := range sm.serviceInstances {
 		if sm.serviceInstances[x].UID == newServiceUID {
-			log.Debugf("isDHCP: %t, newServiceAddress: %s", sm.serviceInstances[x].isDHCP, newServiceAddress)
+			log.Debugf("isDHCP: %t, newServiceAddresses: %s", sm.serviceInstances[x].isDHCP, newServiceAddresses)
 			// If the found instance's DHCP configuration doesn't match the new service, delete it.
-			if (sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0") ||
-				(!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0") ||
+			if (sm.serviceInstances[x].isDHCP && firstServiceAddress != "0.0.0.0") ||
+				(!sm.serviceInstances[x].isDHCP && firstServiceAddress == "0.0.0.0") ||
 				(!sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
-					newServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP) ||
+					firstServiceAddress != svc.Status.LoadBalancer.Ingress[0].IP) ||
 				(len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc)) ||
 				(sm.serviceInstances[x].isDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 &&
 					sm.serviceInstances[x].dhcpInterfaceIP != svc.Status.LoadBalancer.Ingress[0].IP) {
@@ -62,7 +67,7 @@ func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.Wai
 	}
 
 	// This instance wasn't found, we need to add it to the manager
-	if !foundInstance && newServiceAddress != "" {
+	if !foundInstance && firstServiceAddress != "" {
 		if err := sm.addService(svc); err != nil {
 			return err
 		}
@@ -92,17 +97,19 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		return err
 	}
 
-	log.Infof("(svcs) adding VIP [%s] for [%s/%s]", newService.Vip, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
+	log.Infof("(svcs) adding VIP(s) [%s] for [%s/%s]", newService.VIPs, newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 
-	newService.cluster.StartLoadBalancerService(newService.vipConfig, sm.bgpServer)
+	for x := range newService.vipConfigs {
+		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
+	}
 
 	sm.upnpMap(newService)
 
-	if newService.isDHCP {
+	if newService.isDHCP && len(newService.vipConfigs) == 1 {
 		go func() {
 			for ip := range newService.dhcpClient.IPChannel() {
 				log.Debugf("IP %s may have changed", ip)
-				newService.vipConfig.VIP = ip
+				newService.vipConfigs[0].VIP = ip
 				newService.dhcpInterfaceIP = ip
 				if err := sm.updateStatus(newService); err != nil {
 					log.Warnf("error updating svc: %s", err)
@@ -122,11 +129,14 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		return err
 	}
 
-	serviceIP := fetchServiceAddress(svc)
+	// TODO: Currently this only implements egress for the primary load balancer
+	// IP of the service
+	serviceIPs := fetchServiceAddresses(svc)
 
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
-	if svc.Annotations[flushContrack] == "true" {
+	if svc.Annotations[flushContrack] == "true" && len(serviceIPs) > 0 {
 		log.Debugf("Flushing conntrack rules for service [%s]", svc.Name)
+		serviceIP := serviceIPs[0]
 		err = vip.DeleteExistingSessions(serviceIP, false)
 		if err != nil {
 			log.Errorf("Error flushing any remaining egress connections [%s]", err)
@@ -138,8 +148,9 @@ func (sm *Manager) addService(svc *v1.Service) error {
 	}
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
-	if svc.Annotations[egress] == "true" {
+	if svc.Annotations[egress] == "true" && len(serviceIPs) > 0 {
 		log.Debugf("Enabling egress for the service [%s]", svc.Name)
+		serviceIP := serviceIPs[0]
 		if svc.Annotations[endpoint] != "" {
 			// We will need to modify the iptables rules
 			err = sm.iptablesCheck()
@@ -157,6 +168,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 			}
 		}
 	}
+
 	finishTime := time.Since(startTime)
 	log.Infof("[service] synchronised in %dms", finishTime.Milliseconds())
 
@@ -189,13 +201,21 @@ func (sm *Manager) deleteService(uid string) error {
 		return nil
 	}
 	shared := false
+	vipSet := make(map[string]interface{})
 	for x := range updatedInstances {
-		if updatedInstances[x].Vip == serviceInstance.Vip {
+		for _, vip := range updatedInstances[x].VIPs {
+			vipSet[vip] = nil
+		}
+	}
+	for _, vip := range serviceInstance.VIPs {
+		if _, found := vipSet[vip]; found {
 			shared = true
 		}
 	}
 	if !shared {
-		serviceInstance.cluster.Stop()
+		for x := range serviceInstance.clusters {
+			serviceInstance.clusters[x].Stop()
+		}
 		if serviceInstance.isDHCP {
 			serviceInstance.dhcpClient.Stop()
 			macvlan, err := netlink.LinkByName(serviceInstance.dhcpInterface)
@@ -208,8 +228,9 @@ func (sm *Manager) deleteService(uid string) error {
 				return fmt.Errorf("error deleting DHCP Link : %v", err)
 			}
 		}
-		if serviceInstance.vipConfig.EnableBGP {
-			cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfig.VIP, serviceInstance.vipConfig.VIPCIDR)
+		// TODO: Implement dual-stack loadbalancer support if BGP is enabled
+		if serviceInstance.vipConfigs[0].EnableBGP {
+			cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfigs[0].VIP, serviceInstance.vipConfigs[0].VIPCIDR)
 			err := sm.bgpServer.DelHost(cidrVip)
 			return err
 		}
@@ -238,9 +259,10 @@ func (sm *Manager) deleteService(uid string) error {
 func (sm *Manager) upnpMap(s *Instance) {
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - work out if we need to mapping.Reclaim()
-	if sm.upnp != nil {
-		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.Vip, s.Port, s.serviceSnapshot.Name)
-		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, s.Vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
+	// TODO: Handle upnp in the dualstack case
+	if sm.upnp != nil && len(s.VIPs) == 1 {
+		log.Infof("[UPNP] Adding map to [%s:%d - %s]", s.VIPs[0], s.Port, s.serviceSnapshot.Name)
+		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, s.VIPs[0], strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
 			log.Infof("service should be accessible externally on port [%d]", s.Port)
 		} else {
 			sm.upnp.Reclaim()
@@ -292,17 +314,18 @@ func (sm *Manager) updateStatus(i *Instance) error {
 				Protocol: port.Protocol,
 			})
 		}
-		lbIngress := []v1.LoadBalancerIngress{{
-			IP:    i.vipConfig.VIP,
-			Ports: ports,
-		}}
-		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, lbIngress) {
-			currentService.Status.LoadBalancer.Ingress = lbIngress
-			_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
-			if err != nil {
-				log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
-				return err
-			}
+		var ingresses []v1.LoadBalancerIngress
+		for _, vipConfig := range i.vipConfigs {
+			ingresses = append(ingresses, v1.LoadBalancerIngress{
+				IP:    vipConfig.VIP,
+				Ports: ports,
+			})
+		}
+		updatedService.Status.LoadBalancer.Ingress = ingresses
+		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
+		if err != nil {
+			log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
+			return err
 		}
 		return nil
 	})
@@ -314,13 +337,19 @@ func (sm *Manager) updateStatus(i *Instance) error {
 	return nil
 }
 
-// fetchServiceAddress tries to get the address from annotations
+// fetchServiceAddresses tries to get the addresses from annotations
 // kube-vip.io/loadbalancerIPs, then from spec.loadbalancerIP
-func fetchServiceAddress(s *v1.Service) string {
+// May return []string{""} (with length 1) if neither exist.
+func fetchServiceAddresses(s *v1.Service) []string {
 	if s.Annotations != nil {
 		if v, ok := s.Annotations[loadbalancerIPAnnotation]; ok {
-			return v
+			ips := strings.Split(v, ",")
+			var trimmedIPs []string
+			for _, ip := range ips {
+				trimmedIPs = append(trimmedIPs, strings.TrimSpace(ip))
+			}
+			return trimmedIPs
 		}
 	}
-	return s.Spec.LoadBalancerIP
+	return []string{s.Spec.LoadBalancerIP}
 }

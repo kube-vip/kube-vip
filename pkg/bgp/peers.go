@@ -23,7 +23,9 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 
 		Timers: &api.Timers{
 			Config: &api.TimersConfig{
-				ConnectRetry: 10,
+				ConnectRetry:      10,
+				HoldTime:          b.c.HoldTime,
+				KeepaliveInterval: b.c.KeepaliveInterval,
 			},
 		},
 

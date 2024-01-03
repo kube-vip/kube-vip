@@ -74,7 +74,12 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			// If this is a control plane host it will likely have started as a static pod or won't have the
 			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 			// ensure connectivity.
-			clientset, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))
+			if config.DetectControlPlane {
+				clientset, err = k8s.FindWorkingKubernetesAddress(adminConfigPath, false)
+			} else {
+				// This will attempt to use kubernetes as the hostname (this should be passed as a host alias) in the pod manifest
+				clientset, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))
+			}
 		} else {
 			clientset, err = k8s.NewClientset(adminConfigPath, false, "")
 		}
@@ -95,6 +100,23 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		}
 		log.Debug("Using external Kubernetes configuration from incluster config.")
 	}
+
+	// Flip this to something else
+	// if config.DetectControlPlane {
+	// 	log.Info("[k8s client] flipping to internal service account")
+	// 	_, err = clientset.CoreV1().ServiceAccounts("kube-system").Apply(context.TODO(), kubevip.GenerateSA(), v1.ApplyOptions{FieldManager: "application/apply-patch"})
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
+	// 	}
+	// 	_, err = clientset.RbacV1().ClusterRoles().Apply(context.TODO(), kubevip.GenerateCR(), v1.ApplyOptions{FieldManager: "application/apply-patch"})
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
+	// 	}
+	// 	_, err = clientset.RbacV1().ClusterRoleBindings().Apply(context.TODO(), kubevip.GenerateCRB(), v1.ApplyOptions{FieldManager: "application/apply-patch"})
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
+	// 	}
+	// }
 
 	return &Manager{
 		clientSet: clientset,

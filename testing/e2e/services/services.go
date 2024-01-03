@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -124,10 +125,11 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			policyLocal: true,
 			testHTTP:    true,
 		}
-		leader, lbAddress, err := svc.createService(ctx, clientset)
+		leader, lbAddresses, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Error(err)
 		}
+		lbAddress := lbAddresses[0]
 
 		err = leaderFailover(ctx, &s, &leader, clientset)
 		if err != nil {
@@ -218,10 +220,12 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 				name:        fmt.Sprintf("%s-%d", s, i),
 				testHTTP:    true,
 			}
-			_, lbAddress, err := svc.createService(ctx, clientset)
+			_, lbAddresses, err := svc.createService(ctx, clientset)
 			if err != nil {
 				log.Fatal(err)
 			}
+			lbAddress := lbAddresses[0]
+
 			config.successCounter++
 			nodes, err := getAddressesOnNodes()
 			if err != nil {
@@ -282,10 +286,11 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			testHTTP:    false,
 		}
 
-		_, egress, err = svc.createService(ctx, clientset)
+		_, lbAddresses, err := svc.createService(ctx, clientset)
 		if err != nil {
 			log.Fatal(err)
 		}
+		egress = lbAddresses[0]
 
 		for i := 1; i < 5; i++ {
 			if found {
@@ -308,18 +313,66 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Infof("🏆 Testing Complete [%d] passed", config.successCounter)
 	}
+
+	if !config.ignoreDualStack {
+		// Dualstack loadbalancer test
+		log.Infof("🧪 ---> testing dualstack loadbalancer service <---")
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     2,
+			server:       true,
+		}
+		err := deploy.createDeployment(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
+		svc := service{
+			name:          s,
+			testHTTP:      true,
+			testDualstack: true,
+		}
+		_, _, err = svc.createService(ctx, clientset)
+		if err != nil {
+			log.Error(err)
+		} else {
+			config.successCounter++
+		}
+
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
+		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	}
+
+	log.Infof("🏆 Testing Complete [%d] passed", config.successCounter)
 }
 
 func httpTest(address string) error {
+	log.Infof("🕷️  testing HTTP request against [%s]", address)
 	Client := http.Client{
 		Timeout: 1 * time.Second,
 	}
+	ip := net.ParseIP(address)
+	if ip == nil {
+		return errors.New("invalid address")
+	}
+	if ip.To4() == nil {
+		// use brackets for IPv6 address
+		address = fmt.Sprintf("[%s]", address)
+	}
 	var err error
 	for i := 0; i < 5; i++ {
+		var r *http.Response
 		//nolint
-		r, err := Client.Get(fmt.Sprintf("http://%s", address)) //nolint
+		r, err = Client.Get(fmt.Sprintf("http://%s", address)) //nolint
 
 		if err == nil {
 			log.Infof("🕸️  successfully retrieved web data in [%ds]", i)
