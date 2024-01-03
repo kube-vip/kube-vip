@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/cloudflare/ipvs"
@@ -66,7 +67,7 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 	var m ipvs.ForwardType
 	switch strings.ToLower(forwardingMethod) {
 	case "masquerade":
-		m = ipvs.Masquarade
+		m = ipvs.Masquerade
 	case "local":
 		m = ipvs.Local
 	case "tunnel":
@@ -178,13 +179,14 @@ func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
 }
 
 func (lb *IPVSLoadBalancer) addrString() string {
-	return lb.loadBalancerService.Address.Net(lb.loadBalancerService.Family).String()
+	return lb.loadBalancerService.Address.String()
 }
 
-func ipAndFamily(address string) (ipvs.IP, ipvs.AddressFamily) {
+func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
+
 	ipAddr := net.ParseIP(address)
 	if ipAddr.To4() == nil {
-		return ipvs.NewIP(ipAddr), ipvs.INET6
+		return netip.AddrFrom16([16]byte(ipAddr.To16())), ipvs.INET6
 	}
-	return ipvs.NewIP(ipAddr), ipvs.INET
+	return netip.AddrFrom4([4]byte(ipAddr.To4())), ipvs.INET
 }
