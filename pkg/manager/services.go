@@ -301,7 +301,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		}
 
 		if !cmp.Equal(currentService, currentServiceCopy) {
-			currentService, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+			currentService, err = sm.clientSet.CoreV1().Services(currentServiceCopy.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 			if err != nil {
 				log.Errorf("Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
 				return err
@@ -321,11 +321,13 @@ func (sm *Manager) updateStatus(i *Instance) error {
 				Ports: ports,
 			})
 		}
-		updatedService.Status.LoadBalancer.Ingress = ingresses
-		_, err = sm.clientSet.CoreV1().Services(updatedService.Namespace).UpdateStatus(context.TODO(), updatedService, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
-			return err
+		if !cmp.Equal(currentServiceCopy.Status.LoadBalancer.Ingress, ingresses) {
+			currentServiceCopy.Status.LoadBalancer.Ingress = ingresses
+			_, err = sm.clientSet.CoreV1().Services(currentServiceCopy.Namespace).UpdateStatus(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+			if err != nil {
+				log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
+				return err
+			}
 		}
 		return nil
 	})
