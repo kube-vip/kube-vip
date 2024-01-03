@@ -1,6 +1,8 @@
 module github.com/kube-vip/kube-vip
 
-go 1.19
+go 1.21
+
+toolchain go1.21.3
 
 require (
 	github.com/cloudflare/ipvs v0.9.1
@@ -29,9 +31,9 @@ require (
 	golang.org/x/sys v0.15.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/api v0.28.4
+	k8s.io/api v0.29.0
 	k8s.io/apimachinery v0.29.0
-	k8s.io/client-go v0.28.3
+	k8s.io/client-go v0.29.0
 	k8s.io/klog/v2 v2.110.1
 	sigs.k8s.io/kind v0.20.0
 	sigs.k8s.io/yaml v1.4.0
@@ -47,7 +49,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/eapache/channels v1.1.0 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
+	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/logr v1.3.0 // indirect
