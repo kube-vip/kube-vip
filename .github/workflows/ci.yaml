@@ -15,10 +15,10 @@ jobs:
         run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.3
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
       - name: All checks
         run: make check
   unit-tests:
@@ -27,10 +27,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
       - name: Run tests
         run: make unit-tests
   integration-tests:
@@ -39,10 +39,10 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Set up Go ${{ env.GO_VERSION }}
+    - name: Install Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
+        go-version-file: go.mod
     - name: Run tests
       run: make integration-tests
   e2e-tests:
@@ -51,10 +51,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
       - name: Build image locally
         run: make dockerx86Local
       - name: Run tests
@@ -65,10 +65,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
       - name: Build image with iptables
         run: make dockerx86ActionIPTables
       - name: Run tests
