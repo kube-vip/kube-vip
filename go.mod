@@ -5,7 +5,7 @@ go 1.21
 toolchain go1.21.3
 
 require (
-	github.com/cloudflare/ipvs v0.9.1
+	github.com/cloudflare/ipvs v0.10.1
 	github.com/davecgh/go-spew v1.1.1
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/golang/protobuf v1.5.3
@@ -96,8 +96,11 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spf13/viper v1.16.0 // indirect
 	github.com/subosito/gotenv v1.4.2 // indirect
+	github.com/tj/go-spin v1.1.0 // indirect
 	github.com/u-root/uio v0.0.0-20230305220412-3e8cd9d6bf63 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/xlab/c-for-go v0.0.0-20230906092656-a1822f0a09c1 // indirect
+	github.com/xlab/pkgconfig v0.0.0-20170226114623-cea12a0fd245 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
