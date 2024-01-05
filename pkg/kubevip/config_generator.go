@@ -523,7 +523,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name: "kubeconfig",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/etc/kubernetes/admin.conf",
+					Path: c.K8sConfigFile,
 				},
 			},
 		}

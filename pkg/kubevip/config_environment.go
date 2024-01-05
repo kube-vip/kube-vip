@@ -519,5 +519,10 @@ func ParseEnvironment(c *Config) error {
 		c.EgressWithNftables = b
 	}
 
+	// check to see if we're using a specific path to the Kubernetes config file
+	env = os.Getenv(k8sConfigFile)
+	if env != "" {
+		c.K8sConfigFile = env
+	}
 	return nil
 }
