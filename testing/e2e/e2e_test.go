@@ -131,6 +131,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				time.Sleep(30 * time.Second)
 				By(withTimestamp("loading local docker image to kind cluster"))
 				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
+				killLoadBalancer(clusterName)
 			}()
 
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
@@ -203,6 +204,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				time.Sleep(30 * time.Second)
 				By(withTimestamp("loading local docker image to kind cluster"))
 				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
+				killLoadBalancer(clusterName)
 			}()
 
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
@@ -280,6 +282,20 @@ func killLeader(leaderIPAddr string, clusterName string) {
 
 	cmd := exec.Command(
 		"docker", "kill", leaderName,
+	)
+
+	session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(session, "5s").Should(gexec.Exit(0))
+}
+
+func killLoadBalancer(clusterName string) {
+	dockerLoadBalancer := fmt.Sprintf("%s--external-load-balancer", clusterName)
+
+	Expect(dockerLoadBalancer).ToNot(BeEmpty())
+
+	cmd := exec.Command(
+		"docker", "kill", dockerLoadBalancer,
 	)
 
 	session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
