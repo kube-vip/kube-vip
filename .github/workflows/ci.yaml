@@ -57,8 +57,10 @@ jobs:
           go-version-file: go.mod
       - name: Build image locally
         run: make dockerx86Local
-      - name: Run tests
+      - name: Run Control plane tests
         run: make e2e-tests
+      - name: Run Control plane tests v1.29.0 onwards
+        run: make e2e-tests129
   service-e2e-tests:
     runs-on: ubuntu-latest
     name: E2E service tests

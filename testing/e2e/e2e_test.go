@@ -35,6 +35,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		logger                  log.Logger
 		imagePath               string
 		k8sImagePath            string
+		configPath              string
 		kubeVIPManifestTemplate *template.Template
 		clusterName             string
 		tempDirPath             string
@@ -44,9 +45,12 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		klog.SetOutput(GinkgoWriter)
 		logger = e2e.TestLogger{}
 
-		imagePath = os.Getenv("E2E_IMAGE_PATH")
-		k8sImagePath = os.Getenv("K8S_IMAGE_PATH")
-
+		imagePath = os.Getenv("E2E_IMAGE_PATH")    // Path to kube-vip image
+		configPath = os.Getenv("CONFIG_PATH")      // path to the api server config
+		k8sImagePath = os.Getenv("K8S_IMAGE_PATH") // path to the kubernetes image (version for kind)
+		if configPath == "" {
+			configPath = "/etc/kubernetes/admin.conf"
+		}
 		curDir, err := os.Getwd()
 		Expect(err).NotTo(HaveOccurred())
 		templatePath := filepath.Join(curDir, "kube-vip.yaml.tmpl")
@@ -118,6 +122,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv4VIP,
 				ImagePath:       imagePath,
+				ConfigPath:      configPath,
 			})).To(Succeed())
 		})
 
