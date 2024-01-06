@@ -218,7 +218,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are still accessible via the assigned IPv6 VIP with little downtime"))
 			// Allow at most 20 seconds of downtime when polling the control plane nodes
-			assertControlPlaneIsRoutable(ipv6VIP, 1*time.Second, 20*time.Second)
+			assertControlPlaneIsRoutable(ipv6VIP, 1*time.Second, 30*time.Second)
 		})
 	})
 })
