@@ -163,8 +163,8 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			assertControlPlaneIsRoutable(ipv4VIP, time.Duration(0), 20*time.Second)
 
 			// wait for a bit
-			time.Sleep(20 * time.Second)
 			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
+			time.Sleep(30 * time.Second)
 
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv4VIP, clusterName)
@@ -259,8 +259,8 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			assertControlPlaneIsRoutable(ipv6VIP, time.Duration(0), 20*time.Second)
 
 			// wait for a bit
-			time.Sleep(30 * time.Second)
 			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
+			time.Sleep(30 * time.Second)
 
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv6VIP, clusterName)
