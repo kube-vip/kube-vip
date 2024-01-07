@@ -154,6 +154,9 @@ type Config struct {
 
 	// ServicesLeaseName, this will set the lease name for services leader in arp mode
 	ServicesLeaseName string `yaml:"servicesLeaseName"`
+
+	// K8sConfigFile, this is the path to the config file used to speak with the API server
+	K8sConfigFile string `yaml:"k8sConfigFile"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

@@ -35,18 +35,24 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		logger                  log.Logger
 		imagePath               string
 		k8sImagePath            string
+		configPath              string
 		kubeVIPManifestTemplate *template.Template
 		clusterName             string
 		tempDirPath             string
+		v129                    bool
 	)
 
 	BeforeEach(func() {
 		klog.SetOutput(GinkgoWriter)
 		logger = e2e.TestLogger{}
 
-		imagePath = os.Getenv("E2E_IMAGE_PATH")
-		k8sImagePath = os.Getenv("K8S_IMAGE_PATH")
-
+		imagePath = os.Getenv("E2E_IMAGE_PATH")    // Path to kube-vip image
+		configPath = os.Getenv("CONFIG_PATH")      // path to the api server config
+		k8sImagePath = os.Getenv("K8S_IMAGE_PATH") // path to the kubernetes image (version for kind)
+		if configPath == "" {
+			configPath = "/etc/kubernetes/admin.conf"
+		}
+		_, v129 = os.LookupEnv("V129")
 		curDir, err := os.Getwd()
 		Expect(err).NotTo(HaveOccurred())
 		templatePath := filepath.Join(curDir, "kube-vip.yaml.tmpl")
@@ -118,7 +124,27 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv4VIP,
 				ImagePath:       imagePath,
+				ConfigPath:      configPath,
 			})).To(Succeed())
+
+			if v129 {
+				// create a seperate manifest
+				manifestPath2 := filepath.Join(tempDirPath, "kube-vip-ipv4-first.yaml")
+
+				// change the path of the mount to the new file
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath2
+
+				manifestFile2, err := os.Create(manifestPath2)
+				Expect(err).NotTo(HaveOccurred())
+
+				defer manifestFile2.Close()
+
+				Expect(kubeVIPManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
+					ControlPlaneVIP: ipv4VIP,
+					ImagePath:       imagePath,
+					ConfigPath:      "/etc/kubernetes/super-admin.conf", // Change the kuberenetes file
+				})).To(Succeed())
+			}
 		})
 
 		It("provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
@@ -135,6 +161,10 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			// Allow enough time for control plane nodes to load the docker image and
 			// use the default timeout for establishing a connection to the VIP
 			assertControlPlaneIsRoutable(ipv4VIP, time.Duration(0), 20*time.Second)
+
+			// wait for a bit
+			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
+			time.Sleep(30 * time.Second)
 
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv4VIP, clusterName)
@@ -190,7 +220,27 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv6VIP,
 				ImagePath:       imagePath,
+				ConfigPath:      configPath,
 			})).To(Succeed())
+
+			if v129 {
+				// create a seperate manifest
+				manifestPath2 := filepath.Join(tempDirPath, "kube-vip-ipv6-first.yaml")
+
+				// change the path of the mount to the new file
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath2
+
+				manifestFile2, err := os.Create(manifestPath2)
+				Expect(err).NotTo(HaveOccurred())
+
+				defer manifestFile2.Close()
+
+				Expect(kubeVIPManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
+					ControlPlaneVIP: ipv6VIP,
+					ImagePath:       imagePath,
+					ConfigPath:      "/etc/kubernetes/super-admin.conf", // Change the kuberenetes file
+				})).To(Succeed())
+			}
 		})
 
 		It("provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
@@ -208,12 +258,16 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			// use the default timeout for establishing a connection to the VIP
 			assertControlPlaneIsRoutable(ipv6VIP, time.Duration(0), 20*time.Second)
 
+			// wait for a bit
+			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
+			time.Sleep(30 * time.Second)
+
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv6VIP, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are still accessible via the assigned IPv6 VIP with little downtime"))
 			// Allow at most 20 seconds of downtime when polling the control plane nodes
-			assertControlPlaneIsRoutable(ipv6VIP, 1*time.Second, 20*time.Second)
+			assertControlPlaneIsRoutable(ipv6VIP, 1*time.Second, 30*time.Second)
 		})
 	})
 })

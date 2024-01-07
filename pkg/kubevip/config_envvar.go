@@ -183,4 +183,7 @@ const (
 
 	// vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
+
+	//k8sConfigFile defines the path to the configfile used to speak with the API server
+	k8sConfigFile = "k8s_config_file"
 )

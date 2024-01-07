@@ -45,5 +45,5 @@ spec:
   hostNetwork: true
   volumes:
   - hostPath:
-      path: /etc/kubernetes/admin.conf
+      path: "{{ .ConfigPath }}"
     name: kubeconfig
