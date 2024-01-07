@@ -39,6 +39,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		kubeVIPManifestTemplate *template.Template
 		clusterName             string
 		tempDirPath             string
+		v129                    bool
 	)
 
 	BeforeEach(func() {
@@ -51,6 +52,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		if configPath == "" {
 			configPath = "/etc/kubernetes/admin.conf"
 		}
+		_, v129 = os.LookupEnv("V129")
 		curDir, err := os.Getwd()
 		Expect(err).NotTo(HaveOccurred())
 		templatePath := filepath.Join(curDir, "kube-vip.yaml.tmpl")
@@ -124,6 +126,44 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				ImagePath:       imagePath,
 				ConfigPath:      configPath,
 			})).To(Succeed())
+
+			if v129 {
+				// create a seperate manifest
+				manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv4-first.yaml")
+
+				// for i := 0; i < 3; i++ {
+				// 	nodeConfig := kindconfigv1alpha4.Node{
+				// 		Role: kindconfigv1alpha4.ControlPlaneRole,
+				// 		ExtraMounts: []kindconfigv1alpha4.Mount{
+				// 			{
+				// 				HostPath:      manifestPath,
+				// 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
+				// 			},
+				// 		},
+				// 	}
+				// 	// Override the kind image version
+				// 	if k8sImagePath != "" {
+				// 		nodeConfig.Image = k8sImagePath
+				// 	}
+				// 	clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
+				// }
+
+				// change the path of the mount to the new file
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath
+
+				manifestFile2, err := os.Create(manifestPath)
+				Expect(err).NotTo(HaveOccurred())
+
+				defer manifestFile2.Close()
+
+				ipv4VIP = e2e.GenerateIPv4VIP()
+
+				Expect(kubeVIPManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
+					ControlPlaneVIP: ipv4VIP,
+					ImagePath:       imagePath,
+					ConfigPath:      "/etc/kubernetes/super-admin.conf", // Change the kuberenetes file
+				})).To(Succeed())
+			}
 		})
 
 		It("provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
@@ -197,6 +237,42 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				ImagePath:       imagePath,
 				ConfigPath:      configPath,
 			})).To(Succeed())
+
+			if v129 {
+				// create a seperate manifest
+				manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv6-first.yaml")
+
+				// for i := 0; i < 3; i++ {
+				// 	nodeConfig := kindconfigv1alpha4.Node{
+				// 		Role: kindconfigv1alpha4.ControlPlaneRole,
+				// 		ExtraMounts: []kindconfigv1alpha4.Mount{
+				// 			{
+				// 				HostPath:      manifestPath,
+				// 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
+				// 			},
+				// 		},
+				// 	}
+				// 	// Override the kind image version
+				// 	if k8sImagePath != "" {
+				// 		nodeConfig.Image = k8sImagePath
+				// 	}
+				// 	clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
+				// }
+
+				// change the path of the mount to the new file
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath
+
+				manifestFile2, err := os.Create(manifestPath)
+				Expect(err).NotTo(HaveOccurred())
+
+				defer manifestFile2.Close()
+
+				Expect(kubeVIPManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
+					ControlPlaneVIP: ipv6VIP,
+					ImagePath:       imagePath,
+					ConfigPath:      "/etc/kubernetes/super-admin.conf", // Change the kuberenetes file
+				})).To(Succeed())
+			}
 		})
 
 		It("provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
