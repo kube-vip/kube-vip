@@ -129,34 +129,15 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			if v129 {
 				// create a seperate manifest
-				manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv4-first.yaml")
-
-				// for i := 0; i < 3; i++ {
-				// 	nodeConfig := kindconfigv1alpha4.Node{
-				// 		Role: kindconfigv1alpha4.ControlPlaneRole,
-				// 		ExtraMounts: []kindconfigv1alpha4.Mount{
-				// 			{
-				// 				HostPath:      manifestPath,
-				// 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
-				// 			},
-				// 		},
-				// 	}
-				// 	// Override the kind image version
-				// 	if k8sImagePath != "" {
-				// 		nodeConfig.Image = k8sImagePath
-				// 	}
-				// 	clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
-				// }
+				manifestPath2 := filepath.Join(tempDirPath, "kube-vip-ipv4-first.yaml")
 
 				// change the path of the mount to the new file
-				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath2
 
-				manifestFile2, err := os.Create(manifestPath)
+				manifestFile2, err := os.Create(manifestPath2)
 				Expect(err).NotTo(HaveOccurred())
 
 				defer manifestFile2.Close()
-
-				ipv4VIP = e2e.GenerateIPv4VIP()
 
 				Expect(kubeVIPManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
 					ControlPlaneVIP: ipv4VIP,
@@ -180,6 +161,10 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			// Allow enough time for control plane nodes to load the docker image and
 			// use the default timeout for establishing a connection to the VIP
 			assertControlPlaneIsRoutable(ipv4VIP, time.Duration(0), 20*time.Second)
+
+			// wait for a bit
+			time.Sleep(20 * time.Second)
+			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
 
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv4VIP, clusterName)
@@ -240,29 +225,12 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 
 			if v129 {
 				// create a seperate manifest
-				manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv6-first.yaml")
-
-				// for i := 0; i < 3; i++ {
-				// 	nodeConfig := kindconfigv1alpha4.Node{
-				// 		Role: kindconfigv1alpha4.ControlPlaneRole,
-				// 		ExtraMounts: []kindconfigv1alpha4.Mount{
-				// 			{
-				// 				HostPath:      manifestPath,
-				// 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
-				// 			},
-				// 		},
-				// 	}
-				// 	// Override the kind image version
-				// 	if k8sImagePath != "" {
-				// 		nodeConfig.Image = k8sImagePath
-				// 	}
-				// 	clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
-				// }
+				manifestPath2 := filepath.Join(tempDirPath, "kube-vip-ipv6-first.yaml")
 
 				// change the path of the mount to the new file
-				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath2
 
-				manifestFile2, err := os.Create(manifestPath)
+				manifestFile2, err := os.Create(manifestPath2)
 				Expect(err).NotTo(HaveOccurred())
 
 				defer manifestFile2.Close()
@@ -289,6 +257,10 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			// Allow enough time for control plane nodes to load the docker image and
 			// use the default timeout for establishing a connection to the VIP
 			assertControlPlaneIsRoutable(ipv6VIP, time.Duration(0), 20*time.Second)
+
+			// wait for a bit
+			time.Sleep(30 * time.Second)
+			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
 
 			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 			killLeader(ipv6VIP, clusterName)
