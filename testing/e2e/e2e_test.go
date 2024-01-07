@@ -195,6 +195,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			Expect(kubeVIPManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
 				ControlPlaneVIP: ipv6VIP,
 				ImagePath:       imagePath,
+				ConfigPath:      configPath,
 			})).To(Succeed())
 		})
 
