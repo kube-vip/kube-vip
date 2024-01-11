@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +25,11 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 
 	for _, instance := range sm.serviceInstances {
 		for _, cluster := range instance.clusters {
-			cluster.Network.DeleteRoute()
+			err = cluster.Network.DeleteRoute()
+			if err != nil && !strings.Contains(err.Error(), "no such process") {
+				log.Errorf("error while deleting route %s on interface %s: %s",
+					cluster.Network.IP(), cluster.Network.Interface(), err.Error())
+			}
 			cluster.Stop()
 		}
 	}
