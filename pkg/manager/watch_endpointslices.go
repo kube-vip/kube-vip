@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -81,7 +82,7 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 			}
 
 			// Build endpoints
-			localendpoints := getLocalEndpointsFromEndpointslices(eps, id)
+			localendpoints := getLocalEndpointsFromEndpointslices(eps, id, sm.config)
 
 			// Find out if we have any local endpoints
 			// if out endpoint is empty then populate it
@@ -176,16 +177,17 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 					leaderElectionActive = false
 				}
 			}
-			log.Debugf("[endpointslices watcher] local endpoint(s) [%d], known good [%s], active election [%t]", len(localendpoints), lastKnownGoodEndpoint, leaderElectionActive)
+			log.Debugf("[endpointslices watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
+				service.Namespace, service.Name, len(localendpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
 		case watch.Deleted:
 			if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && sm.config.EnableRoutingTable {
-				ep, ok := event.Object.(*v1.Endpoints)
+				eps, ok := event.Object.(*discoveryv1.EndpointSlice)
 				if !ok {
 					cancel()
 					return fmt.Errorf("[endpointslices] unable to parse Kubernetes services from API watcher")
 				}
-				localEndpoints := getLocalEndpoints(ep, id)
+				localEndpoints := getLocalEndpointsFromEndpointslices(eps, id, sm.config)
 				if len(localEndpoints) > 0 {
 					sm.clearRoutes(service)
 				}
@@ -206,8 +208,18 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 	return nil //nolint:govet
 }
 
-func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id string) []string {
+func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id string, config *kubevip.Config) []string {
 	var localendpoints []string
+
+	shortname, shortnameErr := getShortname(id)
+	if shortnameErr != nil {
+		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
+			log.Debugf("[endpoint] %v, shortname will not be used", shortnameErr)
+		} else {
+			log.Errorf("[endpoint] %v", shortnameErr)
+		}
+	}
+
 	for i := range eps.Endpoints {
 		for j := range eps.Endpoints[i].Addresses {
 			// 1. Compare the hostname on the endpoint to the hostname
@@ -215,34 +227,26 @@ func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id stri
 			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
 
 			// 1. Compare the Hostname first (should be FQDN)
+			log.Debugf("[endpointslices] processing endpoint [%s]", eps.Endpoints[i].Addresses[j])
 			if eps.Endpoints[i].Hostname != nil && id == *eps.Endpoints[i].Hostname {
-				log.Debugf("[endpointslices] address: %s, hostname: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname)
 				if *eps.Endpoints[i].Conditions.Serving {
+					log.Debugf("[endpointslices] found endpoint - address: %s, hostname: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname)
 					localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
 				}
 			} else {
 				// 2. Compare the Nodename (from testing could be FQDN or short)
 				if eps.Endpoints[i].NodeName != nil {
-					if eps.Endpoints[i].Hostname != nil {
-						log.Debugf("[endpointslices] address: %s, hostname: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname, *eps.Endpoints[i].NodeName)
-					} else {
-						log.Debugf("[endpointslices] address: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].NodeName)
-					}
-
 					if id == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
-						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
-					} else {
-						// 3. Compare to shortname
-						shortname, err := getShortname(id)
-						if err != nil {
-							log.Errorf("[endpointslices] %v", err)
+						if eps.Endpoints[i].Hostname != nil {
+							log.Debugf("[endpointslices] found endpoint - address: %s, hostname: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname, *eps.Endpoints[i].NodeName)
 						} else {
-							log.Debugf("[endpointslices] address: %s, shortname: %s, node: %s", eps.Endpoints[i].Addresses[j], shortname, *eps.Endpoints[i].NodeName)
-
-							if shortname == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
-								localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
-							}
+							log.Debugf("[endpointslices] found endpoint - address: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].NodeName)
 						}
+						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
+					} else if shortnameErr != nil && shortname == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
+						log.Debugf("[endpointslices] found endpoint - address: %s, shortname: %s, node: %s", eps.Endpoints[i].Addresses[j], shortname, *eps.Endpoints[i].NodeName)
+						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
+
 					}
 				}
 			}
