@@ -238,7 +238,7 @@ func getShortname(hostname string) (string, error) {
 		return "", fmt.Errorf("unable to find shortname from %s", hostname)
 	}
 	hostParts := strings.Split(hostname, ".")
-	if len(hostParts) > 1 {
+	if len(hostParts) >= 1 {
 		return hostParts[0], nil
 	}
 	return "", fmt.Errorf("unable to find shortname from %s", hostname)
