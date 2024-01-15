@@ -157,6 +157,9 @@ type Config struct {
 
 	// K8sConfigFile, this is the path to the config file used to speak with the API server
 	K8sConfigFile string `yaml:"k8sConfigFile"`
+
+	// EnableEndpointSlices, if enabled, EndpointSlices will be used instead of Endpoints
+	EnableEndpointSlices bool `yaml:"enableEndpointSlices"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

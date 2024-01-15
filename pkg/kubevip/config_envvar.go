@@ -186,4 +186,7 @@ const (
 
 	//k8sConfigFile defines the path to the configfile used to speak with the API server
 	k8sConfigFile = "k8s_config_file"
+
+	// enableEndpointSlices enables use of EndpointSlices instead of Endpoints
+	enableEndpointSlices = "enable_endpointslices"
 )

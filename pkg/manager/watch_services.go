@@ -32,12 +32,16 @@ var activeService map[string]bool
 // watchedService keeps track of services that are already being watched
 var watchedService map[string]bool
 
+// watchedService keeps track of routes that has been configured on the node
+var configuredLocalRoutes map[string]bool
+
 func init() {
 	// Set up the caches for monitoring existing active or watched services
 	activeServiceLoadBalancerCancel = make(map[string]func())
 	activeServiceLoadBalancer = make(map[string]context.Context)
 	activeService = make(map[string]bool)
 	watchedService = make(map[string]bool)
+	configuredLocalRoutes = make(map[string]bool)
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
@@ -145,7 +149,12 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
 				// Background the services election
-				if sm.config.EnableServicesElection {
+				// EnableServicesElection enabled
+				// watchEndpoint will do a ServicesElection by Service and understands local endpoints
+				//
+				// EnableRoutingTable enabled and EnableLeaderElection disabled
+				// watchEndpoint will also not do a leaderElection by service.
+				if sm.config.EnableServicesElection || (sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection) {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
@@ -154,13 +163,31 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint watcher
 									wg.Add(1)
-									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-									if err != nil {
-										log.Error(err)
+									if !sm.config.EnableEndpointSlices {
+										err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+										if err != nil {
+											log.Error(err)
+										}
+									} else {
+										err = sm.watchEndpointSlices(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+										if err != nil {
+											log.Error(err)
+										}
 									}
 									wg.Done()
 								}
 							}()
+
+							if sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection {
+								wg.Add(1)
+								go func() {
+									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+									if err != nil {
+										log.Error(err)
+									}
+									wg.Done()
+								}()
+							}
 							// We're now watching this service
 							watchedService[string(svc.UID)] = true
 						}
@@ -203,6 +230,14 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					log.Infof("(svcs) [%s] has an ignore annotation for kube-vip", svc.Name)
 					break
 				}
+
+				// If no leader election is enabled, delete routes here
+				if !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
+					sm.config.EnableRoutingTable && configuredLocalRoutes[string(svc.UID)] {
+					configuredLocalRoutes[string(svc.UID)] = false
+					sm.clearRoutes(svc)
+				}
+
 				// If this is an active service then and additional leaderElection will handle stopping
 				err := sm.deleteService(string(svc.UID))
 				if err != nil {
@@ -211,7 +246,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 				// Calls the cancel function of the context
 				if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
-
 					activeServiceLoadBalancerCancel[string(svc.UID)]()
 				}
 				activeService[string(svc.UID)] = false
