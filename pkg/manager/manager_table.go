@@ -107,7 +107,6 @@ func (sm *Manager) startTableMode() error {
 			},
 		})
 	} else {
-		// TODO: this needs to be called periodically or do I need to wrap it somehow with a cancel context?
 		log.Infof("beginning watching services without leader election")
 		err = sm.servicesWatcher(ctx, sm.syncServices)
 		if err != nil {
