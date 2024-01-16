@@ -106,6 +106,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.SourceIF, "sourceIF", "", "The source interface for bgp peering (not to be used with sourceIP)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.SourceIP, "sourceIP", "", "The source address for bgp peering (not to be used with sourceIF)")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.AS, "localAS", 65000, "The local AS number for the bgp server")
+	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.HoldTime, "bgpHoldTimer", 30, "The hold timer for all bgp peers (it defines the time a session is held)")
+	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.KeepaliveInterval, "bgpKeepAliveInterval", 10, "The keepalive interval for all bgp peers (it defines the heartbeat of keepalive messages)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
