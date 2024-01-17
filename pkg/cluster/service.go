@@ -208,7 +208,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			}(ctxArp)
 		}
 
-		if c.EnableBGP {
+		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			cidrVip := fmt.Sprintf("%s/%s", network.IP(), c.VIPCIDR)
 			log.Debugf("(svcs) attempting to advertise the address [%s] over BGP", cidrVip)
