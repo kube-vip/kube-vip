@@ -296,8 +296,8 @@ github.com/onsi/ginkgo/v2 v2.13.2 h1:Bi2gGVkfn6gQcjNjZJVO8Gf0FHzMPf2phUei9tejVMs
 github.com/onsi/ginkgo/v2 v2.13.2/go.mod h1:XStQ8QcGwLyF4HdfcZB8SFOS/MWCgDuXMSBe6zrvLgM=
 github.com/onsi/gomega v1.30.0 h1:hvMK7xYz4D3HapigLTeGdId/NcfQx1VHMJc60ew99+8=
 github.com/onsi/gomega v1.30.0/go.mod h1:9sxs+SwGrKI0+PWe4Fxa9tFQQBG5xSsSbMXOI8PPpoQ=
-github.com/osrg/gobgp/v3 v3.19.0 h1:SHjeu707EVp5h2LR8qLxDz/PzFU6oO+jhquGzGsigTI=
-github.com/osrg/gobgp/v3 v3.19.0/go.mod h1:TszzyYD/31jXlljifRhxFEmPsITEloZmGU5CTN21W18=
+github.com/osrg/gobgp/v3 v3.22.0 h1:HKCk9+8hV5GQ4c35NuV8q+eKSnsScf+0v7oXB6jS8wU=
+github.com/osrg/gobgp/v3 v3.22.0/go.mod h1:4fbscYpsCk14EO16nTWAdJyErO4MbAZ2zLJmsmeXu/k=
 github.com/packethost/packngo v0.31.0 h1:LLH90ardhULWbagBIc3I3nl2uU75io0a7AwY6hyi0S4=
 github.com/packethost/packngo v0.31.0/go.mod h1:Io6VJqzkiqmIEQbpOjeIw9v8q9PfcTEq8TEY/tMQsfw=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=
