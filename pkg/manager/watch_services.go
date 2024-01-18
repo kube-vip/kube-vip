@@ -180,17 +180,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									wg.Done()
 								}
 							}()
-
-							if sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection {
-								wg.Add(1)
-								go func() {
-									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
-									if err != nil {
-										log.Error(err)
-									}
-									wg.Done()
-								}()
-							}
 							// We're now watching this service
 							watchedService[string(svc.UID)] = true
 						}
@@ -201,6 +190,19 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 							if err != nil {
 								log.Error(err)
+							}
+							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
+								if instance := sm.findServiceInstance(svc); instance != nil {
+									for _, cluster := range instance.clusters {
+										err := cluster.Network.AddRoute()
+										if err != nil {
+											log.Errorf("[service] error adding route: %s\n", err.Error())
+										} else {
+											log.Infof("[service] added route: %s, service: %s/%s, interface: %s, table: %d",
+												cluster.Network.IP(), svc.Namespace, svc.Name, cluster.Network.Interface(), sm.config.RoutingTableID)
+										}
+									}
+								}
 							}
 							wg.Done()
 						}()
