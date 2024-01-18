@@ -158,6 +158,12 @@ type Config struct {
 	// K8sConfigFile, this is the path to the config file used to speak with the API server
 	K8sConfigFile string `yaml:"k8sConfigFile"`
 
+	// DNSMode, this will set the mode DSN lookup will be performed (first, ipv4, ipv6, dual)
+	DNSMode string `yaml:"dnsDualStackMode"`
+
+	// DisableServiceUpdates, if true, kube-vip will only advertise service, but it will not update service's Status.LoadBalancer.Ingress slice
+	DisableServiceUpdates bool `yaml:"disableServiceUpdates"`
+
 	// EnableEndpointSlices, if enabled, EndpointSlices will be used instead of Endpoints
 	EnableEndpointSlices bool `yaml:"enableEndpointSlices"`
 }

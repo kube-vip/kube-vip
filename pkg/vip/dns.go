@@ -32,15 +32,20 @@ func (d *ipUpdater) Run(ctx context.Context) {
 				log.Infof("stop ipUpdater")
 				return
 			default:
-				ip, err := lookupHost(d.vip.DNSName())
+				mode := "ipv4"
+				if IsIPv6(d.vip.IP()) {
+					mode = "ipv6"
+				}
+
+				ip, err := LookupHost(d.vip.DNSName(), mode)
 				if err != nil {
 					log.Warnf("cannot lookup %s: %v", d.vip.DNSName(), err)
 					// fallback to renewing the existing IP
-					ip = d.vip.IP()
+					ip = []string{d.vip.IP()}
 				}
 
 				log.Infof("setting %s as an IP", ip)
-				if err := d.vip.SetIP(ip); err != nil {
+				if err := d.vip.SetIP(ip[0]); err != nil {
 					log.Errorf("setting %s as an IP: %v", ip, err)
 				}
 

@@ -13,11 +13,16 @@ import (
 // dnsUpdater already have the functionality to keep trying resolve the IP
 // and update the VIP configuration if it changes
 func (cluster *Cluster) StartDDNS(ctx context.Context) error {
-	ddnsMgr := vip.NewDDNSManager(ctx, cluster.Network)
-	ip, err := ddnsMgr.Start()
-	if err != nil {
-		return err
+	for i := range cluster.Network {
+		ddnsMgr := vip.NewDDNSManager(ctx, cluster.Network[i])
+		ip, err := ddnsMgr.Start()
+		if err != nil {
+			return err
+		}
+		if err = cluster.Network[i].SetIP(ip); err != nil {
+			return err
+		}
 	}
 
-	return cluster.Network.SetIP(ip)
+	return nil
 }

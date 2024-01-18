@@ -24,7 +24,9 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 
 	for _, instance := range sm.serviceInstances {
 		for _, cluster := range instance.clusters {
-			_ = cluster.Network.DeleteRoute()
+			for i := range cluster.Network {
+				_ = cluster.Network[i].DeleteRoute()
+			}
 			cluster.Stop()
 		}
 	}

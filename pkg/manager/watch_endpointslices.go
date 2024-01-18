@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
+	"k8s.io/client-go/util/retry"
 )
 
 func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
@@ -71,6 +72,7 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 
 	for event := range ch {
 		lastKnownGoodEndpoint := ""
+		activeEndpointAnnotation := activeEndpoint
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
@@ -79,6 +81,10 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 			if !ok {
 				cancel()
 				return fmt.Errorf("[endpointslices] unable to parse Kubernetes services from API watcher")
+			}
+
+			if eps.AddressType == discoveryv1.AddressTypeIPv6 {
+				activeEndpointAnnotation = activeEndpointIPv6
 			}
 
 			// Build endpoints
@@ -120,7 +126,7 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 
 				// Set the service accordingly
 				if service.Annotations[egress] == "true" {
-					service.Annotations[activeEndpoint] = lastKnownGoodEndpoint
+					service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
 				}
 
 				if !leaderElectionActive && sm.config.EnableServicesElection {
@@ -149,12 +155,14 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && sm.config.EnableRoutingTable && !configuredLocalRoutes[string(service.UID)] {
 					if instance := sm.findServiceInstance(service); instance != nil {
 						for _, cluster := range instance.clusters {
-							err := cluster.Network.AddRoute()
-							if err != nil {
-								log.Errorf("[endpointslices] error adding route: %s\n", err.Error())
-							} else {
-								log.Infof("[endpointslices] added route: %s, service: %s/%s, interface: %s, table: %d",
-									cluster.Network.IP(), service.Namespace, service.Name, cluster.Network.Interface(), sm.config.RoutingTableID)
+							for i := range cluster.Network {
+								err := cluster.Network[i].AddRoute()
+								if err != nil {
+									log.Errorf("[endpointslices] error adding route: %s\n", err.Error())
+								} else {
+									log.Infof("[endpointslices] added route: %s, service: %s/%s, interface: %s, table: %d",
+										cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+								}
 							}
 						}
 					}
@@ -208,6 +216,38 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 	return nil //nolint:govet
 }
 
+func (sm *Manager) updateServiceEndpointSlicesAnnotation(endpoint, endpointIPv6 string, service *v1.Service) error {
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Retrieve the latest version of Deployment before attempting update
+		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		currentServiceCopy := currentService.DeepCopy()
+		if currentServiceCopy.Annotations == nil {
+			currentServiceCopy.Annotations = make(map[string]string)
+		}
+
+		currentServiceCopy.Annotations[activeEndpoint] = endpoint
+		currentServiceCopy.Annotations[activeEndpointIPv6] = endpointIPv6
+
+		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+		if err != nil {
+			log.Errorf("Error updating Service Spec [%s] : %v", currentServiceCopy.Name, err)
+			return err
+		}
+		return nil
+	})
+
+	if retryErr != nil {
+		log.Errorf("Failed to set Services: %v", retryErr)
+		return retryErr
+	}
+	return nil
+}
+
 func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id string, config *kubevip.Config) []string {
 	var localendpoints []string
 
@@ -243,6 +283,7 @@ func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id stri
 							log.Debugf("[endpointslices] found endpoint - address: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].NodeName)
 						}
 						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
+						// 3. Compare to shortname
 					} else if shortnameErr != nil && shortname == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
 						log.Debugf("[endpointslices] found endpoint - address: %s, shortname: %s, node: %s", eps.Endpoints[i].Addresses[j], shortname, *eps.Endpoints[i].NodeName)
 						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
