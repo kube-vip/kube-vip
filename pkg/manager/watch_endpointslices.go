@@ -240,7 +240,7 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 				service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
 		case watch.Deleted:
-			// When no-leade-elecition mode
+			// When no-leader-elecition mode
 			if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
 				// find all existing local endpoints
 				eps, ok := event.Object.(*discoveryv1.EndpointSlice)
