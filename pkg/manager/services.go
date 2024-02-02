@@ -259,10 +259,12 @@ func (sm *Manager) deleteService(uid string) error {
 			}
 		}
 		// TODO: Implement dual-stack loadbalancer support if BGP is enabled
-		if serviceInstance.vipConfigs[0].EnableBGP {
+		if serviceInstance.vipConfigs[0].EnableBGP && ((sm.config.EnableLeaderElection || sm.config.EnableServicesElection) || configuredLocalRoutes[uid]) {
 			cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfigs[0].VIP, serviceInstance.vipConfigs[0].VIPCIDR)
 			err := sm.bgpServer.DelHost(cidrVip)
-			return err
+			if err != nil {
+				return fmt.Errorf("error deleting BGP host: %v", err)
+			}
 		}
 
 		// We will need to tear down the egress

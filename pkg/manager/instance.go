@@ -55,20 +55,24 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	for _, address := range instanceAddresses {
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
-			VIP:                   address,
-			Interface:             serviceInterface,
-			SingleNode:            true,
-			EnableARP:             config.EnableARP,
-			EnableBGP:             config.EnableBGP,
-			VIPCIDR:               config.VIPCIDR,
-			VIPSubnet:             config.VIPSubnet,
-			EnableRoutingTable:    config.EnableRoutingTable,
-			RoutingTableID:        config.RoutingTableID,
-			RoutingTableType:      config.RoutingTableType,
-			ArpBroadcastRate:      config.ArpBroadcastRate,
-			EnableServiceSecurity: config.EnableServiceSecurity,
-			DNSMode:               config.DNSMode,
-			DisableServiceUpdates: config.DisableServiceUpdates,
+			VIP:                    address,
+			Interface:              serviceInterface,
+			SingleNode:             true,
+			EnableARP:              config.EnableARP,
+			EnableBGP:              config.EnableBGP,
+			VIPCIDR:                config.VIPCIDR,
+			VIPSubnet:              config.VIPSubnet,
+			EnableRoutingTable:     config.EnableRoutingTable,
+			RoutingTableID:         config.RoutingTableID,
+			RoutingTableType:       config.RoutingTableType,
+			ArpBroadcastRate:       config.ArpBroadcastRate,
+			EnableServiceSecurity:  config.EnableServiceSecurity,
+			DNSMode:                config.DNSMode,
+			DisableServiceUpdates:  config.DisableServiceUpdates,
+			EnableServicesElection: config.EnableServicesElection,
+			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
+				EnableLeaderElection: config.EnableLeaderElection,
+			},
 		})
 	}
 

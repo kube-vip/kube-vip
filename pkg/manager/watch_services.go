@@ -157,7 +157,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				//
 				// EnableRoutingTable enabled and EnableLeaderElection disabled
 				// watchEndpoint will also not do a leaderElection by service.
-				if sm.config.EnableServicesElection || (sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection) {
+				if sm.config.EnableServicesElection ||
+					((sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection)) {
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
@@ -181,7 +182,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								}
 							}()
 
-							if sm.config.EnableRoutingTable && !sm.config.EnableLeaderElection {
+							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
 								wg.Add(1)
 								go func() {
 									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
@@ -194,6 +195,34 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							// We're now watching this service
 							watchedService[string(svc.UID)] = true
 						}
+					} else if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
+						go func() {
+							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
+								// Add Endpoint watcher
+								wg.Add(1)
+								if !sm.config.EnableEndpointSlices {
+									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+									if err != nil {
+										log.Error(err)
+									}
+								} else {
+									err = sm.watchEndpointSlices(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
+									if err != nil {
+										log.Error(err)
+									}
+								}
+								wg.Done()
+							}
+						}()
+
+						wg.Add(1)
+						go func() {
+							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+							if err != nil {
+								log.Error(err)
+							}
+							wg.Done()
+						}()
 					} else {
 						// Increment the waitGroup before the service Func is called (Done is completed in there)
 						wg.Add(1)
@@ -254,6 +283,22 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				activeService[string(svc.UID)] = false
 				watchedService[string(svc.UID)] = false
 			}
+
+			if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && sm.config.EnableLeaderElection && !sm.config.EnableServicesElection {
+				if sm.config.EnableBGP {
+					instance := sm.findServiceInstance(svc)
+					for _, vip := range instance.vipConfigs {
+						vipCidr := fmt.Sprintf("%s/%s", vip.VIP, vip.VIPCIDR)
+						err = sm.bgpServer.DelHost(vipCidr)
+						if err != nil {
+							log.Errorf("error deleting host %s: %s", vipCidr, err.Error())
+						}
+					}
+				} else {
+					sm.clearRoutes(svc)
+				}
+			}
+
 			log.Infof("(svcs) [%s/%s] has been deleted", svc.Namespace, svc.Name)
 		case watch.Bookmark:
 			// Un-used

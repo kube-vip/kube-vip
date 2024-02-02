@@ -358,7 +358,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 func httpTest(address string) error {
 	log.Infof("🕷️  testing HTTP request against [%s]", address)
 	Client := http.Client{
-		Timeout: 1 * time.Second,
+		Timeout: 2 * time.Second,
 	}
 	ip := net.ParseIP(address)
 	if ip == nil {
@@ -380,7 +380,7 @@ func httpTest(address string) error {
 
 			return nil
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 2)
 	}
 	return err
 }
