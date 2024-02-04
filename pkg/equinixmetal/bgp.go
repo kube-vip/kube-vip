@@ -25,7 +25,7 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 		return fmt.Errorf("Unable to find local/this device in Equinix Metal API")
 	}
 
-	fmt.Printf("Querying BGP settings for [%s]", thisDevice.Hostname)
+	log.Infof("Querying BGP settings for [%s]", thisDevice.Hostname)
 	neighbours, _, err := c.Devices.ListBGPNeighbors(thisDevice.ID, &packngo.ListOptions{})
 	if err != nil {
 		return err
