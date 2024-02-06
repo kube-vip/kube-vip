@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -50,9 +52,9 @@ var kubeManifestPod = &cobra.Command{
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
-		log.Info(cfg)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
+		fmt.Println(cfg) // output manifest to stdout
 	},
 }
 
@@ -75,9 +77,9 @@ var kubeManifestDaemon = &cobra.Command{
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
 
-		log.Info(cfg)
+		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
+		fmt.Println(cfg) // output manifest to stdout
 	},
 }
 
@@ -100,7 +102,6 @@ var kubeManifestRbac = &cobra.Command{
 		}
 		cfg := kubevip.GenerateSA()
 		b, _ := yaml.Marshal(cfg)
-
-		log.Info(string(b))
+		fmt.Println(string(b)) // output manifest to stdout
 	},
 }
