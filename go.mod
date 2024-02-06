@@ -33,7 +33,7 @@ require (
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.0
-	k8s.io/apimachinery v0.29.0
+	k8s.io/apimachinery v0.29.1
 	k8s.io/client-go v0.29.0
 	k8s.io/klog/v2 v2.120.1
 	sigs.k8s.io/kind v0.20.0
