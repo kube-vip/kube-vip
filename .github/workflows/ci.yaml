@@ -49,6 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     name: E2E ARP tests
     steps:
+      - name: Ensure fs wont cause issues
+        run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Go
