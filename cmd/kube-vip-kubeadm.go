@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -51,9 +52,9 @@ var kubeKubeadmInit = &cobra.Command{
 			_ = cmd.Help()
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
-		log.Info(cfg)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
+		fmt.Println(cfg) // output manifest to stdout
 	},
 }
 
@@ -86,8 +87,7 @@ var kubeKubeadmJoin = &cobra.Command{
 			log.Fatalf("Unable to find file [%s]", kubeConfigPath)
 		}
 
-		// Generate manifest and print
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
-		log.Info(cfg)
+		fmt.Println(cfg) // output manifest to stdout
 	},
 }
