@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -54,7 +52,7 @@ var kubeManifestPod = &cobra.Command{
 		}
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
-		fmt.Println(cfg)
+		log.Info(cfg)
 	},
 }
 
@@ -79,7 +77,7 @@ var kubeManifestDaemon = &cobra.Command{
 		}
 		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
 
-		fmt.Println(cfg)
+		log.Info(cfg)
 	},
 }
 
@@ -103,6 +101,6 @@ var kubeManifestRbac = &cobra.Command{
 		cfg := kubevip.GenerateSA()
 		b, _ := yaml.Marshal(cfg)
 
-		fmt.Println(string(b))
+		log.Info(string(b))
 	},
 }

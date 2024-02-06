@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -54,7 +53,7 @@ var kubeKubeadmInit = &cobra.Command{
 		}
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 
-		fmt.Println(cfg)
+		log.Info(cfg)
 	},
 }
 
@@ -89,6 +88,6 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		// Generate manifest and print
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
-		fmt.Println(cfg)
+		log.Info(cfg)
 	},
 }
