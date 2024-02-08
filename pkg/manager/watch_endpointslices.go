@@ -3,28 +3,27 @@ package manager
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/util/retry"
 )
 
-func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
-	log.Infof("[endpointslices] watching for service [%s] in namespace [%s]", service.Name, service.Namespace)
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	leaderContext, cancel := context.WithCancel(context.Background())
-	var leaderElectionActive bool
-	defer cancel()
+type endpointslicesProvider struct {
+	label     string
+	endpoints *discoveryv1.EndpointSlice
+}
 
+func (ep *endpointslicesProvider) createRetryWatcher(ctx context.Context, sm *Manager,
+	service *v1.Service) (*watchtools.RetryWatcher, error) {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": service.Name}}
 
 	opts := metav1.ListOptions{
@@ -37,256 +36,77 @@ func (sm *Manager) watchEndpointSlices(ctx context.Context, id string, service *
 		},
 	})
 	if err != nil {
-		cancel()
-		return fmt.Errorf("[endpointslices] error creating endpointslices watcher: %s", err.Error())
+		return nil, fmt.Errorf("[%s] error creating endpointslices watcher: %s", ep.label, err.Error())
 	}
 
-	exitFunction := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			log.Debug("[endpointslices] context cancelled")
-			// Stop the retry watcher
-			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			cancel()
-			return
-		case <-sm.shutdownChan:
-			log.Debug("[endpointslices] shutdown called")
-			// Stop the retry watcher
-			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			cancel()
-			return
-		case <-exitFunction:
-			log.Debug("[endpointslices] function ending")
-			// Stop the retry watcher
-			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			cancel()
-			return
-		}
-	}()
-
-	ch := rw.ResultChan()
-
-	for event := range ch {
-		lastKnownGoodEndpoint := ""
-		activeEndpointAnnotation := activeEndpoint
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-
-			eps, ok := event.Object.(*discoveryv1.EndpointSlice)
-			if !ok {
-				cancel()
-				return fmt.Errorf("[endpointslices] unable to parse Kubernetes services from API watcher")
-			}
-
-			if eps.AddressType == discoveryv1.AddressTypeIPv6 {
-				activeEndpointAnnotation = activeEndpointIPv6
-			}
-
-			// Build endpoints
-			var endpoints []string
-			if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
-				service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
-				endpoints = getAllEndpointsFromEndpointslices(eps)
-			} else {
-				endpoints = getLocalEndpointsFromEndpointslices(eps, id, sm.config)
-			}
-
-			// Find out if we have any local endpoints
-			// if out endpoint is empty then populate it
-			// if not, go through the endpoints and see if ours still exists
-			// If we have a local endpoint then begin the leader Election, unless it's already running
-			//
-
-			// Check that we have local endpoints
-			if len(endpoints) != 0 {
-				// if we haven't populated one, then do so
-				if lastKnownGoodEndpoint != "" {
-
-					// check out previous endpoint exists
-					stillExists := false
-
-					for x := range endpoints {
-						if endpoints[x] == lastKnownGoodEndpoint {
-							stillExists = true
-						}
-					}
-					// If the last endpoint no longer exists, we cancel our leader Election
-					if !stillExists && leaderElectionActive {
-						log.Warnf("[endpointslices] existing endpoint [%s] has been removed, restarting leaderElection", lastKnownGoodEndpoint)
-						// Stop the existing leaderElection
-						cancel()
-						// Set our active endpoint to an existing one
-						lastKnownGoodEndpoint = endpoints[0]
-						// disable last leaderElection flag
-						leaderElectionActive = false
-					}
-
-				} else {
-					lastKnownGoodEndpoint = endpoints[0]
-				}
-
-				// Set the service accordingly
-				if service.Annotations[egress] == "true" {
-					service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
-				}
-
-				if !leaderElectionActive && sm.config.EnableServicesElection {
-					go func() {
-						leaderContext, cancel = context.WithCancel(context.Background())
-
-						// This is a blocking function, that will restart (in the event of failure)
-						for {
-							// if the context isn't cancelled restart
-							if leaderContext.Err() != context.Canceled {
-								leaderElectionActive = true
-								err := sm.StartServicesLeaderElection(leaderContext, service, wg)
-								if err != nil {
-									log.Error(err)
-								}
-								leaderElectionActive = false
-							} else {
-								leaderElectionActive = false
-								break
-							}
-						}
-					}()
-				}
-
-				// There are local endpoints available on the node
-				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && !configuredLocalRoutes[string(service.UID)] {
-					// If routing table mode is enabled - routes should be added per node
-					if sm.config.EnableRoutingTable {
-						if instance := sm.findServiceInstance(service); instance != nil {
-							for _, cluster := range instance.clusters {
-								for i := range cluster.Network {
-									err := cluster.Network[i].AddRoute()
-									if err != nil {
-										log.Errorf("[endpointslices] error adding route: %s\n", err.Error())
-									} else {
-										log.Infof("[endpointslices] added route: %s, service: %s/%s, interface: %s, table: %d",
-											cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
-										configuredLocalRoutes[string(service.UID)] = true
-										leaderElectionActive = true
-									}
-								}
-							}
-						}
-					}
-
-					// If BGP mode is enabled - hosts should be added per node
-					if sm.config.EnableBGP {
-						if instance := sm.findServiceInstance(service); instance != nil {
-							for _, cluster := range instance.clusters {
-								for i := range cluster.Network {
-									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									log.Debugf("[endpointslices] Attempting to advertise BGP service: %s", address)
-									err := sm.bgpServer.AddHost(address)
-									if err != nil {
-										log.Errorf("[endpointslices] error adding BGP host %s\n", err.Error())
-									} else {
-										log.Infof("[endpointslices] added BGP host: %s, service: %s/%s", address, service.Namespace, service.Name)
-										configuredLocalRoutes[string(service.UID)] = true
-										leaderElectionActive = true
-									}
-								}
-							}
-						}
-					}
-				}
-			} else {
-				// There are no local enpoints
-				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && configuredLocalRoutes[string(service.UID)] {
-					// If routing table mode is enabled - routes should be deleted
-					if sm.config.EnableRoutingTable {
-						sm.clearRoutes(service)
-						configuredLocalRoutes[string(service.UID)] = false
-					}
-
-					// If BGP mode is enabled - routes should be deleted
-					if sm.config.EnableBGP {
-						if instance := sm.findServiceInstance(service); instance != nil {
-							for _, cluster := range instance.clusters {
-								for i := range cluster.Network {
-									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									err := sm.bgpServer.DelHost(address)
-									if err != nil {
-										log.Errorf("[endpointslices] error deleting BGP host%s:  %s\n", address, err.Error())
-									} else {
-										log.Infof("[endpointslices] deleted BGP host: %s, service: %s/%s",
-											address, service.Namespace, service.Name)
-										configuredLocalRoutes[string(service.UID)] = false
-										leaderElectionActive = false
-									}
-								}
-							}
-						}
-					}
-				}
-
-				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
-				if lastKnownGoodEndpoint != "" {
-					log.Warnf("[endpointslices] existing endpoint [%s] has been removed, no remaining endpoints for leaderElection", lastKnownGoodEndpoint)
-					lastKnownGoodEndpoint = "" // reset endpoint
-					cancel()                   // stop services watcher
-					leaderElectionActive = false
-				}
-			}
-			log.Debugf("[endpointslices watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
-				service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
-
-		case watch.Deleted:
-			// When no-leader-elecition mode
-			if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
-				// find all existing local endpoints
-				eps, ok := event.Object.(*discoveryv1.EndpointSlice)
-				if !ok {
-					cancel()
-					return fmt.Errorf("unable to parse Kubernetes services from API watcher")
-				}
-
-				var endpoints []string
-				if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
-					service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
-					endpoints = getAllEndpointsFromEndpointslices(eps)
-				} else {
-					endpoints = getLocalEndpointsFromEndpointslices(eps, id, sm.config)
-				}
-
-				// If there were local endpints deleted
-				if len(endpoints) > 0 {
-					// Delete all routes in routing table mode
-					if sm.config.EnableRoutingTable {
-						sm.clearRoutes(service)
-					}
-
-					// Delete all hosts in BGP mode
-					if sm.config.EnableBGP {
-						sm.clearBGPHosts(service)
-					}
-				}
-			}
-
-			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
-			close(exitFunction)
-			log.Infof("[endpointslices] deleted stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
-			return nil
-		case watch.Error:
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Errorf("[endpointslices] -> %v", statusErr)
-		}
-	}
-	close(exitFunction)
-	log.Infof("[endpointslices] stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
-	return nil //nolint:govet
+	return rw, nil
 }
 
-func (sm *Manager) updateServiceEndpointSlicesAnnotation(endpoint, endpointIPv6 string, service *v1.Service) error {
+func (ep *endpointslicesProvider) loadObject(endpoints runtime.Object, cancel context.CancelFunc) error {
+	eps, ok := endpoints.(*discoveryv1.EndpointSlice)
+	if !ok {
+		cancel()
+		return fmt.Errorf("[%s] error casting endpoints to v1.Endpoints struct", ep.label)
+	}
+	ep.endpoints = eps
+	return nil
+}
+
+func (ep *endpointslicesProvider) getAllEndpoints() ([]string, error) {
+	result := []string{}
+	for _, ep := range ep.endpoints.Endpoints {
+		result = append(result, ep.Addresses...)
+	}
+	return result, nil
+}
+
+func (ep *endpointslicesProvider) getLocalEndpoints(id string, config *kubevip.Config) ([]string, error) {
+	shortname, shortnameErr := getShortname(id)
+	if shortnameErr != nil {
+		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
+			log.Debugf("[%s] %v, shortname will not be used", ep.label, shortnameErr)
+		} else {
+			log.Errorf("[%s] %v", ep.label, shortnameErr)
+		}
+	}
+
+	var localEndpoints []string
+	for i := range ep.endpoints.Endpoints {
+		for j := range ep.endpoints.Endpoints[i].Addresses {
+			// 1. Compare the hostname on the endpoint to the hostname
+			// 2. Compare the nodename on the endpoint to the hostname
+			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
+
+			// 1. Compare the Hostname first (should be FQDN)
+			log.Debugf("[%s] processing endpoint [%s]", ep.label, ep.endpoints.Endpoints[i].Addresses[j])
+			if ep.endpoints.Endpoints[i].Hostname != nil && id == *ep.endpoints.Endpoints[i].Hostname {
+				if *ep.endpoints.Endpoints[i].Conditions.Serving {
+					log.Debugf("[%s] found endpoint - address: %s, hostname: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].Hostname)
+					localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
+				}
+			} else {
+				// 2. Compare the Nodename (from testing could be FQDN or short)
+				if ep.endpoints.Endpoints[i].NodeName != nil {
+					if id == *ep.endpoints.Endpoints[i].NodeName && *ep.endpoints.Endpoints[i].Conditions.Serving {
+						if ep.endpoints.Endpoints[i].Hostname != nil {
+							log.Debugf("[%s] found endpoint - address: %s, hostname: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].Hostname, *ep.endpoints.Endpoints[i].NodeName)
+						} else {
+							log.Debugf("[%s] found endpoint - address: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].NodeName)
+						}
+						localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
+						// 3. Compare to shortname
+					} else if shortnameErr != nil && shortname == *ep.endpoints.Endpoints[i].NodeName && *ep.endpoints.Endpoints[i].Conditions.Serving {
+						log.Debugf("[%s] found endpoint - address: %s, shortname: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], shortname, *ep.endpoints.Endpoints[i].NodeName)
+						localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
+					}
+				}
+			}
+		}
+	}
+	return localEndpoints, nil
+}
+
+func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6 string, service *v1.Service, sm *Manager) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
@@ -305,71 +125,23 @@ func (sm *Manager) updateServiceEndpointSlicesAnnotation(endpoint, endpointIPv6 
 
 		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
-			log.Errorf("Error updating Service Spec [%s] : %v", currentServiceCopy.Name, err)
+			log.Errorf("[%s] error updating Service Spec [%s] : %v", ep.label, currentServiceCopy.Name, err)
 			return err
 		}
 		return nil
 	})
 
 	if retryErr != nil {
-		log.Errorf("Failed to set Services: %v", retryErr)
+		log.Errorf("[%s] failed to set Services: %v", ep.label, retryErr)
 		return retryErr
 	}
 	return nil
 }
 
-func getLocalEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice, id string, config *kubevip.Config) []string {
-	var localendpoints []string
-
-	shortname, shortnameErr := getShortname(id)
-	if shortnameErr != nil {
-		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
-			log.Debugf("[endpointslices] %v, shortname will not be used", shortnameErr)
-		} else {
-			log.Errorf("[endpointslices] %v", shortnameErr)
-		}
-	}
-
-	for i := range eps.Endpoints {
-		for j := range eps.Endpoints[i].Addresses {
-			// 1. Compare the hostname on the endpoint to the hostname
-			// 2. Compare the nodename on the endpoint to the hostname
-			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
-
-			// 1. Compare the Hostname first (should be FQDN)
-			log.Debugf("[endpointslices] processing endpoint [%s]", eps.Endpoints[i].Addresses[j])
-			if eps.Endpoints[i].Hostname != nil && id == *eps.Endpoints[i].Hostname {
-				if *eps.Endpoints[i].Conditions.Serving {
-					log.Debugf("[endpointslices] found endpoint - address: %s, hostname: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname)
-					localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
-				}
-			} else {
-				// 2. Compare the Nodename (from testing could be FQDN or short)
-				if eps.Endpoints[i].NodeName != nil {
-					if id == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
-						if eps.Endpoints[i].Hostname != nil {
-							log.Debugf("[endpointslices] found endpoint - address: %s, hostname: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].Hostname, *eps.Endpoints[i].NodeName)
-						} else {
-							log.Debugf("[endpointslices] found endpoint - address: %s, node: %s", eps.Endpoints[i].Addresses[j], *eps.Endpoints[i].NodeName)
-						}
-						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
-						// 3. Compare to shortname
-					} else if shortnameErr != nil && shortname == *eps.Endpoints[i].NodeName && *eps.Endpoints[i].Conditions.Serving {
-						log.Debugf("[endpointslices] found endpoint - address: %s, shortname: %s, node: %s", eps.Endpoints[i].Addresses[j], shortname, *eps.Endpoints[i].NodeName)
-						localendpoints = append(localendpoints, eps.Endpoints[i].Addresses[j])
-
-					}
-				}
-			}
-		}
-	}
-	return localendpoints
+func (ep *endpointslicesProvider) getLabel() string {
+	return ep.label
 }
 
-func getAllEndpointsFromEndpointslices(eps *discoveryv1.EndpointSlice) []string {
-	endpoints := []string{}
-	for _, ep := range eps.Endpoints {
-		endpoints = append(endpoints, ep.Addresses...)
-	}
-	return endpoints
+func (ep *endpointslicesProvider) getProtocol() string {
+	return string(ep.endpoints.AddressType)
 }

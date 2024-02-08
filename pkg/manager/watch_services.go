@@ -167,16 +167,15 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint or EndpointSlices watcher
 									wg.Add(1)
+									var provider epProvider
 									if !sm.config.EnableEndpointSlices {
-										err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-										if err != nil {
-											log.Error(err)
-										}
+										provider = &endpointsProvider{label: "endpoints"}
+
 									} else {
-										err = sm.watchEndpointSlices(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-										if err != nil {
-											log.Error(err)
-										}
+										provider = &endpointslicesProvider{label: "endpointslices"}
+									}
+									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg, provider); err != nil {
+										log.Error(err)
 									}
 									wg.Done()
 								}
@@ -200,16 +199,15 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 								// Add Endpoint watcher
 								wg.Add(1)
+								var provider epProvider
 								if !sm.config.EnableEndpointSlices {
-									err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-									if err != nil {
-										log.Error(err)
-									}
+									provider = &endpointsProvider{label: "endpoints"}
+
 								} else {
-									err = sm.watchEndpointSlices(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg)
-									if err != nil {
-										log.Error(err)
-									}
+									provider = &endpointslicesProvider{label: "endpointslices"}
+								}
+								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg, provider); err != nil {
+									log.Error(err)
 								}
 								wg.Done()
 							}

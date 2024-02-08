@@ -182,17 +182,15 @@ func (sm *Manager) addService(svc *v1.Service) error {
 				}
 			}
 			if len(errList) == 0 {
+				var provider epProvider
 				if !sm.config.EnableEndpointSlices {
-					err = sm.updateServiceEndpointAnnotation(svc.Annotations[activeEndpoint], svc)
-					if err != nil {
-						log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
-					}
+					provider = &endpointsProvider{label: "endpoints"}
 				} else {
-					err = sm.updateServiceEndpointSlicesAnnotation(svc.Annotations[activeEndpoint],
-						svc.Annotations[activeEndpointIPv6], svc)
-					if err != nil {
-						log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
-					}
+					provider = &endpointslicesProvider{label: "endpointslices"}
+				}
+				err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
+				if err != nil {
+					log.Errorf("error configuring egress annotation for loadbalancer [%s]", err)
 				}
 
 			}
