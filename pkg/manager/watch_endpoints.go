@@ -2,10 +2,11 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -305,7 +306,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 								for i := range cluster.Network {
 									err := cluster.Network[i].AddRoute()
 									if err != nil {
-										if !os.IsExist(err) {
+										if !errors.Is(err, syscall.EEXIST) {
 											// If file exists error is returned by netlink continue quietly
 											log.Errorf("[%s] error adding route: %s", provider.getLabel(), err.Error())
 										}
@@ -435,12 +436,12 @@ func (sm *Manager) clearRoutes(service *v1.Service) {
 		for _, cluster := range instance.clusters {
 			for i := range cluster.Network {
 				err := cluster.Network[i].DeleteRoute()
-				if err != nil && !strings.Contains(err.Error(), "no such process") {
+				if err != nil && !errors.Is(err, syscall.ESRCH) {
 					log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
-				} else {
-					log.Infof("deleted route: %s, service: %s/%s, interface: %s, table: %d",
-						cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+					return
 				}
+				log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
+					cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 			}
 		}
 	}
@@ -455,7 +456,7 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 				if err != nil {
 					log.Errorf("[endpoint] error deleting BGP host %s\n", err.Error())
 				} else {
-					log.Infof("[endpoint] deleted BGP host: %s, service: %s/%s",
+					log.Debugf("[endpoint] deleted BGP host: %s, service: %s/%s",
 						address, service.Namespace, service.Name)
 				}
 			}
