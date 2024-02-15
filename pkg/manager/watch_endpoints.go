@@ -2,61 +2,199 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/util/retry"
 )
 
-func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup) error {
-	log.Infof("[endpoint] watching for service [%s] in namespace [%s]", service.Name, service.Namespace)
-	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	leaderContext, cancel := context.WithCancel(context.Background())
-	var leaderElectionActive bool
-	defer cancel()
+type epProvider interface {
+	createRetryWatcher(context.Context, *Manager,
+		*v1.Service) (*watchtools.RetryWatcher, error)
+	getAllEndpoints() ([]string, error)
+	getLocalEndpoints(string, *kubevip.Config) ([]string, error)
+	getLabel() string
+	updateServiceAnnotation(string, string, *v1.Service, *Manager) error
+	loadObject(runtime.Object, context.CancelFunc) error
+	getProtocol() string
+}
 
+type endpointsProvider struct {
+	label     string
+	endpoints *v1.Endpoints
+}
+
+func (ep *endpointsProvider) createRetryWatcher(ctx context.Context, sm *Manager,
+	service *v1.Service) (*watchtools.RetryWatcher, error) {
 	opts := metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", service.Name).String(),
 	}
+
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			return sm.clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
 	})
+
+	if err != nil {
+		return nil, fmt.Errorf("error creating endpoint watcher: %s", err.Error())
+	}
+
+	return rw, nil
+}
+
+func (ep *endpointsProvider) loadObject(endpoints runtime.Object, cancel context.CancelFunc) error {
+	eps, ok := endpoints.(*v1.Endpoints)
+	if !ok {
+		cancel()
+		return fmt.Errorf("[%s] unable to parse Kubernetes services from API watcher", ep.getLabel())
+	}
+	ep.endpoints = eps
+	return nil
+}
+
+func (ep *endpointsProvider) getAllEndpoints() ([]string, error) {
+	result := []string{}
+	for subset := range ep.endpoints.Subsets {
+		for address := range ep.endpoints.Subsets[subset].Addresses {
+			addr := strings.Split(ep.endpoints.Subsets[subset].Addresses[address].IP, "/")
+			result = append(result, addr[0])
+		}
+	}
+
+	return result, nil
+}
+
+func (ep *endpointsProvider) getLocalEndpoints(id string, config *kubevip.Config) ([]string, error) {
+	var localEndpoints []string
+
+	shortname, shortnameErr := getShortname(id)
+	if shortnameErr != nil {
+		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
+			log.Debugf("[%s] %v, shortname will not be used", ep.label, shortnameErr)
+		} else {
+			log.Errorf("[%s] %v", ep.label, shortnameErr)
+		}
+	}
+
+	for subset := range ep.endpoints.Subsets {
+		for address := range ep.endpoints.Subsets[subset].Addresses {
+			// 1. Compare the hostname on the endpoint to the hostname
+			// 2. Compare the nodename on the endpoint to the hostname
+			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
+
+			// 1. Compare the Hostname first (should be FQDN)
+			log.Debugf("[%s] processing endpoint [%s]", ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP)
+			if id == ep.endpoints.Subsets[subset].Addresses[address].Hostname {
+				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s",
+					ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, ep.endpoints.Subsets[subset].Addresses[address].Hostname)
+				localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
+			} else {
+				// 2. Compare the Nodename (from testing could be FQDN or short)
+				if ep.endpoints.Subsets[subset].Addresses[address].NodeName != nil {
+					if id == *ep.endpoints.Subsets[subset].Addresses[address].NodeName {
+						log.Debugf("[%s] found local endpoint - address: %s, hostname: %s, node: %s",
+							ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, ep.endpoints.Subsets[subset].Addresses[address].Hostname,
+							*ep.endpoints.Subsets[subset].Addresses[address].NodeName)
+						localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
+					} else if shortnameErr == nil && shortname == *ep.endpoints.Subsets[subset].Addresses[address].NodeName {
+						log.Debugf("[%s] found local endpoint -  address: %s, shortname: %s, node: %s",
+							ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, shortname, *ep.endpoints.Subsets[subset].Addresses[address].NodeName)
+						localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
+					}
+				}
+			}
+		}
+	}
+	return localEndpoints, nil
+}
+
+func (ep *endpointsProvider) updateServiceAnnotation(endpoint string, _ string, service *v1.Service, sm *Manager) error {
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Retrieve the latest version of Deployment before attempting update
+		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		currentServiceCopy := currentService.DeepCopy()
+		if currentServiceCopy.Annotations == nil {
+			currentServiceCopy.Annotations = make(map[string]string)
+		}
+
+		currentServiceCopy.Annotations[activeEndpoint] = endpoint
+
+		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+		if err != nil {
+			log.Errorf("[%s] error updating Service Spec [%s] : %v", ep.getLabel(), currentServiceCopy.Name, err)
+			return err
+		}
+		return nil
+	})
+
+	if retryErr != nil {
+		log.Errorf("[%s] failed to set Services: %v", ep.getLabel(), retryErr)
+		return retryErr
+	}
+	return nil
+}
+
+func (ep *endpointsProvider) getLabel() string {
+	return ep.label
+}
+
+func (ep *endpointsProvider) getProtocol() string {
+	return ""
+}
+
+func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup, provider epProvider) error {
+	log.Infof("[%s] watching for service [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
+	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
+	leaderContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var leaderElectionActive bool
+
+	rw, err := provider.createRetryWatcher(leaderContext, sm, service)
 	if err != nil {
 		cancel()
-		return fmt.Errorf("error creating endpoint watcher: %s", err.Error())
+		return fmt.Errorf("[%s] error watching endpoints: %w", provider.getLabel(), err)
 	}
 
 	exitFunction := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			log.Debug("[endpoint] context cancelled")
+			log.Debugf("[%s] context cancelled", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
 			cancel()
 			return
 		case <-sm.shutdownChan:
-			log.Debug("[endpoint] shutdown called")
+			log.Debugf("[%s] shutdown called", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
 			cancel()
 			return
 		case <-exitFunction:
-			log.Debug("[endpoint] function ending")
+			log.Debugf("[%s] function ending", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
@@ -69,24 +207,31 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 	var lastKnownGoodEndpoint string
 	for event := range ch {
-
+		activeEndpointAnnotation := activeEndpoint
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 
 		case watch.Added, watch.Modified:
-			ep, ok := event.Object.(*v1.Endpoints)
-			if !ok {
-				cancel()
-				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
+
+			if err = provider.loadObject(event.Object, cancel); err != nil {
+				return fmt.Errorf("[%s] error loading k8s object: %w", provider.getLabel(), err)
+			}
+
+			if sm.config.EnableEndpointSlices && provider.getProtocol() == string(discoveryv1.AddressTypeIPv6) {
+				activeEndpointAnnotation = activeEndpointIPv6
 			}
 
 			// Build endpoints
 			var endpoints []string
 			if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
 				service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
-				endpoints = getAllEndpoints(ep)
+				if endpoints, err = provider.getAllEndpoints(); err != nil {
+					return fmt.Errorf("[%s] error getting all endpoints: %w", provider.getLabel(), err)
+				}
 			} else {
-				endpoints = getLocalEndpoints(ep, id, sm.config)
+				if endpoints, err = provider.getLocalEndpoints(id, sm.config); err != nil {
+					return fmt.Errorf("[%s] error getting local endpoints: %w", provider.getLabel(), err)
+				}
 			}
 
 			// Find out if we have any local endpoints
@@ -110,9 +255,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 					// If the last endpoint no longer exists, we cancel our leader Election
 					if !stillExists && leaderElectionActive {
-						log.Warnf("[endpoint] existing [%s] has been removed, restarting leaderElection", lastKnownGoodEndpoint)
-						// Stop the existing leaderElection
-						cancel()
+						if sm.config.EnableServicesElection || sm.config.EnableLeaderElection {
+							log.Warnf("[%s] existing [%s] has been removed, restarting leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
+							// Stop the existing leaderElection
+							cancel()
+						}
 						// Set our active endpoint to an existing one
 						lastKnownGoodEndpoint = endpoints[0]
 						// disable last leaderElection flag
@@ -125,7 +272,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 				// Set the service accordingly
 				if service.Annotations[egress] == "true" {
-					service.Annotations[activeEndpoint] = lastKnownGoodEndpoint
+					service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
 				}
 
 				if !leaderElectionActive && sm.config.EnableServicesElection {
@@ -159,10 +306,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 								for i := range cluster.Network {
 									err := cluster.Network[i].AddRoute()
 									if err != nil {
-										log.Errorf("[endpoint] error adding route: %s\n", err.Error())
+										if !errors.Is(err, syscall.EEXIST) {
+											// If file exists error is returned by netlink continue quietly
+											log.Errorf("[%s] error adding route: %s", provider.getLabel(), err.Error())
+										}
 									} else {
-										log.Infof("[endpoint]  added route: %s, service: %s/%s, interface: %s, table: %d",
-											cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+										log.Infof("[%s] added route: %s, service: %s/%s, interface: %s, table: %d",
+											provider.getLabel(), cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 										configuredLocalRoutes[string(service.UID)] = true
 										leaderElectionActive = true
 									}
@@ -177,12 +327,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
 									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									log.Debugf("[endpoint] Attempting to advertise BGP service: %s", address)
+									log.Debugf("[%s] attempting to advertise BGP service: %s", provider.getLabel(), address)
 									err := sm.bgpServer.AddHost(address)
 									if err != nil {
-										log.Errorf("[endpoint] error adding BGP host %s\n", err.Error())
+										log.Errorf("[%s] error adding BGP host %s\n", err.Error(), provider.getLabel())
 									} else {
-										log.Infof("[endpoint] added BGP host: %s, service: %s/%s", address, service.Namespace, service.Name)
+										log.Infof("[%s] added BGP host: %s, service: %s/%s",
+											provider.getLabel(), address, service.Namespace, service.Name)
 										configuredLocalRoutes[string(service.UID)] = true
 										leaderElectionActive = true
 									}
@@ -193,7 +344,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				}
 			} else {
 				// There are no local enpoints
-				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && configuredLocalRoutes[string(service.UID)] {
+				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
 					// If routing table mode is enabled - routes should be deleted
 					if sm.config.EnableRoutingTable {
 						sm.clearRoutes(service)
@@ -208,10 +359,10 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
 									err := sm.bgpServer.DelHost(address)
 									if err != nil {
-										log.Errorf("[endpoint] error deleting BGP host%s:  %s\n", address, err.Error())
+										log.Errorf("[%s] error deleting BGP host%s:  %s\n", provider.getLabel(), address, err.Error())
 									} else {
-										log.Infof("[endpoint] deleted BGP host: %s, service: %s/%s",
-											address, service.Namespace, service.Name)
+										log.Infof("[%s] deleted BGP host: %s, service: %s/%s",
+											provider.getLabel(), address, service.Namespace, service.Name)
 										configuredLocalRoutes[string(service.UID)] = false
 										leaderElectionActive = false
 									}
@@ -223,31 +374,31 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
-					log.Warnf("[endpoint] existing [%s] has been removed, no remaining endpoints for leaderElection", lastKnownGoodEndpoint)
+					log.Warnf("[%s] existing [%s] has been removed, no remaining endpoints for leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
 					lastKnownGoodEndpoint = "" // reset endpoint
-					cancel()                   // stop services watcher
+					if sm.config.EnableServicesElection || sm.config.EnableLeaderElection {
+						cancel() // stop services watcher
+					}
 					leaderElectionActive = false
 				}
 			}
-			log.Debugf("[endpoint watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
-				service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
+			log.Debugf("[%s watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
+				provider.getLabel(), service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
 
 		case watch.Deleted:
 			// When no-leader-elecition mode
 			if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
 				// find all existing local endpoints
-				ep, ok := event.Object.(*v1.Endpoints)
-				if !ok {
-					cancel()
-					return fmt.Errorf("unable to parse Kubernetes services from API watcher")
-				}
-
 				var endpoints []string
 				if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
 					service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
-					endpoints = getAllEndpoints(ep)
+					if endpoints, err = provider.getAllEndpoints(); err != nil {
+						return fmt.Errorf("[%s] error getting all endpoints: %w", provider.getLabel(), err)
+					}
 				} else {
-					endpoints = getLocalEndpoints(ep, id, sm.config)
+					if endpoints, err = provider.getLocalEndpoints(id, sm.config); err != nil {
+						return fmt.Errorf("[%s] error getting all endpoints: %w", provider.getLabel(), err)
+					}
 				}
 
 				// If there were local endpoints deleted
@@ -266,70 +417,18 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
 			close(exitFunction)
-			log.Infof("[endpoints] deleted stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
+			log.Infof("[%s] deleted stopping watching for [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
 
 			return nil
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Errorf("[endpoint] -> %v", statusErr)
+			log.Errorf("[%s] -> %v", provider.getLabel(), statusErr)
 		}
 	}
 	close(exitFunction)
-	log.Infof("[endpoints] stopping watching for [%s] in namespace [%s]", service.Name, service.Namespace)
+	log.Infof("[%s] stopping watching for [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
 	return nil //nolint:govet
-}
-
-func getAllEndpoints(ep *v1.Endpoints) []string {
-	endpoints := []string{}
-	for subset := range ep.Subsets {
-		for address := range ep.Subsets[subset].Addresses {
-			addr := strings.Split(ep.Subsets[subset].Addresses[address].IP, "/")
-			endpoints = append(endpoints, addr[0])
-		}
-	}
-	return endpoints
-}
-
-func getLocalEndpoints(ep *v1.Endpoints, id string, config *kubevip.Config) []string {
-	var localendpoints []string
-
-	shortname, shortnameErr := getShortname(id)
-	if shortnameErr != nil {
-		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
-			log.Debugf("[endpoint] %v, shortname will not be used", shortnameErr)
-		} else {
-			log.Errorf("[endpoint] %v", shortnameErr)
-		}
-	}
-
-	for subset := range ep.Subsets {
-		for address := range ep.Subsets[subset].Addresses {
-			// 1. Compare the hostname on the endpoint to the hostname
-			// 2. Compare the nodename on the endpoint to the hostname
-			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
-
-			// 1. Compare the Hostname first (should be FQDN)
-			log.Debugf("[endpoint] processing endpoint [%s]", ep.Subsets[subset].Addresses[address].IP)
-			if id == ep.Subsets[subset].Addresses[address].Hostname {
-				log.Debugf("[endpoint] found local endpoint - address: %s, hostname: %s", ep.Subsets[subset].Addresses[address].IP, ep.Subsets[subset].Addresses[address].Hostname)
-				localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
-			} else {
-				// 2. Compare the Nodename (from testing could be FQDN or short)
-				if ep.Subsets[subset].Addresses[address].NodeName != nil {
-					if id == *ep.Subsets[subset].Addresses[address].NodeName {
-						log.Debugf("[endpoint] found local endpoint - address: %s, hostname: %s, node: %s", ep.Subsets[subset].Addresses[address].IP, ep.Subsets[subset].Addresses[address].Hostname, *ep.Subsets[subset].Addresses[address].NodeName)
-						localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
-					} else if shortnameErr == nil && shortname == *ep.Subsets[subset].Addresses[address].NodeName {
-						log.Debugf("[endpoint] found local endpoint -  address: %s, shortname: %s, node: %s", ep.Subsets[subset].Addresses[address].IP, shortname, *ep.Subsets[subset].Addresses[address].NodeName)
-						localendpoints = append(localendpoints, ep.Subsets[subset].Addresses[address].IP)
-					}
-
-				}
-			}
-		}
-	}
-	return localendpoints
 }
 
 func (sm *Manager) clearRoutes(service *v1.Service) {
@@ -337,12 +436,12 @@ func (sm *Manager) clearRoutes(service *v1.Service) {
 		for _, cluster := range instance.clusters {
 			for i := range cluster.Network {
 				err := cluster.Network[i].DeleteRoute()
-				if err != nil && !strings.Contains(err.Error(), "no such process") {
+				if err != nil && !errors.Is(err, syscall.ESRCH) {
 					log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
-				} else {
-					log.Infof("deleted route: %s, service: %s/%s, interface: %s, table: %d",
-						cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+					return
 				}
+				log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
+					cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 			}
 		}
 	}
@@ -357,43 +456,12 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 				if err != nil {
 					log.Errorf("[endpoint] error deleting BGP host %s\n", err.Error())
 				} else {
-					log.Infof("[endpoint] deleted BGP host: %s, service: %s/%s",
+					log.Debugf("[endpoint] deleted BGP host: %s, service: %s/%s",
 						address, service.Namespace, service.Name)
 				}
 			}
 		}
 	}
-}
-
-func (sm *Manager) updateServiceEndpointAnnotation(endpoint string, service *v1.Service) error {
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Retrieve the latest version of Deployment before attempting update
-		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		currentServiceCopy := currentService.DeepCopy()
-		if currentServiceCopy.Annotations == nil {
-			currentServiceCopy.Annotations = make(map[string]string)
-		}
-
-		currentServiceCopy.Annotations[activeEndpoint] = endpoint
-
-		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
-		if err != nil {
-			log.Errorf("Error updating Service Spec [%s] : %v", currentServiceCopy.Name, err)
-			return err
-		}
-		return nil
-	})
-
-	if retryErr != nil {
-		log.Errorf("Failed to set Services: %v", retryErr)
-		return retryErr
-	}
-	return nil
 }
 
 // returns just the shortname (or first bit) of a FQDN

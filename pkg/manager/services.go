@@ -182,17 +182,15 @@ func (sm *Manager) addService(svc *v1.Service) error {
 				}
 			}
 			if len(errList) == 0 {
+				var provider epProvider
 				if !sm.config.EnableEndpointSlices {
-					err = sm.updateServiceEndpointAnnotation(svc.Annotations[activeEndpoint], svc)
-					if err != nil {
-						log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
-					}
+					provider = &endpointsProvider{label: "endpoints"}
 				} else {
-					err = sm.updateServiceEndpointSlicesAnnotation(svc.Annotations[activeEndpoint],
-						svc.Annotations[activeEndpointIPv6], svc)
-					if err != nil {
-						log.Errorf("Error configuring egress annotation for loadbalancer [%s]", err)
-					}
+					provider = &endpointslicesProvider{label: "endpointslices"}
+				}
+				err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
+				if err != nil {
+					log.Errorf("error configuring egress annotation for loadbalancer [%s]", err)
 				}
 
 			}
@@ -259,11 +257,14 @@ func (sm *Manager) deleteService(uid string) error {
 			}
 		}
 		// TODO: Implement dual-stack loadbalancer support if BGP is enabled
-		if serviceInstance.vipConfigs[0].EnableBGP && ((sm.config.EnableLeaderElection || sm.config.EnableServicesElection) || configuredLocalRoutes[uid]) {
-			cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfigs[0].VIP, serviceInstance.vipConfigs[0].VIPCIDR)
-			err := sm.bgpServer.DelHost(cidrVip)
-			if err != nil {
-				return fmt.Errorf("error deleting BGP host: %v", err)
+		for i := range serviceInstance.vipConfigs {
+			if serviceInstance.vipConfigs[i].EnableBGP {
+				cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfigs[i].VIP, serviceInstance.vipConfigs[i].VIPCIDR)
+				err := sm.bgpServer.DelHost(cidrVip)
+				if err != nil {
+					return fmt.Errorf("[BGP] error deleting BGP host: %v", err)
+				}
+				log.Debugf("[BGP] deleted host: %s", cidrVip)
 			}
 		}
 
