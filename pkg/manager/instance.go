@@ -65,6 +65,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			EnableRoutingTable:     config.EnableRoutingTable,
 			RoutingTableID:         config.RoutingTableID,
 			RoutingTableType:       config.RoutingTableType,
+			RoutingProtocol:        config.RoutingProtocol,
 			ArpBroadcastRate:       config.ArpBroadcastRate,
 			EnableServiceSecurity:  config.EnableServiceSecurity,
 			DNSMode:                config.DNSMode,

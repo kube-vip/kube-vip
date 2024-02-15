@@ -136,6 +136,9 @@ const (
 	//						 you should say `vip_routingtabletype=2` for RTN_LOCAL
 	vipRoutingTableType = "vip_routingtabletype" //nolint
 
+	// vipRoutingProtocol - defines what value will be used as protcol when creating routes
+	vipRoutingProtocol = "vip_routingprotocol" //nolint
+
 	// cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 

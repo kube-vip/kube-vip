@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 	v1 "k8s.io/api/core/v1"
 
@@ -30,6 +31,7 @@ type Network interface {
 	DeleteRoute() error
 	IsSet() (bool, error)
 	IP() string
+	PrepareRoute() *netlink.Route
 	SetIP(ip string) error
 	SetServicePorts(service *v1.Service)
 	Interface() string
@@ -55,6 +57,7 @@ type network struct {
 
 	routeTable       int
 	routingTableType int
+	routingProtocol  int
 }
 
 func netlinkParse(addr string) (*netlink.Addr, error) {
@@ -66,7 +69,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, dnsMode string) ([]Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode string) ([]Network, error) {
 	networks := []Network{}
 
 	if IsIP(address) {
@@ -80,6 +83,7 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 		result.link = link
 		result.routeTable = tableID
 		result.routingTableType = tableType
+		result.routingProtocol = routingProtocol
 
 		// Check if the subnet needs overriding
 		if subnet != "" {
@@ -142,8 +146,20 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 	return networks, nil
 }
 
-// AddRoute - Add an IP address to a route table
-func (configurator *network) AddRoute() error {
+// GetRoutes returns all routes from selected table with selected protocol
+func GetRoutes(table, protocol int) ([]netlink.Route, error) {
+	route := &netlink.Route{
+		Table:    table,
+		Protocol: netlink.RouteProtocol(protocol),
+	}
+	routes, err := netlink.RouteListFiltered(nl.FAMILY_ALL, route, netlink.RT_FILTER_PROTOCOL|netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, fmt.Errorf("error getting routes from table [%d] with protocol [%d]: %w", table, protocol, err)
+	}
+	return routes, nil
+}
+
+func (configurator *network) PrepareRoute() *netlink.Route {
 	routeScope := netlink.SCOPE_UNIVERSE
 	if configurator.routingTableType == unix.RTN_LOCAL {
 		routeScope = netlink.SCOPE_LINK
@@ -154,23 +170,20 @@ func (configurator *network) AddRoute() error {
 		LinkIndex: configurator.link.Attrs().Index,
 		Table:     configurator.routeTable,
 		Type:      configurator.routingTableType,
+		Protocol:  netlink.RouteProtocol(configurator.routingProtocol),
 	}
+	return route
+}
+
+// AddRoute - Add an IP address to a route table
+func (configurator *network) AddRoute() error {
+	route := configurator.PrepareRoute()
 	return netlink.RouteAdd(route)
 }
 
 // DeleteRoute - Delete an IP address from a route table
 func (configurator *network) DeleteRoute() error {
-	routeScope := netlink.SCOPE_UNIVERSE
-	if configurator.routingTableType == unix.RTN_LOCAL {
-		routeScope = netlink.SCOPE_LINK
-	}
-	route := &netlink.Route{
-		Scope:     routeScope,
-		Dst:       configurator.address.IPNet,
-		LinkIndex: configurator.link.Attrs().Index,
-		Table:     configurator.routeTable,
-		Type:      configurator.routingTableType,
-	}
+	route := configurator.PrepareRoute()
 	return netlink.RouteDel(route)
 }
 

@@ -50,7 +50,7 @@ func startNetworking(c *kubevip.Config) ([]vip.Network, error) {
 
 	networks := []vip.Network{}
 	for _, addr := range addresses {
-		network, err := vip.NewConfig(addr, c.Interface, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType, c.DNSMode)
+		network, err := vip.NewConfig(addr, c.Interface, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType, c.RoutingProtocol, c.DNSMode)
 		if err != nil {
 			return nil, err
 		}
