@@ -30,13 +30,15 @@ func (sm *Manager) startTableMode() error {
 	defer cancel()
 	log.Infof("all routing table entries will exist in table [%d] with protocol [%d]", sm.config.RoutingTableID, sm.config.RoutingProtocol)
 
-	go func() {
-		// we assume that after 10s all services should be configured so we can delete redundant routes
-		time.Sleep(time.Second * 10)
-		if err := sm.purgeRoutes(); err != nil {
-			log.Errorf("error checking for old routes: %v", err)
-		}
-	}()
+	if sm.config.CleanRoutingTable {
+		go func() {
+			// we assume that after 10s all services should be configured so we can delete redundant routes
+			time.Sleep(time.Second * 10)
+			if err := sm.cleanRoutes(); err != nil {
+				log.Errorf("error checking for old routes: %v", err)
+			}
+		}()
+	}
 
 	log.Infof("started route watcher")
 
@@ -129,7 +131,7 @@ func (sm *Manager) startTableMode() error {
 	return nil
 }
 
-func (sm *Manager) purgeRoutes() error {
+func (sm *Manager) cleanRoutes() error {
 	routes, err := vip.GetRoutes(sm.config.RoutingTableID, sm.config.RoutingProtocol)
 	if err != nil {
 		return fmt.Errorf("error getting routes: %w", err)

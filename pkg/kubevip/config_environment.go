@@ -323,6 +323,16 @@ func ParseEnvironment(c *Config) error {
 		c.RoutingProtocol = int(i)
 	}
 
+	// Clean routing table
+	env = os.Getenv(vipCleanRoutingTable)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.CleanRoutingTable = b
+	}
+
 	// DNS mode
 	env = os.Getenv(dnsMode)
 	if env != "" {
