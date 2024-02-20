@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cloudflare/ipvs"
+	"github.com/cloudflare/ipvs/netmask"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -57,6 +58,7 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
+		Netmask:   netmask.MaskFrom(31, 32),
 		Family:    family,
 		Protocol:  ipvs.TCP,
 		Port:      uint16(port),
