@@ -297,8 +297,12 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}()
 				}
 
+				isRouteConfigured, err := isRouteConfigured(service.UID)
+				if err != nil {
+					return fmt.Errorf("error while checkig if route is configured: %w", err)
+				}
 				// There are local endpoints available on the node
-				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && !configuredLocalRoutes[string(service.UID)] {
+				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && isRouteConfigured {
 					// If routing table mode is enabled - routes should be added per node
 					if sm.config.EnableRoutingTable {
 						if instance := sm.findServiceInstance(service); instance != nil {
@@ -313,7 +317,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									} else {
 										log.Infof("[%s] added route: %s, service: %s/%s, interface: %s, table: %d",
 											provider.getLabel(), cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
-										configuredLocalRoutes[string(service.UID)] = true
+										configuredLocalRoutes.Store(string(service.UID), true)
 										leaderElectionActive = true
 									}
 								}
@@ -334,7 +338,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									} else {
 										log.Infof("[%s] added BGP host: %s, service: %s/%s",
 											provider.getLabel(), address, service.Namespace, service.Name)
-										configuredLocalRoutes[string(service.UID)] = true
+										configuredLocalRoutes.Store(string(service.UID), true)
 										leaderElectionActive = true
 									}
 								}
@@ -347,8 +351,9 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
 					// If routing table mode is enabled - routes should be deleted
 					if sm.config.EnableRoutingTable {
-						sm.clearRoutes(service)
-						configuredLocalRoutes[string(service.UID)] = false
+						if errs := sm.clearRoutes(service); len(errs) == 0 {
+							configuredLocalRoutes.Store(string(service.UID), false)
+						}
 					}
 
 					// If BGP mode is enabled - routes should be deleted
@@ -363,7 +368,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									} else {
 										log.Infof("[%s] deleted BGP host: %s, service: %s/%s",
 											provider.getLabel(), address, service.Namespace, service.Name)
-										configuredLocalRoutes[string(service.UID)] = false
+										configuredLocalRoutes.Store(string(service.UID), false)
 										leaderElectionActive = false
 									}
 								}
@@ -431,20 +436,22 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 	return nil //nolint:govet
 }
 
-func (sm *Manager) clearRoutes(service *v1.Service) {
+func (sm *Manager) clearRoutes(service *v1.Service) []error {
+	errs := []error{}
 	if instance := sm.findServiceInstance(service); instance != nil {
 		for _, cluster := range instance.clusters {
 			for i := range cluster.Network {
 				err := cluster.Network[i].DeleteRoute()
 				if err != nil && !errors.Is(err, syscall.ESRCH) {
 					log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
-					return
+					errs = append(errs, err)
 				}
 				log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
 					cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 			}
 		}
 	}
+	return errs
 }
 
 func (sm *Manager) clearBGPHosts(service *v1.Service) {

@@ -13,6 +13,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -33,7 +34,7 @@ var activeService map[string]bool
 var watchedService map[string]bool
 
 // watchedService keeps track of routes that has been configured on the node
-var configuredLocalRoutes map[string]bool
+var configuredLocalRoutes sync.Map
 
 func init() {
 	// Set up the caches for monitoring existing active or watched services
@@ -41,7 +42,6 @@ func init() {
 	activeServiceLoadBalancer = make(map[string]context.Context)
 	activeService = make(map[string]bool)
 	watchedService = make(map[string]bool)
-	configuredLocalRoutes = make(map[string]bool)
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
@@ -261,15 +261,20 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					break
 				}
 
+				isRouteConfigured, err := isRouteConfigured(svc.UID)
+				if err != nil {
+					return fmt.Errorf("error while checkig if route is configured: %w", err)
+				}
 				// If no leader election is enabled, delete routes here
 				if !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
-					sm.config.EnableRoutingTable && configuredLocalRoutes[string(svc.UID)] {
-					configuredLocalRoutes[string(svc.UID)] = false
-					sm.clearRoutes(svc)
+					sm.config.EnableRoutingTable && isRouteConfigured {
+					if errs := sm.clearRoutes(svc); len(errs) == 0 {
+						configuredLocalRoutes.Store(string(svc.UID), false)
+					}
 				}
 
 				// If this is an active service then and additional leaderElection will handle stopping
-				err := sm.deleteService(string(svc.UID))
+				err = sm.deleteService(string(svc.UID))
 				if err != nil {
 					log.Error(err)
 				}
@@ -318,4 +323,16 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	close(exitFunction)
 	log.Warnln("Stopping watching services for type: LoadBalancer in all namespaces")
 	return nil
+}
+
+func isRouteConfigured(serviceUID types.UID) (bool, error) {
+	isConfigured := false
+	value, ok := configuredLocalRoutes.Load(string(serviceUID))
+	if ok {
+		isConfigured, ok = value.(bool)
+		if !ok {
+			return false, fmt.Errorf("error converting configuredLocalRoute item to boolean value")
+		}
+	}
+	return isConfigured, nil
 }
