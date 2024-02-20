@@ -299,10 +299,10 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 				isRouteConfigured, err := isRouteConfigured(service.UID)
 				if err != nil {
-					return fmt.Errorf("error while checkig if route is configured: %w", err)
+					return fmt.Errorf("[%s] error while checking if route is configured: %w", provider.getLabel(), err)
 				}
 				// There are local endpoints available on the node
-				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && isRouteConfigured {
+				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && !isRouteConfigured {
 					// If routing table mode is enabled - routes should be added per node
 					if sm.config.EnableRoutingTable {
 						if instance := sm.findServiceInstance(service); instance != nil {
@@ -310,9 +310,18 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 								for i := range cluster.Network {
 									err := cluster.Network[i].AddRoute()
 									if err != nil {
-										if !errors.Is(err, syscall.EEXIST) {
-											// If file exists error is returned by netlink continue quietly
-											log.Errorf("[%s] error adding route: %s", provider.getLabel(), err.Error())
+										if errors.Is(err, syscall.EEXIST) {
+											// If route exists try to update it if necessary
+											isUpdated, err := cluster.Network[i].UpdateRoutes()
+											if err != nil {
+												return fmt.Errorf("[%s] error updating existing routes: %w", provider.getLabel(), err)
+											}
+											if isUpdated {
+												log.Debugf("[%s] updated route: %s", provider.getLabel(), cluster.Network[i].IP())
+											}
+										} else {
+											// If other error occurs, return error
+											return fmt.Errorf("[%s] error adding route: %s", provider.getLabel(), err.Error())
 										}
 									} else {
 										log.Infof("[%s] added route: %s, service: %s/%s, interface: %s, table: %d",

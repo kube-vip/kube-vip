@@ -40,8 +40,6 @@ func (sm *Manager) startTableMode() error {
 		}()
 	}
 
-	log.Infof("started route watcher")
-
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
 		<-sm.signalChan
@@ -132,7 +130,7 @@ func (sm *Manager) startTableMode() error {
 }
 
 func (sm *Manager) cleanRoutes() error {
-	routes, err := vip.GetRoutes(sm.config.RoutingTableID, sm.config.RoutingProtocol)
+	routes, err := vip.ListRoutes(sm.config.RoutingTableID, sm.config.RoutingProtocol)
 	if err != nil {
 		return fmt.Errorf("error getting routes: %w", err)
 	}

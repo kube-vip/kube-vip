@@ -2,6 +2,7 @@ package vip
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ type Network interface {
 	AddRoute() error
 	DeleteIP() error
 	DeleteRoute() error
+	UpdateRoutes() (bool, error)
 	IsSet() (bool, error)
 	IP() string
 	PrepareRoute() *netlink.Route
@@ -146,8 +148,8 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 	return networks, nil
 }
 
-// GetRoutes returns all routes from selected table with selected protocol
-func GetRoutes(table, protocol int) ([]netlink.Route, error) {
+// ListRoutes returns all routes from selected table with selected protocol
+func ListRoutes(table, protocol int) ([]netlink.Route, error) {
 	route := &netlink.Route{
 		Table:    table,
 		Protocol: netlink.RouteProtocol(protocol),
@@ -155,6 +157,19 @@ func GetRoutes(table, protocol int) ([]netlink.Route, error) {
 	routes, err := netlink.RouteListFiltered(nl.FAMILY_ALL, route, netlink.RT_FILTER_PROTOCOL|netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return nil, fmt.Errorf("error getting routes from table [%d] with protocol [%d]: %w", table, protocol, err)
+	}
+	return routes, nil
+}
+
+// ListRoutesByDst returns all routes from selected table with selected destination IP
+func ListRoutesByDst(table int, dst *net.IPNet) ([]netlink.Route, error) {
+	route := &netlink.Route{
+		Dst:   dst,
+		Table: table,
+	}
+	routes, err := netlink.RouteListFiltered(nl.FAMILY_ALL, route, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_DST)
+	if err != nil {
+		return nil, fmt.Errorf("error getting routes from table [%d] with destination IP [%s]: %w", table, dst.String(), err)
 	}
 	return routes, nil
 }
@@ -185,6 +200,35 @@ func (configurator *network) AddRoute() error {
 func (configurator *network) DeleteRoute() error {
 	route := configurator.PrepareRoute()
 	return netlink.RouteDel(route)
+}
+
+// GetRoutes - Get an IP addresses from a route table
+func (configurator *network) getRoutes() (*[]netlink.Route, error) {
+	routes, err := ListRoutesByDst(configurator.routeTable, configurator.address.IPNet)
+	if err != nil {
+		return nil, fmt.Errorf("error getting routes: %w", err)
+	}
+	return &routes, nil
+}
+
+func (configurator *network) UpdateRoutes() (bool, error) {
+	routes, err := configurator.getRoutes()
+	if err != nil {
+		return false, fmt.Errorf("error updating routes: %w", err)
+	}
+	isUpdated := false
+	r := configurator.PrepareRoute()
+	for _, route := range *routes {
+		if route.Protocol == unix.RTPROT_BOOT &&
+			(route.Type == r.Type || route.Type == unix.RTN_UNICAST) &&
+			route.LinkIndex == r.LinkIndex && route.Scope == r.Scope {
+			if err = netlink.RouteReplace(r); err != nil {
+				return false, fmt.Errorf("error replacing route: %w", err)
+			}
+			isUpdated = true
+		}
+	}
+	return isUpdated, nil
 }
 
 // AddIP - Add an IP address to the interface

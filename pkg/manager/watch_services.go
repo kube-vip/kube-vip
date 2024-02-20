@@ -334,5 +334,6 @@ func isRouteConfigured(serviceUID types.UID) (bool, error) {
 			return false, fmt.Errorf("error converting configuredLocalRoute item to boolean value")
 		}
 	}
+
 	return isConfigured, nil
 }
