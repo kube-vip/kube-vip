@@ -47,11 +47,13 @@ func (sm *Manager) iptablesCheck() error {
 func getSameFamilyCidr(source, ip string) string {
 	cidrs := strings.Split(source, ",")
 	for _, cidr := range cidrs {
+		source = cidr
 		if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
 			return cidr
 		}
 	}
-	return ""
+	// return to the default behaviour of setting the CIDR to the first one (or only one)
+	return source
 }
 
 func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
