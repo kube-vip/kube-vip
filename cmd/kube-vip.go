@@ -127,6 +127,8 @@ func init() {
 	// Routing Table flags
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableID, "tableID", 198, "The routing table used for all table entries")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableType, "tableType", 0, "The type of route that will be added to the routing table")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingProtocol, "routingProtocol", 248, "The routing protocol value used to create routes")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.CleanRoutingTable, "cleanRoutingTable", false, "Clean routing table of redundant routes on start")
 
 	// Behaviour flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableControlPlane, "controlplane", false, "Enable HA for control plane")
