@@ -25,8 +25,8 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/vishvananda/netlink v1.2.1-beta.2
 	go.etcd.io/etcd/api/v3 v3.5.12
-	go.etcd.io/etcd/client/pkg/v3 v3.5.11
-	go.etcd.io/etcd/client/v3 v3.5.11
+	go.etcd.io/etcd/client/pkg/v3 v3.5.12
+	go.etcd.io/etcd/client/v3 v3.5.12
 	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20231005195138-3e424a577f31
 	golang.org/x/sys v0.17.0
