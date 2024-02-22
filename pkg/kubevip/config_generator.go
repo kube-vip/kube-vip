@@ -505,6 +505,16 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, disServiceUpdates...)
 	}
 
+	if c.MirrorDestInterface != "" {
+		mdif := []corev1.EnvVar{
+			{
+				Name:  mirrorDestInterface,
+				Value: strconv.FormatBool(c.DisableServiceUpdates),
+			},
+		}
+		newEnvironment = append(newEnvironment, mdif...)
+	}
+
 	newManifest := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",

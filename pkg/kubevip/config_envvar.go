@@ -190,7 +190,7 @@ const (
 	// vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
 
-	//k8sConfigFile defines the path to the configfile used to speak with the API server
+	// k8sConfigFile defines the path to the configfile used to speak with the API server
 	k8sConfigFile = "k8s_config_file"
 
 	// dnsMode defines mode that DNS lookup will be performed with (first, ipv4, ipv6, dual)
@@ -201,4 +201,9 @@ const (
 
 	// enableEndpointSlices enables use of EndpointSlices instead of Endpoints
 	enableEndpointSlices = "enable_endpointslices"
+
+	// mirrorDestInterface is the network interface where all traffics that go through service interface
+	// will be mirrored to. The source interface is ServicesInterface by default, fall back to Interface if not set.
+	// + optional
+	mirrorDestInterface = "mirror_dest_interface"
 )

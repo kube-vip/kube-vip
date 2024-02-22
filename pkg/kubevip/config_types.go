@@ -172,6 +172,11 @@ type Config struct {
 
 	// EnableEndpointSlices, if enabled, EndpointSlices will be used instead of Endpoints
 	EnableEndpointSlices bool `yaml:"enableEndpointSlices"`
+
+	// MirrorDestInterface is the network interface where all traffics that go through service interface
+	// will be mirrored to. If ServicesInterface is not set, fall back to Interface.
+	// + optional
+	MirrorDestInterface string `yaml:"mirrorDestInterface"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
