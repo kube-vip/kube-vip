@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -59,31 +58,10 @@ func (sm *Manager) startTableMode() error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
-		// first start port mirroring for on all kube-vip instance, since
-		// service's VIP could be on any of the kube-vip instance in this mode.
-		svcIf := sm.config.Interface
-		if sm.config.MirrorDestInterface != "" {
-			if sm.config.ServicesInterface != "" {
-				svcIf = sm.config.ServicesInterface
-			}
-			log.Infof("mirroring traffic from interface %s to interface %s", svcIf, sm.config.MirrorDestInterface)
-			if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
-				return err
-			}
-		}
-
 		log.Infof("beginning watching services, leaderelection will happen for every service")
 		err = sm.startServicesWatchForLeaderElection(ctx)
 		if err != nil {
 			return err
-		}
-
-		// clean up traffic mirror related config
-		if sm.config.MirrorDestInterface != "" {
-			log.Infof("clean up qdisc config on interface %s", svcIf)
-			if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
-				return err
-			}
 		}
 	} else if sm.config.EnableLeaderElection {
 
@@ -115,29 +93,9 @@ func (sm *Manager) startTableMode() error {
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
-					// first start port mirroring for on kube-vip instance with leader, since
-					// service's VIP will be on this kube-vip instance
-					svcIf := sm.config.Interface
-					if sm.config.MirrorDestInterface != "" {
-						if sm.config.ServicesInterface != "" {
-							svcIf = sm.config.ServicesInterface
-						}
-						log.Infof("mirroring traffic from interface %s to interface %s", svcIf, sm.config.MirrorDestInterface)
-						if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
-							log.Error(err)
-						}
-					}
-
 					err = sm.servicesWatcher(ctx, sm.syncServices)
 					if err != nil {
 						log.Error(err)
-					}
-					// clean up traffic mirror related config
-					if sm.config.MirrorDestInterface != "" {
-						log.Infof("clean up qdisc config on interface %s", svcIf)
-						if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
-							log.Error(err)
-						}
 					}
 				},
 				OnStoppedLeading: func() {
@@ -162,29 +120,10 @@ func (sm *Manager) startTableMode() error {
 			},
 		})
 	} else {
-		// first start port mirroring for on current kube-vip instance, since
-		// service's VIP will be on this kube-vip instance
-		svcIf := sm.config.Interface
-		if sm.config.MirrorDestInterface != "" {
-			if sm.config.ServicesInterface != "" {
-				svcIf = sm.config.ServicesInterface
-			}
-			log.Infof("mirroring traffic from interface %s to interface %s", svcIf, sm.config.MirrorDestInterface)
-			if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
-				return err
-			}
-		}
 		log.Infof("beginning watching services without leader election")
 		err = sm.servicesWatcher(ctx, sm.syncServices)
 		if err != nil {
 			log.Errorf("Cannot watch services, %v", err)
-		}
-		// clean up traffic mirror related config
-		if sm.config.MirrorDestInterface != "" {
-			log.Infof("clean up qdisc config on interface %s", svcIf)
-			if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
