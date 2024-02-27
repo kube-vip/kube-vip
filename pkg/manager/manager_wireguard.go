@@ -115,7 +115,7 @@ func (sm *Manager) startWireguard() error {
 				OnStartedLeading: func(ctx context.Context) {
 					err = sm.servicesWatcher(ctx, sm.syncServices)
 					if err != nil {
-						log.Error(err)
+						log.Fatal(err)
 					}
 				},
 				OnStoppedLeading: func() {
