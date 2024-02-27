@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var qDiscNotFound = errors.New("qdisc not found")
+var errQdiscNotFound = errors.New("qdisc not found")
 
 // MirrorTrafficFromNIC use netlink to implement tc command to mirror traffic from
 // one interface to another
@@ -82,13 +82,12 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 	}
 
 	// get id through tc qdisc show dev fromNICName
-	qdiscID, err := getQdiscFromInterfaceByType(fromNICName, "ingress")
+	qdiscID, err := getQdiscFromInterfaceByType(fromNICID, fromNICName, "ingress")
 	if err != nil {
-		if err == qDiscNotFound {
+		if err == errQdiscNotFound {
 			return fmt.Errorf("no qdisc under interface %s is prio type: %v", fromNICName, err)
-		} else {
-			return err
 		}
+		return err
 	}
 
 	log.Debugf("step 4: tc filter add dev %s parent %d: protocol ip u32 match u8 0 0 action mirred egress mirror dev %s", fromNICName, qdiscID, toNICName)
@@ -130,39 +129,12 @@ func CleanupQDSICFromNIC(nicName string) error {
 	log.Debugf("interface %s has index %d", nicName, nicID)
 
 	log.Debug("step 1: delete ingress qdisc")
-	_, err = getQdiscFromInterfaceByType(nicName, "ingress")
-	if err != nil {
-		if err == qDiscNotFound {
-			log.Debugf("ingress qdisc doesn't exist on interface %s, skip deleting", nicName)
-		} else {
-			return err
-		}
-	}
-
-	qdisc1 := &netlink.Ingress{
-		QdiscAttrs: netlink.QdiscAttrs{
-			LinkIndex: nicID,
-			Parent:    netlink.HANDLE_INGRESS,
-		},
-	}
-	if err := netlink.QdiscDel(qdisc1); err != nil {
+	if err := tryCleanupQdiscByType(nicID, nicName, "ingress"); err != nil {
 		return err
 	}
 
 	log.Debug("step 2: delete root prio qdisc")
-	_, err = getQdiscFromInterfaceByType(nicName, "prio")
-	if err != nil {
-		if err == qDiscNotFound {
-			log.Debugf("prio qdisc doesn't exist on interface %s, skip deleting", nicName)
-		} else {
-			return err
-		}
-	}
-	qdiscRoot := netlink.NewPrio(netlink.QdiscAttrs{
-		LinkIndex: nicID,
-		Parent:    netlink.HANDLE_ROOT,
-	})
-	if err := netlink.QdiscDel(qdiscRoot); err != nil {
+	if err := tryCleanupQdiscByType(nicID, nicName, "prio"); err != nil {
 		return err
 	}
 
@@ -170,24 +142,49 @@ func CleanupQDSICFromNIC(nicName string) error {
 	return nil
 }
 
-func getQdiscFromInterfaceByType(netIf string, qtype string) (uint32, error) {
-	// name of nic which traffic will be mirrored to
-	toNIC, err := netlink.LinkByName(netIf)
-	if err != nil {
-		return 0, fmt.Errorf("failed to find nic %s: %v", netIf, err)
-	}
-	toNICID := toNIC.Attrs().Index
+func getQdiscFromInterfaceByType(nicID int, nicName string, qType string) (uint32, error) {
 	// get id through tc qdisc show dev fromNICName
-	qs, err := netlink.QdiscList(&netlink.Ifb{LinkAttrs: netlink.LinkAttrs{Index: toNICID}})
+	qs, err := netlink.QdiscList(&netlink.Ifb{LinkAttrs: netlink.LinkAttrs{Index: nicID}})
 	if err != nil {
-		fmt.Printf("Failed to list qdisc for interface %s: %v", netIf, err)
+		fmt.Printf("Failed to list qdisc for interface %s: %v", nicName, err)
 		return 0, err
 	}
 	for _, q := range qs {
-		if q.Type() == qtype {
+		if q.Type() == qType {
 			return q.Attrs().Handle, nil
 		}
 	}
-	log.Errorf("no qdisc under interface %s is prio type: %v", netIf, err)
-	return 0, qDiscNotFound
+	log.Errorf("no qdisc under interface %s is %s type", nicName, qType)
+	return 0, errQdiscNotFound
+}
+
+func tryCleanupQdiscByType(nicID int, nicName, qType string) error {
+	var qdisc netlink.Qdisc
+	switch qType {
+	case "ingress":
+		qdisc = &netlink.Ingress{QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: nicID,
+			Parent:    netlink.HANDLE_INGRESS,
+		}}
+	case "prio":
+		qdisc = netlink.NewPrio(netlink.QdiscAttrs{
+			LinkIndex: nicID,
+			Parent:    netlink.HANDLE_ROOT,
+		})
+	default:
+		return fmt.Errorf("unknown qdisc type %s", qType)
+	}
+
+	_, err := getQdiscFromInterfaceByType(nicID, nicName, qType)
+	if err != nil {
+		if err == errQdiscNotFound {
+			log.Debugf("%s type qdisc doesn't exist on interface %s, skip deleting", qType, nicName)
+			return nil
+		}
+		return err
+	}
+	if err := netlink.QdiscDel(qdisc); err != nil {
+		return err
+	}
+	return nil
 }
