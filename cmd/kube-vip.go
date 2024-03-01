@@ -23,8 +23,7 @@ import (
 // Path to the configuration file
 var configPath string
 
-// Path to the configuration file
-// var namespace string
+var inCluster bool
 
 // Disable the Virtual IP (bind to the existing network stack)
 var disableVIP bool
@@ -164,7 +163,6 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipManager)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
-	kubeVipCmd.AddCommand(kubeVipStart)
 	kubeVipCmd.AddCommand(kubeVipVersion)
 }
 
