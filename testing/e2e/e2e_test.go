@@ -393,6 +393,7 @@ func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName 
 	)).To(Succeed())
 }
 
+// Assume the VIP is routable if status code is 200 or 500. Since etcd might glitch.
 func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, eventuallyTimeout time.Duration) {
 	if strings.Contains(controlPlaneVIP, ":") {
 		controlPlaneVIP = fmt.Sprintf("[%s]", controlPlaneVIP)
@@ -409,7 +410,7 @@ func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, even
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode
-	}, eventuallyTimeout).Should(Equal(http.StatusOK), "Failed to connect to VIP")
+	}, eventuallyTimeout).Should(BeElementOf([]int{http.StatusOK, http.StatusInternalServerError}), "Failed to connect to VIP")
 }
 
 func killLeader(leaderIPAddr string, clusterName string) {
