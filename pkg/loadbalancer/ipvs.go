@@ -56,18 +56,19 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 
 	ip, family := ipAndFamily(address)
 
+	netMask := netmask.MaskFrom(31, 32) // For ipv4
+	if family == ipvs.INET6 {
+		netMask = netmask.MaskFrom(128, 128) // For ipv6
+	}
+
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
-		Netmask:   netmask.MaskFrom(31, 32), // For ipv4
+		Netmask:   netMask,
 		Family:    family,
 		Protocol:  ipvs.TCP,
 		Port:      uint16(port),
 		Address:   ip,
 		Scheduler: ROUNDROBIN,
-	}
-
-	if family == ipvs.INET6 {
-		svc.Netmask = netmask.MaskFrom(128, 128) // For ipv6
 	}
 
 	var m ipvs.ForwardType
