@@ -58,12 +58,16 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
-		Netmask:   netmask.MaskFrom(31, 32),
+		Netmask:   netmask.MaskFrom(31, 32), // For ipv4
 		Family:    family,
 		Protocol:  ipvs.TCP,
 		Port:      uint16(port),
 		Address:   ip,
 		Scheduler: ROUNDROBIN,
+	}
+
+	if family == ipvs.INET6 {
+		svc.Netmask = netmask.MaskFrom(128, 128) // For ipv6
 	}
 
 	var m ipvs.ForwardType
@@ -114,7 +118,6 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 		if err != nil && strings.Contains(err.Error(), "file exists") {
 			log.Warnf("load balancer for API server already exists, attempting to remove and re-create")
 			err = lb.client.RemoveService(lb.loadBalancerService)
-
 			if err != nil {
 				return fmt.Errorf("error re-creating IPVS service: %v", err)
 			}
@@ -185,7 +188,6 @@ func (lb *IPVSLoadBalancer) addrString() string {
 }
 
 func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
-
 	ipAddr := net.ParseIP(address)
 	if ipAddr.To4() == nil {
 		return netip.AddrFrom16([16]byte(ipAddr.To16())), ipvs.INET6
