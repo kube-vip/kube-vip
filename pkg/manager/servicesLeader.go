@@ -16,7 +16,6 @@ import (
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) error {
-
 	err := sm.servicesWatcher(ctx, sm.StartServicesLeaderElection)
 	if err != nil {
 		return err
@@ -38,7 +37,6 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
-
 	id, err := os.Hostname()
 	if err != nil {
 		return err
@@ -83,7 +81,6 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 						log.Errorln(err)
 					}
 				}()
-
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here

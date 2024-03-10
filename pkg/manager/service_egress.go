@@ -47,11 +47,13 @@ func (sm *Manager) iptablesCheck() error {
 func getSameFamilyCidr(source, ip string) string {
 	cidrs := strings.Split(source, ",")
 	for _, cidr := range cidrs {
+		source = cidr
 		if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
 			return cidr
 		}
 	}
-	return ""
+	// return to the default behaviour of setting the CIDR to the first one (or only one)
+	return source
 }
 
 func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
@@ -160,7 +162,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 		}
 	}
 	//_ = i.DumpChain(vip.MangleChainName)
-	err = vip.DeleteExistingSessions(podIP, false)
+	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
 		return err
 	}
@@ -235,7 +237,7 @@ func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace stri
 			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 		}
 	}
-	err = vip.DeleteExistingSessions(podIP, false)
+	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
 		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 	}
