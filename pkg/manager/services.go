@@ -147,13 +147,14 @@ func (sm *Manager) addService(svc *v1.Service) error {
 
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
+
 		log.Debugf("Flushing conntrack rules for service [%s]", svc.Name)
 		for _, serviceIP := range serviceIPs {
-			err = vip.DeleteExistingSessions(serviceIP, false)
+			err = vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
 				log.Errorf("Error flushing any remaining egress connections [%s]", err)
 			}
-			err = vip.DeleteExistingSessions(serviceIP, true)
+			err = vip.DeleteExistingSessions(serviceIP, true, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
 				log.Errorf("Error flushing any remaining ingress connections [%s]", err)
 			}
