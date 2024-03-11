@@ -570,5 +570,10 @@ func ParseEnvironment(c *Config) error {
 		c.EnableEndpointSlices = b
 	}
 
+	env = os.Getenv(mirrorDestInterface)
+	if env != "" {
+		c.MirrorDestInterface = env
+	}
+
 	return nil
 }
