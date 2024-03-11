@@ -21,6 +21,7 @@ import (
 const (
 	defaultValidLft                 = 60
 	iptablesComment                 = "%s kube-vip load balancer IP"
+	iptablesCommentMarkRule         = "kube-vip load balancer IP set mark for masquerade"
 	ignoreServiceSecurityAnnotation = "kube-vip.io/ignore-service-security"
 )
 
@@ -57,6 +58,9 @@ type network struct {
 	dnsName string
 	isDDNS  bool
 
+	forwardMethod   string
+	iptablesBackend string
+
 	routeTable       int
 	routingTableType int
 	routingProtocol  int
@@ -71,7 +75,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode string) ([]Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
 	networks := []Network{}
 
 	if IsIP(address) {
@@ -86,6 +90,8 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 		result.routeTable = tableID
 		result.routingTableType = tableType
 		result.routingProtocol = routingProtocol
+		result.forwardMethod = forwardMethod
+		result.iptablesBackend = iptablesBackend
 
 		// Check if the subnet needs overriding
 		if subnet != "" {
@@ -243,6 +249,12 @@ func (configurator *network) AddIP() error {
 		}
 	}
 
+	if configurator.forwardMethod == "masquerade" {
+		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
+			return errors.Wrap(err, "could not add iptables rules for masquerade")
+		}
+	}
+
 	return nil
 }
 
@@ -396,6 +408,72 @@ func (configurator *network) DeleteIP() error {
 		}
 	}
 
+	if configurator.forwardMethod == "masquerade" {
+		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
+			return errors.Wrap(err, "could not remove iptables masquerade rules ")
+		}
+	}
+
+	return nil
+}
+
+func (configurator *network) addIptablesRulesForMasquerade() error {
+	ver, err := iptables.GetVersion()
+	if err != nil {
+		return errors.Wrap(err, "could not get iptables version")
+	}
+
+	ipt, err := iptables.New(iptables.EnableNFTables(ver.BackendMode == "nft"))
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, vip)
+	if err := addMasqueradeRuleForVIP(ipt, vip, comment); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// addIptablesRulesForMasquerade add iptables rules for MASQUERADE
+// insert example
+func (configurator *network) removeIptablesRulesForMasquerade() error {
+	ver, err := iptables.GetVersion()
+	if err != nil {
+		return errors.Wrap(err, "could not get iptables version")
+	}
+	ipt, err := iptables.New(iptables.EnableNFTables(ver.BackendMode == "nft"))
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
+
+	err = delMasqueradeRuleForVIP(ipt, vip, comment)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
+	err := ipt.InsertUnique(iptables.TableNat, iptables.ChainPOSTROUTING,
+		1, "-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	if err != nil {
+		return fmt.Errorf("could not add masquerade rule for VIP %s: %v", vip, err)
+	}
+	return nil
+}
+
+func delMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
+	err := ipt.DeleteIfExists(iptables.TableNat, iptables.ChainPOSTROUTING,
+		"-d", "-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	if err != nil {
+		return fmt.Errorf("could not del masquerade rule for VIP %s: %v", vip, err)
+	}
 	return nil
 }
 
