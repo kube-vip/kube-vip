@@ -162,6 +162,11 @@ func ParseEnvironment(c *Config) error {
 		c.DetectControlPlane = b
 	}
 
+	env = os.Getenv(kubernetesAddr)
+	if env != "" {
+		c.KubernetesAddr = env
+	}
+
 	// Find Services toggle
 	env = os.Getenv(svcEnable)
 	if env != "" {
@@ -568,6 +573,20 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableEndpointSlices = b
+	}
+
+	env = os.Getenv(iptablesBackend)
+	if env != "" {
+		c.IptablesBackend = env
+	}
+
+	env = os.Getenv(backendHealthCheckInterval)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BackendHealthCheckInterval = int(i)
 	}
 
 	return nil

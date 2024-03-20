@@ -505,6 +505,23 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, disServiceUpdates...)
 	}
 
+	var securityContext *corev1.SecurityContext
+	if c.LoadBalancerForwardingMethod == "masquerade" {
+		var privileged = true
+		securityContext = &corev1.SecurityContext{
+			Privileged: &privileged,
+		}
+	} else {
+		securityContext = &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{
+					"NET_ADMIN",
+					"NET_RAW",
+				},
+			},
+		}
+	}
+
 	newManifest := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
@@ -520,14 +537,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 					Name:            "kube-vip",
 					Image:           fmt.Sprintf("ghcr.io/kube-vip/kube-vip:%s", imageVersion),
 					ImagePullPolicy: corev1.PullAlways,
-					SecurityContext: &corev1.SecurityContext{
-						Capabilities: &corev1.Capabilities{
-							Add: []corev1.Capability{
-								"NET_ADMIN",
-								"NET_RAW",
-							},
-						},
-					},
+					SecurityContext: securityContext,
 					Args: []string{
 						command,
 					},

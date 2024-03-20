@@ -64,8 +64,12 @@ const (
 )
 
 const (
-	TableFilter = "filter"
-	ChainInput  = "INPUT"
+	TableFilter      = "filter"
+	TableMangle      = "mangle"
+	TableNat         = "nat"
+	ChainInput       = "INPUT"
+	ChainPREROUTING  = "PREROUTING"
+	ChainPOSTROUTING = "POSTROUTING"
 )
 
 type IPTables struct {

@@ -151,6 +151,9 @@ const (
 	// cpDetect will attempt to automatically find a working address for the control plane from loopback
 	cpDetect = "cp_detect"
 
+	// kubernetesAddr，is the address of the Kubernetes API server on this machine
+	kubernetesAddr = "kubernetes_addr"
+
 	// svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"
 
@@ -190,7 +193,7 @@ const (
 	// vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"
 
-	//k8sConfigFile defines the path to the configfile used to speak with the API server
+	// k8sConfigFile defines the path to the configfile used to speak with the API server
 	k8sConfigFile = "k8s_config_file"
 
 	// dnsMode defines mode that DNS lookup will be performed with (first, ipv4, ipv6, dual)
@@ -201,4 +204,10 @@ const (
 
 	// enableEndpointSlices enables use of EndpointSlices instead of Endpoints
 	enableEndpointSlices = "enable_endpointslices"
+
+	// iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
+	iptablesBackend = "iptables_backend"
+
+	// backendHealthCheckInterval Interval in seconds for checking backend health.
+	backendHealthCheckInterval = "backend_health_check_interval"
 )
