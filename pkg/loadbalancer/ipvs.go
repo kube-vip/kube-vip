@@ -5,9 +5,12 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/cloudflare/ipvs"
 	"github.com/cloudflare/ipvs/netmask"
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,14 +36,23 @@ const (
 	ROUNDROBIN = "rr"
 )
 
+type Backend struct {
+	Addr string
+	Port int
+}
+
 type IPVSLoadBalancer struct {
 	client              ipvs.Client
 	loadBalancerService ipvs.Service
 	Port                int
 	forwardingMethod    ipvs.ForwardType
+	backendMap          map[Backend]bool
+	interval            int
+	lock                sync.Mutex
+	stop                chan struct{}
 }
 
-func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(address string, port int, forwardingMethod string, backendHealthCheckInterval int) (*IPVSLoadBalancer, error) {
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
@@ -88,17 +100,29 @@ func NewIPVSLB(address string, port int, forwardingMethod string) (*IPVSLoadBala
 		log.Warnf("unknown forwarding method. Defaulting to Local")
 	}
 
+	if backendHealthCheckInterval <= 0 {
+		backendHealthCheckInterval = 5
+	}
+
 	lb := &IPVSLoadBalancer{
 		Port:                port,
 		client:              c,
 		loadBalancerService: svc,
 		forwardingMethod:    m,
+		interval:            backendHealthCheckInterval,
+		backendMap:          make(map[Backend]bool),
 	}
+
+	if strings.ToLower(forwardingMethod) == "masquerade" {
+		go lb.healthCheck()
+	}
+
 	// Return our created load-balancer
 	return lb, nil
 }
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
+	close(lb.stop)
 	err := lb.client.RemoveService(lb.loadBalancerService)
 	if err != nil {
 		return fmt.Errorf("error removing existing IPVS service: %v", err)
@@ -107,6 +131,24 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 }
 
 func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
+	backend := Backend{Addr: address, Port: port}
+
+	lb.lock.Lock()
+	defer lb.lock.Unlock()
+	if _, ok := lb.backendMap[backend]; !ok {
+		isHealth := lb.checkBackend(backend)
+		if isHealth {
+			err := lb.addBackend(address, port)
+			if err != nil {
+				return err
+			}
+		}
+		lb.backendMap[backend] = isHealth
+	}
+	return nil
+}
+
+func (lb *IPVSLoadBalancer) addBackend(address string, port int) error {
 	// Check if this is the first backend
 	backends, err := lb.client.Destinations(lb.loadBalancerService)
 	if err != nil && strings.Contains(err.Error(), "file does not exist") {
@@ -166,6 +208,23 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
 }
 
 func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
+	backend := Backend{Addr: address, Port: port}
+
+	lb.lock.Lock()
+	defer lb.lock.Unlock()
+
+	if _, ok := lb.backendMap[backend]; ok {
+		err := lb.removeBackend(address, port)
+		if err != nil {
+			return err
+		}
+		delete(lb.backendMap, backend)
+	}
+
+	return nil
+}
+
+func (lb *IPVSLoadBalancer) removeBackend(address string, port int) error {
 	ip, family := ipAndFamily(address)
 	if family != lb.loadBalancerService.Family {
 		return nil
@@ -194,4 +253,60 @@ func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
 		return netip.AddrFrom16([16]byte(ipAddr.To16())), ipvs.INET6
 	}
 	return netip.AddrFrom4([4]byte(ipAddr.To4())), ipvs.INET
+}
+
+func (lb *IPVSLoadBalancer) healthCheck() {
+	ticker := time.NewTicker(time.Second * time.Duration(lb.interval))
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-lb.stop:
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			ticker.Stop()
+			lb.lock.Lock()
+			for backend, oldStatus := range lb.backendMap {
+				newStatus := lb.checkBackend(backend)
+				if newStatus {
+					// old status -> health
+					if !oldStatus {
+						err := lb.AddBackend(backend.Addr, backend.Port)
+						if err != nil {
+							log.Errorf("failed to add backend: %s", err)
+						}
+						lb.backendMap[backend] = newStatus
+					}
+				} else {
+					// old status -> not health
+					if oldStatus {
+						log.Infof("healthCheck failed for backend %s:%d, attempting to remove from load balancer", backend.Addr, backend.Port)
+						err := lb.removeBackend(backend.Addr, backend.Port)
+						if err != nil {
+							log.Errorf("failed to remove backend %s:%d: %s", backend.Addr, backend.Port, err)
+						}
+						lb.backendMap[backend] = newStatus
+					}
+				}
+			}
+			lb.lock.Unlock()
+			ticker.Reset(time.Second * time.Duration(lb.interval))
+		}
+	}
+}
+
+func (lb *IPVSLoadBalancer) checkBackend(backend Backend) bool {
+	adminConfigPath := "/etc/kubernetes/admin.conf"
+	client, err := k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("%s:%v", backend.Addr, backend.Port))
+	if err != nil {
+		log.Infof("failed to new clientset: %s", err)
+		return false
+	}
+	_, err = client.DiscoveryClient.ServerVersion()
+	if err != nil {
+		log.Infof("failed check k8s server version: %s", err)
+		return false
+	}
+	return true
 }

@@ -71,7 +71,10 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
 	case fileExists(adminConfigPath):
-		if config.EnableControlPlane {
+		if config.KubernetesAddr != "" {
+			fmt.Println(config.KubernetesAddr)
+			clientset, err = k8s.NewClientset(adminConfigPath, false, config.KubernetesAddr)
+		} else if config.EnableControlPlane {
 			// If this is a control plane host it will likely have started as a static pod or won't have the
 			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 			// ensure connectivity.
