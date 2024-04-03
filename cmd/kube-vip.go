@@ -17,7 +17,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
-	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -348,14 +347,6 @@ var kubeVipManager = &cobra.Command{
 				}
 				initConfig.MetalAPIKey = providerAPI
 				initConfig.MetalProject = providerProject
-			}
-		}
-
-		if initConfig.LoadBalancerForwardingMethod == "masquerade" {
-			log.Infof("sysctl set net.ipv4.vs.conntrack to 1")
-			err := sysctl.WriteProcSys("/proc/sys/net/ipv4/vs/conntrack", "1")
-			if err != nil {
-				log.Fatalln(err)
 			}
 		}
 
