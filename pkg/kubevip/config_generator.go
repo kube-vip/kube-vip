@@ -536,7 +536,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				{
 					Name:            "kube-vip",
 					Image:           fmt.Sprintf("ghcr.io/kube-vip/kube-vip:%s", imageVersion),
-					ImagePullPolicy: corev1.PullAlways,
+					ImagePullPolicy: corev1.PullIfNotPresent,
 					SecurityContext: securityContext,
 					Args: []string{
 						command,
