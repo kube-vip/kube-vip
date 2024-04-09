@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -66,6 +67,10 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+
+	if config.NodeName == "" {
+		return nil, errors.New("node name is missing from config")
+	}
 
 	switch {
 	case config.LeaderElectionType == "etcd":
@@ -173,17 +178,17 @@ func (sm *Manager) Start() error {
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Infoln("Starting Kube-vip Manager with the ARP engine")
-		return sm.startARP()
+		return sm.startARP(sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
 		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
-		return sm.startWireguard()
+		return sm.startWireguard(sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
 		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
-		return sm.startTableMode()
+		return sm.startTableMode(sm.config.NodeName)
 	}
 
 	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")

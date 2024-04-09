@@ -15,14 +15,9 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startWireguard() error {
+func (sm *Manager) startWireguard(id string) error {
 	var ns string
 	var err error
-
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down

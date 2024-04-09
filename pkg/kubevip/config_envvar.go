@@ -74,6 +74,9 @@ const (
 	// vipDdns - defines if use dynamic dns to allocate IP for "address"
 	vipDdns = "vip_ddns"
 
+	// vipLeaseNodeName defines the node name that is used to acquire leases
+	nodeName = "vip_nodename"
+
 	// vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
 

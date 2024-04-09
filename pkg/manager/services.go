@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -315,11 +314,6 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			return err
 		}
 
-		id, err := os.Hostname()
-		if err != nil {
-			return err
-		}
-
 		currentServiceCopy := currentService.DeepCopy()
 		if currentServiceCopy.Annotations == nil {
 			currentServiceCopy.Annotations = make(map[string]string)
@@ -328,7 +322,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		// If we're using ARP then we can only broadcast the VIP from one place, add an annotation to the service
 		if sm.config.EnableARP {
 			// Add the current host
-			currentServiceCopy.Annotations[vipHost] = id
+			currentServiceCopy.Annotations[vipHost] = sm.config.NodeName
 		}
 		if i.dhcpInterfaceHwaddr != "" || i.dhcpInterfaceIP != "" {
 			currentServiceCopy.Annotations[hwAddrKey] = i.dhcpInterfaceHwaddr

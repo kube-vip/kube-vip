@@ -61,45 +61,31 @@ func (ep *endpointslicesProvider) getAllEndpoints() ([]string, error) {
 }
 
 func (ep *endpointslicesProvider) getLocalEndpoints(id string, config *kubevip.Config) ([]string, error) {
-	shortname, shortnameErr := getShortname(id)
-	if shortnameErr != nil {
-		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
-			log.Debugf("[%s] %v, shortname will not be used", ep.label, shortnameErr)
-		} else {
-			log.Errorf("[%s] %v", ep.label, shortnameErr)
-		}
-	}
-
 	var localEndpoints []string
-	for i := range ep.endpoints.Endpoints {
-		for j := range ep.endpoints.Endpoints[i].Addresses {
-			// 1. Compare the hostname on the endpoint to the hostname
-			// 2. Compare the nodename on the endpoint to the hostname
-			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
+	for endpointIndex := range ep.endpoints.Endpoints {
+		endpoint := ep.endpoints.Endpoints[endpointIndex]
+		if !*endpoint.Conditions.Serving {
+			continue
+		}
+		for addressIndex := range ep.endpoints.Endpoints[endpointIndex].Addresses {
+			address := endpoint.Addresses[addressIndex]
+			log.Debugf("[%s] processing endpoint [%s]", ep.label, address)
 
-			// 1. Compare the Hostname first (should be FQDN)
-			log.Debugf("[%s] processing endpoint [%s]", ep.label, ep.endpoints.Endpoints[i].Addresses[j])
-			if ep.endpoints.Endpoints[i].Hostname != nil && id == *ep.endpoints.Endpoints[i].Hostname {
-				if *ep.endpoints.Endpoints[i].Conditions.Serving {
-					log.Debugf("[%s] found endpoint - address: %s, hostname: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].Hostname)
-					localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
+			// 1. Compare the Nodename
+			if endpoint.NodeName != nil && id == *endpoint.NodeName {
+				if endpoint.Hostname != nil {
+					log.Debugf("[%s] found endpoint - address: %s, hostname: %s, node: %s", ep.label, address, *endpoint.Hostname, *endpoint.NodeName)
+				} else {
+					log.Debugf("[%s] found endpoint - address: %s, node: %s", ep.label, address, *endpoint.NodeName)
 				}
-			} else {
-				// 2. Compare the Nodename (from testing could be FQDN or short)
-				if ep.endpoints.Endpoints[i].NodeName != nil {
-					if id == *ep.endpoints.Endpoints[i].NodeName && *ep.endpoints.Endpoints[i].Conditions.Serving {
-						if ep.endpoints.Endpoints[i].Hostname != nil {
-							log.Debugf("[%s] found endpoint - address: %s, hostname: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].Hostname, *ep.endpoints.Endpoints[i].NodeName)
-						} else {
-							log.Debugf("[%s] found endpoint - address: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], *ep.endpoints.Endpoints[i].NodeName)
-						}
-						localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
-						// 3. Compare to shortname
-					} else if shortnameErr != nil && shortname == *ep.endpoints.Endpoints[i].NodeName && *ep.endpoints.Endpoints[i].Conditions.Serving {
-						log.Debugf("[%s] found endpoint - address: %s, shortname: %s, node: %s", ep.label, ep.endpoints.Endpoints[i].Addresses[j], shortname, *ep.endpoints.Endpoints[i].NodeName)
-						localEndpoints = append(localEndpoints, ep.endpoints.Endpoints[i].Addresses[j])
-					}
-				}
+				localEndpoints = append(localEndpoints, address)
+				continue
+			}
+
+			// 2. Compare the Hostname (only useful if node name is not available)
+			if endpoint.Hostname != nil && id == *endpoint.Hostname {
+				log.Debugf("[%s] found endpoint - address: %s, hostname: %s", ep.label, address, *endpoint.Hostname)
+				localEndpoints = append(localEndpoints, address)
 			}
 		}
 	}

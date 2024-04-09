@@ -91,6 +91,9 @@ type Config struct {
 	// use DDNS to allocate IP when Address is set to a DNS Name
 	DDNS bool `yaml:"ddns"`
 
+	// NodeName - used for matching node name from pod spec
+	NodeName string `yaml:"leaseNodeName"`
+
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
 

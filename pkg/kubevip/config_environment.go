@@ -100,6 +100,11 @@ func ParseEnvironment(c *Config) error {
 		}
 	}
 
+	env = os.Getenv(nodeName)
+	if env != "" {
+		c.NodeName = env
+	}
+
 	// Find vip address
 	env = os.Getenv(vipAddress)
 	if env != "" {
