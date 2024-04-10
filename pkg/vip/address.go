@@ -78,20 +78,20 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
 	networks := []Network{}
 
+	link, err := netlink.LinkByName(iface)
+	if err != nil {
+		return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+	}
+
 	if IsIP(address) {
-		result := &network{}
-
-		link, err := netlink.LinkByName(iface)
-		if err != nil {
-			return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+		result := &network{
+			link:             link,
+			routeTable:       tableID,
+			routingTableType: tableType,
+			routingProtocol:  routingProtocol,
+			forwardMethod:    forwardMethod,
+			iptablesBackend:  iptablesBackend,
 		}
-
-		result.link = link
-		result.routeTable = tableID
-		result.routingTableType = tableType
-		result.routingProtocol = routingProtocol
-		result.forwardMethod = forwardMethod
-		result.iptablesBackend = iptablesBackend
 
 		// Check if the subnet needs overriding
 		if subnet != "" {
@@ -117,27 +117,34 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 			// return early for ddns if no IP is allocated for the domain
 			// when leader starts, should do get IP from DHCP for the domain
 			if isDDNS {
+				result := &network{
+					link:             link,
+					routeTable:       tableID,
+					routingTableType: tableType,
+					routingProtocol:  routingProtocol,
+					forwardMethod:    forwardMethod,
+					iptablesBackend:  iptablesBackend,
+					isDDNS:           isDDNS,
+					dnsName:          address,
+				}
+
+				networks = append(networks, result)
 				return networks, nil
 			}
 			return nil, err
 		}
 
 		for _, ip := range ips {
-
-			result := &network{}
-
-			link, err := netlink.LinkByName(iface)
-			if err != nil {
-				return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+			result := &network{
+				link:             link,
+				routeTable:       tableID,
+				routingTableType: tableType,
+				routingProtocol:  routingProtocol,
+				forwardMethod:    forwardMethod,
+				iptablesBackend:  iptablesBackend,
+				isDDNS:           isDDNS,
+				dnsName:          address,
 			}
-
-			result.link = link
-			result.routeTable = tableID
-			result.routingTableType = tableType
-
-			// address is DNS
-			result.isDDNS = isDDNS
-			result.dnsName = address
 
 			// we're able to resolve store this as the initial IP
 			if result.address, err = netlinkParse(ip); err != nil {
