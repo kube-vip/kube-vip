@@ -122,7 +122,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Value: fmt.Sprintf("%d", c.Port),
 		},
 		{
-			Name:  nodeName,
+			Name: nodeName,
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
 					FieldPath: "spec.nodeName",
