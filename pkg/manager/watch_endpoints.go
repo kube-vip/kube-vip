@@ -82,10 +82,8 @@ func (ep *endpointsProvider) getAllEndpoints() ([]string, error) {
 func (ep *endpointsProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
 
-	for subsetIndex := range ep.endpoints.Subsets {
-		subset := ep.endpoints.Subsets[subsetIndex]
-		for addressIndex := range subset.Addresses {
-			address := subset.Addresses[addressIndex]
+	for _, subset := range ep.endpoints.Subsets {
+		for _, address := range subset.Addresses {
 			log.Debugf("[%s] processing endpoint [%s]", ep.label, address.IP)
 
 			// 1. Compare the Nodename
