@@ -60,7 +60,7 @@ func (ep *endpointslicesProvider) getAllEndpoints() ([]string, error) {
 	return result, nil
 }
 
-func (ep *endpointslicesProvider) getLocalEndpoints(id string, config *kubevip.Config) ([]string, error) {
+func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
 	for endpointIndex := range ep.endpoints.Endpoints {
 		endpoint := ep.endpoints.Endpoints[endpointIndex]
@@ -82,7 +82,7 @@ func (ep *endpointslicesProvider) getLocalEndpoints(id string, config *kubevip.C
 				continue
 			}
 
-			// 2. Compare the Hostname (only useful if node name is not available)
+			// 2. Compare the Hostname (only useful if endpoint.NodeName is not available)
 			if endpoint.Hostname != nil && id == *endpoint.Hostname {
 				log.Debugf("[%s] found endpoint - address: %s, hostname: %s", ep.label, address, *endpoint.Hostname)
 				localEndpoints = append(localEndpoints, address)
