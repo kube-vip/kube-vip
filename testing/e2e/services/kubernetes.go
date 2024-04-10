@@ -92,6 +92,14 @@ func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clien
 									Name:  "egress_withnftables",
 									Value: "true",
 								},
+								{
+									Name: "vip_nodename",
+									ValueFrom: &v1.EnvVarSource{
+										FieldRef: &v1.ObjectFieldSelector{
+											FieldPath: "spec.nodeName",
+										},
+									},
+								},
 							},
 							Image: imagepath,
 							Name:  "kube-vip",

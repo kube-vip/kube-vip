@@ -90,8 +90,8 @@ func (config *testConfig) createKind() error {
 		err := provider.Create("services", cluster.CreateWithV1Alpha4Config(&clusterConfig))
 		if err != nil {
 			return err
-
 		}
+
 		loadImageCmd := load.NewCommand(cmd.NewLogger(), cmd.StandardIOStreams())
 		loadImageCmd.SetArgs([]string{"--name", "services", config.ImagePath})
 		err = loadImageCmd.Execute()
@@ -101,6 +101,16 @@ func (config *testConfig) createKind() error {
 		nodes, err := provider.ListNodes("services")
 		if err != nil {
 			return err
+		}
+
+		if !config.skipHostnameChange {
+			log.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
+			for _, node := range nodes {
+				cmd := exec.Command("docker", "exec", node.String(), "hostname", node.String() + "-modified")
+				if _, err := cmd.CombinedOutput(); err != nil {
+					return err
+				}
+			}
 		}
 
 		// HMMM, if we want to run workloads on the control planes (todo)
