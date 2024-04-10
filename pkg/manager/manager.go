@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -67,17 +66,6 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-
-	id := config.NodeName
-	if id == "" {
-		log.Warning("Node name is missing from the config, fall back to hostname")
-		hostname, err := os.Hostname()
-		if err != nil {
-			return nil, fmt.Errorf("could not get hostname: %v", err)
-		}
-		id = hostname
-	}
-	log.Infof("Using node id [%v]", id)
 
 	switch {
 	case config.LeaderElectionType == "etcd":
@@ -155,6 +143,17 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start() error {
+
+	id := sm.config.NodeName
+	if id == "" {
+		log.Warning("Node name is missing from the config, fall back to hostname")
+		hostname, err := os.Hostname()
+		if err != nil {
+			return fmt.Errorf("could not get hostname: %v", err)
+		}
+		id = hostname
+	}
+	log.Infof("Using node id [%v]", id)
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
