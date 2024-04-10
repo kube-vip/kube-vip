@@ -61,6 +61,21 @@ type Manager struct {
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
+	// Instance identity should be the same as k8s node name to ensure better compatibility.
+	// By default k8s sets node name to `hostname -s`,
+	// so if node name is not provided in the config,
+	// we set it to hostname as a fallback.
+	// This mimics legacy behavior and should work on old kube-vip installations.
+	if config.NodeName == "" {
+		log.Warning("Node name is missing from the config, fall back to hostname")
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("could not get hostname: %v", err)
+		}
+		config.NodeName = hostname
+	}
+	log.Infof("Using node name [%v]", config.NodeName)
+
 	var clientset *kubernetes.Clientset
 	var err error
 
@@ -144,17 +159,6 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start() error {
 
-	id := sm.config.NodeName
-	if id == "" {
-		log.Warning("Node name is missing from the config, fall back to hostname")
-		hostname, err := os.Hostname()
-		if err != nil {
-			return fmt.Errorf("could not get hostname: %v", err)
-		}
-		id = hostname
-	}
-	log.Infof("Using node id [%v]", id)
-
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -184,17 +188,17 @@ func (sm *Manager) Start() error {
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Infoln("Starting Kube-vip Manager with the ARP engine")
-		return sm.startARP(id)
+		return sm.startARP(sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
 		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
-		return sm.startWireguard(id)
+		return sm.startWireguard(sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
 		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
-		return sm.startTableMode(id)
+		return sm.startTableMode(sm.config.NodeName)
 	}
 
 	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
