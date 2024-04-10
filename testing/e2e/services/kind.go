@@ -106,7 +106,8 @@ func (config *testConfig) createKind() error {
 		if !config.skipHostnameChange {
 			log.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
 			for _, node := range nodes {
-				cmd := exec.Command("docker", "exec", node.String(), "hostname", node.String()+"-modified") //nolint:all
+				nodeName := node.String()
+				cmd := exec.Command("docker", "exec", nodeName, "hostname", nodeName+"-modified")
 				if _, err := cmd.CombinedOutput(); err != nil {
 					return err
 				}
@@ -115,8 +116,9 @@ func (config *testConfig) createKind() error {
 
 		// HMMM, if we want to run workloads on the control planes (todo)
 		if config.ControlPlane {
-			for x := range nodes {
-				cmd := exec.Command("kubectl", "taint", "nodes", nodes[x].String(), "node-role.kubernetes.io/control-plane:NoSchedule-") //nolint:all
+			for _, node := range nodes {
+				nodeName := node.String()
+				cmd := exec.Command("kubectl", "taint", "nodes", nodeName, "node-role.kubernetes.io/control-plane:NoSchedule-")
 				_, _ = cmd.CombinedOutput()
 			}
 		}
