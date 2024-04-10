@@ -9,11 +9,8 @@ spec:
   - name: kube-vip
     args:
     - manager
-    - --leaderElectionType=etcd
-    - --etcdCACert=/etc/kubernetes/pki/etcd/ca.crt
-    - --etcdCert=/etc/kubernetes/pki/etcd/server.crt
-    - --etcdKey=/etc/kubernetes/pki/etcd/server.key
-    - --etcdEndpoints=127.0.0.1:2379
+    - --prometheusHTTPServer
+    - ""
     env:
     - name: vip_arp
       value: "true"
@@ -24,19 +21,13 @@ spec:
     - name: address
       value: "{{ .ControlPlaneVIP }}"
     - name: vip_leaseduration
-      value: "2"
+      value: "5"
     - name: vip_renewdeadline
       value: "3"
     - name: vip_retryperiod
       value: "1"
     - name: cp_enable
       value: "true"
-    - name: vip_loglevel
-      value: "5"
-    - name: vip_nodename
-      valueFrom:
-        fieldRef:
-          fieldPath: spec.nodeName
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
@@ -45,11 +36,14 @@ spec:
         - NET_ADMIN
         - NET_RAW
     volumeMounts:
-    # force kube-vip to use CP ip from admin.conf instead of localhost
-    - mountPath: /etc/kubernetes/pki/etcd
-      name: etcd-certs
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostAliases:
+    - hostnames:
+      - kubernetes
+      ip: 127.0.0.1
   hostNetwork: true
   volumes:
   - hostPath:
-      path: /etc/kubernetes/pki/etcd
-    name: etcd-certs
+      path: "{{ .ConfigPath }}"
+    name: kubeconfig

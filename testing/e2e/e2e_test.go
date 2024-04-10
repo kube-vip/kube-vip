@@ -33,14 +33,15 @@ import (
 
 var _ = Describe("kube-vip broadcast neighbor", func() {
 	var (
-		logger                  log.Logger
-		imagePath               string
-		k8sImagePath            string
-		configPath              string
-		kubeVIPManifestTemplate *template.Template
-		clusterName             string
-		tempDirPath             string
-		v129                    bool
+		logger                          log.Logger
+		imagePath                       string
+		k8sImagePath                    string
+		configPath                      string
+		kubeVIPManifestTemplate         *template.Template
+		kubeVIPHostnameManifestTemplate *template.Template
+		clusterName                     string
+		tempDirPath                     string
+		v129                            bool
 	)
 
 	BeforeEach(func() {
@@ -56,9 +57,13 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		_, v129 = os.LookupEnv("V129")
 		curDir, err := os.Getwd()
 		Expect(err).NotTo(HaveOccurred())
-		templatePath := filepath.Join(curDir, "kube-vip.yaml.tmpl")
 
+		templatePath := filepath.Join(curDir, "kube-vip.yaml.tmpl")
 		kubeVIPManifestTemplate, err = template.New("kube-vip.yaml.tmpl").ParseFiles(templatePath)
+		Expect(err).NotTo(HaveOccurred())
+
+		hostnameTemplatePath := filepath.Join(curDir, "kube-vip-hostname.yaml.tmpl")
+		kubeVIPHostnameManifestTemplate, err = template.New("kube-vip-hostname.yaml.tmpl").ParseFiles(hostnameTemplatePath)
 		Expect(err).NotTo(HaveOccurred())
 
 		tempDirPath, err = ioutil.TempDir("", "kube-vip-test")
@@ -378,6 +383,103 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 			assertControlPlaneIsRoutable(vips[0], 1*time.Second, 30*time.Second)
 		})
 	})
+
+	Describe("kube-vip IPv4 functionality with legacy hostname", func() {
+		var (
+			clusterConfig kindconfigv1alpha4.Cluster
+			ipv4VIP       string
+		)
+
+		BeforeEach(func() {
+			clusterName = fmt.Sprintf("%s-ipv4-hostname", filepath.Base(tempDirPath))
+
+			clusterConfig = kindconfigv1alpha4.Cluster{
+				Networking: kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv4Family,
+				},
+				Nodes: []kindconfigv1alpha4.Node{},
+			}
+
+			manifestPath := filepath.Join(tempDirPath, "kube-vip-ipv4-hostname.yaml")
+
+			for i := 0; i < 3; i++ {
+				nodeConfig := kindconfigv1alpha4.Node{
+					Role: kindconfigv1alpha4.ControlPlaneRole,
+					ExtraMounts: []kindconfigv1alpha4.Mount{
+						{
+							HostPath:      manifestPath,
+							ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
+						},
+					},
+				}
+				// Override the kind image version
+				if k8sImagePath != "" {
+					nodeConfig.Image = k8sImagePath
+				}
+				clusterConfig.Nodes = append(clusterConfig.Nodes, nodeConfig)
+			}
+
+			manifestFile, err := os.Create(manifestPath)
+			Expect(err).NotTo(HaveOccurred())
+
+			defer manifestFile.Close()
+
+			ipv4VIP = e2e.GenerateIPv4VIP()
+
+			Expect(kubeVIPHostnameManifestTemplate.Execute(manifestFile, e2e.KubevipManifestValues{
+				ControlPlaneVIP: ipv4VIP,
+				ImagePath:       imagePath,
+				ConfigPath:      configPath,
+			})).To(Succeed())
+
+			if v129 {
+				// create a seperate manifest
+				manifestPath2 := filepath.Join(tempDirPath, "kube-vip-ipv4-hostname-first.yaml")
+
+				// change the path of the mount to the new file
+				clusterConfig.Nodes[0].ExtraMounts[0].HostPath = manifestPath2
+
+				manifestFile2, err := os.Create(manifestPath2)
+				Expect(err).NotTo(HaveOccurred())
+
+				defer manifestFile2.Close()
+
+				Expect(kubeVIPHostnameManifestTemplate.Execute(manifestFile2, e2e.KubevipManifestValues{
+					ControlPlaneVIP: ipv4VIP,
+					ImagePath:       imagePath,
+					ConfigPath:      "/etc/kubernetes/super-admin.conf", // Change the kuberenetes file
+				})).To(Succeed())
+			}
+		})
+
+		It("uses hostname fallback while providing an IPv4 VIP address for the Kubernetes control plane nodes", func() {
+			go func() {
+				time.Sleep(30 * time.Second)
+				By(withTimestamp("loading local docker image to kind cluster"))
+				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
+			}()
+
+			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
+			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv4 VIP"))
+			// Allow enough time for control plane nodes to load the docker image and
+			// use the default timeout for establishing a connection to the VIP
+			assertControlPlaneIsRoutable(ipv4VIP, time.Duration(0), 20*time.Second)
+
+			// wait for a bit
+			By(withTimestamp("sitting for a few seconds to hopefully allow the roles to have been created in the cluster"))
+			time.Sleep(30 * time.Second)
+
+			By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
+			killLeader(ipv4VIP, clusterName)
+
+			By(withTimestamp("checking that the Kubernetes control plane nodes are still accessible via the assigned IPv4 VIP with little downtime"))
+			// Allow at most 20 seconds of downtime when polling the control plane nodes
+			assertControlPlaneIsRoutable(ipv4VIP, 1*time.Second, 30*time.Second)
+		})
+	})
+
 })
 
 func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName string) {
