@@ -106,7 +106,7 @@ func (config *testConfig) createKind() error {
 		if !config.skipHostnameChange {
 			log.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
 			for _, node := range nodes {
-				cmd := exec.Command("docker", "exec", node.String(), "hostname", node.String() + "-modified")
+				cmd := exec.Command("docker", "exec", node.String(), "hostname", node.String()+"-modified")
 				if _, err := cmd.CombinedOutput(); err != nil {
 					return err
 				}
