@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -15,14 +14,9 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startTableMode() error {
+func (sm *Manager) startTableMode(id string) error {
 	var ns string
 	var err error
-
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down

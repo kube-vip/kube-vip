@@ -121,6 +121,14 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name:  port,
 			Value: fmt.Sprintf("%d", c.Port),
 		},
+		{
+			Name: nodeName,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "spec.nodeName",
+				},
+			},
+		},
 	}
 
 	// If we're specifically saying which interface to use then add it to the manifest

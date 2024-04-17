@@ -76,12 +76,9 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 
 // StartCluster - Begins a running instance of the Leader Election cluster
 func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
+	var err error
 
-	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, c.LeaseName, id)
+	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, c.LeaseName, c.NodeName)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
@@ -172,7 +169,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	run := &runConfig{
 		config:  c,
-		leaseID: id,
+		leaseID: c.NodeName,
 		sm:      sm,
 		onStartedLeading: func(ctx context.Context) {
 			// As we're leading lets start the vip service

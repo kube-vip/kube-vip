@@ -18,10 +18,7 @@ import (
 )
 
 func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
+	var err error
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -58,7 +55,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			if !c.EnableBGP {
 				// Attempt to attach the EIP in the standard manner
 				log.Debugf("Attaching the Equinix Metal EIP through the API to this host")
-				err = equinixmetal.AttachEIP(packetClient, c, id)
+				err = equinixmetal.AttachEIP(packetClient, c, c.NodeName)
 				if err != nil {
 					log.Error(err)
 				}

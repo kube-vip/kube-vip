@@ -29,6 +29,7 @@ func findSelf(c *packngo.Client, projectID string) *packngo.Device {
 	// Go through devices
 	dev, _, _ := c.Devices.List(projectID, &packngo.ListOptions{})
 	for _, d := range dev {
+		// TODO do we need to replace os.Hostname with config.NodeName here?
 		me, _ := os.Hostname()
 		if me == d.Hostname {
 			return &d

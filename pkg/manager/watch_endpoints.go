@@ -79,44 +79,24 @@ func (ep *endpointsProvider) getAllEndpoints() ([]string, error) {
 	return result, nil
 }
 
-func (ep *endpointsProvider) getLocalEndpoints(id string, config *kubevip.Config) ([]string, error) {
+func (ep *endpointsProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
 
-	shortname, shortnameErr := getShortname(id)
-	if shortnameErr != nil {
-		if config.EnableRoutingTable && (!config.EnableLeaderElection && !config.EnableServicesElection) {
-			log.Debugf("[%s] %v, shortname will not be used", ep.label, shortnameErr)
-		} else {
-			log.Errorf("[%s] %v", ep.label, shortnameErr)
-		}
-	}
+	for _, subset := range ep.endpoints.Subsets {
+		for _, address := range subset.Addresses {
+			log.Debugf("[%s] processing endpoint [%s]", ep.label, address.IP)
 
-	for subset := range ep.endpoints.Subsets {
-		for address := range ep.endpoints.Subsets[subset].Addresses {
-			// 1. Compare the hostname on the endpoint to the hostname
-			// 2. Compare the nodename on the endpoint to the hostname
-			// 3. Drop the FQDN to a shortname and compare to the nodename on the endpoint
-
-			// 1. Compare the Hostname first (should be FQDN)
-			log.Debugf("[%s] processing endpoint [%s]", ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP)
-			if id == ep.endpoints.Subsets[subset].Addresses[address].Hostname {
-				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s",
-					ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, ep.endpoints.Subsets[subset].Addresses[address].Hostname)
-				localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
-			} else {
-				// 2. Compare the Nodename (from testing could be FQDN or short)
-				if ep.endpoints.Subsets[subset].Addresses[address].NodeName != nil {
-					if id == *ep.endpoints.Subsets[subset].Addresses[address].NodeName {
-						log.Debugf("[%s] found local endpoint - address: %s, hostname: %s, node: %s",
-							ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, ep.endpoints.Subsets[subset].Addresses[address].Hostname,
-							*ep.endpoints.Subsets[subset].Addresses[address].NodeName)
-						localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
-					} else if shortnameErr == nil && shortname == *ep.endpoints.Subsets[subset].Addresses[address].NodeName {
-						log.Debugf("[%s] found local endpoint -  address: %s, shortname: %s, node: %s",
-							ep.label, ep.endpoints.Subsets[subset].Addresses[address].IP, shortname, *ep.endpoints.Subsets[subset].Addresses[address].NodeName)
-						localEndpoints = append(localEndpoints, ep.endpoints.Subsets[subset].Addresses[address].IP)
-					}
-				}
+			// 1. Compare the Nodename
+			if address.NodeName != nil && id == *address.NodeName {
+				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s, node: %s", ep.label, address.IP, address.Hostname, *address.NodeName)
+				localEndpoints = append(localEndpoints, address.IP)
+				continue
+			}
+			// 2. Compare the Hostname (only useful if address.NodeName is not available)
+			if id == address.Hostname {
+				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s", ep.label, address.IP, address.Hostname)
+				localEndpoints = append(localEndpoints, address.IP)
+				continue
 			}
 		}
 	}
@@ -478,16 +458,4 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 			}
 		}
 	}
-}
-
-// returns just the shortname (or first bit) of a FQDN
-func getShortname(hostname string) (string, error) {
-	if len(hostname) == 0 {
-		return "", fmt.Errorf("unable to find shortname from %s", hostname)
-	}
-	hostParts := strings.Split(hostname, ".")
-	if len(hostParts) >= 1 {
-		return hostParts[0], nil
-	}
-	return "", fmt.Errorf("unable to find shortname from %s", hostname)
 }
