@@ -27,17 +27,17 @@ func (sm *Manager) startBGP() error {
 		if sm.config.ProviderConfig != "" {
 			key, project, err := equinixmetal.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
-				log.Error(err)
-			} else {
-				// Set the environment variable with the key for the project
-				os.Setenv("PACKET_AUTH_TOKEN", key)
-				// Update the configuration with the project key
-				sm.config.MetalProjectID = project
+				return err
 			}
+			// Set the environment variable with the key for the project
+			os.Setenv("PACKET_AUTH_TOKEN", key)
+			// Update the configuration with the project key
+			sm.config.MetalProjectID = project
+
 		}
 		packetClient, err = packngo.NewClient()
 		if err != nil {
-			log.Error(err)
+			return err
 		}
 
 		// We're using Equinix Metal with BGP, populate the Peer information from the API
@@ -45,7 +45,7 @@ func (sm *Manager) startBGP() error {
 			log.Infoln("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, sm.config)
 			if err != nil {
-				log.Error(err)
+				return err
 			}
 		}
 	}
