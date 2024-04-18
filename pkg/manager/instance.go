@@ -43,21 +43,24 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	instanceUID := string(svc.UID)
 
 	// Detect if we're using a specific interface for services
-	var serviceInterface string
-	config.ServicesInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
-	if config.ServicesInterface != "" {
-		serviceInterface = config.ServicesInterface
-	} else {
-		serviceInterface = config.Interface
-	}
+	var svcInterface string
+	svcInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
 
+	// If it is still blank then use the
+	if svcInterface == "" {
+		if config.ServicesInterface != "" {
+			svcInterface = config.ServicesInterface
+		} else {
+			svcInterface = config.Interface
+		}
+	}
 	var newVips []*kubevip.Config
 
 	for _, address := range instanceAddresses {
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
 			VIP:                    address,
-			Interface:              serviceInterface,
+			Interface:              svcInterface,
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
 			EnableBGP:              config.EnableBGP,
@@ -138,6 +141,8 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		}
 
 		instance.clusters = append(instance.clusters, c)
+		log.Infof("(svcs) adding VIP [%s] via %s for [%s/%s]", vipConfig.VIP, vipConfig.Interface, svc.Namespace, svc.Name)
+
 	}
 
 	return instance, nil

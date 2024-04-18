@@ -108,7 +108,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 				var ndp *vip.NdpResponder
 				if isIPv6 {
-					ndp, err = vip.NewNDPResponder(c.Interface)
+					ndp, err = vip.NewNDPResponder(cluster.Network[i].Interface())
 					if err != nil {
 						log.Fatalf("failed to create new NDP Responder")
 					}
@@ -117,13 +117,13 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				if ndp != nil {
 					defer ndp.Close()
 				}
-				log.Infof("Gratuitous Arp broadcast will repeat every 3 seconds for [%s]", ipString)
+				log.Infof("Gratuitous Arp broadcast will repeat every 3 seconds for [%s/%s]", ipString, cluster.Network[i].Interface())
 				for {
 					select {
 					case <-ctx.Done(): // if cancel() execute
 						return
 					default:
-						cluster.ensureIPAndSendGratuitous(c.Interface, ndp)
+						cluster.ensureIPAndSendGratuitous(cluster.Network[i].Interface(), ndp)
 					}
 					time.Sleep(3 * time.Second)
 				}
@@ -174,10 +174,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			// ctxArp, cancelArp = context.WithCancel(context.Background())
 
 			ipString := network.IP()
-
 			var ndp *vip.NdpResponder
 			if vip.IsIPv6(ipString) {
-				ndp, err = vip.NewNDPResponder(c.Interface)
+				ndp, err = vip.NewNDPResponder(network.Interface())
 				if err != nil {
 					log.Fatalf("failed to create new NDP Responder")
 				}
@@ -186,15 +185,15 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				if ndp != nil {
 					defer ndp.Close()
 				}
-				log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
+				log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
 
 				for {
 					select {
 					case <-ctx.Done(): // if cancel() execute
-						log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, c.Interface, c.ArpBroadcastRate)
+						log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
 						return
 					default:
-						cluster.ensureIPAndSendGratuitous(c.Interface, ndp)
+						cluster.ensureIPAndSendGratuitous(network.Interface(), ndp)
 					}
 					if c.ArpBroadcastRate < 500 {
 						log.Errorf("arp broadcast rate is [%d], this shouldn't be lower that 300ms (defaulting to 3000)", c.ArpBroadcastRate)
