@@ -580,6 +580,11 @@ func ParseEnvironment(c *Config) error {
 		c.EnableEndpointSlices = b
 	}
 
+	env = os.Getenv(mirrorDestInterface)
+	if env != "" {
+		c.MirrorDestInterface = env 
+  }
+  
 	env = os.Getenv(iptablesBackend)
 	if env != "" {
 		c.IptablesBackend = env

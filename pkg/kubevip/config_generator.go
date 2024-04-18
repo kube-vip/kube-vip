@@ -513,6 +513,16 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, disServiceUpdates...)
 	}
 
+	if c.MirrorDestInterface != "" {
+		mdif := []corev1.EnvVar{
+			{
+				Name:  mirrorDestInterface,
+				Value: c.MirrorDestInterface,
+			},
+		}
+		newEnvironment = append(newEnvironment, mdif...)
+  }
+  
 	var securityContext *corev1.SecurityContext
 	if c.LoadBalancerForwardingMethod == "masquerade" {
 		var privileged = true

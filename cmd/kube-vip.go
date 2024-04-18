@@ -85,6 +85,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LoadBalancerPort, "lbPort", 6443, "loadbalancer port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerForwardingMethod, "lbForwardingMethod", "local", "loadbalancer forwarding method")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MirrorDestInterface, "mirrorDestInterface", "", "network interface where all traffic that traverses the service interface will be mirrored to. Source interface will use default interface is servicesInterface is not set.")
 
 	// Clustering type (leaderElection)
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")

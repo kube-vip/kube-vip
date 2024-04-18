@@ -48,6 +48,18 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	// Watch function
 	var wg sync.WaitGroup
 
+	// first start port mirroring if enabled
+	if err := sm.startTrafficMirroringIfEnabled(); err != nil {
+		return err
+	}
+	defer func() {
+		// clean up traffic mirror related config
+		err := sm.stopTrafficMirroringIfEnabled()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
 	if sm.config.ServiceNamespace == "" {
 		// v1.NamespaceAll is actually "", but we'll stay with the const in case things change upstream
 		sm.config.ServiceNamespace = v1.NamespaceAll
@@ -129,7 +141,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 			if event.Type == watch.Modified {
 				for _, addr := range svcAddresses {
-					//log.Debugf("(svcs) Retreiving local addresses, to ensure that this modified address doesn't exist: %s", addr)
+					// log.Debugf("(svcs) Retreiving local addresses, to ensure that this modified address doesn't exist: %s", addr)
 					f, err := vip.GarbageCollect(sm.config.Interface, addr)
 					if err != nil {
 						log.Errorf("(svcs) cleaning existing address error: [%s]", err.Error())
@@ -165,7 +177,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									var provider epProvider
 									if !sm.config.EnableEndpointSlices {
 										provider = &endpointsProvider{label: "endpoints"}
-
 									} else {
 										provider = &endpointslicesProvider{label: "endpointslices"}
 									}
@@ -197,7 +208,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								var provider epProvider
 								if !sm.config.EnableEndpointSlices {
 									provider = &endpointsProvider{label: "endpoints"}
-
 								} else {
 									provider = &endpointslicesProvider{label: "endpointslices"}
 								}

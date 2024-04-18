@@ -208,9 +208,15 @@ const (
 	// enableEndpointSlices enables use of EndpointSlices instead of Endpoints
 	enableEndpointSlices = "enable_endpointslices"
 
-	// iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
+	// mirrorDestInterface is the network interface where all traffics that go through service interface
+	// will be mirrored to. The source interface is ServicesInterface by default, fall back to Interface if not set.
+	// + optional
+	mirrorDestInterface = "mirror_dest_interface"
+
+  // iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
 	iptablesBackend = "iptables_backend"
 
 	// backendHealthCheckInterval Interval in seconds for checking backend health.
 	backendHealthCheckInterval = "backend_health_check_interval"
+
 )

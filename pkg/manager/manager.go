@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+  "github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -37,7 +38,7 @@ type Manager struct {
 	// Additional functionality
 	upnp *upnp.Upnp
 
-	//BGP Manager, this is a singleton that manages all BGP advertisements
+	// BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 
 	// This channel is used to catch an OS signal and trigger a shutdown
@@ -61,7 +62,7 @@ type Manager struct {
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
-	// Instance identity should be the same as k8s node name to ensure better compatibility.
+  // Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
 	// so if node name is not provided in the config,
 	// we set it to hostname as a fallback.
@@ -158,7 +159,6 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start() error {
-
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -226,6 +226,48 @@ func (sm *Manager) parseAnnotations() error {
 		return err
 	}
 	return nil
+}
+
+func (sm *Manager) serviceInterface() string {
+	svcIf := sm.config.Interface
+	if sm.config.ServicesInterface != "" {
+		svcIf = sm.config.ServicesInterface
+	}
+	return svcIf
+}
+
+func (sm *Manager) startTrafficMirroringIfEnabled() error {
+	if sm.config.MirrorDestInterface != "" {
+		svcIf := sm.serviceInterface()
+		log.Infof("mirroring traffic from interface %s to interface %s", svcIf, sm.config.MirrorDestInterface)
+		if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
+			return err
+		}
+	} else {
+		log.Debug("skip starting traffic mirroring since it's not enabled.")
+	}
+	return nil
+}
+
+func (sm *Manager) stopTrafficMirroringIfEnabled() error {
+	if sm.config.MirrorDestInterface != "" {
+		svcIf := sm.serviceInterface()
+		log.Infof("clean up qdisc config on interface %s", svcIf)
+		if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
+			return err
+		}
+	} else {
+		log.Debug("skip stopping traffic mirroring since it's not enabled.")
+	}
+	return nil
+}
+
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
