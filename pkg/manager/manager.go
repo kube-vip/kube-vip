@@ -9,12 +9,12 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kube-vip/kube-vip/pkg/k8s"
-	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
-
 	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+  "github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -61,6 +61,22 @@ type Manager struct {
 
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
+
+  // Instance identity should be the same as k8s node name to ensure better compatibility.
+	// By default k8s sets node name to `hostname -s`,
+	// so if node name is not provided in the config,
+	// we set it to hostname as a fallback.
+	// This mimics legacy behavior and should work on old kube-vip installations.
+	if config.NodeName == "" {
+		log.Warning("Node name is missing from the config, fall back to hostname")
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("could not get hostname: %v", err)
+		}
+		config.NodeName = hostname
+	}
+	log.Infof("Using node name [%v]", config.NodeName)
+
 	var clientset *kubernetes.Clientset
 	var err error
 
@@ -70,8 +86,11 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	switch {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
-	case fileExists(adminConfigPath):
-		if config.EnableControlPlane {
+	case utils.FileExists(adminConfigPath):
+		if config.KubernetesAddr != "" {
+			fmt.Println(config.KubernetesAddr)
+			clientset, err = k8s.NewClientset(adminConfigPath, false, config.KubernetesAddr)
+		} else if config.EnableControlPlane {
 			// If this is a control plane host it will likely have started as a static pod or won't have the
 			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 			// ensure connectivity.
@@ -88,7 +107,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
 		}
 		log.Debugf("Using external Kubernetes configuration from file [%s]", adminConfigPath)
-	case fileExists(homeConfigPath):
+	case utils.FileExists(homeConfigPath):
 		clientset, err = k8s.NewClientset(homeConfigPath, false, "")
 		if err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
@@ -169,17 +188,17 @@ func (sm *Manager) Start() error {
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Infoln("Starting Kube-vip Manager with the ARP engine")
-		return sm.startARP()
+		return sm.startARP(sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
 		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
-		return sm.startWireguard()
+		return sm.startWireguard(sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
 		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
-		return sm.startTableMode()
+		return sm.startTableMode(sm.config.NodeName)
 	}
 
 	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")

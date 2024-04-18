@@ -28,6 +28,10 @@ spec:
       value: "1"
     - name: cp_enable
       value: "true"
+    - name: vip_nodename
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:

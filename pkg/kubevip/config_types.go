@@ -27,6 +27,9 @@ type Config struct {
 	// DetectControlPlane, will attempt to find the control plane from loopback (127.0.0.1)
 	DetectControlPlane bool `yaml:"detectControlPlane"`
 
+	// KubernetesAddr，is the address of the Kubernetes API server on this machine
+	KubernetesAddr string `yaml:"kubernetesAddr"`
+
 	// EnableServices, will enable the services functionality (used for hybrid behaviour)
 	EnableServices bool `yaml:"enableServices"`
 
@@ -87,6 +90,9 @@ type Config struct {
 
 	// use DDNS to allocate IP when Address is set to a DNS Name
 	DDNS bool `yaml:"ddns"`
+
+	// NodeName - used for matching node name from pod spec
+	NodeName string `yaml:"leaseNodeName"`
 
 	// SingleNode will start the cluster as a single Node (Raft disabled)
 	SingleNode bool `yaml:"singleNode"`
@@ -177,6 +183,12 @@ type Config struct {
 	// will be mirrored to. If ServicesInterface is not set, fall back to Interface.
 	// + optional
 	MirrorDestInterface string `yaml:"mirrorDestInterface"`
+  
+	// IptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
+	IptablesBackend string `yaml:"iptablesBackend"`
+
+	// BackendHealthCheckInterval Interval in seconds for checking backend health.
+	BackendHealthCheckInterval int `yaml:"backendHealthCheckInterval"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

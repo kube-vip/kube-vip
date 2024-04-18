@@ -2,6 +2,7 @@ package vip
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
@@ -149,6 +150,19 @@ func (e *Egress) InsertSourceNat(vip, podIP string) error {
 
 func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) error {
 	log.Infof("[egress] Adding source nat from [%s] => [%s], with destination port [%s]", podIP, vip, port)
+	natRules, err := e.ipTablesClient.List("nat", "POSTROUTING")
+	if err != nil {
+		return err
+	}
+	foundNatRules := e.findExistingVIP(natRules, vip)
+	log.Warnf("[egress] Cleaning [%d] existing postrouting nat rules for vip [%s]", len(foundNatRules), vip)
+	for x := range foundNatRules {
+		err = e.ipTablesClient.Delete("nat", "POSTROUTING", foundNatRules[x][2:]...)
+		if err != nil {
+			log.Errorf("[egress] Error removing rule [%v]", err)
+		}
+	}
+
 	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment); err != nil {
 		return err
 	} else if exists {
@@ -160,7 +174,7 @@ func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto strin
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
 }
 
-func DeleteExistingSessions(sessionIP string, destination bool) error {
+func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts, srcPorts string) error {
 
 	nfct, err := ct.Open(&ct.Config{})
 	if err != nil {
@@ -173,14 +187,75 @@ func DeleteExistingSessions(sessionIP string, destination bool) error {
 		log.Errorf("could not dump sessions: %v", err)
 		return err
 	}
+	destPortProtocol := make(map[uint16]uint8)
+	srcPortProtocol := make(map[uint16]uint8)
+
+	if destinationPorts != "" {
+		fixedPorts := strings.Split(destinationPorts, ",")
+
+		for _, fixedPort := range fixedPorts {
+
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			}
+			port, err := strconv.ParseUint(data[1], 10, 16)
+			if err != nil {
+				return fmt.Errorf("[egress] error parsing annotaion [%s]", destinationPorts)
+			}
+			switch data[0] {
+			case strings.ToLower("udp"):
+				destPortProtocol[uint16(port)] = ProtocolUDP
+			case strings.ToLower("tcp"):
+				destPortProtocol[uint16(port)] = ProtocolTCP
+			case strings.ToLower("sctp"):
+				destPortProtocol[uint16(port)] = ProtocolSCTP
+			default:
+				log.Errorf("[egress] annotation protocol [%s] isn't supported", data[0])
+			}
+		}
+	}
+
+	if srcPorts != "" {
+		fixedPorts := strings.Split(srcPorts, ",")
+
+		for _, fixedPort := range fixedPorts {
+
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			}
+			port, err := strconv.ParseUint(data[1], 10, 16)
+			if err != nil {
+				return fmt.Errorf("[egress] error parsing annotaion [%s]", srcPorts)
+			}
+			switch data[0] {
+			case strings.ToLower("udp"):
+				srcPortProtocol[uint16(port)] = ProtocolUDP
+			case strings.ToLower("tcp"):
+				srcPortProtocol[uint16(port)] = ProtocolTCP
+			case strings.ToLower("sctp"):
+				srcPortProtocol[uint16(port)] = ProtocolSCTP
+			default:
+				log.Errorf("[egress] annotation protocol [%s] isn't supported", data[0])
+			}
+		}
+	}
+
 	// by default we only clear source (i.e. connections going from the vip (egress))
 	if !destination {
 		for _, session := range sessions {
-			//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
-
+			//session.Origin.Proto
 			if session.Origin.Src.String() == sessionIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
-				//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
-				err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				if destinationPorts != "" {
+					proto := destPortProtocol[*session.Origin.Proto.DstPort]
+					if proto == *session.Origin.Proto.Number {
+						log.Infof("[egress] cleaning existing connection Source [%s] -> [%s:%d] proto: [%d] ", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort, *session.Origin.Proto.Number)
+						err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+					}
+				} else {
+					err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				}
 				if err != nil {
 					log.Errorf("could not delete sessions: %v", err)
 				}
@@ -192,8 +267,15 @@ func DeleteExistingSessions(sessionIP string, destination bool) error {
 			//fmt.Printf("Looking for [%s] found [%s]\n", podIP, session.Origin.Dst.String())
 
 			if session.Origin.Dst.String() == sessionIP /*&& *session.Origin.Proto.DstPort == uint16(destinationPort)*/ {
-				//fmt.Printf("Source -> %s  Destination -> %s:%d\n", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort)
-				err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				if srcPorts != "" {
+					proto := srcPortProtocol[*session.Origin.Proto.DstPort]
+					if proto == *session.Origin.Proto.Number {
+						log.Infof("[egress] cleaning existing connection Source [%s] -> [%s:%d] proto: [%d] ", session.Origin.Src.String(), session.Origin.Dst.String(), *session.Origin.Proto.DstPort, *session.Origin.Proto.Number)
+						err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+					}
+				} else {
+					err = nfct.Delete(ct.Conntrack, ct.IPv4, session)
+				}
 				if err != nil {
 					log.Errorf("could not delete sessions: %v", err)
 				}
@@ -271,6 +353,22 @@ func (e *Egress) findRules(rules []string) [][]string {
 			if r[x] == "\""+e.comment+"\"" {
 				// Remove the quotes around the comment
 				r[x] = strings.Trim(r[x], "\"")
+				foundRules = append(foundRules, r)
+			}
+		}
+	}
+
+	return foundRules
+}
+
+func (e *Egress) findExistingVIP(rules []string, vip string) [][]string {
+	var foundRules [][]string
+
+	for i := range rules {
+		r := strings.Split(rules[i], " ")
+		for x := range r {
+			// Look for a vip already in a post Routing rule
+			if r[x] == vip {
 				foundRules = append(foundRules, r)
 			}
 		}

@@ -21,6 +21,7 @@ import (
 const (
 	defaultValidLft                 = 60
 	iptablesComment                 = "%s kube-vip load balancer IP"
+	iptablesCommentMarkRule         = "kube-vip load balancer IP set mark for masquerade"
 	ignoreServiceSecurityAnnotation = "kube-vip.io/ignore-service-security"
 )
 
@@ -57,6 +58,9 @@ type network struct {
 	dnsName string
 	isDDNS  bool
 
+	forwardMethod   string
+	iptablesBackend string
+
 	routeTable       int
 	routingTableType int
 	routingProtocol  int
@@ -71,21 +75,23 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode string) ([]Network, error) {
+func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
 	networks := []Network{}
 
+	link, err := netlink.LinkByName(iface)
+	if err != nil {
+		return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+	}
+
 	if IsIP(address) {
-		result := &network{}
-
-		link, err := netlink.LinkByName(iface)
-		if err != nil {
-			return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+		result := &network{
+			link:             link,
+			routeTable:       tableID,
+			routingTableType: tableType,
+			routingProtocol:  routingProtocol,
+			forwardMethod:    forwardMethod,
+			iptablesBackend:  iptablesBackend,
 		}
-
-		result.link = link
-		result.routeTable = tableID
-		result.routingTableType = tableType
-		result.routingProtocol = routingProtocol
 
 		// Check if the subnet needs overriding
 		if subnet != "" {
@@ -111,27 +117,34 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 			// return early for ddns if no IP is allocated for the domain
 			// when leader starts, should do get IP from DHCP for the domain
 			if isDDNS {
+				result := &network{
+					link:             link,
+					routeTable:       tableID,
+					routingTableType: tableType,
+					routingProtocol:  routingProtocol,
+					forwardMethod:    forwardMethod,
+					iptablesBackend:  iptablesBackend,
+					isDDNS:           isDDNS,
+					dnsName:          address,
+				}
+
+				networks = append(networks, result)
 				return networks, nil
 			}
 			return nil, err
 		}
 
 		for _, ip := range ips {
-
-			result := &network{}
-
-			link, err := netlink.LinkByName(iface)
-			if err != nil {
-				return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
+			result := &network{
+				link:             link,
+				routeTable:       tableID,
+				routingTableType: tableType,
+				routingProtocol:  routingProtocol,
+				forwardMethod:    forwardMethod,
+				iptablesBackend:  iptablesBackend,
+				isDDNS:           isDDNS,
+				dnsName:          address,
 			}
-
-			result.link = link
-			result.routeTable = tableID
-			result.routingTableType = tableType
-
-			// address is DNS
-			result.isDDNS = isDDNS
-			result.dnsName = address
 
 			// we're able to resolve store this as the initial IP
 			if result.address, err = netlinkParse(ip); err != nil {
@@ -240,6 +253,12 @@ func (configurator *network) AddIP() error {
 	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
+		}
+	}
+
+	if configurator.forwardMethod == "masquerade" {
+		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
+			return errors.Wrap(err, "could not add iptables rules for masquerade")
 		}
 	}
 
@@ -396,6 +415,74 @@ func (configurator *network) DeleteIP() error {
 		}
 	}
 
+	if configurator.forwardMethod == "masquerade" {
+		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
+			return errors.Wrap(err, "could not remove iptables masquerade rules ")
+		}
+	}
+
+	return nil
+}
+
+func (configurator *network) addIptablesRulesForMasquerade() error {
+	ver, err := iptables.GetVersion()
+	if err != nil {
+		return errors.Wrap(err, "could not get iptables version")
+	}
+
+	ipt, err := iptables.New(iptables.EnableNFTables(ver.BackendMode == "nft"))
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, vip)
+	if err := addMasqueradeRuleForVIP(ipt, vip, comment); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// addIptablesRulesForMasquerade add iptables rules for MASQUERADE
+// insert example
+func (configurator *network) removeIptablesRulesForMasquerade() error {
+	ver, err := iptables.GetVersion()
+	if err != nil {
+		return errors.Wrap(err, "could not get iptables version")
+	}
+	ipt, err := iptables.New(iptables.EnableNFTables(ver.BackendMode == "nft"))
+	if err != nil {
+		return errors.Wrap(err, "could not create iptables client")
+	}
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, vip)
+
+	err = delMasqueradeRuleForVIP(ipt, vip, comment)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// TODO: investigate if adding "--vport <port>" would be better or not quite necessary
+// After this rule is added, ipvs kernel module is also loaded
+func addMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
+	err := ipt.InsertUnique(iptables.TableNat, iptables.ChainPOSTROUTING,
+		1, "-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	if err != nil {
+		return fmt.Errorf("could not add masquerade rule for VIP %s: %v", vip, err)
+	}
+	return nil
+}
+
+func delMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
+	err := ipt.DeleteIfExists(iptables.TableNat, iptables.ChainPOSTROUTING,
+		"-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	if err != nil {
+		return fmt.Errorf("could not del masquerade rule for VIP %s: %v", vip, err)
+	}
 	return nil
 }
 

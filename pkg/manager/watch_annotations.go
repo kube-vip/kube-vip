@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,12 +27,8 @@ import (
 func (sm *Manager) annotationsWatcher() error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Infof("Kube-Vip is waiting for annotation prefix [%s] to be present on this node", sm.config.Annotations)
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
 
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": hostname}}
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": sm.config.NodeName}}
 	listOptions := metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	}

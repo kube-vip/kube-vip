@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
@@ -61,10 +60,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		}
 	}()
 
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
 	if sm.config.ServiceNamespace == "" {
 		// v1.NamespaceAll is actually "", but we'll stay with the const in case things change upstream
 		sm.config.ServiceNamespace = v1.NamespaceAll
@@ -185,7 +180,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									} else {
 										provider = &endpointslicesProvider{label: "endpointslices"}
 									}
-									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg, provider); err != nil {
+									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, &wg, provider); err != nil {
 										log.Error(err)
 									}
 									wg.Done()
@@ -216,7 +211,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								} else {
 									provider = &endpointslicesProvider{label: "endpointslices"}
 								}
-								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], id, svc, &wg, provider); err != nil {
+								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, &wg, provider); err != nil {
 									log.Error(err)
 								}
 								wg.Done()

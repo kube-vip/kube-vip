@@ -100,6 +100,11 @@ func ParseEnvironment(c *Config) error {
 		}
 	}
 
+	env = os.Getenv(nodeName)
+	if env != "" {
+		c.NodeName = env
+	}
+
 	// Find vip address
 	env = os.Getenv(vipAddress)
 	if env != "" {
@@ -160,6 +165,11 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.DetectControlPlane = b
+	}
+
+	env = os.Getenv(kubernetesAddr)
+	if env != "" {
+		c.KubernetesAddr = env
 	}
 
 	// Find Services toggle
@@ -572,7 +582,21 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(mirrorDestInterface)
 	if env != "" {
-		c.MirrorDestInterface = env
+		c.MirrorDestInterface = env 
+  }
+  
+	env = os.Getenv(iptablesBackend)
+	if env != "" {
+		c.IptablesBackend = env
+	}
+
+	env = os.Getenv(backendHealthCheckInterval)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BackendHealthCheckInterval = int(i)
 	}
 
 	return nil

@@ -74,6 +74,9 @@ const (
 	// vipDdns - defines if use dynamic dns to allocate IP for "address"
 	vipDdns = "vip_ddns"
 
+	// vipLeaseNodeName defines the node name that is used to acquire leases
+	nodeName = "vip_nodename"
+
 	// vipSingleNode - defines the vip start as a single node cluster
 	vipSingleNode = "vip_singlenode"
 
@@ -151,6 +154,9 @@ const (
 	// cpDetect will attempt to automatically find a working address for the control plane from loopback
 	cpDetect = "cp_detect"
 
+	// kubernetesAddr，is the address of the Kubernetes API server on this machine
+	kubernetesAddr = "kubernetes_addr"
+
 	// svcEnable enables the Kubernetes service feature
 	svcEnable = "svc_enable"
 
@@ -206,4 +212,11 @@ const (
 	// will be mirrored to. The source interface is ServicesInterface by default, fall back to Interface if not set.
 	// + optional
 	mirrorDestInterface = "mirror_dest_interface"
+
+  // iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
+	iptablesBackend = "iptables_backend"
+
+	// backendHealthCheckInterval Interval in seconds for checking backend health.
+	backendHealthCheckInterval = "backend_health_check_interval"
+
 )

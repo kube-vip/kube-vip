@@ -33,6 +33,7 @@ type testConfig struct {
 	ignoreDualStack      bool
 	ignoreEgress         bool
 	retainCluster        bool
+	skipHostnameChange   bool
 }
 
 func main() {
@@ -49,6 +50,7 @@ func main() {
 	_, t.ignoreDualStack = os.LookupEnv("IGNORE_DUALSTACK")
 	_, t.retainCluster = os.LookupEnv("RETAIN_CLUSTER")
 	_, t.IPv6 = os.LookupEnv("IPV6_FAMILY")
+	_, t.skipHostnameChange = os.LookupEnv("SKIP_HOSTNAME_CHANGE")
 
 	flag.StringVar(&t.ImagePath, "imagepath", "plndr/kube-vip:action", "")
 	flag.BoolVar(&t.ControlPlane, "ControlPlane", false, "")
@@ -110,6 +112,7 @@ func main() {
 				log.Warn(err)
 			}
 		}
+
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 		homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")

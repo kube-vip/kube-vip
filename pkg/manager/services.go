@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -147,13 +146,14 @@ func (sm *Manager) addService(svc *v1.Service) error {
 
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
+
 		log.Debugf("Flushing conntrack rules for service [%s]", svc.Name)
 		for _, serviceIP := range serviceIPs {
-			err = vip.DeleteExistingSessions(serviceIP, false)
+			err = vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
 				log.Errorf("Error flushing any remaining egress connections [%s]", err)
 			}
-			err = vip.DeleteExistingSessions(serviceIP, true)
+			err = vip.DeleteExistingSessions(serviceIP, true, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
 				log.Errorf("Error flushing any remaining ingress connections [%s]", err)
 			}
@@ -314,11 +314,6 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			return err
 		}
 
-		id, err := os.Hostname()
-		if err != nil {
-			return err
-		}
-
 		currentServiceCopy := currentService.DeepCopy()
 		if currentServiceCopy.Annotations == nil {
 			currentServiceCopy.Annotations = make(map[string]string)
@@ -327,7 +322,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		// If we're using ARP then we can only broadcast the VIP from one place, add an annotation to the service
 		if sm.config.EnableARP {
 			// Add the current host
-			currentServiceCopy.Annotations[vipHost] = id
+			currentServiceCopy.Annotations[vipHost] = sm.config.NodeName
 		}
 		if i.dhcpInterfaceHwaddr != "" || i.dhcpInterfaceIP != "" {
 			currentServiceCopy.Annotations[hwAddrKey] = i.dhcpInterfaceHwaddr

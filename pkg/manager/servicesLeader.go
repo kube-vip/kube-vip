@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) error {
-
 	err := sm.servicesWatcher(ctx, sm.StartServicesLeaderElection)
 	if err != nil {
 		return err
@@ -38,14 +36,8 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
-
-	id, err := os.Hostname()
-	if err != nil {
-		return err
-	}
-
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Infof("(svc election) service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, id)
+	log.Infof("(svc election) service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, sm.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -55,7 +47,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 		},
 		Client: sm.clientSet.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: id,
+			Identity: sm.config.NodeName,
 		},
 	}
 
@@ -83,11 +75,10 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 						log.Errorln(err)
 					}
 				}()
-
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("(svc election) service [%s] leader lost: [%s]", service.Name, id)
+				log.Infof("(svc election) service [%s] leader lost: [%s]", service.Name, sm.config.NodeName)
 				if activeService[string(service.UID)] {
 					if err := sm.deleteService(string(service.UID)); err != nil {
 						log.Errorln(err)
@@ -98,7 +89,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected
-				if identity == id {
+				if identity == sm.config.NodeName {
 					// I just got the lock
 					return
 				}

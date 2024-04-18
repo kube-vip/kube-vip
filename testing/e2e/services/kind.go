@@ -90,8 +90,8 @@ func (config *testConfig) createKind() error {
 		err := provider.Create("services", cluster.CreateWithV1Alpha4Config(&clusterConfig))
 		if err != nil {
 			return err
-
 		}
+
 		loadImageCmd := load.NewCommand(cmd.NewLogger(), cmd.StandardIOStreams())
 		loadImageCmd.SetArgs([]string{"--name", "services", config.ImagePath})
 		err = loadImageCmd.Execute()
@@ -103,10 +103,22 @@ func (config *testConfig) createKind() error {
 			return err
 		}
 
+		if !config.skipHostnameChange {
+			log.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
+			for _, node := range nodes {
+				nodeName := node.String()
+				cmd := exec.Command("docker", "exec", nodeName, "hostname", nodeName+"-modified")
+				if _, err := cmd.CombinedOutput(); err != nil {
+					return err
+				}
+			}
+		}
+
 		// HMMM, if we want to run workloads on the control planes (todo)
 		if config.ControlPlane {
-			for x := range nodes {
-				cmd := exec.Command("kubectl", "taint", "nodes", nodes[x].String(), "node-role.kubernetes.io/control-plane:NoSchedule-") //nolint:all
+			for _, node := range nodes {
+				nodeName := node.String()
+				cmd := exec.Command("kubectl", "taint", "nodes", nodeName, "node-role.kubernetes.io/control-plane:NoSchedule-")
 				_, _ = cmd.CombinedOutput()
 			}
 		}

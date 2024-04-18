@@ -121,6 +121,14 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Name:  port,
 			Value: fmt.Sprintf("%d", c.Port),
 		},
+		{
+			Name: nodeName,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "spec.nodeName",
+				},
+			},
+		},
 	}
 
 	// If we're specifically saying which interface to use then add it to the manifest
@@ -513,6 +521,23 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 		}
 		newEnvironment = append(newEnvironment, mdif...)
+  }
+  
+	var securityContext *corev1.SecurityContext
+	if c.LoadBalancerForwardingMethod == "masquerade" {
+		var privileged = true
+		securityContext = &corev1.SecurityContext{
+			Privileged: &privileged,
+		}
+	} else {
+		securityContext = &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{
+					"NET_ADMIN",
+					"NET_RAW",
+				},
+			},
+		}
 	}
 
 	newManifest := &corev1.Pod{
@@ -529,15 +554,8 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				{
 					Name:            "kube-vip",
 					Image:           fmt.Sprintf("ghcr.io/kube-vip/kube-vip:%s", imageVersion),
-					ImagePullPolicy: corev1.PullAlways,
-					SecurityContext: &corev1.SecurityContext{
-						Capabilities: &corev1.Capabilities{
-							Add: []corev1.Capability{
-								"NET_ADMIN",
-								"NET_RAW",
-							},
-						},
-					},
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					SecurityContext: securityContext,
 					Args: []string{
 						command,
 					},

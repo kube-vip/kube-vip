@@ -19,7 +19,7 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startARP() error {
+func (sm *Manager) startARP(id string) error {
 	var cpCluster *cluster.Cluster
 	var ns string
 	var err error
@@ -79,11 +79,6 @@ func (sm *Manager) startARP() error {
 			log.Warnf("unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
 			ns = sm.config.Namespace
 		}
-	}
-
-	id, err := os.Hostname()
-	if err != nil {
-		return err
 	}
 
 	// Before starting the leader Election enable any additional functionality
@@ -157,7 +152,7 @@ func (sm *Manager) startARP() error {
 				OnStartedLeading: func(ctx context.Context) {
 					err = sm.servicesWatcher(ctx, sm.syncServices)
 					if err != nil {
-						log.Error(err)
+						log.Fatal(err)
 					}
 				},
 				OnStoppedLeading: func() {
