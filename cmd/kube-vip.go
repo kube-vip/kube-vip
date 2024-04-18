@@ -20,20 +20,8 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
-// Path to the configuration file
-var configPath string
-
-// Path to the configuration file
-// var namespace string
-
-// Disable the Virtual IP (bind to the existing network stack)
-var disableVIP bool
-
-// Disable the Virtual IP (bind to the existing network stack)
-// var controlPlane bool
-
-// Run as a load balancer service (within a pod / kubernetes)
-// var serviceArp bool
+// Is kube-vip running within cluster
+var inCluster bool
 
 // ConfigMap name within a Kubernetes cluster
 var configMap string
@@ -43,6 +31,9 @@ var logLevel uint32
 
 // Provider Config
 var providerConfig string
+
+// Points to a kubernetes configuration file
+var kubeConfigPath string
 
 // Release - this struct contains the release information populated when building kube-vip
 var Release struct {
@@ -55,9 +46,6 @@ var (
 	initConfig       kubevip.Config
 	initLoadBalancer kubevip.LoadBalancer
 )
-
-// Points to a kubernetes configuration file
-var kubeConfigPath string
 
 var kubeVipCmd = &cobra.Command{
 	Use:   "kube-vip",
@@ -166,7 +154,6 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipManager)
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
-	kubeVipCmd.AddCommand(kubeVipStart)
 	kubeVipCmd.AddCommand(kubeVipVersion)
 }
 
