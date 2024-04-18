@@ -44,6 +44,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 
 	// Detect if we're using a specific interface for services
 	var serviceInterface string
+	config.ServicesInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
 	if config.ServicesInterface != "" {
 		serviceInterface = config.ServicesInterface
 	} else {
