@@ -13,7 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-  "github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -62,7 +62,7 @@ type Manager struct {
 // New will create a new managing object
 func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
-  // Instance identity should be the same as k8s node name to ensure better compatibility.
+	// Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
 	// so if node name is not provided in the config,
 	// we set it to hostname as a fallback.
@@ -260,14 +260,6 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 		log.Debug("skip stopping traffic mirroring since it's not enabled.")
 	}
 	return nil
-}
-
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {

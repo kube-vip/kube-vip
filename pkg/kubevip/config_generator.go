@@ -521,8 +521,8 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 		}
 		newEnvironment = append(newEnvironment, mdif...)
-  }
-  
+	}
+
 	var securityContext *corev1.SecurityContext
 	if c.LoadBalancerForwardingMethod == "masquerade" {
 		var privileged = true
