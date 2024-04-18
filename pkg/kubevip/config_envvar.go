@@ -213,10 +213,9 @@ const (
 	// + optional
 	mirrorDestInterface = "mirror_dest_interface"
 
-  // iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
+	// iptablesBackend iptables backend, can be specified as `nft` or `legacy`. If not set, it defaults to automatic detection.
 	iptablesBackend = "iptables_backend"
 
 	// backendHealthCheckInterval Interval in seconds for checking backend health.
 	backendHealthCheckInterval = "backend_health_check_interval"
-
 )

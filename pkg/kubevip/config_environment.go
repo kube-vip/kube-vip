@@ -582,9 +582,9 @@ func ParseEnvironment(c *Config) error {
 
 	env = os.Getenv(mirrorDestInterface)
 	if env != "" {
-		c.MirrorDestInterface = env 
-  }
-  
+		c.MirrorDestInterface = env
+	}
+
 	env = os.Getenv(iptablesBackend)
 	if env != "" {
 		c.IptablesBackend = env
