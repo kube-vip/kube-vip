@@ -456,7 +456,7 @@ func (configurator *network) removeIptablesRulesForMasquerade() error {
 		return errors.Wrap(err, "could not create iptables client")
 	}
 	vip := configurator.address.IP.String()
-	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
+	comment := fmt.Sprintf(iptablesComment, vip)
 
 	err = delMasqueradeRuleForVIP(ipt, vip, comment)
 	if err != nil {
@@ -466,6 +466,8 @@ func (configurator *network) removeIptablesRulesForMasquerade() error {
 	return nil
 }
 
+// TODO: investigate if adding "--vport <port>" would be better or not quite necessary
+// After this rule is added, ipvs kernel module is also loaded
 func addMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
 	err := ipt.InsertUnique(iptables.TableNat, iptables.ChainPOSTROUTING,
 		1, "-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
@@ -477,7 +479,7 @@ func addMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error 
 
 func delMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error {
 	err := ipt.DeleteIfExists(iptables.TableNat, iptables.ChainPOSTROUTING,
-		"-d", "-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+		"-m", "ipvs", "--vaddr", vip, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
 	if err != nil {
 		return fmt.Errorf("could not del masquerade rule for VIP %s: %v", vip, err)
 	}

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kube-vip/kube-vip/pkg/k8s"
-
 	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -85,7 +85,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	switch {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
-	case fileExists(adminConfigPath):
+	case utils.FileExists(adminConfigPath):
 		if config.KubernetesAddr != "" {
 			fmt.Println(config.KubernetesAddr)
 			clientset, err = k8s.NewClientset(adminConfigPath, false, config.KubernetesAddr)
@@ -106,7 +106,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
 		}
 		log.Debugf("Using external Kubernetes configuration from file [%s]", adminConfigPath)
-	case fileExists(homeConfigPath):
+	case utils.FileExists(homeConfigPath):
 		clientset, err = k8s.NewClientset(homeConfigPath, false, "")
 		if err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
@@ -226,14 +226,6 @@ func (sm *Manager) parseAnnotations() error {
 		return err
 	}
 	return nil
-}
-
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {

@@ -11,7 +11,10 @@ import (
 	"github.com/cloudflare/ipvs"
 	"github.com/cloudflare/ipvs/netmask"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
+	"github.com/kube-vip/kube-vip/pkg/sysctl"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
 )
 
 /*
@@ -65,6 +68,20 @@ func NewIPVSLB(address string, port int, forwardingMethod string, backendHealthC
 		log.Fatalf("Error getting IPVS version [%v]", err)
 	}
 	log.Infof("IPVS Loadbalancer enabled for %d.%d.%d", i.Version[0], i.Version[1], i.Version[2])
+
+	if strings.ToLower(forwardingMethod) == "masquerade" {
+		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/vs/conntrack", "1")
+		if err != nil {
+			log.Fatalf("Error ensuring net.ipv4.vs.conntrack enabled [%v]", err)
+		}
+		log.Infof("sysctl set net.ipv4.vs.conntrack to 1")
+
+		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/ip_forward", "1")
+		if err != nil {
+			log.Fatalf("Error ensuring net.ipv4.ip_forward enabled [%v]", err)
+		}
+		log.Infof("sysctl set net.ipv4.ip_forward to 1")
+	}
 
 	ip, family := ipAndFamily(address)
 
@@ -297,12 +314,29 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 }
 
 func (lb *IPVSLoadBalancer) checkBackend(backend Backend) bool {
+	var client *kubernetes.Clientset
+	var err error
+
 	adminConfigPath := "/etc/kubernetes/admin.conf"
-	client, err := k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("%s:%v", backend.Addr, backend.Port))
-	if err != nil {
-		log.Infof("failed to new clientset: %s", err)
-		return false
+	// TODO: add one more switch case of homeConfigPath if there is such scenario in future
+	// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	switch {
+	case utils.FileExists(adminConfigPath):
+		client, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("%s:%v", backend.Addr, backend.Port))
+		if err != nil {
+			log.Infof("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
+			return false
+		}
+		log.Debugf("Using external Kubernetes configuration from %q.", adminConfigPath)
+	default:
+		client, err = k8s.NewClientset("", true, fmt.Sprintf("%s:%v", backend.Addr, backend.Port))
+		if err != nil {
+			log.Infof("could not create k8s clientset %v", err)
+			return false
+		}
+		log.Debug("Using external Kubernetes configuration from incluster config.")
 	}
+
 	_, err = client.DiscoveryClient.ServerVersion()
 	if err != nil {
 		log.Infof("failed check k8s server version: %s", err)
