@@ -15,7 +15,7 @@ require (
 	github.com/kamhlos/upnp v0.0.0-20210324072331-5661950dff08
 	github.com/mdlayher/ndp v1.0.1
 	github.com/onsi/ginkgo/v2 v2.15.0
-	github.com/onsi/gomega v1.30.0
+	github.com/onsi/gomega v1.32.0
 	github.com/osrg/gobgp/v3 v3.25.0
 	github.com/packethost/packngo v0.31.0
 	github.com/pkg/errors v0.9.1
