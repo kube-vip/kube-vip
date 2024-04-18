@@ -28,12 +28,12 @@ func (sm *Manager) startBGP() error {
 			key, project, err := equinixmetal.GetPacketConfig(sm.config.ProviderConfig)
 			if err != nil {
 				return err
-			} else {
-				// Set the environment variable with the key for the project
-				os.Setenv("PACKET_AUTH_TOKEN", key)
-				// Update the configuration with the project key
-				sm.config.MetalProjectID = project
 			}
+			// Set the environment variable with the key for the project
+			os.Setenv("PACKET_AUTH_TOKEN", key)
+			// Update the configuration with the project key
+			sm.config.MetalProjectID = project
+
 		}
 		packetClient, err = packngo.NewClient()
 		if err != nil {
