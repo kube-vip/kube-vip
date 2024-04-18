@@ -30,6 +30,7 @@ const (
 	flushContrack            = "kube-vip.io/flush-conntrack"
 	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
+	serviceInterface         = "kube-vip.io/serviceInterface"
 )
 
 func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
@@ -135,7 +136,7 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		log.Debugf("(svcs) will update [%s/%s]", newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 		if err := sm.updateStatus(newService); err != nil {
 			// delete service to collect garbage
-			if deleteErr := sm.deleteService(newService.UID); err != nil {
+			if deleteErr := sm.deleteService(newService.UID); deleteErr != nil {
 				return deleteErr
 			}
 			return err
