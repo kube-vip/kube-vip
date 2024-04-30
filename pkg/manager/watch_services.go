@@ -237,7 +237,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							wg.Done()
 						}()
 					}
-					activeService[string(svc.UID)] = true
 				} else {
 					// Increment the waitGroup before the service Func is called (Done is completed in there)
 					wg.Add(1)
@@ -247,6 +246,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 					wg.Done()
 				}
+				activeService[string(svc.UID)] = true
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
