@@ -151,3 +151,18 @@ func (sm *Manager) cleanRoutes() error {
 	}
 	return nil
 }
+
+func (sm *Manager) countRouteReferences(route *netlink.Route) int {
+	cnt := 0
+	for _, instance := range sm.serviceInstances {
+		for _, cluster := range instance.clusters {
+			for n := range cluster.Network {
+				r := cluster.Network[n].PrepareRoute()
+				if r.Dst.String() == route.Dst.String() {
+					cnt++
+				}
+			}
+		}
+	}
+	return cnt
+}

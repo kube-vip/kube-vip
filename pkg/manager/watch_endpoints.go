@@ -430,13 +430,17 @@ func (sm *Manager) clearRoutes(service *v1.Service) []error {
 	if instance := sm.findServiceInstance(service); instance != nil {
 		for _, cluster := range instance.clusters {
 			for i := range cluster.Network {
-				err := cluster.Network[i].DeleteRoute()
-				if err != nil && !errors.Is(err, syscall.ESRCH) {
-					log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
-					errs = append(errs, err)
+				route := cluster.Network[i].PrepareRoute()
+				// check if route we are about to delete is not referenced by more than one service
+				if sm.countRouteReferences(route) <= 1 {
+					err := cluster.Network[i].DeleteRoute()
+					if err != nil && !errors.Is(err, syscall.ESRCH) {
+						log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
+						errs = append(errs, err)
+					}
+					log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
+						cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 				}
-				log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
-					cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
 			}
 		}
 	}
