@@ -2,12 +2,16 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -15,6 +19,10 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
@@ -31,7 +39,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	signal.Notify(signalChan, syscall.SIGTERM)
 
 	for i := range cluster.Network {
-
 		if cluster.Network[i].IsDDNS() {
 			if err := cluster.StartDDNS(ctxDNS); err != nil {
 				log.Error(err)
@@ -45,9 +52,11 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			ipUpdater.Run(ctxDNS)
 		}
 
-		err = cluster.Network[i].AddIP()
-		if err != nil {
-			log.Fatalf("%v", err)
+		if !c.EnableRoutingTable {
+			err = cluster.Network[i].AddIP(false)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
 		}
 
 		if c.EnableMetal {
@@ -74,7 +83,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if c.EnableLoadBalancer {
-
 			log.Infof("Starting IPVS LoadBalancer")
 
 			lb, err := loadbalancer.NewIPVSLB(cluster.Network[i].IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval)
@@ -101,8 +109,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		if c.EnableARP {
 			// ctxArp, cancelArp = context.WithCancel(context.Background())
-
-			go func(ctx context.Context) {
+			go func(ctx context.Context, i int) {
 				ipString := cluster.Network[i].IP()
 				isIPv6 := vip.IsIPv6(ipString)
 
@@ -127,18 +134,156 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					}
 					time.Sleep(3 * time.Second)
 				}
-			}(ctxArp)
-		}
-
-		if c.EnableRoutingTable {
-			err = cluster.Network[i].AddRoute()
-			if err != nil {
-				log.Warnf("%v", err)
-			}
+			}(ctxArp, i)
 		}
 	}
 
+	if c.EnableRoutingTable {
+		backendMapV4 := backend.Map{}
+		backendMapV6 := backend.Map{}
+		// only check localhost
+
+		nodename := ""
+		if c.NodeName != "" {
+			nodename = c.NodeName
+		} else {
+			nodename = os.Getenv("HOSTNAME")
+		}
+
+		ips := []string{}
+		if nodename != "" {
+			if ips, err = getNodeIPs(ctxArp, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+				log.Error("failed to get IP of control-plane node: %w", err)
+			}
+		}
+
+		if len(ips) == 0 {
+			isV6, err := isV6(cluster.Network[0].IP())
+			if err != nil {
+				return fmt.Errorf("failed to parse IP '%s'", cluster.Network[0].IP())
+			}
+			if !isV6 {
+				ips = append(ips, "127.0.0.1")
+			} else {
+				ips = append(ips, "::1")
+			}
+
+			log.Infof("no IP address found for node - will fallback to use localhost address: %v", ips)
+		}
+
+		for _, ip := range ips {
+			entry := backend.Entry{Addr: ip, Port: c.Port}
+			ipv6, err := isV6(ip)
+			if err != nil {
+				log.Error("failed to check IP type", "IP", ip, "error", err)
+			}
+			if !ipv6 {
+				backendMapV4[entry] = false
+			} else {
+				backendMapV6[entry] = false
+			}
+		}
+
+		stop := make(chan struct{})
+
+		// will wait for system interrupt and will send stop signal to backend watch
+		go func() {
+			<-signalChan
+			stop <- struct{}{}
+		}()
+
+		backend.Watch(func() {
+			for i := range cluster.Network {
+				networkIP := cluster.Network[i].IP()
+				isNetworkV6, err := isV6(networkIP)
+				if err != nil {
+					log.Error("failed to check IP type", "IP", networkIP, "error", err)
+					continue
+				}
+
+				backendMap := &backendMapV4
+				if isNetworkV6 {
+					backendMap = &backendMapV6
+				}
+
+				for entry := range *backendMap {
+					if entry.Check() {
+						err = cluster.Network[i].AddIP(true)
+						if err != nil {
+							log.Fatalf("error adding IP: %v", err)
+						}
+						if !(*backendMap)[entry] {
+							log.Infof("added IP: %s", cluster.Network[i].IP())
+						}
+
+						err = cluster.Network[i].AddRoute(true)
+						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
+							log.Warnf("%v", err)
+						} else if err == nil && !(*backendMap)[entry] {
+							log.Infof("added route: %s", cluster.Network[i].PrepareRoute().String())
+						}
+
+						(*backendMap)[entry] = true
+						break
+					}
+					(*backendMap)[entry] = false
+				}
+
+				deleteAddress := true
+				for entry := range *backendMap {
+					if (*backendMap)[entry] {
+						deleteAddress = false
+						break
+					}
+				}
+
+				if deleteAddress {
+					err = cluster.Network[i].DeleteRoute()
+					if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
+						log.Warnf("error while deleting route: %v", err)
+					} else if err == nil {
+						log.Infof("deleted route: %s", cluster.Network[i].PrepareRoute().String())
+					}
+
+					isSet, err := cluster.Network[i].IsSet()
+					if err != nil {
+						log.Error("failed to check IP address", "error", err)
+					}
+					if isSet {
+						err = cluster.Network[i].DeleteIP()
+						if err != nil {
+							log.Fatalf("error deleting IP: %v", err)
+						}
+						log.Infof("deleted IP: %s", cluster.Network[i].IP())
+					}
+				}
+			}
+		}, c.BackendHealthCheckInterval, stop)
+	}
+
 	return nil
+}
+
+func isV6(ip string) (bool, error) {
+	ipaddr := net.ParseIP(ip)
+	if ipaddr == nil {
+		return false, fmt.Errorf("failed to parse IP '%s'", ip)
+	}
+	return ipaddr.To4() == nil, nil
+}
+
+func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clientset) ([]string, error) {
+	node, err := client.CoreV1().Nodes().Get(ctx, nodename, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return []string{}, fmt.Errorf("failed to get data about '%s' node: %w", nodename, err)
+	}
+	ips := []string{}
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == corev1.NodeInternalIP {
+			ips = append(ips, addr.Address)
+		}
+	}
+	return ips, nil
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
@@ -159,20 +304,18 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			log.Warnf("Attempted to clean existing VIP => %v", err)
 		}
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
-			err = network.AddRoute()
+			err = network.AddRoute(false)
 			if err != nil {
 				log.Warnf("%v", err)
 			}
 		} else if !c.EnableRoutingTable {
-			err = network.AddIP()
+			err = network.AddIP(false)
 			if err != nil {
 				log.Warnf("%v", err)
 			}
 		}
 
 		if c.EnableARP {
-			// ctxArp, cancelArp = context.WithCancel(context.Background())
-
 			ipString := network.IP()
 			var ndp *vip.NdpResponder
 			if vip.IsIPv6(ipString) {
@@ -267,7 +410,7 @@ func (cluster *Cluster) ensureIPAndSendGratuitous(iface string, ndp *vip.NdpResp
 		}
 		if !set {
 			log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, iface)
-			err = cluster.Network[i].AddIP()
+			err = cluster.Network[i].AddIP(false)
 			if err != nil {
 				log.Warnf("%v", err)
 			}
