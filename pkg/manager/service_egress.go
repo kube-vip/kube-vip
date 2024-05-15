@@ -23,6 +23,7 @@ func (sm *Manager) iptablesCheck() error {
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	scanner.Split(bufio.ScanLines)
 	var nat, filter, mangle bool
