@@ -45,6 +45,9 @@ type Config struct {
 	// LoadBalancerClassName, will limit the load balancing services to services with LoadBalancerClass set to this value
 	LoadBalancerClassName string `yaml:"lbClassName"`
 
+	// LoadBalancerClassLegacyHandling, will enable legacy loadbalancer class handling which does not force service loadbalancer class and kube-vip's loadbalancer class to be the same.
+	LoadBalancerClassLegacyHandling bool `yaml:"lbClassNameLegacyHandling"`
+
 	// EnableServiceSecurity, will enable the use of iptables to secure services
 	EnableServiceSecurity bool `yaml:"EnableServiceSecurity"`
 

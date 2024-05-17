@@ -112,29 +112,27 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
+			// Check if we ignore this service
+			if svc.Annotations["kube-vip.io/ignore"] == "true" {
+				log.Infof("(svcs) [%s] has an ignore annotation for kube-vip", svc.Name)
+				break
+			}
+
+			// Select loadbalancer class filtering function
+			lbClassFilterFunc := sm.lbClassFilter
+			if sm.config.LoadBalancerClassLegacyHandling {
+				lbClassFilterFunc = sm.lbClassFilterLegacy
+			}
+
+			// Check the loadBalancer class
+			if lbClassFilterFunc(svc) {
+				break
+			}
+
 			svcAddresses := fetchServiceAddresses(svc)
 
 			// We only care about LoadBalancer services that have been allocated an address
 			if len(svcAddresses) <= 0 {
-				break
-			}
-
-			// Check the loadBalancer class
-			if svc.Spec.LoadBalancerClass != nil {
-				// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
-				if *svc.Spec.LoadBalancerClass != sm.config.LoadBalancerClassName {
-					log.Infof("(svcs) [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
-					break
-				}
-			} else if sm.config.LoadBalancerClassOnly {
-				// if kube-vip is configured to only recognize services with kube-vip's lb class, then ignore the services without any lb class
-				log.Infof("(svcs) kube-vip configured to only recognize services with kube-vip's lb class but the service [%s] didn't specify any loadBalancer class, ignoring", svc.Name)
-				break
-			}
-
-			// Check if we ignore this service
-			if svc.Annotations["kube-vip.io/ignore"] == "true" {
-				log.Infof("(svcs) [%s] has an ignore annotation for kube-vip", svc.Name)
 				break
 			}
 
@@ -328,6 +326,44 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	close(exitFunction)
 	log.Warnln("Stopping watching services for type: LoadBalancer in all namespaces")
 	return nil
+}
+
+func (sm *Manager) lbClassFilterLegacy(svc *v1.Service) bool {
+	if svc == nil {
+		log.Infof("(svcs) service is nil, ignoring")
+		return true
+	}
+	if svc.Spec.LoadBalancerClass != nil {
+		// if this isn't nil then it has been configured, check if it the kube-vip loadBalancer class
+		if *svc.Spec.LoadBalancerClass != sm.config.LoadBalancerClassName {
+			log.Infof("(svcs) [%s] specified the loadBalancer class [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass)
+			return true
+		}
+	} else if sm.config.LoadBalancerClassOnly {
+		// if kube-vip is configured to only recognize services with kube-vip's lb class, then ignore the services without any lb class
+		log.Infof("(svcs) kube-vip configured to only recognize services with kube-vip's lb class but the service [%s] didn't specify any loadBalancer class, ignoring", svc.Name)
+		return true
+	}
+	return false
+}
+
+func (sm *Manager) lbClassFilter(svc *v1.Service) bool {
+	if svc == nil {
+		log.Infof("(svcs) service is nil, ignoring")
+		return true
+	}
+	if svc.Spec.LoadBalancerClass == nil && sm.config.LoadBalancerClassName != "" {
+		log.Infof("(svcs) [%s] specified no loadBalancer class, expected [%s], ignoring", svc.Name, sm.config.LoadBalancerClassName)
+		return true
+	}
+	if svc.Spec.LoadBalancerClass == nil && sm.config.LoadBalancerClassName == "" {
+		return false
+	}
+	if *svc.Spec.LoadBalancerClass != sm.config.LoadBalancerClassName {
+		log.Infof("(svcs) [%s] specified loadBalancer class [%s], expected [%s], ignoring", svc.Name, *svc.Spec.LoadBalancerClass, sm.config.LoadBalancerClassName)
+		return true
+	}
+	return false
 }
 
 func isRouteConfigured(serviceUID types.UID) (bool, error) {

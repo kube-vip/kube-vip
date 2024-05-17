@@ -175,6 +175,9 @@ const (
 	// lbClassName enables load-balancer for a specific class only
 	lbClassName = "lb_class_name"
 
+	// lbClassLegacyHandling enables legacy handing of load-balancer class
+	lbClassLegacyHandling = "lb_class_legacy_handling"
+
 	// lbEnable defines if the load-balancer should be enabled
 	lbEnable = "lb_enable"
 

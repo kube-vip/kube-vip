@@ -202,9 +202,19 @@ func ParseEnvironment(c *Config) error {
 		}
 
 		// Load-balancer class name
-		env = os.Getenv(lbClassName)
-		if env != "" {
+		env, exists := os.LookupEnv(lbClassName)
+		if exists {
 			c.LoadBalancerClassName = env
+		}
+
+		// Load-balancer class legacy handling
+		env = os.Getenv(lbClassLegacyHandling)
+		if env != "" {
+			b, err := strconv.ParseBool(env)
+			if err != nil {
+				return err
+			}
+			c.LoadBalancerClassLegacyHandling = b
 		}
 
 		// Find the namespace that the control plane should use (for leaderElection lock)
