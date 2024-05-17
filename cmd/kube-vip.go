@@ -60,7 +60,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc..")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.NodeName, "nodeName", "", "Name to be used for lease holder. Must be unique for each node/instance")
 
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "32", "The CIDR range for the virtual IP address") // todo: deprecate
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address. Default to 32 for IPv4 and 128 for IPv6") // todo: deprecate
 
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "Port for the VIP")
