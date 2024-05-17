@@ -220,8 +220,11 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		// Stop the Arp context if it is running
 		cancelArp()
 
-		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
+		log.Info("[LOADBALANCER] Stopping load balancers")
+
+		if c.EnableRoutingTable {
 			for i := range cluster.Network {
+				log.Infof("[VIP] Deleting Route for Virtual IP [%s]", cluster.Network[i].IP())
 				if err := cluster.Network[i].DeleteRoute(); err != nil {
 					log.Warnf("%v", err)
 				}
@@ -230,9 +233,6 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			close(cluster.completed)
 			return
 		}
-
-		log.Info("[LOADBALANCER] Stopping load balancers")
-
 		for i := range cluster.Network {
 			log.Infof("[VIP] Releasing the Virtual IP [%s]", cluster.Network[i].IP())
 			if err := cluster.Network[i].DeleteIP(); err != nil {
