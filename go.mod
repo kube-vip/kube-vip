@@ -1,8 +1,7 @@
 module github.com/kube-vip/kube-vip
 
 go 1.21
-
-toolchain go1.21.3
+toolchain go1.22.2
 
 require (
 	github.com/cloudflare/ipvs v0.10.1
@@ -33,7 +32,7 @@ require (
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.1
-	k8s.io/apimachinery v0.29.3
+	k8s.io/apimachinery v0.30.1
 	k8s.io/client-go v0.29.1
 	k8s.io/klog/v2 v2.120.1
 	sigs.k8s.io/kind v0.22.0
@@ -121,7 +120,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20231010175941-2dd684a91f00 // indirect
+	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
 	modernc.org/cc/v4 v4.1.0 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
