@@ -79,9 +79,9 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLeaderElection, "leaderElection", false, "Use the Kubernetes leader election mechanism for clustering")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LeaderElectionType, "leaderElectionType", "kubernetes", "Defines the backend to run the leader election: kubernetes or etcd. Defaults to kubernetes.")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LeaseName, "leaseName", "plndr-cp-lock", "Name of the lease that is used for leader election")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LeaseDuration, "leaseDuration", 5, "Length of time a Kubernetes leader lease can be held for")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time a Kubernetes leader can attempt to renew its lease")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RetryPeriod, "leaseRetry", 1, "Number of times the host will retry to hold a lease")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LeaseDuration, "leaseDuration", 5, "Length of time (in seconds) a Kubernetes leader lease can be held for")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time (in seconds) a Kubernetes leader can attempt to renew its lease")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RetryPeriod, "leaseRetry", 1, "Length of time (in seconds) the LeaderElector clients should wait between tries of actions")
 
 	// Equinix Metal flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableMetal, "metal", false, "This will use the Equinix Metal API (requires the token ENV) to update the EIP <-> VIP")
