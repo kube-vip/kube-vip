@@ -205,7 +205,7 @@ type KubernetesLeaderElection struct {
 	// RenewDeadline - length of time a host can attempt to renew its lease
 	RenewDeadline int
 
-	// RetryPerion - Number of times the host will retry to hold a lease
+	// RetryPeriod - length of time (in seconds) the LeaderElector clients should wait between tries of actions
 	RetryPeriod int
 
 	// LeaseAnnotations - annotations which will be given to the lease object
