@@ -485,15 +485,13 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		})
 	}
 
-	if c.PrometheusHTTPServer != "" {
-		prometheus := []corev1.EnvVar{
-			{
-				Name:  prometheusServer,
-				Value: c.PrometheusHTTPServer,
-			},
-		}
-		newEnvironment = append(newEnvironment, prometheus...)
+	prometheus := []corev1.EnvVar{
+		{
+			Name:  prometheusServer,
+			Value: c.PrometheusHTTPServer,
+		},
 	}
+	newEnvironment = append(newEnvironment, prometheus...)
 
 	if c.EnableEndpointSlices {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{
