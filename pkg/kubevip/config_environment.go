@@ -2,6 +2,9 @@ package kubevip
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
+	"math/bits"
 	"os"
 	"strconv"
 
@@ -316,9 +319,12 @@ func ParseEnvironment(c *Config) error {
 	// Routing Table ID
 	env = os.Getenv(vipRoutingTableID)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
+		i, err := strconv.ParseInt(env, 10, 64)
 		if err != nil {
 			return err
+		}
+		if i > math.MaxInt32 && math.MaxInt < math.MaxInt64 {
+			return fmt.Errorf("system does not support int64 natively only [int%d]", bits.OnesCount(math.MaxInt)+1)
 		}
 		c.RoutingTableID = int(i)
 	}
