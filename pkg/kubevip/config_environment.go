@@ -329,7 +329,7 @@ func ParseEnvironment(c *Config) error {
 		} else if i < 0 {
 			return fmt.Errorf("no support of negative [%d] in env var %q", i, vipRoutingTableID)
 		}
-		return fmt.Errorf("no support for int64 natively on system only [int%d]", bits.OnesCount(math.MaxUint))
+		return fmt.Errorf("no support for int64, system natively supports [int%d]", bits.OnesCount(math.MaxUint))
 	}
 
 	// Routing Table Type
