@@ -2,6 +2,9 @@ package kubevip
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
+	"math/bits"
 	"os"
 	"strconv"
 
@@ -316,11 +319,18 @@ func ParseEnvironment(c *Config) error {
 	// Routing Table ID
 	env = os.Getenv(vipRoutingTableID)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
+		i, err := strconv.ParseInt(env, 10, 64)
 		if err != nil {
 			return err
 		}
-		c.RoutingTableID = int(i)
+		if i >= 0 && i <= math.MaxInt {
+			c.RoutingTableID = int(i)
+			return nil
+		} else if i < 0 {
+			return fmt.Errorf("no support of negative [%d] in env var %q", i, vipRoutingTableID)
+		}
+		// +1 for the signing bit as it is 0 for positive integers
+		return fmt.Errorf("no support for int64, system natively supports [int%d]", bits.OnesCount(math.MaxInt)+1)
 	}
 
 	// Routing Table Type
