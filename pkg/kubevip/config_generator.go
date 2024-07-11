@@ -699,11 +699,13 @@ func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inClust
 			},
 		}
 	}
+
+	// TODO: we don't check error return values for any of these marshall/unmarshall functions
 	b, _ := yaml.Marshal(newManifest)
 
 	// This additional step is required to be able to delete a section of the manifest being generated
 	m := make(map[string]interface{})
-	yaml.Unmarshal(b, &m)
+	_ = yaml.Unmarshal(b, &m)
 	delete(m, "status")
 
 	b, _ = yaml.Marshal(m)
