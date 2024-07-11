@@ -57,9 +57,9 @@ var kubeManifestPod = &cobra.Command{
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 
-		if initConfig.VIPCIDR == "" {
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
-
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -92,9 +92,9 @@ var kubeManifestDaemon = &cobra.Command{
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 
-		if initConfig.VIPCIDR == "" {
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
-
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -125,9 +125,9 @@ var kubeManifestRbac = &cobra.Command{
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 
-		if initConfig.VIPCIDR == "" {
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
-
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -147,7 +147,7 @@ func generateCidrRange(address string) (string, error) {
 		ip := net.ParseIP(a)
 
 		if ip == nil {
-			return "", fmt.Errorf("invalid IP address: %v", a)
+			return "", fmt.Errorf("invalid IP address: %s from [%s]", a, address)
 		}
 
 		if ip.To4() != nil {

@@ -59,6 +59,8 @@ jobs:
           go-version-file: go.mod
       - name: Build image locally
         run: make dockerx86Local
+      - name: Run Manifest generation tests
+        run: make manifest-test
       - name: Run Control plane tests
         run: make e2e-tests
       - name: Run Control plane tests v1.29.0 onwards
