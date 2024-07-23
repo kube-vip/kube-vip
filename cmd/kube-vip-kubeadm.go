@@ -53,6 +53,14 @@ var kubeKubeadmInit = &cobra.Command{
 			log.Fatalln("No address is specified for kube-vip to expose services on")
 		}
 
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+			if err != nil {
+				log.Fatalln(err)
+			}
+		}
+
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
 		fmt.Println(cfg) // output manifest to stdout
 	},
@@ -85,6 +93,14 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
 			log.Fatalf("Unable to find file [%s]", kubeConfigPath)
+		}
+
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+			if err != nil {
+				log.Fatalln(err)
+			}
 		}
 
 		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)

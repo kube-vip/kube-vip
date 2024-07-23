@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net"
-	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	log "github.com/sirupsen/logrus"
@@ -59,7 +57,7 @@ var kubeManifestPod = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
-			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -94,7 +92,7 @@ var kubeManifestDaemon = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
-			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -127,7 +125,7 @@ var kubeManifestRbac = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
-			initConfig.VIPCIDR, err = generateCidrRange(initConfig.Address)
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -137,25 +135,4 @@ var kubeManifestRbac = &cobra.Command{
 		b, _ := yaml.Marshal(cfg)
 		fmt.Println(string(b)) // output manifest to stdout
 	},
-}
-
-func generateCidrRange(address string) (string, error) {
-	var cidrs []string
-
-	addresses := strings.Split(address, ",")
-	for _, a := range addresses {
-		ip := net.ParseIP(a)
-
-		if ip == nil {
-			return "", fmt.Errorf("invalid IP address: %s from [%s]", a, address)
-		}
-
-		if ip.To4() != nil {
-			cidrs = append(cidrs, "32")
-		} else {
-			cidrs = append(cidrs, "128")
-		}
-	}
-
-	return strings.Join(cidrs, ","), nil
 }
