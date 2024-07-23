@@ -125,10 +125,12 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			return nil, fmt.Errorf("error starting DHCP for %s/%s: error: %s",
 				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name, err)
 		case ip := <-instance.dhcpClient.IPChannel():
+			instance.vipConfigs[0].Interface = instance.dhcpInterface
 			instance.vipConfigs[0].VIP = ip
 			instance.dhcpInterfaceIP = ip
 		}
 	}
+
 	for _, vipConfig := range instance.vipConfigs {
 		c, err := cluster.InitCluster(vipConfig, false)
 		if err != nil {
