@@ -96,14 +96,14 @@ func FindWorkingKubernetesAddress(configPath string, inCluster bool) (*kubernete
 	for x := range ips {
 		log.Debugf("[k8s client] checking with IP address [%s]", ips[x].String())
 
-		k, err := newClientset(configPath, inCluster, ips[x].String()+":6443", time.Second*2)
+		k, err := newClientset(configPath, inCluster, net.JoinHostPort(ips[x].String(), "6443"), time.Second*2)
 		if err != nil {
 			log.Info(err)
 		}
 		_, err = k.DiscoveryClient.ServerVersion()
 		if err == nil {
 			log.Infof("[k8s client] working with IP address [%s]", ips[x].String())
-			return NewClientset(configPath, inCluster, ips[x].String()+":6443")
+			return NewClientset(configPath, inCluster, net.JoinHostPort(ips[x].String(), "6443"))
 		}
 	}
 	return nil, fmt.Errorf("unable to find a working address for the local API server [%v]", err)
