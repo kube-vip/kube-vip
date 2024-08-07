@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -207,6 +208,14 @@ var kubeVipService = &cobra.Command{
 			configMap = envConfigMap
 		}
 
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+			if err != nil {
+				log.Fatalln(err)
+			}
+		}
+
 		// Define the new service manager
 		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
@@ -229,6 +238,14 @@ var kubeVipManager = &cobra.Command{
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Fatalln(err)
+		}
+
+		// Ensure there is an address to generate the CIDR from
+		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
+			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+			if err != nil {
+				log.Fatalln(err)
+			}
 		}
 
 		// Set the logging level for all subsequent functions
@@ -406,4 +423,25 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	if err == http.ErrServerClosed {
 		err = nil
 	}
+}
+
+func GenerateCidrRange(address string) (string, error) {
+	var cidrs []string
+
+	addresses := strings.Split(address, ",")
+	for _, a := range addresses {
+		ip := net.ParseIP(a)
+
+		if ip == nil {
+			return "", fmt.Errorf("invalid IP address: %s from [%s]", a, address)
+		}
+
+		if ip.To4() != nil {
+			cidrs = append(cidrs, "32")
+		} else {
+			cidrs = append(cidrs, "128")
+		}
+	}
+
+	return strings.Join(cidrs, ","), nil
 }
