@@ -36,16 +36,14 @@ func applyNodeLabel(clientSet *kubernetes.Clientset, address, id, identity strin
 
 	value, ok := node.Labels[nodeLabelIndex]
 	path := fmt.Sprintf("/metadata/labels/%s", nodeLabelJSONPath)
-	if (!ok || value != address) && id == identity {
-		log.Debugf("setting node label `has-ip=%s` on %s", address, id)
-		// Append label
-		applyPatchLabels(ctx, clientSet, id, "add", path, address)
-	} else if ok && value == address {
+	if ok && value == address {
 		log.Debugf("removing node label `has-ip=%s` on %s", address, id)
 		// Remove label
 		applyPatchLabels(ctx, clientSet, id, "remove", path, address)
 	} else {
-		log.Debugf("no node label change needed")
+		log.Debugf("setting node label `has-ip=%s` on %s", address, id)
+		// Append label
+		applyPatchLabels(ctx, clientSet, id, "add", path, address)
 	}
 }
 
