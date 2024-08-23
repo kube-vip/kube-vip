@@ -24,6 +24,10 @@ func (c *Config) CheckInterface() error {
 }
 
 func isValidInterface(iface string) error {
+	// auto interface discovery for services is enabled
+	if iface == "auto" {
+		return nil
+	}
 	l, err := netlink.LinkByName(iface)
 	if err != nil {
 		return fmt.Errorf("get %s failed, error: %w", iface, err)
