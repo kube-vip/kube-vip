@@ -42,21 +42,47 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	instanceAddresses := fetchServiceAddresses(svc)
 	instanceUID := string(svc.UID)
 
-	// Detect if we're using a specific interface for services
-	var svcInterface string
-	svcInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
-
-	// If it is still blank then use the
-	if svcInterface == "" {
-		if config.ServicesInterface != "" {
-			svcInterface = config.ServicesInterface
-		} else {
-			svcInterface = config.Interface
-		}
-	}
 	var newVips []*kubevip.Config
 
 	for _, address := range instanceAddresses {
+		// Detect if we're using a specific interface for services
+		var svcInterface string
+		svcInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
+		if svcInterface == "auto" {
+			link, err := autoFindInterface(address)
+			if err != nil {
+				log.Errorf("failed to automatically discover network interface for annotated IP address [%s] with error: %s", address, err.Error())
+			} else {
+				if link == nil {
+					log.Errorf("failed to automatically discover network interface for annotated IP address [%s]", address)
+				}
+			}
+			if link == nil {
+				svcInterface = ""
+			} else {
+				svcInterface = getAutoInterfaceName(link, config.Interface)
+			}
+		}
+		// If it is still blank then use the
+		if svcInterface == "" {
+			switch config.ServicesInterface {
+			case "auto":
+				link, err := autoFindInterface(address)
+				if err != nil {
+					log.Errorf("failed to automatically discover network interface for IP address [%s] with error: %s - defaulting to: %s", address, err.Error(), config.Interface)
+				} else if link == nil {
+					log.Errorf("failed to automatically discover network interface for IP address [%s] - defaulting to: %s", address, config.Interface)
+				}
+				svcInterface = getAutoInterfaceName(link, config.Interface)
+			case "":
+				svcInterface = config.Interface
+			default:
+				svcInterface = config.ServicesInterface
+			}
+		}
+
+		log.Info("new instance", "svc", *svc, "interface", svcInterface)
+
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
 			VIP:                    address,
@@ -148,6 +174,42 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	}
 
 	return instance, nil
+}
+
+func autoFindInterface(ip string) (netlink.Link, error) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list network interfaces: %w", err)
+	}
+
+	address := net.ParseIP(ip)
+
+	family := netlink.FAMILY_V4
+
+	if address.To4() == nil {
+		family = netlink.FAMILY_V6
+	}
+
+	for _, link := range links {
+		addr, err := netlink.AddrList(link, family)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get IP addresses for interface %s: %w", link.Attrs().Name, err)
+		}
+		for _, a := range addr {
+			if a.IPNet.Contains(address) {
+				return link, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
+	if link == nil {
+		return defaultInterface
+	}
+	return link.Attrs().Name
 }
 
 func (i *Instance) startDHCP() error {
