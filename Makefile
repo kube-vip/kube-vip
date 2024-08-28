@@ -17,7 +17,7 @@ LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extld
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= plndr
 
-.PHONY: all build clean install uninstall fmt simplify check run e2e-tests
+.PHONY: all build clean install uninstall simplify check run e2e-tests
 
 all: check install
 
@@ -36,9 +36,6 @@ install:
 
 uninstall: clean
 	@rm -f $$(which ${TARGET})
-
-fmt:
-	@gofmt -l -w ./...
 
 demo:
 	@cd demo
@@ -92,12 +89,12 @@ dockerLocal:
 	@echo New Multi Architecture Docker image created
 
 simplify:
-	@gofmt -s -l -w ./...
+	@gofmt -s -l -w *.go pkg cmd
 
 check:
 	go mod tidy
 	test -z "$(git status --porcelain)"
-	test -z $(shell gofmt -l main.go | tee /dev/stderr) || echo "[WARN] Fix formatting issues with 'make fmt'"
+	test -z $(shell gofmt -l *.go pkg cmd) || echo "[WARN] Fix formatting issues with 'make simplify'"
 	golangci-lint run
 	go vet ./...
 
