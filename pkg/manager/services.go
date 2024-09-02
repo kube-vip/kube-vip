@@ -3,11 +3,12 @@ package manager
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/google/go-cmp/cmp"
 	log "github.com/sirupsen/logrus"
