@@ -194,6 +194,16 @@ func ParseEnvironment(c *Config) error {
 			c.EnableServicesElection = b
 		}
 
+		// configure how for how long we will try to update a service before failing.
+		env = os.Getenv(svcStatusUpdateRetrySeconds)
+		if env != "" {
+			b, err := strconv.Atoi(env)
+			if err != nil {
+				return err
+			}
+			c.ServiceStatusUpdateRetrySeconds = b
+		}
+
 		// Find load-balancer class only
 		env = os.Getenv(lbClassOnly)
 		if env != "" {

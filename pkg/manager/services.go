@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"slices"
 	"strings"
 	"sync"
@@ -305,7 +306,16 @@ func (sm *Manager) upnpMap(s *Instance) {
 }
 
 func (sm *Manager) updateStatus(i *Instance) error {
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	statusUpdateRetry := wait.Backoff{
+		Steps:    5,
+		Duration: 10 * time.Millisecond,
+		Factor:   1.0,
+		Jitter:   0.1,
+	}
+	if sm.config.ServiceStatusUpdateRetrySeconds > 0 {
+		statusUpdateRetry.Duration = time.Duration(sm.config.ServiceStatusUpdateRetrySeconds * int(time.Second))
+	}
+	retryErr := retry.RetryOnConflict(statusUpdateRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
 		currentService, err := sm.clientSet.CoreV1().Services(i.serviceSnapshot.Namespace).Get(context.TODO(), i.serviceSnapshot.Name, metav1.GetOptions{})

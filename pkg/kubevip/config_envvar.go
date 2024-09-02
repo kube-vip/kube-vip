@@ -166,6 +166,9 @@ const (
 	// svcElection enables election per Kubernetes service
 	svcElection = "svc_election"
 
+	// svcStatusUpdateRetrySeconds enables election per Kubernetes service
+	svcStatusUpdateRetrySeconds = "svcStatusUpdateRetrySeconds"
+
 	// svcLeaseName Name of the lease that is used for leader election for services (in arp mode)
 	svcLeaseName = "svc_leasename"
 

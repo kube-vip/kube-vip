@@ -36,6 +36,10 @@ type Config struct {
 	// EnableServicesElection, will enable leaderElection per service
 	EnableServicesElection bool `yaml:"enableServicesElection"`
 
+	// ServiceStatusUpdateRetrySeconds this dictates how long between retries that kube-vip will wait before trying to update the status.
+	// kube-vip retries to update the status only 5 times.
+	ServiceStatusUpdateRetrySeconds int `yaml:"serviceStatusUpdateRetrySeconds"`
+
 	// EnableNodeLabeling, will enable node labeling as it becomes leader
 	EnableNodeLabeling bool `yaml:"enableNodeLabeling"`
 

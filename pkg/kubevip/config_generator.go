@@ -238,6 +238,15 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			}
 			newEnvironment = append(newEnvironment, svcElection...)
 		}
+		if c.ServiceStatusUpdateRetrySeconds != 0 {
+			svcElection := []corev1.EnvVar{
+				{
+					Name:  svcStatusUpdateRetrySeconds,
+					Value: strconv.Itoa(c.ServiceStatusUpdateRetrySeconds),
+				},
+			}
+			newEnvironment = append(newEnvironment, svcElection...)
+		}
 		if c.LoadBalancerClassOnly {
 			lbClassOnlyVar := []corev1.EnvVar{
 				{
