@@ -46,7 +46,7 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func getSameFamilyCidr(sourceCidrs, ip string) string {
+func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how this ever worked
 	cidrs := strings.Split(sourceCidrs, ",")
 	for _, cidr := range cidrs {
 		// Is the ip an IPv6 address
@@ -56,7 +56,9 @@ func getSameFamilyCidr(sourceCidrs, ip string) string {
 			}
 		} else {
 			if vip.IsIPv4CIDR(cidr) {
-				return cidr
+				if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
+					return cidr
+				}
 			}
 		}
 	}

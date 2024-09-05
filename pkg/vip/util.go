@@ -106,12 +106,18 @@ func IsIPv6(address string) bool {
 
 func IsIPv4CIDR(cidr string) bool {
 	_, n, _ := net.ParseCIDR(cidr)
+	if n == nil {
+		return false
+	}
 	_, bits := n.Mask.Size()
 	return bits/8 == net.IPv4len
 }
 
 func IsIPv6CIDR(cidr string) bool {
 	_, n, _ := net.ParseCIDR(cidr)
+	if n == nil {
+		return false
+	}
 	_, bits := n.Mask.Size()
 	return bits/8 == net.IPv6len
 }
