@@ -20,9 +20,11 @@ import (
 type service struct {
 	name          string
 	egress        bool // enable egress
+	egressIPv6    bool // egress should be IPv6
 	policyLocal   bool // set the policy to local pods
 	testHTTP      bool
 	testDualstack bool // test dualstack loadbalancer services
+	timeout       int  // how long to wait for the service to be created
 }
 
 type deployment struct {
@@ -74,6 +76,10 @@ func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clien
 								},
 								{
 									Name:  "svc_enable",
+									Value: "true",
+								},
+								{
+									Name:  "enable_endpointslices",
 									Value: "true",
 								},
 								{
@@ -232,6 +238,10 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 			"kube-vip.io/egress": "true",
 		}
 	}
+	if s.egressIPv6 {
+		svc.Annotations["kube-vip.io/egress-ipv6"] = "true"
+	}
+
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 	}
@@ -271,7 +281,7 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 	}
 	ch := rw.ResultChan()
 	go func() {
-		time.Sleep(time.Second * 10)
+		time.Sleep(time.Second * time.Duration(s.timeout))
 		rw.Stop()
 	}()
 	ready := false

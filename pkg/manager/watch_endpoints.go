@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"syscall"
@@ -222,6 +223,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 			// Check that we have local endpoints
 			if len(endpoints) != 0 {
+				// Ignore IPv4
+				if service.Annotations[egressIPv6] == "true" && net.ParseIP(endpoints[0]).To4() != nil {
+					continue
+				}
+
 				// if we haven't populated one, then do so
 				if lastKnownGoodEndpoint != "" {
 

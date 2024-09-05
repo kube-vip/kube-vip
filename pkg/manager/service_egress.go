@@ -9,6 +9,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,52 +46,69 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func getSameFamilyCidr(source, ip string) string {
-	cidrs := strings.Split(source, ",")
+func getSameFamilyCidr(sourceCidrs, ip string) string {
+	cidrs := strings.Split(sourceCidrs, ",")
 	for _, cidr := range cidrs {
-		source = cidr
-		if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
-			return cidr
+		// Is the ip an IPv6 address
+		if vip.IsIPv6(ip) {
+			if vip.IsIPv6CIDR(cidr) {
+				return cidr
+			}
+		} else {
+			if vip.IsIPv4CIDR(cidr) {
+				return cidr
+			}
 		}
 	}
 	// return to the default behaviour of setting the CIDR to the first one (or only one)
-	return source
+	return cidrs[0]
 }
 
 func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
-	// serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
-	// if err != nil {
-	// 	serviceCIDR = "10.96.0.0/12"
-	// 	podCIDR = "10.0.0.0/16"
-	// }
-
+	protocol := iptables.ProtocolIPv4
 	var podCidr, serviceCidr string
 
+	if vip.IsIPv6(vipIP) {
+		protocol = iptables.ProtocolIPv6
+	}
+
+	autoServiceCIDR, autoPodCIDR, discoverErr := sm.AutoDiscoverCIDRs()
+	if discoverErr != nil {
+		log.Warn(discoverErr)
+	}
 	if sm.config.EgressPodCidr != "" {
 		podCidr = getSameFamilyCidr(sm.config.EgressPodCidr, podIP)
+
 	} else {
-		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
-		if !vip.IsIPv4(podIP) {
-			return nil
+		if discoverErr == nil {
+			podCidr = getSameFamilyCidr(autoPodCIDR, podIP)
 		}
-		podCidr = defaultPodCIDR
+		if podCidr == "" {
+			// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
+			if !vip.IsIPv4(podIP) {
+				return nil
+			}
+
+			podCidr = defaultPodCIDR
+		}
 	}
 
 	if sm.config.EgressServiceCidr != "" {
 		serviceCidr = getSameFamilyCidr(sm.config.EgressServiceCidr, vipIP)
 	} else {
-		// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
-		if !vip.IsIPv4(vipIP) {
-			return nil
+		if discoverErr == nil {
+			serviceCidr = getSameFamilyCidr(autoServiceCIDR, podIP)
 		}
-		serviceCidr = defaultServiceCIDR
+		if serviceCidr == "" {
+			// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
+			if !vip.IsIPv4(vipIP) {
+				return nil
+			}
+			serviceCidr = defaultServiceCIDR
+		}
 	}
 
-	protocol := iptables.ProtocolIPv4
-
-	if vip.IsIPv6(vipIP) {
-		protocol = iptables.ProtocolIPv6
-	}
+	log.Infof("[Egress] pod CIDR [%s], service CIDR [%s] for vip [%s] / pod [%s]", podCidr, serviceCidr, vipIP, podIP)
 
 	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
@@ -172,7 +190,21 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 }
 
 func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
-	pod, err := sm.clientSet.CoreV1().Pods("kube-system").Get(context.TODO(), "kube-controller-manager", v1.GetOptions{})
+	podList, err := sm.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), v1.ListOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	var podName string
+	for x := range podList.Items {
+		if strings.Contains(podList.Items[x].Name, "kube-controller-manager") {
+			podName = podList.Items[x].Name
+			break
+		}
+	}
+	if podName == "" {
+		return "", "", fmt.Errorf("[Egress] Unable to auto-discover the pod/service CIDRs")
+	}
+	pod, err := sm.clientSet.CoreV1().Pods("kube-system").Get(context.TODO(), podName, v1.GetOptions{})
 	if err != nil {
 		return "", "", err
 	}

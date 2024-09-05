@@ -32,6 +32,7 @@ type testConfig struct {
 	ignoreLocalDeploy    bool
 	ignoreDualStack      bool
 	ignoreEgress         bool
+	ignoreEgressIPv6     bool
 	retainCluster        bool
 	skipHostnameChange   bool
 }
@@ -47,6 +48,7 @@ func main() {
 	_, t.ignoreLeaderActive = os.LookupEnv("IGNORE_ACTIVE")
 	_, t.ignoreLocalDeploy = os.LookupEnv("IGNORE_LOCALDEPLOY")
 	_, t.ignoreEgress = os.LookupEnv("IGNORE_EGRESS")
+	_, t.ignoreEgressIPv6 = os.LookupEnv("IGNORE_EGRESSIPV6")
 	_, t.ignoreDualStack = os.LookupEnv("IGNORE_DUALSTACK")
 	_, t.retainCluster = os.LookupEnv("RETAIN_CLUSTER")
 	_, t.IPv6 = os.LookupEnv("IPV6_FAMILY")

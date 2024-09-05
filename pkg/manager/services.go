@@ -23,6 +23,7 @@ const (
 	requestedIP              = "kube-vip.io/requestedIP"
 	vipHost                  = "kube-vip.io/vipHost"
 	egress                   = "kube-vip.io/egress"
+	egressIPv6               = "kube-vip.io/egress-ipv6"
 	egressDestinationPorts   = "kube-vip.io/egress-destination-ports"
 	egressSourcePorts        = "kube-vip.io/egress-source-ports"
 	activeEndpoint           = "kube-vip.io/active-endpoint"
@@ -142,7 +143,6 @@ func (sm *Manager) addService(svc *v1.Service) error {
 	}
 
 	serviceIPs := fetchServiceAddresses(svc)
-
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
 
@@ -162,13 +162,32 @@ func (sm *Manager) addService(svc *v1.Service) error {
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if svc.Annotations[egress] == "true" && len(serviceIPs) > 0 {
 		log.Debugf("Enabling egress for the service [%s]", svc.Name)
-		if svc.Annotations[activeEndpoint] != "" {
-			// We will need to modify the iptables rules
-			err = sm.iptablesCheck()
-			if err != nil {
-				log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+		// We will need to modify the iptables rules
+		err = sm.iptablesCheck()
+		if err != nil {
+			log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+		}
+		var podIP string
+		errList := []error{}
+
+		// Should egress be IPv6
+		if svc.Annotations[egressIPv6] == "true" {
+			// Does the service have an active IPv6 endpoint
+			if svc.Annotations[activeEndpointIPv6] != "" {
+				for _, serviceIP := range serviceIPs {
+					if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
+
+						podIP = svc.Annotations[activeEndpointIPv6]
+
+						err = sm.configureEgress(serviceIP, podIP, svc.Annotations[egressDestinationPorts], svc.Namespace)
+						if err != nil {
+							errList = append(errList, err)
+							log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+						}
+					}
+				}
 			}
-			errList := []error{}
+		} else if svc.Annotations[activeEndpoint] != "" { // Not expected to be IPv6, so should be an IPv4 address
 			for _, serviceIP := range serviceIPs {
 				podIPs := svc.Annotations[activeEndpoint]
 				if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
@@ -180,18 +199,17 @@ func (sm *Manager) addService(svc *v1.Service) error {
 					log.Errorf("Error configuring egress for loadbalancer [%s]", err)
 				}
 			}
-			if len(errList) == 0 {
-				var provider epProvider
-				if !sm.config.EnableEndpointSlices {
-					provider = &endpointsProvider{label: "endpoints"}
-				} else {
-					provider = &endpointslicesProvider{label: "endpointslices"}
-				}
-				err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
-				if err != nil {
-					log.Errorf("error configuring egress annotation for loadbalancer [%s]", err)
-				}
-
+		}
+		if len(errList) == 0 {
+			var provider epProvider
+			if !sm.config.EnableEndpointSlices {
+				provider = &endpointsProvider{label: "endpoints"}
+			} else {
+				provider = &endpointslicesProvider{label: "endpointslices"}
+			}
+			err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
+			if err != nil {
+				log.Errorf("error configuring egress annotation for loadbalancer [%s]", err)
 			}
 		}
 	}
