@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -56,7 +57,8 @@ func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how thi
 			}
 		} else {
 			if vip.IsIPv4CIDR(cidr) {
-				if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
+				_, ipnetA, _ := net.ParseCIDR(cidr)
+				if ipnetA.Contains(net.ParseIP(ip)) {
 					return cidr
 				}
 			}
