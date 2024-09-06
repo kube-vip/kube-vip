@@ -34,26 +34,43 @@ func main() {
 		if !exists {
 			log.Fatal("The environment variable E2EADDRESS, was not set")
 		}
+		ip := net.ParseIP(address)
+		network := "tcp"
+		port := ":12345"
+		if ip.To4() == nil {
+			network = "tcp6"
+			address = fmt.Sprintf("[%s]", address)
+			port = ":12346" // use a different port for IPv6 incase the IPv4 port is left connected
+			log.Infoln("Connecting with IPv6")
+		}
 		for {
-
 			// Connect to e2e endpoint with a second timeout
-			conn, err := net.DialTimeout("tcp", address+":12345", time.Second)
+			conn, err := net.DialTimeout(network, address+port, time.Second)
 			if err != nil {
-				log.Fatalf("Dial failed: %v", err.Error())
+				log.Errorf("Dial failed: %v", err.Error())
+				// Wait for a second and connect again
+				time.Sleep(time.Second)
+				continue
 			}
 			_, err = conn.Write([]byte("The Grid, a digital frontier"))
 			if err != nil {
-				log.Fatalf("Write data failed: %v ", err.Error())
+				log.Errorf("Write data failed: %v ", err.Error())
+				// Wait for a second and connect again
+				time.Sleep(time.Second)
+				continue
 			}
 
 			// buffer to get data
 			received := make([]byte, 1024)
 			_, err = conn.Read(received)
 			if err != nil {
-				log.Fatalf("Read data failed:", err.Error())
+				log.Errorf("Read data failed: %v", err.Error())
+				// Wait for a second and connect again
+				time.Sleep(time.Second)
+				continue
 			}
 
-			println("Received message: %s", string(received))
+			log.Infof("Received message: %s\n", string(received))
 
 			conn.Close()
 			// Wait for a second and connect again

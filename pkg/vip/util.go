@@ -104,6 +104,22 @@ func IsIPv6(address string) bool {
 	return ip.To4() == nil
 }
 
+func IsIPv4CIDR(cidr string) bool {
+	ip, _, _ := net.ParseCIDR(cidr)
+	if ip == nil {
+		return false
+	}
+	return ip.To4() != nil
+}
+
+func IsIPv6CIDR(cidr string) bool {
+	ip, _, _ := net.ParseCIDR(cidr)
+	if ip == nil {
+		return false
+	}
+	return ip.To4() == nil
+}
+
 // GetFullMask returns /32 for an IPv4 address and /128 for an IPv6 address
 func GetFullMask(address string) (string, error) {
 	if IsIPv4(address) {

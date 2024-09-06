@@ -81,7 +81,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			}
 		}
 
-		log.Info("new instance", "svc", *svc, "interface", svcInterface)
+		//log.Info("new instance", "svc", *svc, "interface", svcInterface)
 
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{

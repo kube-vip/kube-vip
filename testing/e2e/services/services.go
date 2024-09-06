@@ -47,6 +47,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 		svc := service{
 			name:     s,
 			testHTTP: true,
+			timeout:  10,
 		}
 		_, _, err = svc.createService(ctx, clientset)
 		if err != nil {
@@ -85,6 +86,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			svc := service{
 				name:     fmt.Sprintf("%s-%d", s, i),
 				testHTTP: true,
+				timeout:  30,
 			}
 			_, _, err = svc.createService(ctx, clientset)
 			if err != nil {
@@ -124,6 +126,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			egress:      false,
 			policyLocal: true,
 			testHTTP:    true,
+			timeout:     180,
 		}
 		leader, lbAddresses, err := svc.createService(ctx, clientset)
 		if err != nil {
@@ -178,6 +181,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			name:        s,
 			policyLocal: true,
 			testHTTP:    true,
+			timeout:     30,
 		}
 		leader, _, err := svc.createService(ctx, clientset)
 		if err != nil {
@@ -204,6 +208,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 	if !config.ignoreLocalDeploy {
 		// Multiple deployment tests
 		log.Infof("🧪 ---> multiple deployments (local policy) <---")
+		timeout := 30
 		deploy := deployment{
 			name:         l,
 			nodeAffinity: nodeTolerate,
@@ -219,6 +224,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 				policyLocal: true,
 				name:        fmt.Sprintf("%s-%d", s, i),
 				testHTTP:    true,
+				timeout:     timeout,
 			}
 			_, lbAddresses, err := svc.createService(ctx, clientset)
 			if err != nil {
@@ -255,9 +261,10 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 		log.Infof("🧪 ---> egress IP re-write (local policy) <---")
 		var egress string
 		var found bool
+		timeout := 30
 		// Set up a local listener
 		go func() {
-			found = tcpServer(&egress)
+			found = tcpServer(false, &egress, timeout)
 		}()
 
 		deploy := deployment{
@@ -268,7 +275,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 		}
 
 		// Find this machines IP address
-		deploy.address = GetLocalIP()
+		deploy.address = GetLocalIPv4()
 		if deploy.address == "" {
 			log.Fatalf("Unable to detect local IP address")
 		}
@@ -284,6 +291,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			name:        s,
 			egress:      true,
 			testHTTP:    false,
+			timeout:     30,
 		}
 
 		_, lbAddresses, err := svc.createService(ctx, clientset)
@@ -292,7 +300,86 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 		}
 		egress = lbAddresses[0]
 
-		for i := 1; i < 5; i++ {
+		for i := 1; i < 10; i++ {
+			if found {
+				log.Infof("🕵️  egress has correct IP address")
+				config.successCounter++
+				break
+			}
+			time.Sleep(time.Second * 1)
+		}
+
+		if !found {
+			log.Error("😱 No traffic found from loadbalancer address ")
+		}
+		log.Infof("🧹 deleting Service [%s], deployment [%s]", s, d)
+		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, s, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, d, metav1.DeleteOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if !config.ignoreEgressIPv6 {
+		// pod Failover tests
+		log.Infof("🧪 ---> egress IP re-write IPv6 (local policy) <---")
+		var egress string
+		var found bool
+		timeout := 60
+		// Set up a local listener
+		go func() {
+			found = tcpServer(true, &egress, timeout)
+		}()
+
+		deploy := deployment{
+			name:         d,
+			nodeAffinity: nodeTolerate,
+			replicas:     1,
+			client:       true,
+		}
+
+		// Find this machines IP address
+		deploy.address = GetLocalIPv6()
+		if deploy.address == "" {
+			log.Fatalf("Unable to detect local IP address")
+		}
+		log.Infof("📠 found local address [%s]", deploy.address)
+		// Create a deployment that connects back to this machines IP address
+		err := deploy.createDeployment(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		svc := service{
+			policyLocal:   true,
+			name:          s,
+			egress:        true,
+			egressIPv6:    true,
+			testHTTP:      false,
+			timeout:       timeout,
+			testDualstack: true,
+		}
+
+		_, lbAddresses, err := svc.createService(ctx, clientset)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for x := range lbAddresses {
+			ip := net.ParseIP(lbAddresses[x])
+			// if ip == nil {
+			// 	return errors.New("invalid address")
+			// }
+			if ip.To4() == nil {
+				// use brackets for IPv6 address
+				egress = lbAddresses[x]
+				break
+			}
+		}
+
+		for i := 1; i < timeout; i++ {
 			if found {
 				log.Infof("🕵️  egress has correct IP address")
 				config.successCounter++
@@ -332,6 +419,7 @@ func (config *testConfig) startServiceTest(ctx context.Context, clientset *kuber
 			name:          s,
 			testHTTP:      true,
 			testDualstack: true,
+			timeout:       30,
 		}
 		_, _, err = svc.createService(ctx, clientset)
 		if err != nil {
@@ -547,14 +635,21 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 	return nil
 }
 
-func tcpServer(egressAddress *string) bool {
-	listen, err := net.Listen("tcp", ":12345") //nolint
+func tcpServer(IPv6 bool, egressAddress *string, timeout int) bool {
+	var listen net.Listener
+	var err error
+	if !IPv6 {
+		listen, err = net.Listen("tcp", ":12345") //nolint
+	} else {
+		listen, err = net.Listen("tcp6", ":12346") //nolint
+
+	}
 	if err != nil {
 		log.Error(err)
 	}
 	// close listener
 	go func() {
-		time.Sleep(time.Second * 10)
+		time.Sleep(time.Second * time.Duration(timeout))
 		listen.Close()
 	}()
 	for {
@@ -564,6 +659,12 @@ func tcpServer(egressAddress *string) bool {
 			// log.Fatal(err)
 		}
 		remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		// If it is IPv6 expand the address
+		// if IPv6 {
+		// 	addr, _ := netip.ParseAddr(remoteAddress)
+		// 	remoteAddress = addr.StringExpanded()
+		// }
+
 		if remoteAddress == *egressAddress {
 			log.Infof("📞 👍 incoming from egress Address [%s]", remoteAddress)
 			return true
@@ -591,7 +692,7 @@ func handleRequest(conn net.Conn) {
 	conn.Close()
 }
 
-func GetLocalIP() string {
+func GetLocalIPv4() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return ""
@@ -600,6 +701,22 @@ func GetLocalIP() string {
 		// check the address type and if it is not a loopback the display it
 		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
+}
+
+func GetLocalIPv6() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() == nil && !ipnet.IP.IsLinkLocalUnicast() {
+			if ipnet.IP.To16() != nil {
 				return ipnet.IP.String()
 			}
 		}
