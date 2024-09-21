@@ -9,7 +9,6 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -35,9 +34,8 @@ type Manager struct {
 	// Keeps track of all running instances
 	serviceInstances []*Instance
 
-	// Additional functionality
-	upnp *upnp.Upnp
-
+	// UPNP functionality
+	upnp bool
 	// BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 

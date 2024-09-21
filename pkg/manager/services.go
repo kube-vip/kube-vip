@@ -35,7 +35,7 @@ const (
 	upnpEnabled              = "kube-vip.io/forwardUPNP"
 )
 
-func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")
@@ -79,7 +79,7 @@ func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.Wai
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance && len(newServiceAddresses) > 0 {
-		if err := sm.addService(svc); err != nil {
+		if err := sm.addService(ctx, svc); err != nil {
 			return err
 		}
 	}
@@ -100,7 +100,7 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (sm *Manager) addService(svc *v1.Service) error {
+func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	startTime := time.Now()
 
 	newService, err := NewInstance(svc, sm.config)
@@ -112,8 +112,8 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
 	}
 	if metav1.HasAnnotation(svc.ObjectMeta, upnpEnabled) && svc.Annotations[upnpEnabled] == "true" {
-		if sm.upnp != nil {
-			sm.upnpMap(newService)
+		if !sm.upnp {
+			sm.upnpMap(ctx, newService)
 		} else {
 			log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", svc.Name)
 		}
@@ -311,17 +311,36 @@ func (sm *Manager) deleteService(uid string) error {
 	return nil
 }
 
-func (sm *Manager) upnpMap(s *Instance) {
+func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - work out if we need to mapping.Reclaim()
 	// TODO - check if this implementation for dualstack is correct
-	for _, vip := range s.VIPs {
-		log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, s.Port, s.serviceSnapshot.Name)
-		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
-			log.Infof("service should be accessible externally on port [%d]", s.Port)
-		} else {
-			sm.upnp.Reclaim()
-			log.Errorf("unable to map port to gateway [%s]", err.Error())
+	if sm.upnp {
+		// externalIPs, err := GetConnectionClients(ctx)
+		// if err != nil {
+		// 	log.Errorf("unable to get Connection Gateways [%s]", err.Error())
+		// // }
+		// var validExternalIPs []string
+		// for _, externalIP := range externalIPs {
+		// 	if addr, err := externalIP.GetExternalIPAddress(); err == nil {
+		// 		validExternalIPs = append(validExternalIPs, addr)
+		// 	} else {
+		// 		log.Errorf("unable to get Gateway IP [%s]", err.Error())
+		// 	}
+
+		// }
+		firewallClients := GetWANIPv6FirewallControl1ClientsCtx(ctx)
+		for _, firewallClient := range firewallClients {
+			for _, vip := range s.VIPs {
+				log.Infof("[UPNP] Adding map to [%s:%d - %s] on external IP", vip, s.Port, s.serviceSnapshot.Name)
+				//sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name)
+				if pinholeID, err := firewallClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(s.Port), vip, uint16(s.Port), mapProtocolToIANA(s.Type), 3600); err == nil {
+					log.Infof("service should be accessible externally on port [%d]; PinholeID is [%d]", s.Port, pinholeID)
+				} else {
+					//TODO: Cleanup
+					log.Errorf("unable to map port to gateway [%s]", err.Error())
+				}
+			}
 		}
 	}
 }
