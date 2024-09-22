@@ -316,12 +316,14 @@ func (sm *Manager) upnpMap(s *Instance) {
 	// TODO - work out if we need to mapping.Reclaim()
 	// TODO - check if this implementation for dualstack is correct
 	for _, vip := range s.VIPs {
-		log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, s.Port, s.serviceSnapshot.Name)
-		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
-			log.Infof("service should be accessible externally on port [%d]", s.Port)
-		} else {
-			sm.upnp.Reclaim()
-			log.Errorf("unable to map port to gateway [%s]", err.Error())
+		for _, port := range s.ExternalPorts {
+			log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, port.Port, s.serviceSnapshot.Name)
+			if err := sm.upnp.AddPortMapping(int(port.Port), int(port.Port), 0, vip, strings.ToUpper(port.Type), s.serviceSnapshot.Name); err == nil {
+				log.Infof("service should be accessible externally on port [%d]", port.Port)
+			} else {
+				sm.upnp.Reclaim()
+				log.Errorf("unable to map port to gateway [%s]", err.Error())
+			}
 		}
 	}
 }
