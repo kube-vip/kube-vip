@@ -32,6 +32,7 @@ const (
 	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
 	serviceInterface         = "kube-vip.io/serviceInterface"
+	upnpEnabled              = "kube-vip.io/forwardUPNP"
 )
 
 func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
@@ -110,8 +111,13 @@ func (sm *Manager) addService(svc *v1.Service) error {
 	for x := range newService.vipConfigs {
 		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
 	}
-
-	sm.upnpMap(newService)
+	if metav1.HasAnnotation(svc.ObjectMeta, upnpEnabled) && svc.Annotations[upnpEnabled] == "true" {
+		if sm.upnp != nil {
+			sm.upnpMap(newService)
+		} else {
+			log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", svc.Name)
+		}
+	}
 
 	if newService.isDHCP && len(newService.vipConfigs) == 1 {
 		go func() {
@@ -309,15 +315,13 @@ func (sm *Manager) upnpMap(s *Instance) {
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - work out if we need to mapping.Reclaim()
 	// TODO - check if this implementation for dualstack is correct
-	if sm.upnp != nil {
-		for _, vip := range s.VIPs {
-			log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, s.Port, s.serviceSnapshot.Name)
-			if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
-				log.Infof("service should be accessible externally on port [%d]", s.Port)
-			} else {
-				sm.upnp.Reclaim()
-				log.Errorf("unable to map port to gateway [%s]", err.Error())
-			}
+	for _, vip := range s.VIPs {
+		log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, s.Port, s.serviceSnapshot.Name)
+		if err := sm.upnp.AddPortMapping(int(s.Port), int(s.Port), 0, vip, strings.ToUpper(s.Type), s.serviceSnapshot.Name); err == nil {
+			log.Infof("service should be accessible externally on port [%d]", s.Port)
+		} else {
+			sm.upnp.Reclaim()
+			log.Errorf("unable to map port to gateway [%s]", err.Error())
 		}
 	}
 }
