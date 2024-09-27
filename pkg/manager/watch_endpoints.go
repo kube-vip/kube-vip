@@ -239,19 +239,18 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							stillExists = true
 						}
 					}
-					// If the last endpoint no longer exists, we cancel our leader Election
-					if !stillExists && leaderElectionActive {
-						if sm.config.EnableServicesElection || sm.config.EnableLeaderElection {
+					// If the last endpoint no longer exists, we cancel our leader Election, and set another endpoint as last known good
+					if !stillExists {
+						if leaderElectionActive && (sm.config.EnableServicesElection || sm.config.EnableLeaderElection) {
 							log.Warnf("[%s] existing [%s] has been removed, restarting leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
 							// Stop the existing leaderElection
 							cancel()
+							// disable last leaderElection flag
+							leaderElectionActive = false
 						}
 						// Set our active endpoint to an existing one
 						lastKnownGoodEndpoint = endpoints[0]
-						// disable last leaderElection flag
-						leaderElectionActive = false
 					}
-
 				} else {
 					lastKnownGoodEndpoint = endpoints[0]
 				}
