@@ -33,6 +33,9 @@ const (
 	// vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 
+	// vipInterfaceLoGlobal - defines if the lo interface (if used) should have a global scope
+	vipInterfaceLoGlobal = "vip_interfaceloglobal"
+
 	// vipServicesInterface - defines the interface that the service vips should bind too
 	vipServicesInterface = "vip_servicesinterface"
 

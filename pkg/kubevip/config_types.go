@@ -192,6 +192,9 @@ type Config struct {
 
 	// BackendHealthCheckInterval Interval in seconds for checking backend health.
 	BackendHealthCheckInterval int `yaml:"backendHealthCheckInterval"`
+
+	// LoInterfaceGlobalScope, if true will set global scope when using the lo interface, otherwise a host scope will be used
+	LoInterfaceGlobalScope bool `yaml:"loInterfaceGlobalScope"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

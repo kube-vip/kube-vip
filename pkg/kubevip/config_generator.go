@@ -139,6 +139,13 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 				Value: c.Interface,
 			},
 		}
+		// specify if global scope should be set when using the lo interface
+		if c.LoInterfaceGlobalScope {
+			iface = append(iface, corev1.EnvVar{
+				Name:  vipInterfaceLoGlobal,
+				Value: strconv.FormatBool(c.LoInterfaceGlobalScope),
+			})
+		}
 		newEnvironment = append(newEnvironment, iface...)
 	}
 
