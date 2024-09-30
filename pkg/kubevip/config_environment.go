@@ -38,6 +38,15 @@ func ParseEnvironment(c *Config) error {
 		c.Interface = env
 	}
 
+	env = os.Getenv(vipInterfaceLoGlobal)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.LoInterfaceGlobalScope = b
+	}
+
 	// Find (services) interface
 	env = os.Getenv(vipServicesInterface)
 	if env != "" {

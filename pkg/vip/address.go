@@ -75,7 +75,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -105,10 +105,12 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 				return networks, errors.Wrapf(err, "could not parse address '%s'", address)
 			}
 		}
-		// Ensure we don't have a global address on loopback
-		if iface == "lo" {
+
+		if iface == "lo" && !loGlobalScope {
+			// set host scope on loopback, otherwise global scope will be used by default
 			result.address.Scope = unix.RT_SCOPE_HOST
 		}
+
 		networks = append(networks, result)
 	} else {
 		// try to resolve the address
