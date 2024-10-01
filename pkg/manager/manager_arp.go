@@ -7,7 +7,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kamhlos/upnp"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -85,14 +84,17 @@ func (sm *Manager) startARP(id string) error {
 	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
 
 	if upnpEnabled {
-		sm.upnp = new(upnp.Upnp)
-		err := sm.upnp.ExternalIPAddr()
-		if err != nil {
+		sm.upnp = true
+		clients, err := GetConnectionClients(ctx)
+		if err != nil || len(clients) == 0 {
 			log.Errorf("Error Enabling UPNP %s", err.Error())
 			// Set the struct to nil so nothing should use it in future
-			sm.upnp = nil
+			sm.upnp = false
 		} else {
-			log.Infof("Successfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
+			for _, c := range clients {
+				ip, err := c.GetExternalIPAddress()
+				log.Infof("Found UPNP Gateway addresses[%s] error: [%s]", ip, err)
+			}
 		}
 	}
 
