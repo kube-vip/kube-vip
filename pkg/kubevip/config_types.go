@@ -231,15 +231,20 @@ type LoadBalancer struct {
 	// Name of a LoadBalancer
 	Name string `yaml:"name"`
 
-	// Type of LoadBalancer, either TCP of HTTP(s)
-	Type string `yaml:"type"`
-
-	// Listening frontend port of this LoadBalancer instance
-	Port int `yaml:"port"`
+	//Ports exposed by a LoadBalancer
+	Ports []Port
 
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
 
 	// Forwarding method of LoadBalancer, either Local, Tunnel, DirectRoute or Bypass
 	ForwardingMethod string `yaml:"forwardingMethod"`
+}
+
+type Port struct {
+	// Type of LoadBalancer, either TCP or UDP
+	Type string `yaml:"type"`
+
+	// Listening frontend port of this LoadBalancer instance
+	Port int `yaml:"port"`
 }

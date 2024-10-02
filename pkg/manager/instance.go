@@ -30,12 +30,16 @@ type Instance struct {
 	dhcpClient          *vip.DHCPClient
 
 	// Kubernetes service mapping
-	VIPs []string
-	Port int32
-	UID  string
-	Type string
+	VIPs          []string
+	UID           string
+	ExternalPorts []Port
 
 	serviceSnapshot *v1.Service
+}
+
+type Port struct {
+	Port int32
+	Type string
 }
 
 func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
@@ -113,9 +117,11 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		VIPs:            instanceAddresses,
 		serviceSnapshot: svc,
 	}
-	if len(svc.Spec.Ports) > 0 {
-		instance.Type = string(svc.Spec.Ports[0].Protocol)
-		instance.Port = svc.Spec.Ports[0].Port
+	for _, port := range svc.Spec.Ports {
+		instance.ExternalPorts = append(instance.ExternalPorts, Port{
+			Port: port.Port,
+			Type: string(port.Protocol),
+		})
 	}
 
 	if svc.Annotations != nil {
@@ -124,11 +130,17 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		instance.dhcpHostname = svc.Annotations[loadbalancerHostname]
 	}
 
+	configPorts := make([]kubevip.Port, 0)
+	for _, p := range instance.ExternalPorts {
+		configPorts = append(configPorts, kubevip.Port{
+			Type: p.Type,
+			Port: int(p.Port),
+		})
+	}
 	// Generate Load Balancer config
 	newLB := kubevip.LoadBalancer{
 		Name:      fmt.Sprintf("%s-load-balancer", svc.Name),
-		Port:      int(instance.Port),
-		Type:      instance.Type,
+		Ports:     configPorts,
 		BindToVip: true,
 	}
 	for _, vip := range newVips {
