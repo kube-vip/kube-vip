@@ -293,7 +293,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance := sm.findServiceInstance(service); instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
-									err := cluster.Network[i].AddRoute()
+									err := cluster.Network[i].AddRoute(false)
 									if err != nil {
 										if errors.Is(err, syscall.EEXIST) {
 											// If route exists try to update it if necessary

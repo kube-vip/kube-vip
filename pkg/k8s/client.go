@@ -39,17 +39,18 @@ func newClientset(configPath string, inCluster bool, hostname string, timeout ti
 }
 
 func restConfig(kubeconfig string, inCluster bool, timeout time.Duration) (*rest.Config, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		log.Debugf("[k8s client] we try the incluster first, this error [%v] can safely be ignored", err)
-	}
-
-	if kubeconfig != "" && !inCluster {
-		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	}
-
-	if err != nil {
-		return nil, err
+	var cfg *rest.Config
+	var err error
+	if inCluster {
+		if cfg, err = rest.InClusterConfig(); err != nil {
+			return nil, fmt.Errorf("failed to get incluster config: %w", err)
+		}
+	} else if kubeconfig != "" {
+		if cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig); err != nil {
+			return nil, fmt.Errorf("failed to build config from file '%s': %w", kubeconfig, err)
+		}
+	} else {
+		return nil, fmt.Errorf("failed to build config from file: path to KubeConfig not specified")
 	}
 
 	// Override some of the defaults allowing a little bit more flexibility speaking with the API server
