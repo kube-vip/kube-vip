@@ -6,6 +6,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 )
@@ -24,15 +25,24 @@ func (e *Entry) Check() bool {
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	// TODO: add one more switch case of homeConfigPath if there is such scenario in future
 	// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+
+	var k8sAddr string
+	if vip.IsIPv4(e.Addr) {
+		k8sAddr = fmt.Sprintf("%s:%v", e.Addr, e.Port)
+	} else {
+		k8sAddr = fmt.Sprintf("[%s]:%v", e.Addr, e.Port)
+	}
+
 	switch {
 	case utils.FileExists(adminConfigPath):
-		client, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("%s:%v", e.Addr, e.Port))
+		client, err = k8s.NewClientset(adminConfigPath, false, k8sAddr)
 		if err != nil {
 			log.Infof("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
 			return false
 		}
 	default:
-		client, err = k8s.NewClientset("", true, fmt.Sprintf("%s:%v", e.Addr, e.Port))
+
+		client, err = k8s.NewClientset("", true, k8sAddr)
 		if err != nil {
 			log.Infof("could not create k8s clientset %v", err)
 			return false
