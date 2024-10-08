@@ -7,6 +7,10 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+const (
+	Auto = "auto"
+)
+
 func (c *Config) CheckInterface() error {
 	if c.Interface != "" {
 		if err := isValidInterface(c.Interface); err != nil {
@@ -25,7 +29,7 @@ func (c *Config) CheckInterface() error {
 
 func isValidInterface(iface string) error {
 	// auto interface discovery for services is enabled
-	if iface == "auto" {
+	if iface == Auto {
 		return nil
 	}
 	l, err := netlink.LinkByName(iface)

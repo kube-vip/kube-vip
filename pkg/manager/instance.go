@@ -3,6 +3,7 @@ package manager
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -47,13 +48,15 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	instanceUID := string(svc.UID)
 
 	var newVips []*kubevip.Config
+	var link netlink.Link
+	var err error
 
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
 		var svcInterface string
 		svcInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
-		if svcInterface == "auto" {
-			link, err := autoFindInterface(address)
+		if svcInterface == kubevip.Auto {
+			link, err = autoFindInterface(address)
 			if err != nil {
 				log.Errorf("failed to automatically discover network interface for annotated IP address [%s] with error: %s", address, err.Error())
 			} else {
@@ -70,8 +73,8 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		// If it is still blank then use the
 		if svcInterface == "" {
 			switch config.ServicesInterface {
-			case "auto":
-				link, err := autoFindInterface(address)
+			case kubevip.Auto:
+				link, err = autoFindInterface(address)
 				if err != nil {
 					log.Errorf("failed to automatically discover network interface for IP address [%s] with error: %s - defaulting to: %s", address, err.Error(), config.Interface)
 				} else if link == nil {
@@ -85,6 +88,61 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			}
 		}
 
+		if link == nil {
+			if link, err = netlink.LinkByName(svcInterface); err != nil {
+				return nil, fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
+			}
+			if link == nil {
+				return nil, fmt.Errorf("failed to get interface %s", svcInterface)
+			}
+		}
+
+		cidrs := vip.Split(config.VIPCIDR)
+
+		ipv4AutoSubnet := false
+		ipv6AutoSubnet := false
+		if cidrs[0] == kubevip.Auto {
+			ipv4AutoSubnet = true
+		}
+
+		if len(cidrs) > 1 && cidrs[1] == kubevip.Auto {
+			ipv6AutoSubnet = true
+		}
+
+		if (config.Address != "" || config.VIP != "") && (ipv4AutoSubnet || ipv6AutoSubnet) {
+			return nil, fmt.Errorf("auto subnet discovery cannot be used if VIP address was provided")
+		}
+
+		subnet := ""
+		var err error
+		if vip.IsIPv4(address) {
+			if ipv4AutoSubnet {
+				subnet, err = autoFindSubnet(link, address)
+				if err != nil {
+					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
+				}
+			} else {
+				if cidrs[0] != "" {
+					subnet = cidrs[0]
+				} else {
+					subnet = "32"
+				}
+			}
+		} else {
+			if ipv6AutoSubnet {
+				subnet, err = autoFindSubnet(link, address)
+				if err != nil {
+					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
+				}
+			} else {
+				if len(cidrs) > 1 {
+					subnet = cidrs[1]
+				} else {
+					subnet = "128"
+				}
+			}
+		}
+
 		//log.Info("new instance", "svc", *svc, "interface", svcInterface)
 
 		// Generate new Virtual IP configuration
@@ -94,7 +152,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
 			EnableBGP:              config.EnableBGP,
-			VIPCIDR:                config.VIPCIDR,
+			VIPCIDR:                subnet,
 			VIPSubnet:              config.VIPSubnet,
 			EnableRoutingTable:     config.EnableRoutingTable,
 			RoutingTableID:         config.RoutingTableID,
@@ -215,6 +273,27 @@ func autoFindInterface(ip string) (netlink.Link, error) {
 	}
 
 	return nil, nil
+}
+
+func autoFindSubnet(link netlink.Link, ip string) (string, error) {
+	address := net.ParseIP(ip)
+
+	family := netlink.FAMILY_V4
+	if address.To4() == nil {
+		family = netlink.FAMILY_V6
+	}
+
+	addr, err := netlink.AddrList(link, family)
+	if err != nil {
+		return "", fmt.Errorf("failed to get IP addresses for interface %s: %w", link.Attrs().Name, err)
+	}
+	for _, a := range addr {
+		if a.IPNet.Contains(address) {
+			m, _ := a.IPNet.Mask.Size()
+			return strconv.Itoa(m), nil
+		}
+	}
+	return "", fmt.Errorf("failed to find suitable subnet for address %s", ip)
 }
 
 func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {

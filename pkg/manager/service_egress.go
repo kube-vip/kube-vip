@@ -49,18 +49,33 @@ func (sm *Manager) iptablesCheck() error {
 
 func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how this ever worked
 	cidrs := strings.Split(sourceCidrs, ",")
+	isV6 := vip.IsIPv6(ip)
 	matchingFamily := []string{}
 	for _, cidr := range cidrs {
 		// Is the ip an IPv6 address
-		if vip.IsIPv4(ip) == vip.IsIPv4CIDR(cidr) {
-			matchingFamily = append(matchingFamily, cidr)
-			selectedCIDR, err := checkCIDR(ip, cidr)
-			if err != nil {
-				log.Warnf("CIDR check failed: %s", err.Error())
-				continue
+		if isV6 {
+			if vip.IsIPv6CIDR(cidr) {
+				matchingFamily = append(matchingFamily, cidr)
+				selectedCIDR, err := checkCIDR(ip, cidr)
+				if err != nil {
+					log.Warnf("IPv6 CIDR check failed: %s", err.Error())
+					continue
+				}
+				if selectedCIDR != "" {
+					return selectedCIDR
+				}
 			}
-			if selectedCIDR != "" {
-				return selectedCIDR
+		} else {
+			if vip.IsIPv4CIDR(cidr) {
+				matchingFamily = append(matchingFamily, cidr)
+				selectedCidr, err := checkCIDR(ip, cidr)
+				if err != nil {
+					log.Warnf("IPv4 CIDR check failed: %s", err.Error())
+					continue
+				}
+				if selectedCidr != "" {
+					return selectedCidr
+				}
 			}
 		}
 	}

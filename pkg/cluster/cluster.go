@@ -46,7 +46,7 @@ func startNetworking(c *kubevip.Config) ([]vip.Network, error) {
 		address = c.Address
 	}
 
-	addresses := vip.GetIPs(address)
+	addresses := vip.Split(address)
 
 	networks := []vip.Network{}
 	for _, addr := range addresses {
