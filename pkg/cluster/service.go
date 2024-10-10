@@ -53,8 +53,23 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if !c.EnableRoutingTable {
-			err = cluster.Network[i].AddIP(false)
-			if err != nil {
+			if c.EnableARP {
+				subnets := vip.Split(c.VIPCIDR)
+				subnet := ""
+				if len(subnets) > 0 {
+					subnet = subnets[0]
+				}
+				if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
+					subnet = subnets[1]
+				}
+				if subnet == "" {
+					log.Fatalf("no subnet provided for IP %s", cluster.Network[i].IP())
+				}
+				if err = cluster.Network[i].SetMask(subnet); err != nil {
+					log.Fatalf("failed to set mask %s: %s", subnet, err.Error())
+				}
+			}
+			if err = cluster.Network[i].AddIP(false); err != nil {
 				log.Fatalf("%v", err)
 			}
 		}
@@ -309,8 +324,23 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				log.Warnf("%v", err)
 			}
 		} else if !c.EnableRoutingTable {
-			err = network.AddIP(false)
-			if err != nil {
+			if c.EnableARP {
+				subnets := vip.Split(c.VIPCIDR)
+				subnet := ""
+				if len(subnets) > 0 {
+					subnet = subnets[0]
+				}
+				if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
+					subnet = subnets[1]
+				}
+				if subnet == "" {
+					log.Fatalf("no subnet provided for IP %s", cluster.Network[i].IP())
+				}
+				if err = network.SetMask(subnet); err != nil {
+					log.Fatalf("failed to set mask %s: %s", subnet, err.Error())
+				}
+			}
+			if err = network.AddIP(false); err != nil {
 				log.Warnf("%v", err)
 			}
 		}
@@ -410,6 +440,7 @@ func (cluster *Cluster) ensureIPAndSendGratuitous(iface string, ndp *vip.NdpResp
 		}
 		if !set {
 			log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, iface)
+
 			err = cluster.Network[i].AddIP(false)
 			if err != nil {
 				log.Warnf("%v", err)

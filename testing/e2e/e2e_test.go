@@ -357,7 +357,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 			}()
 
-			vips := vip.GetIPs(dualstackVIP)
+			vips := vip.Split(dualstackVIP)
 
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
