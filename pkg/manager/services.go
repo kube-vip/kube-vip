@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -35,7 +36,7 @@ const (
 	upnpEnabled              = "kube-vip.io/forwardUPNP"
 )
 
-func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	log.Debugf("[STARTING] Service Sync")
@@ -79,7 +80,7 @@ func (sm *Manager) syncServices(_ context.Context, svc *v1.Service, wg *sync.Wai
 
 	// This instance wasn't found, we need to add it to the manager
 	if !foundInstance && len(newServiceAddresses) > 0 {
-		if err := sm.addService(svc); err != nil {
+		if err := sm.addService(ctx, svc); err != nil {
 			return err
 		}
 	}
@@ -100,7 +101,7 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (sm *Manager) addService(svc *v1.Service) error {
+func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	startTime := time.Now()
 
 	newService, err := NewInstance(svc, sm.config)
@@ -112,8 +113,8 @@ func (sm *Manager) addService(svc *v1.Service) error {
 		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
 	}
 	if metav1.HasAnnotation(svc.ObjectMeta, upnpEnabled) && svc.Annotations[upnpEnabled] == "true" {
-		if sm.upnp != nil {
-			sm.upnpMap(newService)
+		if sm.upnp {
+			sm.upnpMap(ctx, newService)
 		} else {
 			log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", svc.Name)
 		}
@@ -311,18 +312,43 @@ func (sm *Manager) deleteService(uid string) error {
 	return nil
 }
 
-func (sm *Manager) upnpMap(s *Instance) {
+// Set up UPNP forwards for a service
+// We first try to use the more modern Pinhole API introduced in UPNPv2 and fall back to UPNPv2 Port Forwarding if no forward was successful
+func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 	// If upnp is enabled then update the gateway/router with the address
-	// TODO - work out if we need to mapping.Reclaim()
 	// TODO - check if this implementation for dualstack is correct
+
+	firewallClients := upnp.GetWANIPv6FirewallControl1ClientsCtx(ctx)
+	upnpClients := upnp.GetConnectionClients(ctx)
+
 	for _, vip := range s.VIPs {
 		for _, port := range s.ExternalPorts {
-			log.Infof("[UPNP] Adding map to [%s:%d - %s]", vip, port.Port, s.serviceSnapshot.Name)
-			if err := sm.upnp.AddPortMapping(int(port.Port), int(port.Port), 0, vip, strings.ToUpper(port.Type), s.serviceSnapshot.Name); err == nil {
-				log.Infof("service should be accessible externally on port [%d]", port.Port)
-			} else {
-				sm.upnp.Reclaim()
-				log.Errorf("unable to map port to gateway [%s]", err.Error())
+			pinholeSuccessful := false
+
+			for _, firewallClient := range firewallClients {
+				log.Infof("[UPNP] Adding map to [%s:%d - %s] on external IP", vip, port.Port, s.serviceSnapshot.Name)
+				pinholeID, pinholeErr := firewallClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(port.Type), 3600)
+				if pinholeErr == nil {
+					pinholeSuccessful = true
+					log.Infof("service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
+				} else {
+					//TODO: Cleanup
+					log.Errorf("unable to map port to gateway using Pinhole API[%s]", pinholeErr.Error())
+				}
+			}
+
+			// Fallback to Port Mapping using UPNP2 Port mapping
+			if !pinholeSuccessful {
+				for _, upnpClient := range upnpClients {
+					log.Infof("[UPNP] Adding map to [%s:%d - %s] on external IP", vip, port.Port, s.serviceSnapshot.Name)
+					portMappingErr := upnpClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(port.Type), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600)
+					if portMappingErr == nil {
+						log.Infof("service should be accessible externally on port [%d]", port.Port)
+					} else {
+						//TODO: Cleanup
+						log.Errorf("unable to map port to gateway using PortForward API[%s]", portMappingErr.Error())
+					}
+				}
 			}
 		}
 	}
