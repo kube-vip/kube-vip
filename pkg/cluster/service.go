@@ -108,7 +108,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if c.EnableARP {
-			// ctxArp, cancelArp = context.WithCancel(context.Background())
 			go func(ctx context.Context, i int) {
 				ipString := cluster.Network[i].IP()
 				isIPv6 := vip.IsIPv6(ipString)
@@ -130,7 +129,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					case <-ctx.Done(): // if cancel() execute
 						return
 					default:
-						cluster.ensureIPAndSendGratuitous(cluster.Network[i].Interface(), ndp)
+						cluster.ensureIPAndSendGratuitous(i, ndp)
 					}
 					time.Sleep(3 * time.Second)
 				}
@@ -336,7 +335,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 						log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
 						return
 					default:
-						cluster.ensureIPAndSendGratuitous(network.Interface(), ndp)
+						cluster.ensureIPAndSendGratuitous(i, ndp)
 					}
 					if c.ArpBroadcastRate < 500 {
 						log.Errorf("arp broadcast rate is [%d], this shouldn't be lower that 300ms (defaulting to 3000)", c.ArpBroadcastRate)
@@ -390,45 +389,48 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 // ensureIPAndSendGratuitous - adds IP to the interface if missing, and send
 // either a gratuitous ARP or gratuitous NDP. Re-adds the interface if it is IPv6
 // and in a dadfailed state.
-func (cluster *Cluster) ensureIPAndSendGratuitous(iface string, ndp *vip.NdpResponder) {
-	for i := range cluster.Network {
-		ipString := cluster.Network[i].IP()
-		isIPv6 := vip.IsIPv6(ipString)
-		// Check if IP is dadfailed
-		if cluster.Network[i].IsDADFAIL() {
-			log.Warnf("IP address is in dadfailed state, removing [%s] from interface [%s]", ipString, iface)
-			err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warnf("%v", err)
-			}
-		}
+func (cluster *Cluster) ensureIPAndSendGratuitous(index int, ndp *vip.NdpResponder) {
+	iface := cluster.Network[index].Interface()
+	ipString := cluster.Network[index].IP()
 
-		// Ensure the address exists on the interface before attempting to ARP
-		set, err := cluster.Network[i].IsSet()
+	// Check if IP is dadfailed
+	if cluster.Network[index].IsDADFAIL() {
+		log.Warnf("IP address is in dadfailed state, removing [%s] from interface [%s]", ipString, iface)
+		err := cluster.Network[index].DeleteIP()
 		if err != nil {
 			log.Warnf("%v", err)
 		}
-		if !set {
-			log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, iface)
-			err = cluster.Network[i].AddIP(false)
-			if err != nil {
-				log.Warnf("%v", err)
-			}
-		}
+	}
 
-		if isIPv6 {
-			// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
+	// Ensure the address exists on the interface before attempting to ARP
+	set, err := cluster.Network[index].IsSet()
+	if err != nil {
+		log.Warnf("%v", err)
+	}
+	if !set {
+		log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, iface)
+		err = cluster.Network[index].AddIP(false)
+		if err != nil {
+			log.Warnf("%v", err)
+		}
+	}
+
+	if vip.IsIPv6(ipString) {
+		// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
+		if ndp == nil {
+			log.Error("NDP responder was not created")
+		} else {
 			err := ndp.SendGratuitous(ipString)
 			if err != nil {
 				log.Warnf("%v", err)
 			}
-		} else {
-			// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
-			err := vip.ARPSendGratuitous(ipString, iface)
-			if err != nil {
-				log.Warnf("%v", err)
-			}
+		}
+
+	} else {
+		// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
+		err := vip.ARPSendGratuitous(ipString, iface)
+		if err != nil {
+			log.Warnf("%v", err)
 		}
 	}
-
 }
