@@ -98,17 +98,7 @@ func (sm *Manager) startARP(id string) error {
 
 	// This will tidy any dangling kube-vip iptables rules
 	if os.Getenv("EGRESS_CLEAN") != "" {
-		i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
-		if err != nil {
-			log.Warnf("(egress) Unable to clean any dangling egress rules [%v]", err)
-			log.Warn("(egress) Can be ignored in non iptables release of kube-vip")
-		} else {
-			log.Info("(egress) Cleaning any dangling kube-vip egress rules")
-			cleanErr := i.CleanIPtables()
-			if cleanErr != nil {
-				log.Errorf("Error cleaning rules [%v]", cleanErr)
-			}
-		}
+		vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 	}
 
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service

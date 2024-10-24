@@ -376,3 +376,17 @@ func (e *Egress) findExistingVIP(rules []string, vip string) [][]string {
 
 	return foundRules
 }
+
+func ClearIPTables(useNftables bool, namespace string, protocol iptables.Protocol) {
+	i, err := CreateIptablesClient(useNftables, namespace, protocol)
+	if err != nil {
+		log.Warnf("(egress) Unable to clean any dangling egress rules [%v]", err)
+		log.Warn("(egress) Can be ignored in non iptables release of kube-vip")
+	} else {
+		log.Info("(egress) Cleaning any dangling kube-vip egress rules")
+		cleanErr := i.CleanIPtables()
+		if cleanErr != nil {
+			log.Errorf("Error cleaning rules [%v]", cleanErr)
+		}
+	}
+}
