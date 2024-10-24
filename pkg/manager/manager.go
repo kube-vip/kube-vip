@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
@@ -204,6 +205,8 @@ func (sm *Manager) Start() error {
 				}
 			}
 		}
+		// TODO: It would be nice to run the UPNP refresh only on the leader.
+		go sm.refreshUPNPForwards()
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
@@ -293,4 +296,17 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
 		}
 	}
 	return nil
+}
+
+// Refresh UPNP Port Forwards for all Service Instances registered in the SM
+func (sm *Manager) refreshUPNPForwards() {
+	log.Info("Starting UPNP Port Refresher")
+	for {
+		time.Sleep(1800 * time.Second)
+
+		log.Infof("Refreshing %d Instances", len(sm.serviceInstances))
+		for i := range sm.serviceInstances {
+			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
+		}
+	}
 }

@@ -112,13 +112,8 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	for x := range newService.vipConfigs {
 		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
 	}
-	if metav1.HasAnnotation(svc.ObjectMeta, upnpEnabled) && svc.Annotations[upnpEnabled] == "true" {
-		if sm.upnp {
-			sm.upnpMap(ctx, newService)
-		} else {
-			log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", svc.Name)
-		}
-	}
+
+	sm.upnpMap(ctx, newService)
 
 	if newService.isDHCP && len(newService.vipConfigs) == 1 {
 		go func() {
@@ -315,6 +310,13 @@ func (sm *Manager) deleteService(uid string) error {
 // Set up UPNP forwards for a service
 // We first try to use the more modern Pinhole API introduced in UPNPv2 and fall back to UPNPv2 Port Forwarding if no forward was successful
 func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
+	if !(metav1.HasAnnotation(s.serviceSnapshot.ObjectMeta, upnpEnabled) && s.serviceSnapshot.Annotations[upnpEnabled] == "true") {
+		// Skip services missing the annotation
+		return
+	}
+	if !sm.upnp {
+		log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", s.serviceSnapshot.Name)
+	}
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - check if this implementation for dualstack is correct
 
