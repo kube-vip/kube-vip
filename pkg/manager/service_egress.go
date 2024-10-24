@@ -138,7 +138,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 
 	log.Infof("[Egress] pod CIDR [%s], service CIDR [%s] for vip [%s] / pod [%s]", podCidr, serviceCidr, vipIP, podIP)
 
-	// checking if all adresses are of the same IP family
+	// checking if all addresses are of the same IP family
 	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {
 		log.Errorf("[Egress] pod's IP [%s] and Pod CIDR [%s] family is not matching. Backing off...", podIP, podCidr)
 		return nil
