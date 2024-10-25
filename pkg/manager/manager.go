@@ -19,15 +19,17 @@ import (
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const plunderLock = "plndr-svcs-lock"
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
-	clientSet *kubernetes.Clientset
-	configMap string
-	config    *kubevip.Config
+	clientSet   *kubernetes.Clientset
+	rwClientSet *kubernetes.Clientset
+	configMap   string
+	config      *kubevip.Config
 
 	// Manager services
 	// service bool
@@ -77,48 +79,72 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	}
 	log.Infof("Using node name [%v]", config.NodeName)
 
-	var clientset *kubernetes.Clientset
-	var err error
-
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+
+	var clientset *kubernetes.Clientset
+	var clientConfig *rest.Config
+	var err error
 
 	switch {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
 	case utils.FileExists(adminConfigPath):
 		if config.KubernetesAddr != "" {
-			fmt.Println(config.KubernetesAddr)
-			clientset, err = k8s.NewClientset(adminConfigPath, false, config.KubernetesAddr)
+			log.Infof("k8s address [%s]", config.KubernetesAddr)
+			clientConfig, err = k8s.NewRestConfig(adminConfigPath, false, config.KubernetesAddr)
 		} else if config.EnableControlPlane {
 			// If this is a control plane host it will likely have started as a static pod or won't have the
 			// VIP up before trying to connect to the API server, we set the API endpoint to this machine to
 			// ensure connectivity.
 			if config.DetectControlPlane {
-				clientset, err = k8s.FindWorkingKubernetesAddress(adminConfigPath, false)
+				clientConfig, err = k8s.FindWorkingKubernetesAddress(adminConfigPath, false)
 			} else {
 				// This will attempt to use kubernetes as the hostname (this should be passed as a host alias) in the pod manifest
-				clientset, err = k8s.NewClientset(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))
+				clientConfig, err = k8s.NewRestConfig(adminConfigPath, false, fmt.Sprintf("kubernetes:%v", config.Port))
 			}
 		} else {
-			clientset, err = k8s.NewClientset(adminConfigPath, false, "")
+			clientConfig, err = k8s.NewRestConfig(adminConfigPath, false, "")
 		}
 		if err != nil {
-			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
+			return nil, fmt.Errorf("could not create k8s REST config from external file: %q: %w", adminConfigPath, err)
 		}
-		log.Debugf("Using external Kubernetes configuration from file [%s]", adminConfigPath)
+		if clientset, err = k8s.NewClientset(clientConfig); err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset: %w", err)
+		}
+		log.Debugf("Using external Kubernetes configuration from file: %q", adminConfigPath)
 	case utils.FileExists(homeConfigPath):
-		clientset, err = k8s.NewClientset(homeConfigPath, false, "")
+		clientConfig, err = k8s.NewRestConfig(homeConfigPath, false, "")
 		if err != nil {
-			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
+			return nil, fmt.Errorf("could not create k8s REST config from external file: %q: %w", homeConfigPath, err)
+		}
+		clientset, err = k8s.NewClientset(clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %w", homeConfigPath, err)
 		}
 		log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
 	default:
-		clientset, err = k8s.NewClientset("", true, "")
+		clientConfig, err = k8s.NewRestConfig("", true, "")
 		if err != nil {
-			return nil, fmt.Errorf("could not create k8s clientset from incluster config: %v", err)
+			return nil, fmt.Errorf("could not create k8s REST config from incluster file: %q: %w", homeConfigPath, err)
+		}
+		clientset, err = k8s.NewClientset(clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset from incluster config: %w", err)
 		}
 		log.Debug("Using external Kubernetes configuration from incluster config.")
+	}
+
+	var rwClientSet *kubernetes.Clientset
+	// if clientConfig is not nil, then we are not using etcd leader election
+	// we need to create non-tieout clientset for RetryWatcher
+	if clientConfig != nil {
+		rwConfig := *clientConfig
+		rwConfig.Timeout = 0
+		rwClientSet, err = k8s.NewClientset(&rwConfig)
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset for retry watcher: %w", err)
+		}
 	}
 
 	// Flip this to something else
@@ -139,9 +165,10 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// }
 
 	return &Manager{
-		clientSet: clientset,
-		configMap: configMap,
-		config:    config,
+		clientSet:   clientset,
+		rwClientSet: rwClientSet,
+		configMap:   configMap,
+		config:      config,
 		countServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "kube_vip",
 			Subsystem: "manager",

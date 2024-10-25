@@ -34,7 +34,8 @@ import (
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
-	KubernetesClient *kubernetes.Clientset
+	KubernetesClient   *kubernetes.Clientset
+	RetryWatcherClient *kubernetes.Clientset
 	// This channel is used to signal a shutdown
 	SignalChan chan os.Signal
 
@@ -64,13 +65,26 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 		hostname = fmt.Sprintf("%s:%v", id, port)
 	}
 
-	clientset, err := k8s.NewClientset(path, inCluster, hostname)
+	config, err := k8s.NewRestConfig(path, inCluster, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create k8s REST config: %w", err)
+	}
+
+	clientset, err := k8s.NewClientset(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating a new k8s clientset: %v", err)
 	}
 
+	rwConfig := *config
+	rwConfig.Timeout = 0 // empty value to disable the timeout
+	rwClientSet, err := k8s.NewClientset(&rwConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create k8s client for retry watcher: %w", err)
+	}
+
 	return &Manager{
-		KubernetesClient: clientset,
+		KubernetesClient:   clientset,
+		RetryWatcherClient: rwClientSet,
 	}, nil
 }
 
@@ -297,7 +311,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.KubernetesClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
+			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},
 	})
 	if err != nil {

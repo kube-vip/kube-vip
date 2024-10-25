@@ -118,7 +118,11 @@ func main() {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 		homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		clientset, err := k8s.NewClientset(homeConfigPath, false, "")
+		config, err := k8s.NewRestConfig(homeConfigPath, false, "")
+		if err != nil {
+			log.Fatalf("could not create k8s REST config from external file: %q: %v", homeConfigPath, err)
+		}
+		clientset, err := k8s.NewClientset(config)
 		if err != nil {
 			log.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
 		}

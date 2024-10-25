@@ -58,7 +58,7 @@ func (sm *Manager) annotationsWatcher() error {
 
 	rw, err := watchtools.NewRetryWatcher(node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
+			return sm.rwClientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},
 	})
 	if err != nil {

@@ -47,7 +47,7 @@ func (ep *endpointsProvider) createRetryWatcher(ctx context.Context, sm *Manager
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
+			return sm.rwClientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
 	})
 
