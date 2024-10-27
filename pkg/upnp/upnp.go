@@ -4,10 +4,19 @@ import (
 	"context"
 	"strings"
 
+	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway2"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
+
+// The UPNP library is structured a bit funny. To create a forward on a gateway and know
+// the external IP of that gateway we need two different instances of the UPNP client
+// WANIPv6FirewallControlClient can be empty if the gatway doesn't support the WANIPv6FirewallControl service
+type Gateway struct {
+	ConnectionClient             ConnectionClient
+	WANIPv6FirewallControlClient *internetgateway2.WANIPv6FirewallControl1
+}
 
 type ConnectionClient interface {
 	AddPortMapping(
@@ -25,25 +34,23 @@ type ConnectionClient interface {
 		NewExternalIPAddress string,
 		err error,
 	)
+	GetServiceClient() *goupnp.ServiceClient
 }
 
-// Gather WANIPv6FirewallControl1 clients in the network and treats errors as non-critical.
-// Use this to create Pinholes in the UPNP IGD2
-func GetWANIPv6FirewallControl1ClientsCtx(ctx context.Context) []internetgateway2.WANIPv6FirewallControl1 {
-	c, errors, err := internetgateway2.NewWANIPv6FirewallControl1ClientsCtx(ctx)
-	var validClients []internetgateway2.WANIPv6FirewallControl1
-	if err != nil {
-		log.Warnf("Unable to query for WAN Firewall Clients [%s]", err.Error())
-	}
-	for _, e := range errors {
-		log.Warnf("UPNP Gateway responded with an error while querying WAN Firewall Client [%s]", e.Error())
-	}
-	for _, c := range c {
-		if c != nil {
-			validClients = append(validClients, *c)
+func GetGatewayClients(ctx context.Context) []Gateway {
+	clients := GetConnectionClients(ctx)
+	gatewayClients := make([]Gateway, len(clients))
+
+	for i := range clients {
+		gatewayClients[i] = Gateway{ConnectionClient: clients[i], WANIPv6FirewallControlClient: nil}
+		gatewayURL := clients[i].GetServiceClient().Location
+		if wanipv6clients, err := internetgateway2.NewWANIPv6FirewallControl1ClientsByURLCtx(ctx, gatewayURL); err == nil {
+			gatewayClients[i].WANIPv6FirewallControlClient = wanipv6clients[0]
+		} else {
+			log.Warnf("Unable to find WANIPv6FirewallControl1Clients for Gateway %s [%s]", gatewayURL, err.Error())
 		}
 	}
-	return validClients
+	return gatewayClients
 }
 
 // Gather UPNPConnectionClients in the network and treats errors as non-critical. Use this to find out the external IPs of the network and configure port forwarding
