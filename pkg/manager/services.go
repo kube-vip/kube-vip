@@ -310,7 +310,7 @@ func (sm *Manager) deleteService(uid string) error {
 // Set up UPNP forwards for a service
 // We first try to use the more modern Pinhole API introduced in UPNPv2 and fall back to UPNPv2 Port Forwarding if no forward was successful
 func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
-	if !(metav1.HasAnnotation(s.serviceSnapshot.ObjectMeta, upnpEnabled) && s.serviceSnapshot.Annotations[upnpEnabled] == "true") {
+	if !isUPNPEnabled(s.serviceSnapshot) {
 		// Skip services missing the annotation
 		return
 	}
@@ -350,10 +350,19 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 					}
 				}
 
-				// TODO: Gather the external IP to annotate the Service later
+				if forwardSucessful {
+					ip, err := gw.ConnectionClient.GetExternalIPAddress()
+					if err == nil {
+						s.upnpGatewayIPs = append(s.upnpGatewayIPs, ip)
+					}
+				}
 			}
 		}
 	}
+
+	// Remove duplicate IPs
+	slices.Sort(s.upnpGatewayIPs)
+	slices.Compact(s.upnpGatewayIPs)
 }
 
 func (sm *Manager) updateStatus(i *Instance) error {
@@ -418,6 +427,15 @@ func (sm *Manager) updateStatus(i *Instance) error {
 				}
 				ingresses = append(ingresses, i)
 			}
+			if isUPNPEnabled(currentService) {
+				for _, ip := range i.upnpGatewayIPs {
+					i := v1.LoadBalancerIngress{
+						IP:    ip,
+						Ports: ports,
+					}
+					ingresses = append(ingresses, i)
+				}
+			}
 		}
 		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
@@ -467,4 +485,8 @@ func fetchServiceAddresses(s *v1.Service) []string {
 	}
 
 	return []string{}
+}
+
+func isUPNPEnabled(s *v1.Service) bool {
+	return metav1.HasAnnotation(s.ObjectMeta, upnpEnabled) && s.Annotations[upnpEnabled] == "true"
 }

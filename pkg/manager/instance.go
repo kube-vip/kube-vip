@@ -29,6 +29,9 @@ type Instance struct {
 	dhcpHostname        string
 	dhcpClient          *vip.DHCPClient
 
+	// External Gateway IP the service is forwarded from
+	upnpGatewayIPs []string
+
 	// Kubernetes service mapping
 	VIPs          []string
 	UID           string
