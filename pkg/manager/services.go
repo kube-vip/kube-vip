@@ -315,7 +315,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 		return
 	}
 	if !sm.upnp {
-		log.Warnf("Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", s.serviceSnapshot.Name)
+		log.Warnf("[UPNP] Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", s.serviceSnapshot.Name)
 	}
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - check if this implementation for dualstack is correct
@@ -332,21 +332,21 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(port.Type), 3600)
 					if pinholeErr == nil {
 						forwardSucessful = true
-						log.Infof("service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
+						log.Infof("[UPNP] Service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
 					} else {
 						//TODO: Cleanup
-						log.Errorf("unable to map port to gateway using Pinhole API[%s]", pinholeErr.Error())
+						log.Errorf("[UPNP] Unable to map port to gateway using Pinhole API[%s]", pinholeErr.Error())
 					}
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
 					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(port.Type), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600)
 					if portMappingErr == nil {
-						log.Infof("service should be accessible externally on port [%d]", port.Port)
+						log.Infof("[UPNP] Service should be accessible externally on port [%d]", port.Port)
 						forwardSucessful = true
 					} else {
 						//TODO: Cleanup
-						log.Errorf("unable to map port to gateway using PortForward API[%s]", portMappingErr.Error())
+						log.Errorf("[UPNP] Unable to map port to gateway using PortForward API[%s]", portMappingErr.Error())
 					}
 				}
 

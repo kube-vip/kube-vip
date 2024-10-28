@@ -304,7 +304,7 @@ func (sm *Manager) refreshUPNPForwards() {
 	for {
 		time.Sleep(1800 * time.Second)
 
-		log.Infof("Refreshing %d Instances", len(sm.serviceInstances))
+		log.Infof("[UPNP] Refreshing %d Instances", len(sm.serviceInstances))
 		for i := range sm.serviceInstances {
 			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
 		}
