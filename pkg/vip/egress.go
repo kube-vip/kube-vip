@@ -87,7 +87,7 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 }
 
 func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
-	log.Infof("[egress] Adding source nat from [%s] => [%s]", podIP, vip)
+	log.Infof("[egress] Removing source nat from [%s] => [%s], with destination port [%s]", podIP, vip, port)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
 
@@ -380,10 +380,10 @@ func (e *Egress) findExistingVIP(rules []string, vip string) [][]string {
 func ClearIPTables(useNftables bool, namespace string, protocol iptables.Protocol) {
 	i, err := CreateIptablesClient(useNftables, namespace, protocol)
 	if err != nil {
-		log.Warnf("(egress) Unable to clean any dangling egress rules [%v]", err)
-		log.Warn("(egress) Can be ignored in non iptables release of kube-vip")
+		log.Warnf("[egress] Unable to clean any dangling egress rules [%v]", err)
+		log.Warn("[egress] Can be ignored in non iptables release of kube-vip")
 	} else {
-		log.Info("(egress) Cleaning any dangling kube-vip egress rules")
+		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
 		cleanErr := i.CleanIPtables()
 		if cleanErr != nil {
 			log.Errorf("Error cleaning rules [%v]", cleanErr)
