@@ -9,6 +9,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 type Entry struct {
@@ -21,6 +22,7 @@ type Map map[Entry]bool
 func (e *Entry) Check() bool {
 	var client *kubernetes.Clientset
 	var err error
+	var config *rest.Config
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	// TODO: add one more switch case of homeConfigPath if there is such scenario in future
@@ -35,23 +37,29 @@ func (e *Entry) Check() bool {
 
 	switch {
 	case utils.FileExists(adminConfigPath):
-		client, err = k8s.NewClientset(adminConfigPath, false, k8sAddr)
+		config, err = k8s.NewRestConfig(adminConfigPath, false, k8sAddr)
+		// client, err = k8s.NewClientset(adminConfigPath, false, k8sAddr)
 		if err != nil {
-			log.Infof("could not create k8s clientset from external file: %q: %v", adminConfigPath, err)
+			log.Errorf("could not create k8s REST config for external file: %q: %v", adminConfigPath, err)
 			return false
 		}
 	default:
-
-		client, err = k8s.NewClientset("", true, k8sAddr)
+		config, err = k8s.NewRestConfig("", true, k8sAddr)
 		if err != nil {
-			log.Infof("could not create k8s clientset %v", err)
+			log.Errorf("could not create k8s REST config %v", err)
 			return false
 		}
 	}
 
+	client, err = k8s.NewClientset(config)
+	if err != nil {
+		log.Errorf("failed to create k8s client: %v", err)
+		return false
+	}
+
 	_, err = client.DiscoveryClient.ServerVersion()
 	if err != nil {
-		log.Infof("failed check k8s server version: %s", err)
+		log.Errorf("failed check k8s server version: %s", err)
 		return false
 	}
 	return true

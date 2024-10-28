@@ -32,7 +32,7 @@ func (ep *endpointslicesProvider) createRetryWatcher(ctx context.Context, sm *Ma
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
+			return sm.rwClientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
 		},
 	})
 	if err != nil {
