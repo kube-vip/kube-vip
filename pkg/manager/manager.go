@@ -334,6 +334,9 @@ func (sm *Manager) refreshUPNPForwards() {
 		log.Infof("[UPNP] Refreshing %d Instances", len(sm.serviceInstances))
 		for i := range sm.serviceInstances {
 			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
+			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
+				log.Warnf("[UPNP] Error updating service IPs %s [%s]", sm.serviceInstances[i].serviceSnapshot.Name, err.Error())
+			}
 		}
 	}
 }

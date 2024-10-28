@@ -322,6 +322,9 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 
 	gateways := upnp.GetGatewayClients(ctx)
 
+	// Reset Gateway IPs to remove stale addresses
+	s.upnpGatewayIPs = make([]string, 0)
+
 	for _, vip := range s.VIPs {
 		for _, port := range s.ExternalPorts {
 			for _, gw := range gateways {
@@ -362,7 +365,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 
 	// Remove duplicate IPs
 	slices.Sort(s.upnpGatewayIPs)
-	slices.Compact(s.upnpGatewayIPs)
+	s.upnpGatewayIPs = slices.Compact(s.upnpGatewayIPs)
 }
 
 func (sm *Manager) updateStatus(i *Instance) error {
