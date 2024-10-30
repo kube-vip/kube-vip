@@ -3,11 +3,9 @@ package manager
 import (
 	"context"
 	"os"
-	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/kamhlos/upnp"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -78,21 +76,6 @@ func (sm *Manager) startARP(id string) error {
 		if err != nil {
 			log.Warnf("unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
 			ns = sm.config.Namespace
-		}
-	}
-
-	// Before starting the leader Election enable any additional functionality
-	upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
-
-	if upnpEnabled {
-		sm.upnp = new(upnp.Upnp)
-		err := sm.upnp.ExternalIPAddr()
-		if err != nil {
-			log.Errorf("Error Enabling UPNP %s", err.Error())
-			// Set the struct to nil so nothing should use it in future
-			sm.upnp = nil
-		} else {
-			log.Infof("Successfully enabled UPNP, Gateway address [%s]", sm.upnp.GatewayOutsideIP)
 		}
 	}
 

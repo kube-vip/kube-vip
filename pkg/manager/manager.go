@@ -1,19 +1,22 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
-	"github.com/kamhlos/upnp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -37,9 +40,8 @@ type Manager struct {
 	// Keeps track of all running instances
 	serviceInstances []*Instance
 
-	// Additional functionality
-	upnp *upnp.Upnp
-
+	// UPNP functionality
+	upnp bool
 	// BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 
@@ -212,6 +214,28 @@ func (sm *Manager) Start() error {
 		return sm.startBGP()
 	}
 
+	if sm.config.EnableARP || sm.config.EnableWireguard {
+		// Before starting the leader Election enable any additional functionality
+		upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
+
+		if upnpEnabled {
+			sm.upnp = true
+			clients := upnp.GetConnectionClients(context.TODO())
+			if len(clients) == 0 {
+				log.Errorf("Error Enabling UPNP. No Clients found")
+				// Set the struct to false so nothing should use it in future
+				sm.upnp = false
+			} else {
+				for _, c := range clients {
+					ip, err := c.GetExternalIPAddress()
+					log.Infof("Found UPNP IGD2 Gateway address[%s] error: [%s]", ip, err)
+				}
+			}
+		}
+		// TODO: It would be nice to run the UPNP refresh only on the leader.
+		go sm.refreshUPNPForwards()
+	}
+
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Infoln("Starting Kube-vip Manager with the ARP engine")
@@ -299,4 +323,17 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
 		}
 	}
 	return nil
+}
+
+// Refresh UPNP Port Forwards for all Service Instances registered in the SM
+func (sm *Manager) refreshUPNPForwards() {
+	log.Info("Starting UPNP Port Refresher")
+	for {
+		time.Sleep(1800 * time.Second)
+
+		log.Infof("[UPNP] Refreshing %d Instances", len(sm.serviceInstances))
+		for i := range sm.serviceInstances {
+			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
+		}
+	}
 }
