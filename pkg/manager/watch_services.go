@@ -155,7 +155,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				log.Debugf("(svcs) [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddresses(svc))
 
 				wg.Add(1)
-				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
+				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
 				// Background the services election
 				// EnableServicesElection enabled
 				// watchEndpoint will do a ServicesElection by Service and understands local endpoints

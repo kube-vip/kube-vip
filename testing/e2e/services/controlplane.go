@@ -52,7 +52,7 @@ func generateIPv4VIP() (string, error) {
 	}
 	for _, cidr := range cidrs {
 		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		if err != nil {
+		if parseErr != nil {
 			return "", parseErr
 		}
 		if ip.To4() != nil {
@@ -75,7 +75,7 @@ func generateIPv6VIP() (string, error) {
 	}
 	for _, cidr := range cidrs {
 		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		if err != nil {
+		if parseErr != nil {
 			return "", parseErr
 		}
 		if ip.To4() == nil {

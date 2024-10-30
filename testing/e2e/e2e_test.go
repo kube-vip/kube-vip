@@ -159,14 +159,11 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv4 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -255,14 +252,11 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv6 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -351,16 +345,13 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("provides an DualStack VIP addresses for the Kubernetes control plane nodes", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			vips := vip.GetIPs(dualstackVIP)
 
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv6 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -458,14 +449,11 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("uses hostname fallback while providing an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned IPv4 VIP"))
 			// Allow enough time for control plane nodes to load the docker image and
@@ -556,14 +544,11 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("setups IPv4 address and route on control-plane node", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
 			time.Sleep(30 * time.Second)
@@ -656,14 +641,11 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("setups IPv6 address and route on control-plane node", func() {
-			go func() {
-				time.Sleep(30 * time.Second)
-				By(withTimestamp("loading local docker image to kind cluster"))
-				e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
-			}()
-
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)
+
+			By(withTimestamp("loading local docker image to kind cluster"))
+			e2e.LoadDockerImageToKind(logger, imagePath, clusterName)
 
 			By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
 			time.Sleep(30 * time.Second)

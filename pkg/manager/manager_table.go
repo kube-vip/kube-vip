@@ -3,10 +3,13 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -34,6 +37,19 @@ func (sm *Manager) startTableMode(id string) error {
 				log.Errorf("error checking for old routes: %v", err)
 			}
 		}()
+	}
+
+	egressCleanEnv := os.Getenv("EGRESS_CLEAN")
+	if egressCleanEnv != "" {
+		egressClean, err := strconv.ParseBool(egressCleanEnv)
+		if err != nil {
+			log.Warnf("failed to parse EGRESS_CLEAN env value [%s]. Egress cleaning will not be performed: %s", egressCleanEnv, err.Error())
+		}
+		if egressClean {
+			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
+			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
+			log.Debug("IPTables rules cleaned on startup")
+		}
 	}
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves

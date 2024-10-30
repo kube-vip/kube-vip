@@ -56,6 +56,11 @@ dockerx86Iptables:
 	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --push -t $(REPOSITORY)/$(TARGET):dev .
 	@echo New single x86 Architecture Docker image created
 
+dockerx86IptablesLocal:
+	@-rm ./kube-vip
+	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New single x86 Architecture Docker image created
+
 dockerx86:
 	@-rm ./kube-vip
 	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
