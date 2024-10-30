@@ -35,7 +35,11 @@ type Egress struct {
 }
 
 func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Protocol) (*Egress, error) {
-	log.Infof("[egress] Creating an iptables client, nftables mode [%t]", nftables)
+	proto := "IPv4"
+	if protocol == iptables.ProtocolIPv6 {
+		proto = "IPv6"
+	}
+	log.Infof("[egress] Creating an iptables client, nftables mode [%t], protocol [%s]", nftables, proto)
 	e := new(Egress)
 	var err error
 
