@@ -329,11 +329,14 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
 func (sm *Manager) refreshUPNPForwards() {
 	log.Info("Starting UPNP Port Refresher")
 	for {
-		time.Sleep(1800 * time.Second)
+		time.Sleep(300 * time.Second)
 
 		log.Infof("[UPNP] Refreshing %d Instances", len(sm.serviceInstances))
 		for i := range sm.serviceInstances {
 			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
+			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
+				log.Warnf("[UPNP] Error updating service IPs %s [%s]", sm.serviceInstances[i].serviceSnapshot.Name, err.Error())
+			}
 		}
 	}
 }
