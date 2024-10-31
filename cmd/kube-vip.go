@@ -289,6 +289,14 @@ var kubeVipManager = &cobra.Command{
 			log.Fatalln("no features are enabled")
 		}
 
+		if !initConfig.EnableARP && strings.Contains(initConfig.VIPCIDR, kubevip.Auto) {
+			log.Fatalln("auto subnet discovery cannot be used outside ARP mode")
+		}
+
+		if strings.Contains(initConfig.VIPCIDR, kubevip.Auto) && initConfig.Address != "" {
+			log.Fatalln("auto subnet discovery cannot be used if VIP address was provided")
+		}
+
 		// If we're using wireguard then all traffic goes through the wg0 interface
 		if initConfig.EnableWireguard {
 			if initConfig.Interface == "" {

@@ -345,7 +345,7 @@ var _ = Describe("kube-vip broadcast neighbor", func() {
 		})
 
 		It("provides an DualStack VIP addresses for the Kubernetes control plane nodes", func() {
-			vips := vip.GetIPs(dualstackVIP)
+			vips := vip.Split(dualstackVIP)
 
 			By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 			createKindCluster(logger, &clusterConfig, clusterName)

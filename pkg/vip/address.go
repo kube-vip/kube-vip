@@ -43,6 +43,7 @@ type Network interface {
 	IsDDNS() bool
 	DDNSHostName() string
 	DNSName() string
+	SetMask(mask string) error
 }
 
 // network - This allows network configuration
@@ -286,6 +287,7 @@ func (configurator *network) AddIP(precheck bool) error {
 			return errors.Wrap(err, "could not check if address exists")
 		}
 	}
+
 	if !exists {
 		if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
 			return errors.Wrap(err, "could not add ip")
@@ -691,4 +693,17 @@ func GarbageCollect(adapter, address string) (found bool, err error) {
 		}
 	}
 	return // Didn't find the address on the adapter
+}
+
+func (configurator *network) SetMask(mask string) error {
+	m, err := strconv.Atoi(mask)
+	if err != nil {
+		return err
+	}
+	size := 32
+	if IsIPv6(configurator.address.IP.String()) {
+		size = 128
+	}
+	configurator.address.IPNet.Mask = net.CIDRMask(m, size)
+	return nil
 }
