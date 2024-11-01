@@ -75,9 +75,13 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 		return nil, fmt.Errorf("error creating a new k8s clientset: %v", err)
 	}
 
-	rwConfig := *config
+	rwConfig, err := k8s.NewRestConfig(path, inCluster, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create k8s REST config for retryClientSet: %w", err)
+	}
+
 	rwConfig.Timeout = 0 // empty value to disable the timeout
-	rwClientSet, err := k8s.NewClientset(&rwConfig)
+	rwClientSet, err := k8s.NewClientset(rwConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create k8s client for retry watcher: %w", err)
 	}
