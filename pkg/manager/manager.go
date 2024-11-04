@@ -139,7 +139,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	var rwClientSet *kubernetes.Clientset
 	// if clientConfig is not nil, then we are not using etcd leader election
-	// we need to create non-tieout clientset for RetryWatcher
+	// we need to create non-timeout clientset for RetryWatcher
 	if clientConfig != nil {
 		rwConfig := *clientConfig
 		rwConfig.Timeout = 0
