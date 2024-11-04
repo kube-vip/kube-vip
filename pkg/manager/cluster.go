@@ -15,6 +15,7 @@ func initClusterManager(sm *Manager) (*cluster.Manager, error) {
 	switch sm.config.LeaderElectionType {
 	case "kubernetes", "":
 		m.KubernetesClient = sm.clientSet
+		m.RetryWatcherClient = sm.rwClientSet
 	case "etcd":
 		client, err := etcd.NewClient(sm.config)
 		if err != nil {
