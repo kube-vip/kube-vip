@@ -151,3 +151,6 @@ trivy: dockerx86ActionIPTables
 		--severity  'CRITICAL,HIGH'  \
 		$(REPOSITORY)/$(TARGET):action
 
+kind-reload:
+	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) -n services
+	kubectl rollout restart -n kube-system daemonset/kube-vip-ds
