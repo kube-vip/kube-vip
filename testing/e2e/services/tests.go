@@ -54,7 +54,7 @@ func main() {
 	_, t.IPv6 = os.LookupEnv("IPV6_FAMILY")
 	_, t.skipHostnameChange = os.LookupEnv("SKIP_HOSTNAME_CHANGE")
 
-	flag.StringVar(&t.ImagePath, "imagepath", "plndr/kube-vip:action", "")
+	//flag.StringVar(&t.ImagePath, "imagepath", "plndr/kube-vip:action", "")
 	flag.BoolVar(&t.ControlPlane, "ControlPlane", false, "")
 	flag.BoolVar(&t.Services, "Services", false, "")
 
