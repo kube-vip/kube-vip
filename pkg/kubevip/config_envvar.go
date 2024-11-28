@@ -125,6 +125,13 @@ const (
 	// bgpKeepaliveInterval defines bgp timers keepalive interval
 	bgpKeepaliveInterval = "bgp_keepalive_interval"
 
+	// mpbgpNexthop defines MPBGP mode
+	mpbgpNexthop = "mpbgp_nexthop"
+	// mpbgpIPv4 defines fixed IPv4 to be used with MPBGP
+	mpbgpIPv4 = "mpbgp_ipv4"
+	// mpbgpIPv6 defines fixed IPv6 to be used with MPBGP
+	mpbgpIPv6 = "mpbgp_ipv6"
+
 	// vipWireguard - defines if wireguard will be used for vips
 	vipWireguard = "vip_wireguard" //nolint
 

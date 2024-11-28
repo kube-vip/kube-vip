@@ -444,6 +444,24 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Peers = peers
 	}
 
+	// MPBGP mode
+	env = os.Getenv(mpbgpNexthop)
+	if env != "" {
+		c.BGPConfig.MpbgpNexthop = env
+	}
+
+	// MPBGP fixed IPv4
+	env = os.Getenv(mpbgpIPv4)
+	if env != "" {
+		c.BGPConfig.MpbgpIPv4 = env
+	}
+
+	// MPBGP fixed IPv6
+	env = os.Getenv(mpbgpIPv6)
+	if env != "" {
+		c.BGPConfig.MpbgpIPv6 = env
+	}
+
 	// BGP Peer mutlihop
 	env = os.Getenv(bgpMultiHop)
 	if env != "" {
