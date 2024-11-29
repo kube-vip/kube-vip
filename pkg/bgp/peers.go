@@ -70,7 +70,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 			},
 		}
 
-		switch b.c.MpbgpIPv4 {
+		switch b.c.MpbgpNexthop {
 		case "fixed":
 			if b.c.MpbgpIPv4 == "" || b.c.MpbgpIPv6 == "" {
 				return fmt.Errorf("to use MP-BGP with fixed address both IPv4 and IPv6 has to be provided [current - IPv4: %s, IPv6: %s]",
@@ -147,7 +147,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 
 		if ipv4Address != "" {
 			if err := insertPolicy(b.s, ipv4Address, p, api.Family_AFI_IP); err != nil {
-				return fmt.Errorf("failed to add IPv6 policy: %w", err)
+				return fmt.Errorf("failed to add IPv4 policy: %w", err)
 			}
 		}
 	} else {
@@ -356,9 +356,13 @@ func GetNonLinkLocalIP(iface *netlink.Link, family int) (string, error) {
 }
 
 func insertPolicy(s *server.BgpServer, address string, p *api.Peer, family api.Family_Afi) error {
+	familyType := "v4"
+	if family == api.Family_AFI_IP6 {
+		familyType = "v6"
+	}
 	err := s.AddPolicy(context.Background(), &api.AddPolicyRequest{
 		Policy: &api.Policy{
-			Name: fmt.Sprintf("peer-%s-v6", p.Conf.NeighborAddress),
+			Name: fmt.Sprintf("peer-%s-%s", p.Conf.NeighborAddress, familyType),
 			Statements: []*api.Statement{
 				{
 					Conditions: &api.Conditions{
@@ -395,12 +399,7 @@ func insertPolicy(s *server.BgpServer, address string, p *api.Peer, family api.F
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to add policy: %v", err)
-	}
-
-	policyType := "v4"
-	if family == api.Family_AFI_IP6 {
-		policyType = "v6"
+		return fmt.Errorf("failed to add policy: %w", err)
 	}
 
 	err = s.AddPolicyAssignment(context.Background(), &api.AddPolicyAssignmentRequest{
@@ -409,7 +408,7 @@ func insertPolicy(s *server.BgpServer, address string, p *api.Peer, family api.F
 			Direction: api.PolicyDirection_EXPORT,
 			Policies: []*api.Policy{
 				{
-					Name: fmt.Sprintf("peer-%s-%s", p.Conf.NeighborAddress, policyType),
+					Name: fmt.Sprintf("peer-%s-%s", p.Conf.NeighborAddress, familyType),
 				},
 			},
 		},
