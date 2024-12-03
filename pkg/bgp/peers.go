@@ -72,6 +72,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 
 		switch b.c.MpbgpNexthop {
 		case "fixed":
+			p.Transport.LocalAddress = b.c.SourceIP
 			if b.c.MpbgpIPv4 == "" || b.c.MpbgpIPv6 == "" {
 				return fmt.Errorf("to use MP-BGP with fixed address both IPv4 and IPv6 has to be provided [current - IPv4: %s, IPv6: %s]",
 					b.c.MpbgpIPv4, b.c.MpbgpIPv6)
@@ -95,7 +96,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 				}
 			} else {
 				// Get the non link-local IPv4 address on that interface
-				ipv6Address, err = GetNonLinkLocalIP(iface, netlink.FAMILY_V4)
+				ipv4Address, err = GetNonLinkLocalIP(iface, netlink.FAMILY_V4)
 				if err != nil {
 					return fmt.Errorf("failed to get non link-local IPv4 address: %v", err)
 				}
