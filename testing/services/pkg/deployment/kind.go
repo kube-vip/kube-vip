@@ -1,4 +1,4 @@
-package main
+package deployment
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/gookit/slog"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cmd"
@@ -26,7 +26,7 @@ type nodeAddresses struct {
 	addresses []string
 }
 
-func (config *testConfig) createKind() error {
+func (config *TestConfig) CreateKind() error {
 
 	clusterConfig := kindconfigv1alpha4.Cluster{
 		Networking: kindconfigv1alpha4.Networking{
@@ -42,7 +42,7 @@ func (config *testConfig) createKind() error {
 		// Change Networking Family
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.IPv6Family
 	}
-	if config.Dualstack {
+	if config.DualStack {
 		// Change Networking Family
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.DualStackFamily
 	}
@@ -82,7 +82,7 @@ func (config *testConfig) createKind() error {
 	found := false
 	for x := range clusters {
 		if clusters[x] == "services" {
-			log.Infof("Cluster already exists")
+			slog.Infof("Cluster already exists")
 			found = true
 		}
 	}
@@ -103,8 +103,8 @@ func (config *testConfig) createKind() error {
 			return err
 		}
 
-		if !config.skipHostnameChange {
-			log.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
+		if !config.SkipHostnameChange {
+			slog.Infof("⚙️ changing hostnames on nodes to force using proper node names for service selection")
 			for _, node := range nodes {
 				nodeName := node.String()
 				cmd := exec.Command("docker", "exec", nodeName, "hostname", nodeName+"-modified")
@@ -140,14 +140,14 @@ func (config *testConfig) createKind() error {
 		if _, err := cmd.CombinedOutput(); err != nil {
 			return err
 		}
-		log.Infof("💤 sleeping for a few seconds to let controllers start")
+		slog.Infof("💤 sleeping for a few seconds to let controllers start")
 		time.Sleep(time.Second * 5)
 	}
 	return nil
 }
 
-func deleteKind() error {
-	log.Info("🧽 deleting Kind cluster")
+func DeleteKind() error {
+	slog.Info("🧽 deleting Kind cluster")
 	return provider.Delete("services", "")
 }
 
