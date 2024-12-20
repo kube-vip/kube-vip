@@ -106,10 +106,15 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
+func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
+
+	// Look up the destination ports from the annotations on the service
+	destinationPorts := annotations[egressDestinationPorts]
+	deniedNetworks := annotations[egressDeniedNetworks]
+	allowedNetworks := annotations[egressAllowedNetworks]
 
 	if sm.config.EgressPodCidr == "" || sm.config.EgressServiceCidr == "" {
 		autoServiceCIDR, autoPodCIDR, discoverErr = sm.AutoDiscoverCIDRs()
@@ -130,7 +135,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	if podCidr == "" {
 		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
 		if !vip.IsIPv4(podIP) {
-			return nil
+			return fmt.Errorf("error with the CIDR [%s]", podIP)
 		}
 		podCidr = defaultPodCIDR
 	}
@@ -201,16 +206,35 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
+	if deniedNetworks != "" {
+		networks := strings.Split(deniedNetworks, ",")
+		for x := range networks {
+			err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	}
+
 	mask := "/32"
 	if !vip.IsIPv4(podIP) {
 		mask = "/128"
 	}
 
-	err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
-	if err != nil {
-		return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+	if allowedNetworks != "" {
+		networks := strings.Split(allowedNetworks, ",")
+		for x := range networks {
+			err = i.AppendReturnRulesForMarkingForNetwork(vip.MangleChainName, podIP+mask, networks[x])
+			if err != nil {
+				return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	} else {
+		err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
+		if err != nil {
+			return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		}
 	}
-
 	err = i.InsertMangeTableIntoPrerouting(vip.MangleChainName)
 	if err != nil {
 		return fmt.Errorf("error adding prerouting mangle chain [%s], error [%s]", vip.MangleChainName, err)
@@ -283,7 +307,12 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	return
 }
 
-func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace string) error {
+func (sm *Manager) TeardownEgress(podIP, vipIP, namespace string, annotations map[string]string) error {
+	// Look up the destination ports from the annotations on the service
+	destinationPorts := annotations[egressDestinationPorts]
+	deniedNetworks := annotations[egressDeniedNetworks]
+	allowedNetworks := annotations[egressAllowedNetworks]
+
 	protocol := iptables.ProtocolIPv4
 	if vip.IsIPv6(podIP) {
 		protocol = iptables.ProtocolIPv6
@@ -294,10 +323,30 @@ func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace stri
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
 
-	// Remove the marking of egress packets
-	err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
-	if err != nil {
-		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	if deniedNetworks != "" {
+		networks := strings.Split(deniedNetworks, ",")
+		for x := range networks {
+			err = i.DeleteMangleReturnForNetwork(vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	}
+
+	if allowedNetworks != "" {
+		networks := strings.Split(allowedNetworks, ",")
+		for x := range networks {
+			err = i.DeleteMangleMarkingForNetwork(podIP, vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	} else {
+		// Remove the marking of egress packets
+		err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
+		if err != nil {
+			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+		}
 	}
 
 	// Clear up SNAT rules
@@ -330,6 +379,7 @@ func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace stri
 			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 		}
 	}
+
 	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
 		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
