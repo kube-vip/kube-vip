@@ -91,12 +91,12 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	config1 := configBase
 	config1.EtcdConfig.Client = cliMember1
 	config1.MemberID = "my-host"
-	uniqueID := rand.Int63()
+	uniqueID := rand.Uint64()
 	config1.MemberUniqueID = &uniqueID
 	config1.Callbacks = baseCallbacksForName(config1.MemberID)
 	config1.Callbacks.OnStartedLeading = func(_ context.Context) {
 		log.Println("I'm my-host, the new leader!!!!")
-		log.Println("Loosing the leadership on purpose by stopping renewing the lease")
+		log.Println("Losing the leadership on purpose by stopping renewing the lease")
 		g.Expect(cliMember1.Lease.Close()).To(Succeed())
 		log.Println("Member1 leases closed")
 	}

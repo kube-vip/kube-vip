@@ -1,15 +1,15 @@
-package main
+package deployment
 
 import (
 	"context"
 	"fmt"
 	"time"
 
+	"github.com/gookit/slog"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -17,7 +17,7 @@ import (
 )
 
 // service defines the settings for a new service
-type service struct {
+type Service struct {
 	name          string
 	egress        bool // enable egress
 	egressIPv6    bool // egress should be IPv6
@@ -27,8 +27,8 @@ type service struct {
 	timeout       int  // how long to wait for the service to be created
 }
 
-type deployment struct {
-	replicas     int
+type Deployment struct {
+	replicas     int32
 	server       bool
 	client       bool
 	address      string
@@ -36,7 +36,7 @@ type deployment struct {
 	name         string
 }
 
-func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clientset, imagepath string) error {
+func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clientset, imagepath string) error {
 	ds := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-vip-ds",
@@ -132,8 +132,8 @@ func (d *deployment) createKVDs(ctx context.Context, clientset *kubernetes.Clien
 	return nil
 
 }
-func (d *deployment) createDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
-	replicas := int32(d.replicas)
+func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
+	replicas := d.replicas
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: d.name,
@@ -204,11 +204,11 @@ func (d *deployment) createDeployment(ctx context.Context, clientset *kubernetes
 		return err
 	}
 
-	log.Infof("📝 created deployment [%s]", result.GetObjectMeta().GetName())
+	slog.Infof("📝 created deployment [%s]", result.GetObjectMeta().GetName())
 	return nil
 }
 
-func (s *service) createService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddresses []string, err error) {
+func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddresses []string, err error) {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.name,
@@ -242,6 +242,11 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		svc.Annotations["kube-vip.io/egress-ipv6"] = "true"
 	}
 
+	//svc.Annotations["kube-vip.io/egress-denied-networks"] = "172.18.0.0/24"
+	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "172.18.0.0/24"
+
+	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "192.168.0.0/24, 172.18.0.0/24"
+
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 	}
@@ -252,11 +257,11 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		}
 		ipv4VIP, err := generateIPv4VIP()
 		if err != nil {
-			log.Fatal(err)
+			slog.Fatal(err)
 		}
 		ipv6VIP, err := generateIPv6VIP()
 		if err != nil {
-			log.Fatal(err)
+			slog.Fatal(err)
 		}
 		svc.Annotations["kube-vip.io/loadbalancerIPs"] = fmt.Sprintf("%s,%s", ipv4VIP, ipv6VIP)
 		svc.Labels["implementation"] = "kube-vip"
@@ -265,19 +270,19 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		svc.Spec.IPFamilyPolicy = &ipfPolicy
 	}
 
-	log.Infof("🌍 creating service [%s]", svc.Name)
+	slog.Infof("🌍 creating service [%s]", svc.Name)
 	_, err = clientset.CoreV1().Services(v1.NamespaceDefault).Create(ctx, svc, metav1.CreateOptions{})
 	if err != nil {
-		log.Fatal(err)
+		slog.Fatal(err)
 	}
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, options)
 		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		slog.Fatal(err)
 	}
 	ch := rw.ResultChan()
 	go func() {
@@ -292,17 +297,17 @@ func (s *service) createService(ctx context.Context, clientset *kubernetes.Clien
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			// log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
+			// slog.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
-				log.Fatalf("unable to parse Kubernetes services from API watcher")
+				slog.Fatalf("unable to parse Kubernetes services from API watcher")
 			}
 			if svc.Name == s.name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
 					for _, ingress := range svc.Status.LoadBalancer.Ingress {
 						loadBalancerAddresses = append(loadBalancerAddresses, ingress.IP)
 					}
-					log.Infof("🔎 found load balancer addresses [%s] on node [%s]", loadBalancerAddresses, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔎 found load balancer addresses [%s] on node [%s]", loadBalancerAddresses, svc.Annotations["kube-vip.io/vipHost"])
 					ready = true
 					currentLeader = svc.Annotations["kube-vip.io/vipHost"]
 				}

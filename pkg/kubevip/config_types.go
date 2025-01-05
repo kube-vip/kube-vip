@@ -83,7 +83,7 @@ type Config struct {
 	Address string `yaml:"address"`
 
 	// Listen port for the VirtualIP
-	Port int `yaml:"port"`
+	Port uint16 `yaml:"port"`
 
 	// Namespace will define which namespace the control plane pods will run in
 	Namespace string `yaml:"namespace"`
@@ -113,7 +113,7 @@ type Config struct {
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
 	// Listen port for the IPVS Service
-	LoadBalancerPort int `yaml:"lbPort"`
+	LoadBalancerPort uint16 `yaml:"lbPort"`
 
 	// Forwarding method for the IPVS Service
 	LoadBalancerForwardingMethod string `yaml:"lbForwardingMethod"`

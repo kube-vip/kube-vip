@@ -14,7 +14,7 @@ import (
 
 type Entry struct {
 	Addr string
-	Port int
+	Port uint16
 }
 
 type Map map[Entry]bool

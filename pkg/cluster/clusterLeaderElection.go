@@ -189,7 +189,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		config:  c,
 		leaseID: c.NodeName,
 		sm:      sm,
-		onStartedLeading: func(ctx context.Context) {
+		onStartedLeading: func(ctx context.Context) { //nolint TODO: potential clean code
 			// As we're leading lets start the vip service
 			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
 			if err != nil {
@@ -305,7 +305,7 @@ func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *run
 	})
 }
 
-func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) error {
+func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Infof("Kube-Vip is watching nodes for control-plane labels")
 
@@ -314,7 +314,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 	}
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},
 	})
@@ -376,7 +376,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port int) erro
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, ok := errObject.(*apierrors.StatusError)
 			if !ok {
-				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
 			}
 
 			status := statusErr.ErrStatus

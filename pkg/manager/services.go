@@ -19,23 +19,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
-const (
-	hwAddrKey                = "kube-vip.io/hwaddr"
-	requestedIP              = "kube-vip.io/requestedIP"
-	vipHost                  = "kube-vip.io/vipHost"
-	egress                   = "kube-vip.io/egress"
-	egressIPv6               = "kube-vip.io/egress-ipv6"
-	egressDestinationPorts   = "kube-vip.io/egress-destination-ports"
-	egressSourcePorts        = "kube-vip.io/egress-source-ports"
-	activeEndpoint           = "kube-vip.io/active-endpoint"
-	activeEndpointIPv6       = "kube-vip.io/active-endpoint-ipv6"
-	flushContrack            = "kube-vip.io/flush-conntrack"
-	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
-	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
-	serviceInterface         = "kube-vip.io/serviceInterface"
-	upnpEnabled              = "kube-vip.io/forwardUPNP"
-)
-
 func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
@@ -181,7 +164,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 
 						podIP = svc.Annotations[activeEndpointIPv6]
 
-						err = sm.configureEgress(serviceIP, podIP, svc.Annotations[egressDestinationPorts], svc.Namespace)
+						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Errorf("Error configuring egress for loadbalancer [%s]", err)
@@ -195,7 +178,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[activeEndpointIPv6]
 				}
-				err = sm.configureEgress(serviceIP, podIPs, svc.Annotations[egressDestinationPorts], svc.Namespace)
+				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
 					log.Errorf("Error configuring egress for loadbalancer [%s]", err)
@@ -291,7 +274,7 @@ func (sm *Manager) deleteService(uid string) error {
 		if serviceInstance.serviceSnapshot.Annotations[egress] == "true" {
 			if serviceInstance.serviceSnapshot.Annotations[activeEndpoint] != "" {
 				log.Infof("service [%s] has an egress re-write enabled", serviceInstance.serviceSnapshot.Name)
-				err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[activeEndpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Annotations[egressDestinationPorts], serviceInstance.serviceSnapshot.Namespace)
+				err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[activeEndpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Namespace, serviceInstance.serviceSnapshot.Annotations)
 				if err != nil {
 					log.Errorf("%v", err)
 				}
@@ -332,7 +315,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
-					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(port.Type), 3600)
+					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", port.Port, vip, port.Port, upnp.MapProtocolToIANA(port.Type), 3600)
 					if pinholeErr == nil {
 						forwardSucessful = true
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
@@ -343,7 +326,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
-					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(port.Type), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600)
+					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", port.Port, strings.ToUpper(port.Type), port.Port, vip, true, s.serviceSnapshot.Name, 3600)
 					if portMappingErr == nil {
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]", port.Port)
 						forwardSucessful = true

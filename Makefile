@@ -139,7 +139,7 @@ e2e-tests129:
 	V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
 service-tests:
-	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/e2e/services -Services
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
 
 trivy: dockerx86ActionIPTables
 	docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.47.0 \
@@ -151,6 +151,15 @@ trivy: dockerx86ActionIPTables
 		--severity  'CRITICAL,HIGH'  \
 		$(REPOSITORY)/$(TARGET):action
 
+kind-quick:
+	echo "Standing up your cluster"
+	kind create cluster --config ./testing/kind/kind.yaml --name kube-vip
+	kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
+	kubectl create configmap --namespace kube-system kubevip --from-literal range-global=172.18.100.10-172.18.100.30
+	kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
+	kind load docker-image --name kube-vip $(REPOSITORY)/$(TARGET):$(DOCKERTAG)
+	docker run --network host --rm $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --services --inCluster --arp --interface eth0 | kubectl apply -f -
+
 kind-reload:
-	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) -n services
+	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) --name kube-vip
 	kubectl rollout restart -n kube-system daemonset/kube-vip-ds

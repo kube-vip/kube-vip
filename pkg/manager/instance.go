@@ -42,7 +42,7 @@ type Instance struct {
 }
 
 type Port struct {
-	Port int32
+	Port uint16
 	Type string
 }
 
@@ -180,7 +180,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	}
 	for _, port := range svc.Spec.Ports {
 		instance.ExternalPorts = append(instance.ExternalPorts, Port{
-			Port: port.Port,
+			Port: uint16(port.Port), //nolint
 			Type: string(port.Protocol),
 		})
 	}

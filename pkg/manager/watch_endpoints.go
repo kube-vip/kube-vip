@@ -46,7 +46,7 @@ func (ep *endpointsProvider) createRetryWatcher(ctx context.Context, sm *Manager
 	}
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return sm.rwClientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
 	})
@@ -243,7 +243,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					if !stillExists {
 						if sm.config.EnableRoutingTable {
 							if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP,
-								service.Annotations[egressDestinationPorts], service.Namespace); err != nil {
+								service.Namespace, service.Annotations); err != nil {
 								log.Warnf("error removing redundant egress rules: %s", err.Error())
 							}
 						}
@@ -375,8 +375,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
 					log.Warnf("[%s] existing [%s] has been removed, no remaining endpoints for leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
-					if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP,
-						service.Annotations[egressDestinationPorts], service.Namespace); err != nil {
+					if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations); err != nil {
 						log.Errorf("error removing redundant egress rules: %s", err.Error())
 					}
 

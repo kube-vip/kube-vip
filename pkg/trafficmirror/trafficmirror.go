@@ -95,7 +95,7 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 	filter2 := &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: fromNICID,
-			Parent:    netlink.MakeHandle(uint16(qdiscID), 0),
+			Parent:    netlink.MakeHandle(uint16(qdiscID), 0), //nolint
 			Protocol:  unix.ETH_P_ALL,
 		},
 		Actions: []netlink.Action{

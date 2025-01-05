@@ -10,6 +10,7 @@ require (
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.6.0
+	github.com/gookit/slog v0.5.7
 	github.com/huin/goupnp v1.3.0
 	github.com/insomniacslk/dhcp v0.0.0-20230731140434-0f9eb93a696c
 	github.com/jpillora/backoff v1.0.0
@@ -29,8 +30,8 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.13
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240409090435-93d18d7e34b8
-	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.20.0
+	golang.org/x/sync v0.10.0
+	golang.org/x/sys v0.28.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.1
@@ -65,6 +66,9 @@ require (
 	github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6 // indirect
 	github.com/google/safetext v0.0.0-20220905092116-b49f7bc46da2 // indirect
 	github.com/google/uuid v1.3.1 // indirect
+	github.com/gookit/color v1.5.4 // indirect
+	github.com/gookit/goutil v0.6.17 // indirect
+	github.com/gookit/gsr v0.1.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -99,18 +103,20 @@ require (
 	github.com/subosito/gotenv v1.4.2 // indirect
 	github.com/tj/go-spin v1.1.0 // indirect
 	github.com/u-root/uio v0.0.0-20230305220412-3e8cd9d6bf63 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/xlab/c-for-go v0.0.0-20230906092656-a1822f0a09c1 // indirect
 	github.com/xlab/pkgconfig v0.0.0-20170226114623-cea12a0fd245 // indirect
+	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.23.0 // indirect
+	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/oauth2 v0.16.0 // indirect
-	golang.org/x/term v0.20.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
+	golang.org/x/term v0.27.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
-	golang.org/x/tools v0.21.0 // indirect
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d // indirect
