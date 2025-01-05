@@ -71,7 +71,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.rwClientSet.CoreV1().Services(sm.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
+			return sm.rwClientSet.CoreV1().Services(sm.config.ServiceNamespace).Watch(ctx, options)
 		},
 	})
 	if err != nil {
@@ -315,7 +315,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, ok := errObject.(*apierrors.StatusError)
 			if !ok {
-				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
 			}
 
 			status := statusErr.ErrStatus

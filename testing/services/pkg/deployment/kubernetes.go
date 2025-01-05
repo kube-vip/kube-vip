@@ -28,7 +28,7 @@ type Service struct {
 }
 
 type Deployment struct {
-	replicas     int
+	replicas     int32
 	server       bool
 	client       bool
 	address      string
@@ -133,7 +133,7 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 
 }
 func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
-	replicas := int32(d.replicas)
+	replicas := d.replicas
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: d.name,
@@ -278,7 +278,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, options)
 		},
 	})
 	if err != nil {

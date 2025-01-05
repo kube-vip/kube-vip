@@ -47,7 +47,7 @@ type TestConfig struct {
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
 	// Simple Deployment test
 	var err error
-	defer func() error {
+	defer func() error { //nolint
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
@@ -59,7 +59,7 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 			slog.Fatal(err)
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> simple deployment <---")
 	deploy := Deployment{
@@ -91,7 +91,7 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 	// Multiple deployment tests
 	var err error
 
-	defer func() error {
+	defer func() error { //nolint
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
 			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
@@ -105,7 +105,8 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 			slog.Fatal(err)
 		}
 		return nil
-	}()
+	}() //nolint
+
 	slog.Infof("🧪 ---> multiple deployments <---")
 	deploy := Deployment{
 		name:         config.LeaderName,
@@ -150,7 +151,7 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 			return err
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
@@ -180,9 +181,8 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	err = leaderFailover(ctx, &config.ServiceName, &leader, clientset)
 	if err != nil {
 		return err
-	} else {
-		config.SuccessCounter++
 	}
+	config.SuccessCounter++
 
 	// Get all addresses on all nodes
 	nodes, err := getAddressesOnNodes()
@@ -212,7 +212,7 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 			return err
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> active pod failover deployment (local policy) <---")
 	deploy := Deployment{
@@ -239,9 +239,8 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 	err = podFailover(ctx, &config.ServiceName, &leader, clientset)
 	if err != nil {
 		return err
-	} else {
-		config.SuccessCounter++
 	}
+	config.SuccessCounter++
 
 	return err
 }
@@ -262,7 +261,7 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 			return err
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> multiple deployments (local policy) <---")
 	timeout := 30
@@ -318,7 +317,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 			return err
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> egress IP re-write (local policy) <---")
 	var egress string
@@ -393,7 +392,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 			return err
 		}
 		return nil
-	}()
+	}() //nolint
 
 	slog.Infof("🧪 ---> egress IP re-write IPv6 (local policy) <---")
 	var egress string

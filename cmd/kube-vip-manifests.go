@@ -29,7 +29,7 @@ func init() {
 var kubeManifest = &cobra.Command{
 	Use:   "manifest",
 	Short: "Manifest functions",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		_ = cmd.Help()
 		// TODO - A load of text detailing what's actually happening
 	},
@@ -38,7 +38,7 @@ var kubeManifest = &cobra.Command{
 var kubeManifestPod = &cobra.Command{
 	Use:   "pod",
 	Short: "Generate a Pod Manifest",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
 
 		// Set the logging level for all subsequent functions
@@ -71,7 +71,7 @@ var kubeManifestPod = &cobra.Command{
 var kubeManifestDaemon = &cobra.Command{
 	Use:   "daemonset",
 	Short: "Generate a Daemonset Manifest",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
 
 		// Set the logging level for all subsequent functions
@@ -106,7 +106,7 @@ var kubeManifestDaemon = &cobra.Command{
 var kubeManifestRbac = &cobra.Command{
 	Use:   "rbac",
 	Short: "Generate an RBAC Manifest",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
 
 		// Set the logging level for all subsequent functions

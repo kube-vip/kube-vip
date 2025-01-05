@@ -39,7 +39,7 @@ const (
 type IPVSLoadBalancer struct {
 	client              ipvs.Client
 	loadBalancerService ipvs.Service
-	Port                int
+	Port                uint16
 	forwardingMethod    ipvs.ForwardType
 	backendMap          backend.Map
 	interval            int
@@ -47,7 +47,7 @@ type IPVSLoadBalancer struct {
 	stop                chan struct{}
 }
 
-func NewIPVSLB(address string, port int, forwardingMethod string, backendHealthCheckInterval int) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int) (*IPVSLoadBalancer, error) {
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
@@ -87,7 +87,7 @@ func NewIPVSLB(address string, port int, forwardingMethod string, backendHealthC
 		Netmask:   netMask,
 		Family:    family,
 		Protocol:  ipvs.TCP,
-		Port:      uint16(port),
+		Port:      port,
 		Address:   ip,
 		Scheduler: ROUNDROBIN,
 	}
@@ -139,7 +139,7 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 	return nil
 }
 
-func (lb *IPVSLoadBalancer) AddBackend(address string, port int) error {
+func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 	backend := backend.Entry{Addr: address, Port: port}
 
 	lb.lock.Lock()
@@ -195,7 +195,7 @@ func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
 
 	dst := ipvs.Destination{
 		Address:   ip,
-		Port:      uint16(backend.Port),
+		Port:      backend.Port,
 		Family:    family,
 		Weight:    1,
 		FwdMethod: lb.forwardingMethod,
@@ -216,7 +216,7 @@ func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
 	return nil
 }
 
-func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
+func (lb *IPVSLoadBalancer) RemoveBackend(address string, port uint16) error {
 	backend := backend.Entry{Addr: address, Port: port}
 
 	lb.lock.Lock()
@@ -233,7 +233,7 @@ func (lb *IPVSLoadBalancer) RemoveBackend(address string, port int) error {
 	return nil
 }
 
-func (lb *IPVSLoadBalancer) removeBackend(address string, port int) error {
+func (lb *IPVSLoadBalancer) removeBackend(address string, port uint16) error {
 	ip, family := ipAndFamily(address)
 	if family != lb.loadBalancerService.Family {
 		return nil
@@ -241,7 +241,7 @@ func (lb *IPVSLoadBalancer) removeBackend(address string, port int) error {
 
 	dst := ipvs.Destination{
 		Address: ip,
-		Port:    uint16(port),
+		Port:    port,
 		Family:  family,
 		Weight:  1,
 	}

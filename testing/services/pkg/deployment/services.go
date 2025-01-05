@@ -149,7 +149,7 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, options)
 		},
 	})
 	if err != nil {
@@ -232,7 +232,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, options)
 		},
 	})
 	if err != nil {

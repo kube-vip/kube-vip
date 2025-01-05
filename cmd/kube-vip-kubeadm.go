@@ -22,7 +22,7 @@ func init() {
 var kubeKubeadm = &cobra.Command{
 	Use:   "kubeadm",
 	Short: "Kubeadm functions",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		_ = cmd.Help()
 		// TODO - A load of text detailing what's actually happening
 	},
@@ -32,7 +32,7 @@ var kubeKubeadmInit = &cobra.Command{
 	Use:   "init",
 	Short: "kube-vip init",
 	Long:  "The \"init\" subcommand will generate the Kubernetes manifest that will be started by kubeadm through the kubeadm init process",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
@@ -69,7 +69,7 @@ var kubeKubeadmInit = &cobra.Command{
 var kubeKubeadmJoin = &cobra.Command{
 	Use:   "join",
 	Short: "kube-vip join",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 

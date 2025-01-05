@@ -315,7 +315,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
-					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(port.Type), 3600)
+					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", port.Port, vip, port.Port, upnp.MapProtocolToIANA(port.Type), 3600)
 					if pinholeErr == nil {
 						forwardSucessful = true
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
@@ -326,7 +326,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
-					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(port.Type), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600)
+					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", port.Port, strings.ToUpper(port.Type), port.Port, vip, true, s.serviceSnapshot.Name, 3600)
 					if portMappingErr == nil {
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]", port.Port)
 						forwardSucessful = true

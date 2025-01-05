@@ -31,7 +31,7 @@ type LeaderElectionConfig struct {
 
 	// MemberUniqueID is the int equivalent to MemberID that allows to override the default conversion
 	// from string to int using hashing.
-	MemberUniqueID *int64
+	MemberUniqueID *uint64
 
 	// LeaseDurationSeconds is the duration that non-leader candidates will
 	// wait to force acquire leadership.
@@ -73,7 +73,7 @@ func RunElectionOrDie(ctx context.Context, config *LeaderElectionConfig) {
 // RunElection blocks until leader election loop is
 // stopped by ctx or it has stopped holding the leader lease.
 func RunElection(ctx context.Context, config *LeaderElectionConfig) error {
-	var memberID int64
+	var memberID uint64
 	if config.MemberUniqueID != nil {
 		memberID = *config.MemberUniqueID
 	} else {
@@ -81,11 +81,11 @@ func RunElection(ctx context.Context, config *LeaderElectionConfig) error {
 		if _, err := h.Write(append([]byte(config.Name), []byte(config.MemberID)...)); err != nil {
 			return err
 		}
-		memberID = int64(h.Sum64())
+		memberID = h.Sum64()
 	}
 
 	ttl := config.LeaseDurationSeconds
-	r := &pb.LeaseGrantRequest{TTL: ttl, ID: memberID}
+	r := &pb.LeaseGrantRequest{TTL: ttl, ID: int64(memberID)} //nolint
 	lease, err := clientv3.RetryLeaseClient(
 		config.EtcdConfig.Client,
 	).LeaseGrant(ctx, r)

@@ -25,7 +25,7 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	if env != "" {
-		logLevel, err := strconv.ParseUint(env, 10, 32)
+		logLevel, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
 			panic("Unable to parse environment variable [vip_loglevel], should be int")
 		}
@@ -136,11 +136,11 @@ func ParseEnvironment(c *Config) error {
 	// Find vip port
 	env = os.Getenv(port)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
+		i, err := strconv.ParseUint(env, 10, 16)
 		if err != nil {
 			return err
 		}
-		c.Port = int(i)
+		c.Port = uint16(i)
 	}
 
 	// Find vipDdns
@@ -535,11 +535,11 @@ func ParseEnvironment(c *Config) error {
 	// Find loadbalancer port
 	env = os.Getenv(lbPort)
 	if env != "" {
-		i, err := strconv.ParseInt(env, 10, 32)
+		i, err := strconv.ParseUint(env, 10, 16)
 		if err != nil {
 			return err
 		}
-		c.LoadBalancerPort = int(i)
+		c.LoadBalancerPort = uint16(i)
 	}
 
 	// Find loadbalancer forwarding method

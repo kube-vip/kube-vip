@@ -46,13 +46,13 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 	}
 
 	k.BGPConfig.RouterID = neighbours[0].CustomerIP
-	k.BGPConfig.AS = uint32(neighbours[0].CustomerAs)
+	k.BGPConfig.AS = uint32(neighbours[0].CustomerAs) //nolint (being removed)
 
 	// Add the peer(s)
 	for x := range neighbours[0].PeerIps {
 		peer := bgp.Peer{
 			Address:  neighbours[0].PeerIps[x],
-			AS:       uint32(neighbours[0].PeerAs),
+			AS:       uint32(neighbours[0].PeerAs), //nolint (being removed)
 			MultiHop: neighbours[0].Multihop,
 			Password: neighbours[0].Md5Password,
 		}
