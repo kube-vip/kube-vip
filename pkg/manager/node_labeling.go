@@ -36,7 +36,7 @@ func applyNodeLabel(clientSet *kubernetes.Clientset, address, id, identity strin
 
 	value, ok := node.Labels[nodeLabelIndex]
 	path := fmt.Sprintf("/metadata/labels/%s", nodeLabelJSONPath)
-	log.Debugf("Received identity: %s - id: %$", identity, id)
+	log.Debugf("Received identity: %s - id: %s", identity, id)
 	if ok && value == address {
 		log.Debugf("removing node label `has-ip=%s` on %s", address, id)
 		// Remove label
