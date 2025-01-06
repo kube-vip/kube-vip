@@ -2,8 +2,6 @@ name: For each commit and PR
 on:
   push:
   pull_request:
-env:
-  GO_VERSION: "1.21"
 jobs:
   validation:
     runs-on: ubuntu-latest
@@ -12,7 +10,7 @@ jobs:
       - name: Init
         run: sudo apt-get update && sudo apt-get install -y build-essential &&  sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Go
