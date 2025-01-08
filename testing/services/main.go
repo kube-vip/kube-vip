@@ -41,7 +41,7 @@ func main() {
 	flag.BoolVar(&t.EgressIPv6, "egressIPv6", false, "Perform an egress test")
 	flag.BoolVar(&t.DualStack, "dualStack", false, "Perform an dual stack test")
 	flag.BoolVar(&t.RetainCluster, "retain", false, "Retain the cluster")
-
+	flag.StringVar(&t.KindVersionImage, "kindImage", "", "The image to use for the kind nodes e.g. (kindest/node:v1.21.14)")
 	flag.BoolVar(&existing, "existing", false, "Use an existing cluster")
 
 	flag.Parse()

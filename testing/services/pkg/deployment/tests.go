@@ -13,9 +13,9 @@ import (
 )
 
 type TestConfig struct {
-	SuccessCounter int
-
-	ImagePath string
+	SuccessCounter   int
+	KindVersionImage string
+	ImagePath        string
 
 	ControlPlane bool
 	// control plane settings
