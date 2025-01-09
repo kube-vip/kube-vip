@@ -72,7 +72,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				wg.Add(1)
 				go func() {
 					if err := sm.syncServices(ctx, service, wg); err != nil {
-						log.Errorln(err)
+						log.Error(err)
 					}
 				}()
 			},
@@ -81,7 +81,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				log.Infof("(svc election) service [%s] leader lost: [%s]", service.Name, sm.config.NodeName)
 				if activeService[string(service.UID)] {
 					if err := sm.deleteService(string(service.UID)); err != nil {
-						log.Errorln(err)
+						log.Error(err)
 					}
 				}
 				// Mark this service is inactive
