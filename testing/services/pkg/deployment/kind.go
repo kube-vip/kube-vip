@@ -38,6 +38,7 @@ func (config *TestConfig) CreateKind() error {
 			},
 		},
 	}
+
 	if config.IPv6 {
 		// Change Networking Family
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.IPv6Family
@@ -72,6 +73,13 @@ func (config *TestConfig) CreateKind() error {
 		clusterConfig.Nodes = append(clusterConfig.Nodes, kindconfigv1alpha4.Node{Role: kindconfigv1alpha4.WorkerRole})
 		clusterConfig.Nodes = append(clusterConfig.Nodes, kindconfigv1alpha4.Node{Role: kindconfigv1alpha4.WorkerRole})
 		//clusterConfig.Nodes = append(clusterConfig.Nodes, kindconfigv1alpha4.Node{Role: kindconfigv1alpha4.WorkerRole})
+	}
+
+	// Change the default image if required
+	if config.KindVersionImage != "" {
+		for x := range clusterConfig.Nodes {
+			clusterConfig.Nodes[x].Image = config.KindVersionImage
+		}
 	}
 
 	provider = cluster.NewProvider(cluster.ProviderWithLogger(cmd.NewLogger()), cluster.ProviderWithDocker())
