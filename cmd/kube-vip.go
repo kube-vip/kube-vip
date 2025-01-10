@@ -254,7 +254,7 @@ var kubeVipManager = &cobra.Command{
 
 		// Welome messages
 		log.Infof("Starting kube-vip.io [%s]", Release.Version)
-		log.Debugf("Build kube-vip.io [%s]", Release.Build)
+		log.Infof("Build kube-vip.io [%s]", Release.Build)
 
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
