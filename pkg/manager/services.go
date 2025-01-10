@@ -376,8 +376,8 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		}
 
 		if currentService.Annotations["development.kube-vip.io/simulate-api-server-error-on-update"] == "true" {
-			log.Errorf("(poison pill error thrown) Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
-			return fmt.Errorf("(poison pill) simulating api server errors")
+			log.Errorf("(Synthetic error thrown) Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
+			return fmt.Errorf("(Synthetic) simulating api server errors")
 		}
 
 		if !cmp.Equal(currentService, currentServiceCopy) {
