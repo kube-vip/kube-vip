@@ -74,7 +74,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				wg.Add(1)
 				go func() {
 					if err := sm.syncServices(ctx, service, wg); err != nil {
-						log.Errorln(err)
+						log.Error(err)
 						parentCancel()
 					}
 				}()
