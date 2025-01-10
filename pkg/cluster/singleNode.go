@@ -30,7 +30,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 				log.Warnf("Attempted to clean existing VIP => %v", err)
 			}
 
-			err = cluster.Network[i].AddIP()
+			err = cluster.Network[i].AddIP(false)
 			if err != nil {
 				log.Warnf("%v", err)
 			}

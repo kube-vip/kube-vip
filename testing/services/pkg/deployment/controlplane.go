@@ -1,4 +1,4 @@
-package main
+package deployment
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/gookit/slog"
 )
 
 func getKindNetworkSubnetCIDRs() ([]string, error) {
@@ -52,7 +52,7 @@ func generateIPv4VIP() (string, error) {
 	}
 	for _, cidr := range cidrs {
 		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		if err != nil {
+		if parseErr != nil {
 			return "", parseErr
 		}
 		if ip.To4() != nil {
@@ -75,7 +75,7 @@ func generateIPv6VIP() (string, error) {
 	}
 	for _, cidr := range cidrs {
 		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		if err != nil {
+		if parseErr != nil {
 			return "", parseErr
 		}
 		if ip.To4() == nil {
@@ -95,7 +95,7 @@ func generateIPv6VIP() (string, error) {
 
 }
 
-func (config *testConfig) manifestGen() error {
+func (config *TestConfig) manifestGen() error {
 	curDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -140,7 +140,7 @@ func (config *testConfig) manifestGen() error {
 			return err
 		}
 	}
-	log.Infof("🗃️ Manifest path %s", config.ManifestPath)
+	slog.Infof("🗃️ Manifest path %s", config.ManifestPath)
 	err = kubeVIPManifestTemplate.Execute(manifestFile, kubevipManifestValues{
 		ControlPlaneVIP: config.ControlPlaneAddress,
 		ImagePath:       config.ImagePath,

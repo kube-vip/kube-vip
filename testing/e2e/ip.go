@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
@@ -130,4 +131,32 @@ func getKindNetworkSubnetCIDRs() []string {
 	}
 
 	return cidrs
+}
+
+func CheckIPAddressPresence(ip string, container string) bool {
+	cmdOut := new(bytes.Buffer)
+	family := "-4"
+	if vip.IsIPv6(ip) {
+		family = "-6"
+	}
+	cmd := exec.Command(
+		"docker", "exec", container, "ip", family, "addr", "show", "dev", "eth0",
+	)
+	cmd.Stdout = cmdOut
+	Eventually(cmd.Run(), "20s").Should(Succeed())
+	return strings.Contains(cmdOut.String(), ip)
+}
+
+func CheckRoutePresence(ip string, container string) bool {
+	cmdOut := new(bytes.Buffer)
+	family := "-4"
+	if vip.IsIPv6(ip) {
+		family = "-6"
+	}
+	cmd := exec.Command(
+		"docker", "exec", container, "ip", family, "route", "show", "table", "198",
+	)
+	cmd.Stdout = cmdOut
+	Eventually(cmd.Run(), "20s").Should(Succeed())
+	return strings.Contains(cmdOut.String(), ip)
 }

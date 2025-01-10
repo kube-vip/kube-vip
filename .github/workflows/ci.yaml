@@ -2,17 +2,15 @@ name: For each commit and PR
 on:
   push:
   pull_request:
-env:
-  GO_VERSION: "1.21"
 jobs:
   validation:
     runs-on: ubuntu-latest
     name: Checks and linters
     steps:
       - name: Init
-        run: sudo apt-get update && sudo apt-get install -y build-essential golint &&  sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
+        run: sudo apt-get update && sudo apt-get install -y build-essential &&  sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Go
@@ -37,14 +35,14 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Install Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
-    - name: Run tests
-      run: make integration-tests
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run tests
+        run: make integration-tests
   e2e-tests:
     runs-on: ubuntu-latest
     name: E2E ARP tests
@@ -90,10 +88,9 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'plndr/kube-vip:action'
-          format: 'table'
-          exit-code: '1'
+          image-ref: "plndr/kube-vip:action"
+          format: "table"
+          exit-code: "1"
           ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-      
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"

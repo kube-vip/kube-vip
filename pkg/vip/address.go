@@ -27,8 +27,8 @@ const (
 
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
-	AddIP() error
-	AddRoute() error
+	AddIP(precheck bool) error
+	AddRoute(precheck bool) error
 	DeleteIP() error
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
@@ -43,6 +43,7 @@ type Network interface {
 	IsDDNS() bool
 	DDNSHostName() string
 	DNSName() string
+	SetMask(mask string) error
 }
 
 // network - This allows network configuration
@@ -75,7 +76,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -105,10 +106,12 @@ func NewConfig(address string, iface string, subnet string, isDDNS bool, tableID
 				return networks, errors.Wrapf(err, "could not parse address '%s'", address)
 			}
 		}
-		// Ensure we don't have a global address on loopback
-		if iface == "lo" {
+
+		if iface == "lo" && !loGlobalScope {
+			// set host scope on loopback, otherwise global scope will be used by default
 			result.address.Scope = unix.RT_SCOPE_HOST
 		}
+
 		networks = append(networks, result)
 	} else {
 		// try to resolve the address
@@ -204,9 +207,40 @@ func (configurator *network) PrepareRoute() *netlink.Route {
 }
 
 // AddRoute - Add an IP address to a route table
-func (configurator *network) AddRoute() error {
+func (configurator *network) AddRoute(precheck bool) error {
 	route := configurator.PrepareRoute()
-	return netlink.RouteAdd(route)
+
+	exists := false
+	var err error
+	if precheck {
+		exists, err = configurator.routeExists(route)
+		if err != nil {
+			return errors.Wrap(err, "failed to check route")
+		}
+	}
+
+	if !exists {
+		if err := netlink.RouteAdd(route); err != nil {
+			return errors.Wrap(err, "failed to add route")
+		}
+	}
+
+	return nil
+}
+
+func (configurator *network) routeExists(route *netlink.Route) (bool, error) {
+	routes, err := netlink.RouteList(configurator.link, netlink.FAMILY_ALL)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to list routes")
+	}
+
+	for _, r := range routes {
+		if r.Equal(*route) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // DeleteRoute - Delete an IP address from a route table
@@ -245,11 +279,29 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 }
 
 // AddIP - Add an IP address to the interface
-func (configurator *network) AddIP() error {
-	if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
-		return errors.Wrap(err, "could not add ip")
+func (configurator *network) AddIP(precheck bool) error {
+	exists := false
+	var err error
+	if precheck {
+		if exists, err = configurator.addressExists(); err != nil {
+			return errors.Wrap(err, "could not check if address exists")
+		}
 	}
 
+	if !exists {
+		if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
+			return errors.Wrap(err, "could not add ip")
+		}
+
+		if err := configurator.configureIPTables(); err != nil {
+			return errors.Wrap(err, "could not configure IPTables")
+		}
+	}
+
+	return nil
+}
+
+func (configurator *network) configureIPTables() error {
 	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
@@ -263,6 +315,21 @@ func (configurator *network) AddIP() error {
 	}
 
 	return nil
+}
+
+func (configurator *network) addressExists() (bool, error) {
+	addrs, err := netlink.AddrList(configurator.link, netlink.FAMILY_ALL)
+	if err != nil {
+		return false, errors.Wrap(err, "could not list addresses")
+	}
+
+	for _, addr := range addrs {
+		if addr.Equal(*configurator.address) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
@@ -626,4 +693,17 @@ func GarbageCollect(adapter, address string) (found bool, err error) {
 		}
 	}
 	return // Didn't find the address on the adapter
+}
+
+func (configurator *network) SetMask(mask string) error {
+	m, err := strconv.Atoi(mask)
+	if err != nil {
+		return err
+	}
+	size := 32
+	if IsIPv6(configurator.address.IP.String()) {
+		size = 128
+	}
+	configurator.address.IPNet.Mask = net.CIDRMask(m, size)
+	return nil
 }

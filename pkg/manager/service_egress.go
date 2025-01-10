@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,33 +47,95 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func getSameFamilyCidr(source, ip string) string {
-	cidrs := strings.Split(source, ",")
+func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how this ever worked
+	cidrs := strings.Split(sourceCidrs, ",")
+	isV6 := vip.IsIPv6(ip)
+	matchingFamily := []string{}
 	for _, cidr := range cidrs {
-		source = cidr
-		if vip.IsIPv4(cidr) == vip.IsIPv4(ip) {
-			return cidr
+		// Is the ip an IPv6 address
+		if isV6 {
+			if vip.IsIPv6CIDR(cidr) {
+				matchingFamily = append(matchingFamily, cidr)
+				selectedCIDR, err := checkCIDR(ip, cidr)
+				if err != nil {
+					log.Warnf("IPv6 CIDR check failed: %s", err.Error())
+					continue
+				}
+				if selectedCIDR != "" {
+					return selectedCIDR
+				}
+			}
+		} else {
+			if vip.IsIPv4CIDR(cidr) {
+				matchingFamily = append(matchingFamily, cidr)
+				selectedCidr, err := checkCIDR(ip, cidr)
+				if err != nil {
+					log.Warnf("IPv4 CIDR check failed: %s", err.Error())
+					continue
+				}
+				if selectedCidr != "" {
+					return selectedCidr
+				}
+			}
 		}
 	}
+
+	if len(matchingFamily) > 0 {
+		// return first CIDR that has at least the same IP family as processed IP address
+		// (should be better than just returning first CIDR on the list, I think)
+		return matchingFamily[0]
+	}
+
 	// return to the default behaviour of setting the CIDR to the first one (or only one)
-	return source
+	return cidrs[0]
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace string) error {
-	// serviceCIDR, podCIDR, err := sm.AutoDiscoverCIDRs()
-	// if err != nil {
-	// 	serviceCIDR = "10.96.0.0/12"
-	// 	podCIDR = "10.0.0.0/16"
-	// }
+func checkCIDR(ip, cidr string) (string, error) {
+	_, ipnetA, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse CIDR [%s]: %w", cidr, err)
+	}
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return "", fmt.Errorf("failed to parse IP [%s]", ip)
+	}
+	if ipnetA.Contains(parsedIP) {
+		return cidr, nil
+	}
 
+	return "", nil
+}
+
+func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
+	var autoServiceCIDR, autoPodCIDR string
+	var discoverErr error
+
+	// Look up the destination ports from the annotations on the service
+	destinationPorts := annotations[egressDestinationPorts]
+	deniedNetworks := annotations[egressDeniedNetworks]
+	allowedNetworks := annotations[egressAllowedNetworks]
+
+	if sm.config.EgressPodCidr == "" || sm.config.EgressServiceCidr == "" {
+		autoServiceCIDR, autoPodCIDR, discoverErr = sm.AutoDiscoverCIDRs()
+	}
+
+	if discoverErr != nil {
+		log.Warn(discoverErr)
+	}
 
 	if sm.config.EgressPodCidr != "" {
 		podCidr = getSameFamilyCidr(sm.config.EgressPodCidr, podIP)
 	} else {
+		if discoverErr == nil {
+			podCidr = getSameFamilyCidr(autoPodCIDR, podIP)
+		}
+	}
+
+	if podCidr == "" {
 		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
 		if !vip.IsIPv4(podIP) {
-			return nil
+			return fmt.Errorf("error with the CIDR [%s]", podIP)
 		}
 		podCidr = defaultPodCIDR
 	}
@@ -79,6 +143,12 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	if sm.config.EgressServiceCidr != "" {
 		serviceCidr = getSameFamilyCidr(sm.config.EgressServiceCidr, vipIP)
 	} else {
+		if discoverErr == nil {
+			serviceCidr = getSameFamilyCidr(autoServiceCIDR, vipIP)
+		}
+	}
+
+	if serviceCidr == "" {
 		// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
 		if !vip.IsIPv4(vipIP) {
 			return nil
@@ -86,8 +156,25 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 		serviceCidr = defaultServiceCIDR
 	}
 
-	protocol := iptables.ProtocolIPv4
+	log.Infof("[Egress] pod CIDR [%s], service CIDR [%s] for vip [%s] / pod [%s]", podCidr, serviceCidr, vipIP, podIP)
 
+	// checking if all addresses are of the same IP family
+	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {
+		log.Errorf("[Egress] pod's IP [%s] and Pod CIDR [%s] family is not matching. Backing off...", podIP, podCidr)
+		return nil
+	}
+
+	if vip.IsIPv4(vipIP) != vip.IsIPv4CIDR(serviceCidr) {
+		log.Errorf("[Egress] VIP's IP [%s] and Service CIDR [%s] family is not matching. Backing off...", podIP, podCidr)
+		return nil
+	}
+
+	if vip.IsIPv4(vipIP) != vip.IsIPv4(podIP) {
+		log.Errorf("[Egress] VIP's IP [%s] and Pod's IP [%s] family is not matching. Backing off...", podIP, podCidr)
+		return nil
+	}
+
+	protocol := iptables.ProtocolIPv4
 	if vip.IsIPv6(vipIP) {
 		protocol = iptables.ProtocolIPv6
 	}
@@ -102,6 +189,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	if err != nil {
 		return fmt.Errorf("error checking for existence of mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
+
 	if !exists {
 		err = i.CreateMangleChain(vip.MangleChainName)
 		if err != nil {
@@ -112,9 +200,20 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 	if err != nil {
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
+
 	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCidr)
 	if err != nil {
 		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+	}
+
+	if deniedNetworks != "" {
+		networks := strings.Split(deniedNetworks, ",")
+		for x := range networks {
+			err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
 	}
 
 	mask := "/32"
@@ -122,18 +221,26 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 		mask = "/128"
 	}
 
-	err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
-	if err != nil {
-		return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+	if allowedNetworks != "" {
+		networks := strings.Split(allowedNetworks, ",")
+		for x := range networks {
+			err = i.AppendReturnRulesForMarkingForNetwork(vip.MangleChainName, podIP+mask, networks[x])
+			if err != nil {
+				return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	} else {
+		err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
+		if err != nil {
+			return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		}
 	}
-
 	err = i.InsertMangeTableIntoPrerouting(vip.MangleChainName)
 	if err != nil {
 		return fmt.Errorf("error adding prerouting mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
 	if destinationPorts != "" {
-
 		fixedPorts := strings.Split(destinationPorts, ",")
 
 		for _, fixedPort := range fixedPorts {
@@ -154,7 +261,6 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 			if err != nil {
 				return fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
 			}
-
 		}
 	} else {
 		err = i.InsertSourceNat(vipIP, podIP)
@@ -163,6 +269,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 		}
 	}
 	//_ = i.DumpChain(vip.MangleChainName)
+
 	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
 		return err
@@ -172,10 +279,19 @@ func (sm *Manager) configureEgress(vipIP, podIP, destinationPorts, namespace str
 }
 
 func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
-	pod, err := sm.clientSet.CoreV1().Pods("kube-system").Get(context.TODO(), "kube-controller-manager", v1.GetOptions{})
-	if err != nil {
-		return "", "", err
+	log.Debugf("Trying to automatically discover Service and Pod CIDRs")
+	options := v1.ListOptions{
+		LabelSelector: "component=kube-controller-manager",
 	}
+	podList, err := sm.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
+	if err != nil {
+		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
+	}
+	if len(podList.Items) < 1 {
+		return "", "", fmt.Errorf("[Egress] Unable to auto-discover the pod/service CIDRs: kube-controller-manager not found")
+	}
+
+	pod := podList.Items[0]
 	for flags := range pod.Spec.Containers[0].Command {
 		if strings.Contains(pod.Spec.Containers[0].Command[flags], "--cluster-cidr=") {
 			podCIDR = strings.ReplaceAll(pod.Spec.Containers[0].Command[flags], "--cluster-cidr=", "")
@@ -191,7 +307,12 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	return
 }
 
-func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace string) error {
+func (sm *Manager) TeardownEgress(podIP, vipIP, namespace string, annotations map[string]string) error {
+	// Look up the destination ports from the annotations on the service
+	destinationPorts := annotations[egressDestinationPorts]
+	deniedNetworks := annotations[egressDeniedNetworks]
+	allowedNetworks := annotations[egressAllowedNetworks]
+
 	protocol := iptables.ProtocolIPv4
 	if vip.IsIPv6(podIP) {
 		protocol = iptables.ProtocolIPv6
@@ -202,10 +323,30 @@ func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace stri
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
 
-	// Remove the marking of egress packets
-	err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
-	if err != nil {
-		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+	if deniedNetworks != "" {
+		networks := strings.Split(deniedNetworks, ",")
+		for x := range networks {
+			err = i.DeleteMangleReturnForNetwork(vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	}
+
+	if allowedNetworks != "" {
+		networks := strings.Split(allowedNetworks, ",")
+		for x := range networks {
+			err = i.DeleteMangleMarkingForNetwork(podIP, vip.MangleChainName, networks[x])
+			if err != nil {
+				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			}
+		}
+	} else {
+		// Remove the marking of egress packets
+		err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
+		if err != nil {
+			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
+		}
 	}
 
 	// Clear up SNAT rules
@@ -238,6 +379,7 @@ func (sm *Manager) TeardownEgress(podIP, vipIP, destinationPorts, namespace stri
 			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
 		}
 	}
+
 	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
 		return fmt.Errorf("error changing iptables rules for egress [%s]", err)

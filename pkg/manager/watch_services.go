@@ -70,8 +70,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Services(sm.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			return sm.rwClientSet.CoreV1().Services(sm.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
 		},
 	})
 	if err != nil {
@@ -149,22 +149,26 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 				}
 			}
-			// Scenarios:
-			// 1.
+
+			// Architecture walkthrough: (Had to do this as this codfe path is making my head hurt)
+
+			// Is the service active (bool), if not then process this new service
+			// Does this service use an election per service?
+			//
+
 			if !activeService[string(svc.UID)] {
 				log.Debugf("(svcs) [%s] has been added/modified with addresses [%s]", svc.Name, fetchServiceAddresses(svc))
 
 				wg.Add(1)
-				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(context.TODO())
-				// Background the services election
-				// EnableServicesElection enabled
-				// watchEndpoint will do a ServicesElection by Service and understands local endpoints
-				//
-				// EnableRoutingTable enabled and EnableLeaderElection disabled
-				// watchEndpoint will also not do a leaderElection by service.
-				if sm.config.EnableServicesElection ||
-					((sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection)) {
+				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
+
+				if sm.config.EnableServicesElection || // Service Election
+					((sm.config.EnableRoutingTable || sm.config.EnableBGP) && // Routing table mode or BGP
+						(!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection)) { // No leaderelection or services election
+
+					// If this load balancer Traffic Policy is "local"
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
 							// background the endpoint watcher
@@ -225,14 +229,30 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							wg.Done()
 						}()
 					} else {
+						log.Info("(svcs) restartable service watcher starting")
 						// Increment the waitGroup before the service Func is called (Done is completed in there)
 						wg.Add(1)
+
 						go func() {
-							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
-							if err != nil {
-								log.Error(err)
+							leaderContext := context.WithoutCancel(ctx)
+
+							// This is a blocking function, that will restart (in the event of failure)
+							for {
+								// if the context isn't cancelled restart
+								if leaderContext.Err() != context.Canceled {
+									activeService[string(svc.UID)] = true
+
+									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+
+									if err != nil {
+										log.Error(err)
+									}
+									activeService[string(svc.UID)] = false
+								} else {
+									activeService[string(svc.UID)] = false
+									break
+								}
 							}
-							wg.Done()
 						}()
 					}
 				} else {
@@ -315,7 +335,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, ok := errObject.(*apierrors.StatusError)
 			if !ok {
-				log.Errorf(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
+				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
 			}
 
 			status := statusErr.ErrStatus
@@ -324,7 +344,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 		}
 	}
 	close(exitFunction)
-	log.Warnln("Stopping watching services for type: LoadBalancer in all namespaces")
+	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return nil
 }
 

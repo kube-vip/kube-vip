@@ -83,7 +83,7 @@ type Config struct {
 	Address string `yaml:"address"`
 
 	// Listen port for the VirtualIP
-	Port int `yaml:"port"`
+	Port uint16 `yaml:"port"`
 
 	// Namespace will define which namespace the control plane pods will run in
 	Namespace string `yaml:"namespace"`
@@ -113,7 +113,7 @@ type Config struct {
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
 	// Listen port for the IPVS Service
-	LoadBalancerPort int `yaml:"lbPort"`
+	LoadBalancerPort uint16 `yaml:"lbPort"`
 
 	// Forwarding method for the IPVS Service
 	LoadBalancerForwardingMethod string `yaml:"lbForwardingMethod"`
@@ -192,6 +192,9 @@ type Config struct {
 
 	// BackendHealthCheckInterval Interval in seconds for checking backend health.
 	BackendHealthCheckInterval int `yaml:"backendHealthCheckInterval"`
+
+	// LoInterfaceGlobalScope, if true will set global scope when using the lo interface, otherwise a host scope will be used
+	LoInterfaceGlobalScope bool `yaml:"loInterfaceGlobalScope"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
@@ -228,15 +231,20 @@ type LoadBalancer struct {
 	// Name of a LoadBalancer
 	Name string `yaml:"name"`
 
-	// Type of LoadBalancer, either TCP of HTTP(s)
-	Type string `yaml:"type"`
-
-	// Listening frontend port of this LoadBalancer instance
-	Port int `yaml:"port"`
+	//Ports exposed by a LoadBalancer
+	Ports []Port
 
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
 
 	// Forwarding method of LoadBalancer, either Local, Tunnel, DirectRoute or Bypass
 	ForwardingMethod string `yaml:"forwardingMethod"`
+}
+
+type Port struct {
+	// Type of LoadBalancer, either TCP or UDP
+	Type string `yaml:"type"`
+
+	// Listening frontend port of this LoadBalancer instance
+	Port int `yaml:"port"`
 }

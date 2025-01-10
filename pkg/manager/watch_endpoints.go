@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,8 +46,8 @@ func (ep *endpointsProvider) createRetryWatcher(ctx context.Context, sm *Manager
 	}
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return sm.clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			return sm.rwClientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
 	})
 
@@ -145,7 +146,7 @@ func (ep *endpointsProvider) getProtocol() string {
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup, provider epProvider) error {
 	log.Infof("[%s] watching for service [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	leaderContext, cancel := context.WithCancel(context.Background())
+	leaderContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var leaderElectionActive bool
@@ -222,6 +223,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 			// Check that we have local endpoints
 			if len(endpoints) != 0 {
+				// Ignore IPv4
+				if service.Annotations[egressIPv6] == "true" && net.ParseIP(endpoints[0]).To4() != nil {
+					continue
+				}
+
 				// if we haven't populated one, then do so
 				if lastKnownGoodEndpoint != "" {
 
@@ -233,31 +239,31 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							stillExists = true
 						}
 					}
-					// If the last endpoint no longer exists, we cancel our leader Election
-					if !stillExists && leaderElectionActive {
-						if sm.config.EnableServicesElection || sm.config.EnableLeaderElection {
+					// If the last endpoint no longer exists, we cancel our leader Election, and set another endpoint as last known good
+					if !stillExists {
+						if sm.config.EnableRoutingTable {
+							if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP,
+								service.Namespace, service.Annotations); err != nil {
+								log.Warnf("error removing redundant egress rules: %s", err.Error())
+							}
+						}
+						if leaderElectionActive && (sm.config.EnableServicesElection || sm.config.EnableLeaderElection) {
 							log.Warnf("[%s] existing [%s] has been removed, restarting leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
 							// Stop the existing leaderElection
 							cancel()
+							// disable last leaderElection flag
+							leaderElectionActive = false
 						}
 						// Set our active endpoint to an existing one
 						lastKnownGoodEndpoint = endpoints[0]
-						// disable last leaderElection flag
-						leaderElectionActive = false
 					}
-
 				} else {
 					lastKnownGoodEndpoint = endpoints[0]
 				}
 
-				// Set the service accordingly
-				if service.Annotations[egress] == "true" {
-					service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
-				}
-
 				if !leaderElectionActive && sm.config.EnableServicesElection {
 					go func() {
-						leaderContext, cancel = context.WithCancel(context.Background())
+						leaderContext, cancel = context.WithCancel(ctx)
 
 						// This is a blocking function, that will restart (in the event of failure)
 						for {
@@ -288,7 +294,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance := sm.findServiceInstance(service); instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
-									err := cluster.Network[i].AddRoute()
+									err := cluster.Network[i].AddRoute(false)
 									if err != nil {
 										if errors.Is(err, syscall.EEXIST) {
 											// If route exists try to update it if necessary
@@ -336,7 +342,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					}
 				}
 			} else {
-				// There are no local enpoints
+				// There are no local endpoints
 				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection {
 					// If routing table mode is enabled - routes should be deleted
 					if sm.config.EnableRoutingTable {
@@ -369,6 +375,10 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
 					log.Warnf("[%s] existing [%s] has been removed, no remaining endpoints for leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
+					if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations); err != nil {
+						log.Errorf("error removing redundant egress rules: %s", err.Error())
+					}
+
 					lastKnownGoodEndpoint = "" // reset endpoint
 					if sm.config.EnableServicesElection || sm.config.EnableLeaderElection {
 						cancel() // stop services watcher
@@ -376,6 +386,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					leaderElectionActive = false
 				}
 			}
+			// Set the service accordingly
+			if service.Annotations[egress] == "true" {
+				service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
+			}
+
 			log.Debugf("[%s watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
 				provider.getLabel(), service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
 

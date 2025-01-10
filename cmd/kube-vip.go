@@ -64,14 +64,14 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address. Default to 32 for IPv4 and 128 for IPv6") // todo: deprecate
 
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Port, "port", 6443, "Port for the VIP")
+	kubeVipCmd.PersistentFlags().Uint16Var(&initConfig.Port, "port", 6443, "Port for the VIP")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for VIP changes")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableWireguard, "wireguard", false, "Enable Wireguard for services VIPs")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableRoutingTable, "table", false, "Enable Routing Table for services VIPs")
 
 	// LoadBalancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "enableLoadBalancer", false, "enable loadbalancing on the VIP with IPVS")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LoadBalancerPort, "lbPort", 6443, "loadbalancer port for the VIP")
+	kubeVipCmd.PersistentFlags().Uint16Var(&initConfig.LoadBalancerPort, "lbPort", 6443, "loadbalancer port for the VIP")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerForwardingMethod, "lbForwardingMethod", "local", "loadbalancer forwarding method")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DDNS, "ddns", false, "use Dynamic DNS + DHCP to allocate VIP for address")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MirrorDestInterface, "mirrorDestInterface", "", "network interface where all traffic that traverses the service interface will be mirrored to. Source interface will use default interface is servicesInterface is not set.")
@@ -137,6 +137,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DNSMode, "dnsMode", "first", "Name of the mode that DNS lookup will be performed (first, ipv4, ipv6, dual)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpointSlices, "enableEndpointSlices", false, "If enabled, kube-vip will only advertise services, but will use EndpointSlices instead of endpoints to get IPs of Pods")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
@@ -170,7 +171,7 @@ func Execute() {
 var kubeVipVersion = &cobra.Command{
 	Use:   "version",
 	Short: "Version and Release information about the Kubernetes Virtual IP Server",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		fmt.Printf("Kube-VIP Release Information\n")
 		fmt.Printf("Version:  %s\n", Release.Version)
 		fmt.Printf("Build:    %s\n", Release.Build)
@@ -180,7 +181,7 @@ var kubeVipVersion = &cobra.Command{
 var kubeVipSample = &cobra.Command{
 	Use:   "sample",
 	Short: "Generate a Sample configuration",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		_ = cmd.Help()
 	},
 }
@@ -188,7 +189,7 @@ var kubeVipSample = &cobra.Command{
 var kubeVipService = &cobra.Command{
 	Use:   "service",
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// Set the logging level for all subsequent functions
 		log.SetLevel(log.Level(logLevel))
 
@@ -233,7 +234,7 @@ var kubeVipService = &cobra.Command{
 var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
@@ -286,6 +287,14 @@ var kubeVipManager = &cobra.Command{
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPlane {
 			log.Fatalln("no features are enabled")
+		}
+
+		if !initConfig.EnableARP && strings.Contains(initConfig.VIPCIDR, kubevip.Auto) {
+			log.Fatalln("auto subnet discovery cannot be used outside ARP mode")
+		}
+
+		if strings.Contains(initConfig.VIPCIDR, kubevip.Auto) && initConfig.Address != "" {
+			log.Fatalln("auto subnet discovery cannot be used if VIP address was provided")
 		}
 
 		// If we're using wireguard then all traffic goes through the wg0 interface
@@ -383,7 +392,7 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	var err error
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { //nolint TODO
 		_, _ = w.Write([]byte(`<html>
 			<head><title>kube-vip</title></head>
 			<body>

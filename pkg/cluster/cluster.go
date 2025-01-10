@@ -46,11 +46,11 @@ func startNetworking(c *kubevip.Config) ([]vip.Network, error) {
 		address = c.Address
 	}
 
-	addresses := vip.GetIPs(address)
+	addresses := vip.Split(address)
 
 	networks := []vip.Network{}
 	for _, addr := range addresses {
-		network, err := vip.NewConfig(addr, c.Interface, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType, c.RoutingProtocol, c.DNSMode, c.LoadBalancerForwardingMethod, c.IptablesBackend)
+		network, err := vip.NewConfig(addr, c.Interface, c.LoInterfaceGlobalScope, c.VIPSubnet, c.DDNS, c.RoutingTableID, c.RoutingTableType, c.RoutingProtocol, c.DNSMode, c.LoadBalancerForwardingMethod, c.IptablesBackend)
 		if err != nil {
 			return nil, err
 		}

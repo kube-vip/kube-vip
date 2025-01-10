@@ -35,7 +35,11 @@ type Egress struct {
 }
 
 func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Protocol) (*Egress, error) {
-	log.Infof("[egress] Creating an iptables client, nftables mode [%t]", nftables)
+	proto := "IPv4"
+	if protocol == iptables.ProtocolIPv6 {
+		proto = "IPv6"
+	}
+	log.Infof("[egress] Creating an iptables client, nftables mode [%t], protocol [%s]", nftables, proto)
 	e := new(Egress)
 	var err error
 
@@ -64,6 +68,10 @@ func (e *Egress) DeleteManglePrerouting(name string) error {
 	return e.ipTablesClient.Delete("mangle", "PREROUTING", "-j", name)
 }
 
+func (e *Egress) DeleteMangleReturnForNetwork(name, network string) error {
+	return e.ipTablesClient.Delete("mangle", name, "-d", network, "-j", "RETURN", "-m", "comment", "--comment", e.comment)
+}
+
 func (e *Egress) DeleteMangleMarking(podIP, name string) error {
 	log.Infof("[egress] Stopping marking packets on network [%s]", podIP)
 
@@ -73,6 +81,17 @@ func (e *Egress) DeleteMangleMarking(podIP, name string) error {
 		return fmt.Errorf("unable to find source Mangle rule for [%s]", podIP)
 	}
 	return e.ipTablesClient.Delete("mangle", name, "-s", podIP, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
+}
+
+func (e *Egress) DeleteMangleMarkingForNetwork(podIP, name, network string) error {
+	log.Infof("[egress] Stopping marking packets from [%s] to [%s]", podIP, network)
+
+	// exists, _ := e.ipTablesClient.Exists("mangle", name, "-s", podIP, "-d", network, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
+
+	// if !exists {
+	// 	return fmt.Errorf("unable to find source Mangle rule for [%s]", podIP)
+	// }
+	return e.ipTablesClient.Delete("mangle", name, "-s", podIP, "-d", network, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
 }
 
 func (e *Egress) DeleteSourceNat(podIP, vip string) error {
@@ -87,7 +106,7 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 }
 
 func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
-	log.Infof("[egress] Adding source nat from [%s] => [%s]", podIP, vip)
+	log.Infof("[egress] Removing source nat from [%s] => [%s], with destination port [%s]", podIP, vip, port)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
 
@@ -118,6 +137,15 @@ func (e *Egress) AppendReturnRulesForMarking(name, subnet string) error {
 	exists, _ := e.ipTablesClient.Exists("mangle", name, "-s", subnet, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
 	if !exists {
 		return e.ipTablesClient.Append("mangle", name, "-s", subnet, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
+	}
+	return nil
+}
+
+func (e *Egress) AppendReturnRulesForMarkingForNetwork(name, subnet, destination string) error {
+	log.Infof("[egress] Marking packets on network [%s]", subnet)
+	exists, _ := e.ipTablesClient.Exists("mangle", name, "-s", subnet, "-d", destination, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
+	if !exists {
+		return e.ipTablesClient.Append("mangle", name, "-s", subnet, "-d", destination, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
 	}
 	return nil
 }
@@ -375,4 +403,18 @@ func (e *Egress) findExistingVIP(rules []string, vip string) [][]string {
 	}
 
 	return foundRules
+}
+
+func ClearIPTables(useNftables bool, namespace string, protocol iptables.Protocol) {
+	i, err := CreateIptablesClient(useNftables, namespace, protocol)
+	if err != nil {
+		log.Warnf("[egress] Unable to clean any dangling egress rules [%v]", err)
+		log.Warn("[egress] Can be ignored in non iptables release of kube-vip")
+	} else {
+		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
+		cleanErr := i.CleanIPtables()
+		if cleanErr != nil {
+			log.Errorf("Error cleaning rules [%v]", cleanErr)
+		}
+	}
 }
