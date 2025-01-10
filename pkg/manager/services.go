@@ -375,7 +375,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			currentServiceCopy.Annotations[requestedIP] = i.dhcpInterfaceIP
 		}
 
-		if currentService.Annotations["development.kube-vip.io/simulate-api-server-error-on-update"] == "true" {
+		if currentService.Annotations["development.kube-vip.io/synthetic-api-server-error-on-update"] == "true" {
 			log.Errorf("(Synthetic error thrown) Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
 			return fmt.Errorf("(Synthetic) simulating api server errors")
 		}
