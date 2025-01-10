@@ -50,10 +50,12 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			Identity: sm.config.NodeName,
 		},
 	}
+	parentCtx, parentCancel := context.WithCancel(ctx)
+	defer parentCancel()
 
 	activeService[string(service.UID)] = true
 	// start the leader election code loop
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+	leaderelection.RunOrDie(parentCtx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
 		// IMPORTANT: you MUST ensure that any code you have that
 		// is protected by the lease must terminate **before**
@@ -73,6 +75,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				go func() {
 					if err := sm.syncServices(ctx, service, wg); err != nil {
 						log.Errorln(err)
+						parentCancel()
 					}
 				}()
 			},
