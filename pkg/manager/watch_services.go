@@ -149,11 +149,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 				}
 
-				// This service has been modified, but it was also active..
-				if activeService[string(svc.UID)] {
-					//	i := sm.findServiceInstance(svc)
-					//if i.ExternalPorts
-				}
 			}
 
 			// Architecture walkthrough: (Had to do this as this code path is making my head hurt)
