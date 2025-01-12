@@ -150,7 +150,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 			}
 
-			// Architecture walkthrough: (Had to do this as this codfe path is making my head hurt)
+			// Architecture walkthrough: (Had to do this as this code path is making my head hurt)
 
 			// Is the service active (bool), if not then process this new service
 			// Does this service use an election per service?
@@ -297,7 +297,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 
 				// If this is an active service then and additional leaderElection will handle stopping
-				err = sm.deleteService(string(svc.UID))
+				err = sm.deleteService(svc.UID)
 				if err != nil {
 					log.Error(err)
 				}
