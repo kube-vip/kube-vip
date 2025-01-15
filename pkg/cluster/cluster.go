@@ -3,7 +3,7 @@ package cluster
 import (
 	"sync"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"

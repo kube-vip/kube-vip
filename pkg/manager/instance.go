@@ -5,7 +5,7 @@ import (
 	"net"
 	"strconv"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 

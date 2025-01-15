@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 // AttachEIP will use the Equinix Metal APIs to move an EIP and attach to a host

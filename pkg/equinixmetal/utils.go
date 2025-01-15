@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	log "github.com/gookit/slog"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 func findProject(project string, c *packngo.Client) *packngo.Project {

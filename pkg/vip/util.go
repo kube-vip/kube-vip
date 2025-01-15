@@ -8,8 +8,8 @@ import (
 	"strings"
 	"syscall"
 
+	log "github.com/gookit/slog"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 

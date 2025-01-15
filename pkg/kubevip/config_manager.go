@@ -3,7 +3,7 @@ package kubevip
 import (
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 	"github.com/vishvananda/netlink"
 )
 
@@ -44,7 +44,7 @@ func isValidInterface(iface string) error {
 	// userspace has set operational state. Interface must be considered for user
 	// data as setting operational state has not been implemented in every driver."
 	if attrs.OperState == netlink.OperUnknown {
-		log.Warningf(
+		log.Warnf(
 			"the status of the interface %s is unknown. Ensure your interface is ready to accept traffic, if so you can safely ignore this message",
 			iface,
 		)

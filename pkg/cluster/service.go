@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
@@ -18,7 +19,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

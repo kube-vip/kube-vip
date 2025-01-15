@@ -8,10 +8,10 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"

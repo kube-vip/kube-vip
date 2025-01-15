@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )

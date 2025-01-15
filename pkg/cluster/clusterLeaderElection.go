@@ -19,7 +19,7 @@ import (
 
 	"github.com/packethost/packngo"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -168,7 +168,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 		// We're using Equinix Metal with BGP, populate the Peer information from the API
 		if c.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from Equinix Metal")
+			log.Info("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, c)
 			if err != nil {
 				log.Error(err)
@@ -385,6 +385,6 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 		}
 	}
 
-	log.Infoln("Exiting Node watcher")
+	log.Info("Exiting Node watcher")
 	return nil
 }

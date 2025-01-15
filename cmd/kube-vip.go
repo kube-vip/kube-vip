@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 
@@ -110,7 +110,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging
-	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 600, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
@@ -191,16 +191,17 @@ var kubeVipService = &cobra.Command{
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLevel(log.Level(logLevel))
+		log.SetExitFunc(os.Exit)
 
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatal(err)
 		}
 
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Fatalln(err)
+			log.Fatal(err)
 		}
 
 		// User Environment variables as an option to make manifest clearer
@@ -213,7 +214,7 @@ var kubeVipService = &cobra.Command{
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 		}
 
@@ -238,19 +239,20 @@ var kubeVipManager = &cobra.Command{
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatal(err)
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 		}
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(initConfig.Logging))
+		log.SetLogLevel(log.Level(initConfig.Logging))
+		log.SetExitFunc(os.Exit)
 
 		// Welome messages
 		log.Infof("Starting kube-vip.io [%s]", Release.Version)
@@ -286,15 +288,15 @@ var kubeVipManager = &cobra.Command{
 
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPlane {
-			log.Fatalln("no features are enabled")
+			log.Fatal("no features are enabled")
 		}
 
 		if !initConfig.EnableARP && strings.Contains(initConfig.VIPCIDR, kubevip.Auto) {
-			log.Fatalln("auto subnet discovery cannot be used outside ARP mode")
+			log.Fatal("auto subnet discovery cannot be used outside ARP mode")
 		}
 
 		if strings.Contains(initConfig.VIPCIDR, kubevip.Auto) && initConfig.Address != "" {
-			log.Fatalln("auto subnet discovery cannot be used if VIP address was provided")
+			log.Fatal("auto subnet discovery cannot be used if VIP address was provided")
 		}
 
 		// If we're using wireguard then all traffic goes through the wg0 interface
@@ -311,17 +313,17 @@ var kubeVipManager = &cobra.Command{
 					log.Warnf("interface \"%s\" doesn't exist, attempting to create wireguard interface", initConfig.Interface)
 					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
 					if err != nil {
-						log.Fatalln(err)
+						log.Fatal(err)
 					}
 					l, err = netlink.LinkByName(initConfig.Interface)
 					if err != nil {
-						log.Fatalln(err)
+						log.Fatal(err)
 					}
 				}
 			}
 			err = netlink.LinkSetUp(l)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 
 		} else { // if we're not using Wireguard then we'll need to use an actual interface
@@ -345,7 +347,7 @@ var kubeVipManager = &cobra.Command{
 		}
 		// Perform a check on th state of the interface
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Fatalln(err)
+			log.Fatal(err)
 		}
 
 		// User Environment variables as an option to make manifest clearer

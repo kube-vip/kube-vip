@@ -9,9 +9,9 @@ import (
 
 	"github.com/cloudflare/ipvs"
 	"github.com/cloudflare/ipvs/netmask"
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
-	log "github.com/sirupsen/logrus"
 )
 
 /*

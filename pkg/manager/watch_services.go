@@ -6,9 +6,9 @@ import (
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

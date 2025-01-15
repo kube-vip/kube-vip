@@ -8,10 +8,10 @@ import (
 	"net"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/jpillora/backoff"
-	log "github.com/sirupsen/logrus"
 )
 
 const dhcpClientPort = "68"

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	log "github.com/gookit/slog"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
-	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -20,7 +20,7 @@ func (sm *Manager) startWireguard(id string) error {
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	log.Infoln("reading wireguard peer configuration from Kubernetes secret")
+	log.Info("reading wireguard peer configuration from Kubernetes secret")
 	s, err := sm.clientSet.CoreV1().Secrets(sm.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})
 	if err != nil {
 		return err

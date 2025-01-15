@@ -9,8 +9,8 @@ import (
 	"sync"
 	"syscall"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

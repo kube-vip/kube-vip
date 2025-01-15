@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	log "github.com/gookit/slog"
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
-	log "github.com/sirupsen/logrus"
 
 	ct "github.com/florianl/go-conntrack"
 )
