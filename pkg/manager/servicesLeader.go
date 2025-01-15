@@ -70,11 +70,9 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				// Mark this service as active (as we've started leading)
 				// we run this in background as it's blocking
 				wg.Add(1)
-				go func() {
-					if err := sm.syncServices(ctx, service, wg); err != nil {
-						log.Error(err)
-					}
-				}()
+				if err := sm.syncServices(ctx, service, wg); err != nil {
+					log.Error(err)
+				}
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
