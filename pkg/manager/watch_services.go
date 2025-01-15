@@ -154,9 +154,9 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 					i := sm.findServiceInstance(svc)
 					if i != nil {
-						orig := fetchServiceAddresses(i.serviceSnapshot)
-						new := fetchServiceAddresses(svc)
-						if !reflect.DeepEqual(orig, new) {
+						originalService := fetchServiceAddresses(i.serviceSnapshot)
+						newService := fetchServiceAddresses(svc)
+						if !reflect.DeepEqual(originalService, newService) {
 
 							// Calls the cancel function of the context
 							if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
@@ -165,7 +165,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								<-activeServiceLoadBalancer[string(svc.UID)].Done()
 								log.Warn("(svcs) waiting for load balancer to finish")
 							}
-							sm.deleteService(svc.UID)
+							err = sm.deleteService(svc.UID)
+							if err != nil {
+								log.Errorf("(svc) unable to remove existing [%s]", svc.UID)
+							}
 						}
 						// in theory this should never fail
 
