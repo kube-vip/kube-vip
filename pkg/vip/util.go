@@ -8,8 +8,9 @@ import (
 	"strings"
 	"syscall"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -167,7 +168,7 @@ func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) erro
 	for {
 		select {
 		case r := <-routeCh:
-			log.Debugf("type: %d, route: %+v", r.Type, r.Route)
+			log.Debug(fmt.Sprintf("type: %d, route: %+v", r.Type, r.Route))
 			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
 				return fmt.Errorf("default route deleted and the default interface may be invalid")
 			}
@@ -191,7 +192,7 @@ func GenerateMac() (mac string) {
 	 * - https://macaddress.io/database-download
 	 */
 	mac = fmt.Sprintf("%s:%s:%s:%02x:%02x:%02x", "00", "00", "6C", buf[0], buf[1], buf[2])
-	log.Infof("Generated mac: %s", mac)
+	log.Info("Generated mac", "address", mac)
 	return mac
 }
 

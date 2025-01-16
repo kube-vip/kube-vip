@@ -3,10 +3,11 @@ package equinixmetal
 import (
 	"fmt"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 // BGPLookup will use the Equinix Metal API functions to populate the BGP information
@@ -25,7 +26,7 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 		return fmt.Errorf("Unable to find local/this device in Equinix Metal API")
 	}
 
-	log.Infof("Querying BGP settings for [%s]", thisDevice.Hostname)
+	log.Info("Querying BGP settings", "hostname", thisDevice.Hostname)
 	neighbours, _, err := c.Devices.ListBGPNeighbors(thisDevice.ID, &packngo.ListOptions{})
 	if err != nil {
 		return err
@@ -37,7 +38,7 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 
 	// Add a warning (TODO)
 	if len(neighbours) > 1 {
-		log.Warnf("There are [%d] neighbours, only designed to manage one", len(neighbours))
+		log.Warn(fmt.Sprintf("There are [%d] neighbours, only designed to manage one", len(neighbours)))
 	}
 
 	// Ensure a peer exists

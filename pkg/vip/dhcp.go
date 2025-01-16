@@ -8,10 +8,11 @@ import (
 	"net"
 	"time"
 
+	log "log/slog"
+
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/jpillora/backoff"
-	log "github.com/sirupsen/logrus"
 )
 
 const dhcpClientPort = "68"
@@ -129,7 +130,7 @@ func (c *DHCPClient) Start() {
 	// Set up two ticker to renew/rebind regularly
 	t1Timeout := c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 2
 	t2Timeout := (c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 8) * 7
-	log.Debugf("t1 %v t2 %v", t1Timeout, t2Timeout)
+	log.Debug("dhcp timeouts", "timeout1", t1Timeout, "timeoute2", t2Timeout)
 	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
 
 	for {
@@ -143,25 +144,25 @@ func (c *DHCPClient) Start() {
 			lease, err := c.renew()
 			if err == nil {
 				c.lease = lease
-				log.Infof("renew, lease: %+v", lease)
+				log.Info("renew", "lease", lease)
 				t2.Reset(t2Timeout)
 			} else {
-				log.Errorf("renew failed, error: %s", err.Error())
+				log.Error("renew failed", "err", err)
 			}
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
 			lease, err := c.request(true)
 			if err == nil {
 				c.lease = lease
-				log.Infof("rebind, lease: %+v", lease)
+				log.Info("rebind", "lease", lease)
 			} else {
 				if _, ok := err.(*nclient4.ErrNak); !ok {
 					t1.Stop()
 					t2.Stop()
-					log.Errorf("rebind failed, error: %s", err.Error())
+					log.Error("rebind failed", "err", err)
 					return
 				}
-				log.Warnf("ip %s may have changed: %s", c.lease.ACK.YourIPAddr, err.Error())
+				log.Warn("ip may have changed", "ip", c.lease.ACK.YourIPAddr, "err", err)
 				c.initRebootFlag = false
 				c.lease = c.requestWithBackoff()
 			}
@@ -171,9 +172,9 @@ func (c *DHCPClient) Start() {
 		case <-c.stopChan:
 			// release is a unicast request of the IP release.
 			if err := c.release(); err != nil {
-				log.Errorf("release lease failed, error: %s, lease: %+v", err.Error(), c.lease)
+				log.Error("release lease failed", "lease", lease, "err", err)
 			} else {
-				log.Infof("release, lease: %+v", c.lease)
+				log.Info("release", "lease", lease)
 			}
 			t1.Stop()
 			t2.Stop()
@@ -205,18 +206,18 @@ func (c *DHCPClient) requestWithBackoff() *nclient4.Lease {
 	var err error
 
 	for {
-		log.Debugf("trying to get a new IP, attempt %f", backoff.Attempt())
+		log.Debug("trying to get a new IP", "attempt", backoff.Attempt())
 		lease, err = c.request(false)
 		if err != nil {
 			dur := backoff.Duration()
 			if backoff.Attempt() > maxBackoffAttempts-1 {
 				errMsg := fmt.Errorf("failed to get an IP address after %d attempts, error %s, giving up", maxBackoffAttempts, err.Error())
-				log.Error(errMsg)
+				log.Error(errMsg.Error())
 				c.errorChan <- errMsg
 				c.Stop()
 				return nil
 			}
-			log.Errorf("request failed, error: %s (waiting %v)", err.Error(), dur)
+			log.Error("request failed", "err", err.Error(), "waiting", dur)
 			time.Sleep(dur)
 			continue
 		}
@@ -225,7 +226,7 @@ func (c *DHCPClient) requestWithBackoff() *nclient4.Lease {
 	}
 
 	if c.ipChan != nil {
-		log.Debugf("using channel")
+		log.Debug("using channel")
 		c.ipChan <- lease.ACK.YourIPAddr.String()
 	}
 
@@ -251,13 +252,13 @@ func (c *DHCPClient) request(rebind bool) (*nclient4.Lease, error) {
 
 	// if initRebootFlag is set, this means we have an IP already set on c.requestedIP that should be used
 	if c.initRebootFlag {
-		log.Debugf("init-reboot ip %s", c.requestedIP)
+		log.Debug("init-reboot", "ip", c.requestedIP)
 		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.requestedIP)))
 	}
 
 	// if this is a rebind, then the IP we should set is the one that already exists in lease
 	if rebind {
-		log.Debugf("rebinding ip %s", c.lease.ACK.YourIPAddr)
+		log.Debug("rebinding", "ip", c.lease.ACK.YourIPAddr)
 		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.lease.ACK.YourIPAddr)))
 	}
 

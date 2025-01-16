@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/davecgh/go-spew/spew"
 	v1 "k8s.io/api/core/v1"
@@ -26,7 +27,7 @@ import (
 // present
 func (sm *Manager) annotationsWatcher() error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	log.Infof("Kube-Vip is waiting for annotation prefix [%s] to be present on this node", sm.config.Annotations)
+	log.Info("Kube-Vip is waiting for annotation prefix to be present on this node", "prefix", sm.config.Annotations)
 
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": sm.config.NodeName}}
 	listOptions := metav1.ListOptions{
@@ -54,7 +55,7 @@ func (sm *Manager) annotationsWatcher() error {
 
 	// We got an error with the annotations, falling back to the watch until
 	// they're as needed
-	log.Warn(err)
+	log.Warn(err.Error())
 
 	rw, err := watchtools.NewRetryWatcher(node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
@@ -94,7 +95,7 @@ func (sm *Manager) annotationsWatcher() error {
 
 			bgpConfig, bgpPeer, err := parseBgpAnnotations(sm.config.BGPConfig, node, sm.config.Annotations)
 			if err != nil {
-				log.Error(err)
+				log.Error(err.Error())
 				continue
 			}
 
@@ -108,7 +109,7 @@ func (sm *Manager) annotationsWatcher() error {
 				return fmt.Errorf("unable to parse Kubernetes Node from Kubernetes watcher")
 			}
 
-			log.Infof("Node [%s] has been deleted", node.Name)
+			log.Info("Node has been deleted", "name", node.Name)
 
 		case watch.Bookmark:
 			// Un-used
@@ -124,12 +125,12 @@ func (sm *Manager) annotationsWatcher() error {
 			}
 
 			status := statusErr.ErrStatus
-			log.Errorf("%v", status)
+			log.Error(status.String())
 		default:
 		}
 	}
 	close(exitFunction)
-	log.Infoln("Exiting Annotations watcher")
+	log.Info("Exiting Annotations watcher")
 	return nil
 
 }

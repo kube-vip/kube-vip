@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -19,7 +21,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -72,14 +73,14 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// we set it to hostname as a fallback.
 	// This mimics legacy behavior and should work on old kube-vip installations.
 	if config.NodeName == "" {
-		log.Warning("Node name is missing from the config, fall back to hostname")
+		log.Warn("Node name is missing from the config, fall back to hostname")
 		hostname, err := os.Hostname()
 		if err != nil {
 			return nil, fmt.Errorf("could not get hostname: %v", err)
 		}
 		config.NodeName = hostname
 	}
-	log.Infof("Using node name [%v]", config.NodeName)
+	log.Info("using node name", "name", config.NodeName)
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
 	homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
@@ -93,7 +94,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		// Do nothing, we don't construct a k8s client for etcd leader election
 	case utils.FileExists(adminConfigPath):
 		if config.KubernetesAddr != "" {
-			log.Infof("k8s address [%s]", config.KubernetesAddr)
+			log.Info("k8s address", "address", config.KubernetesAddr)
 			clientConfig, err = k8s.NewRestConfig(adminConfigPath, false, config.KubernetesAddr)
 		} else if config.EnableControlPlane {
 			// If this is a control plane host it will likely have started as a static pod or won't have the
@@ -114,7 +115,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		if clientset, err = k8s.NewClientset(clientConfig); err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset: %w", err)
 		}
-		log.Debugf("Using external Kubernetes configuration from file: %q", adminConfigPath)
+		log.Debug("Using external Kubernetes configuration from file", "path", adminConfigPath)
 	case utils.FileExists(homeConfigPath):
 		clientConfig, err = k8s.NewRestConfig(homeConfigPath, false, "")
 		if err != nil {
@@ -124,7 +125,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset from external file: %q: %w", homeConfigPath, err)
 		}
-		log.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
+		log.Debug("Using external Kubernetes configuration from file", "path", adminConfigPath)
 	default:
 		clientConfig, err = k8s.NewRestConfig("", true, "")
 		if err != nil {
@@ -210,7 +211,7 @@ func (sm *Manager) Start() error {
 			return err
 		}
 
-		log.Infoln("Starting Kube-vip Manager with the BGP engine")
+		log.Info("Starting Kube-vip Manager with the BGP engine")
 		return sm.startBGP()
 	}
 
@@ -222,13 +223,17 @@ func (sm *Manager) Start() error {
 			sm.upnp = true
 			clients := upnp.GetConnectionClients(context.TODO())
 			if len(clients) == 0 {
-				log.Errorf("Error Enabling UPNP. No Clients found")
+				log.Error("Error Enabling UPNP. No Clients found")
 				// Set the struct to false so nothing should use it in future
 				sm.upnp = false
 			} else {
 				for _, c := range clients {
 					ip, err := c.GetExternalIPAddress()
-					log.Infof("Found UPNP IGD2 Gateway address[%s] error: [%s]", ip, err)
+					if err != nil {
+						log.Error("unable to find IGD2 Gateway address", "err", err)
+					}
+					log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
+
 				}
 			}
 		}
@@ -238,21 +243,21 @@ func (sm *Manager) Start() error {
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
-		log.Infoln("Starting Kube-vip Manager with the ARP engine")
+		log.Info("Starting Kube-vip Manager with the ARP engine")
 		return sm.startARP(sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
-		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
+		log.Info("Starting Kube-vip Manager with the Wireguard engine")
 		return sm.startWireguard(sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
-		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
+		log.Info("Starting Kube-vip Manager with the Routing Table engine")
 		return sm.startTableMode(sm.config.NodeName)
 	}
 
-	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
+	log.Error("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
 	return nil
 }
 
@@ -268,7 +273,7 @@ func returnNameSpace() (string, error) {
 
 func (sm *Manager) parseAnnotations() error {
 	if sm.config.Annotations == "" {
-		log.Debugf("No Node annotations to parse")
+		log.Debug("No Node annotations to parse")
 		return nil
 	}
 
@@ -290,7 +295,7 @@ func (sm *Manager) serviceInterface() string {
 func (sm *Manager) startTrafficMirroringIfEnabled() error {
 	if sm.config.MirrorDestInterface != "" {
 		svcIf := sm.serviceInterface()
-		log.Infof("mirroring traffic from interface %s to interface %s", svcIf, sm.config.MirrorDestInterface)
+		log.Info("mirroring traffic", "src", svcIf, "dest", sm.config.MirrorDestInterface)
 		if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
 			return err
 		}
@@ -303,7 +308,7 @@ func (sm *Manager) startTrafficMirroringIfEnabled() error {
 func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 	if sm.config.MirrorDestInterface != "" {
 		svcIf := sm.serviceInterface()
-		log.Infof("clean up qdisc config on interface %s", svcIf)
+		log.Info("clean up qdisc config", "interface", svcIf)
 		if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
 			return err
 		}
@@ -314,9 +319,9 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
-	log.Debugf("service UID: %s", svc.UID)
+	log.Debug("finding service", "UID", svc.UID)
 	for i := range sm.serviceInstances {
-		log.Debugf("saved service instance %d UID: %s", i, sm.serviceInstances[i].serviceSnapshot.UID)
+		log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
 		if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
 			return sm.serviceInstances[i]
 		}
@@ -330,11 +335,11 @@ func (sm *Manager) refreshUPNPForwards() {
 	for {
 		time.Sleep(300 * time.Second)
 
-		log.Infof("[UPNP] Refreshing %d Instances", len(sm.serviceInstances))
+		log.Info("[UPNP] Refreshing Instances", "number of instances", len(sm.serviceInstances))
 		for i := range sm.serviceInstances {
 			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
 			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
-				log.Warnf("[UPNP] Error updating service IPs %s [%s]", sm.serviceInstances[i].serviceSnapshot.Name, err.Error())
+				log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].serviceSnapshot.Name, "err", err)
 			}
 		}
 	}

@@ -7,11 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	log "log/slog"
+
 	"github.com/cloudflare/ipvs"
 	"github.com/cloudflare/ipvs/netmask"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
-	log "github.com/sirupsen/logrus"
 )
 
 /*
@@ -51,28 +52,32 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
-		log.Errorf("ensure IPVS kernel modules are loaded")
-		log.Fatalf("Error starting IPVS [%v]", err)
+		log.Error("ensure IPVS kernel modules are loaded")
+		log.Error("Error starting IPVS", "err", err)
+		panic("")
 	}
 	i, err := c.Info()
 	if err != nil {
-		log.Errorf("ensure IPVS kernel modules are loaded")
-		log.Fatalf("Error getting IPVS version [%v]", err)
+		log.Error("ensure IPVS kernel modules are loaded")
+		log.Error("Error retrieving IPVS info", "err", err)
+		panic("")
 	}
-	log.Infof("IPVS Loadbalancer enabled for %d.%d.%d", i.Version[0], i.Version[1], i.Version[2])
+	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf(" %d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
 	if strings.ToLower(forwardingMethod) == "masquerade" {
 		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/vs/conntrack", "1")
 		if err != nil {
-			log.Fatalf("Error ensuring net.ipv4.vs.conntrack enabled [%v]", err)
+			log.Error("ensuring net.ipv4.vs.conntrack enabled", "err", err)
+			panic("")
 		}
-		log.Infof("sysctl set net.ipv4.vs.conntrack to 1")
+		log.Info("sysctl set net.ipv4.vs.conntrack to 1")
 
 		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/ip_forward", "1")
 		if err != nil {
-			log.Fatalf("Error ensuring net.ipv4.ip_forward enabled [%v]", err)
+			log.Error("ensuring net.ipv4.ip_forward enabled", "err", err)
+			panic("")
 		}
-		log.Infof("sysctl set net.ipv4.ip_forward to 1")
+		log.Info("sysctl set net.ipv4.ip_forward to 1")
 	}
 
 	ip, family := ipAndFamily(address)
@@ -106,7 +111,7 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		m = ipvs.Bypass
 	default:
 		m = ipvs.Local
-		log.Warnf("unknown forwarding method. Defaulting to Local")
+		log.Warn("unknown forwarding method. Defaulting to Local")
 	}
 
 	if backendHealthCheckInterval <= 0 {
@@ -161,14 +166,14 @@ func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
 	// Check if this is the first backend
 	backends, err := lb.client.Destinations(lb.loadBalancerService)
 	if err != nil && strings.Contains(err.Error(), "file does not exist") {
-		log.Errorf("Error querying backends %s", err)
+		log.Error("querying backends", "err", err)
 	}
 	// If this is our first backend, then we can create the load-balancer service and add a backend
 	if len(backends) == 0 {
 		err = lb.client.CreateService(lb.loadBalancerService)
 		// If we've an error it could be that the IPVS lb instance has been left from a previous leadership
 		if err != nil && strings.Contains(err.Error(), "file exists") {
-			log.Warnf("load balancer for API server already exists, attempting to remove and re-create")
+			log.Warn("load balancer for API server already exists, attempting to remove and re-create")
 			err = lb.client.RemoveService(lb.loadBalancerService)
 			if err != nil {
 				return fmt.Errorf("error re-creating IPVS service: %v", err)
@@ -179,10 +184,12 @@ func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
 			}
 		} else if err != nil {
 			// Fatal error at this point as IPVS is probably not working
-			log.Errorf("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
-			log.Fatalf("IPVS service error: %v", err)
+			log.Error("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
+			log.Error("IPVS service", "err", err)
+			panic("")
+
 		}
-		log.Infof("Created Load-Balancer services on [%s:%d]", lb.addrString(), lb.Port)
+		log.Info("load-Balancer services created", "address", lb.addrString(), "port", lb.Port)
 	}
 
 	ip, family := ipAndFamily(backend.Addr)
@@ -211,7 +218,7 @@ func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
 		// file exists is fine, we will just return at this point
 		return nil
 	}
-	log.Infof("Added backend for [%s:%d] on [%s:%d]", lb.addrString(), lb.Port, backend.Addr, backend.Port)
+	log.Info("backend added", "src addr", lb.addrString(), "src port", lb.Port, "dst addr", backend.Addr, "dst port", backend.Port)
 
 	return nil
 }
@@ -274,17 +281,17 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 				if !oldStatus {
 					err := lb.AddBackend(backend.Addr, backend.Port)
 					if err != nil {
-						log.Errorf("failed to add backend: %s", err)
+						log.Error("add backend", "err", err)
 					}
 					lb.backendMap[backend] = newStatus
 				}
 			} else {
 				// old status -> not health
 				if oldStatus {
-					log.Infof("healthCheck failed for backend %s:%d, attempting to remove from load balancer", backend.Addr, backend.Port)
+					log.Info("healthCheck failed removing backend", "address", backend.Addr, "port", backend.Port)
 					err := lb.removeBackend(backend.Addr, backend.Port)
 					if err != nil {
-						log.Errorf("failed to remove backend %s:%d: %s", backend.Addr, backend.Port, err)
+						log.Error("failed to remove backend", "address", backend.Addr, "port", backend.Port, "err", err)
 					}
 					lb.backendMap[backend] = newStatus
 				}

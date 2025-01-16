@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,14 +68,14 @@ func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config
 			continue
 		}
 		for _, address := range endpoint.Addresses {
-			log.Debugf("[%s] processing endpoint [%s]", ep.label, address)
+			log.Debug("processing endpoint", "provider", ep.label, "ip", address)
 
 			// 1. Compare the Nodename
 			if endpoint.NodeName != nil && id == *endpoint.NodeName {
 				if endpoint.Hostname != nil {
-					log.Debugf("[%s] found endpoint - address: %s, hostname: %s, node: %s", ep.label, address, *endpoint.Hostname, *endpoint.NodeName)
+					log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname, "nodename", *endpoint.NodeName)
 				} else {
-					log.Debugf("[%s] found endpoint - address: %s, node: %s", ep.label, address, *endpoint.NodeName)
+					log.Debug("found endpoint", "provider", ep.label, "ip", address, "nodename", *endpoint.NodeName)
 				}
 				localEndpoints = append(localEndpoints, address)
 				continue
@@ -82,7 +83,7 @@ func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config
 
 			// 2. Compare the Hostname (only useful if endpoint.NodeName is not available)
 			if endpoint.Hostname != nil && id == *endpoint.Hostname {
-				log.Debugf("[%s] found endpoint - address: %s, hostname: %s", ep.label, address, *endpoint.Hostname)
+				log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname)
 				localEndpoints = append(localEndpoints, address)
 			}
 		}
@@ -109,14 +110,14 @@ func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6
 
 		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
-			log.Errorf("[%s] error updating Service Spec [%s] : %v", ep.label, currentServiceCopy.Name, err)
+			log.Error("error updating Service Spec", "provider", ep.label, "service name", currentServiceCopy.Name, "err", err)
 			return err
 		}
 		return nil
 	})
 
 	if retryErr != nil {
-		log.Errorf("[%s] failed to set Services: %v", ep.label, retryErr)
+		log.Error("failed to set Services", "provider", ep.label, "err", retryErr)
 		return retryErr
 	}
 	return nil

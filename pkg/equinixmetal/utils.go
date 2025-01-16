@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"os"
 
+	log "log/slog"
+
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 func findProject(project string, c *packngo.Client) *packngo.Project {
 	l := &packngo.ListOptions{Includes: []string{project}}
 	ps, _, err := c.Projects.List(l)
 	if err != nil {
-		log.Error(err)
+		log.Error(err.Error())
 	}
 	for _, p := range ps {
 

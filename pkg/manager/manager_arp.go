@@ -6,7 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -54,7 +55,7 @@ func (sm *Manager) startARP(id string) error {
 		go func() {
 			err := cpCluster.StartCluster(sm.config, clusterManager, nil)
 			if err != nil {
-				log.Errorf("Control Plane Error [%v]", err)
+				log.Error("starting control plane", "err", err)
 				// Trigger the shutdown of this manager instance
 				sm.signalChan <- syscall.SIGINT
 
@@ -64,7 +65,7 @@ func (sm *Manager) startARP(id string) error {
 		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
 		if !sm.config.EnableServices {
 			<-sm.signalChan
-			log.Infof("Shutting down Kube-Vip")
+			log.Info("Shutting down Kube-Vip")
 
 			return nil
 		}
@@ -74,7 +75,7 @@ func (sm *Manager) startARP(id string) error {
 
 		ns, err = returnNameSpace()
 		if err != nil {
-			log.Warnf("unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
+			log.Warn("unable to auto-detect namespace, dropping to config", "namespace", sm.config.Namespace)
 			ns = sm.config.Namespace
 		}
 	}
@@ -87,14 +88,14 @@ func (sm *Manager) startARP(id string) error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
-		log.Infof("beginning watching services, leaderelection will happen for every service")
+		log.Info("beginning watching services, leaderelection will happen for every service")
 		err = sm.startServicesWatchForLeaderElection(ctx)
 		if err != nil {
 			return err
 		}
 	} else {
 
-		log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, sm.config.ServicesLeaseName, id)
+		log.Info("beginning services leadership", "namespace", ns, "lock name", sm.config.ServicesLeaseName, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
@@ -125,19 +126,21 @@ func (sm *Manager) startARP(id string) error {
 				OnStartedLeading: func(ctx context.Context) {
 					err = sm.servicesWatcher(ctx, sm.syncServices)
 					if err != nil {
-						log.Fatal(err)
+						log.Error("service watcher", "err", err)
+						panic("") // TODO: - emulating log.fatal here
 					}
 				},
 				OnStoppedLeading: func() {
 					// we can do cleanup here
-					log.Infof("leader lost: %s", id)
+					log.Info("leader lost", "new leader", id)
 					for _, instance := range sm.serviceInstances {
 						for _, cluster := range instance.clusters {
 							cluster.Stop()
 						}
 					}
 
-					log.Fatal("lost leadership, restarting kube-vip")
+					log.Error("lost leadership, restarting kube-vip")
+					panic("") // TODO: - emulating log.fatal here
 				},
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
@@ -148,7 +151,7 @@ func (sm *Manager) startARP(id string) error {
 						// I just got the lock
 						return
 					}
-					log.Infof("new leader elected: %s", identity)
+					log.Info("new leader elected", "new leader", identity)
 				},
 			},
 		})

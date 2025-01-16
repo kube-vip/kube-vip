@@ -5,8 +5,9 @@ import (
 	"hash/fnv"
 	"time"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -147,9 +148,9 @@ watcher:
 
 			m.isLeader = true
 			m.key = m.election.Key() // by this time, this should already be set, since Campaign has already returned
-			log.Debugf("[%s] Marking self as leader with key %s\n", m.memberID, m.key)
+			log.Debug("Marking self as leader with key", "id", m.memberID, "key", m.key)
 		case response := <-changes:
-			log.Debugf("[%s] Leader Changes: %+v\n", m.memberID, response)
+			log.Debug("Leader Changes", "id", m.memberID, "response", response)
 			if len(response.Kvs) == 0 {
 				// There is a race condition where just after we stop being the leader
 				// if there are no more leaders, we might get a response with no key-values
@@ -181,15 +182,15 @@ watcher:
 		m.callbacks.OnStoppedLeading()
 	}
 
-	log.Debugf("[%s] Exiting watcher\n", m.memberID)
+	log.Debug("Exiting watcher", "id", m.memberID)
 }
 
 func (m *member) tryToBeLeader(ctx context.Context) {
 	if err := m.election.Campaign(ctx, m.memberID); err != nil {
-		log.Errorf("Failed trying to become the leader: %s", err)
+		log.Error("Failed trying to become the leader", "err", err)
 		// Resign just in case we acquired leadership just before failing
 		if err := m.election.Resign(m.client.Ctx()); err != nil {
-			log.Warnf("Failed to resign after we failed becoming the leader, this might not be a problem if we were never the leader: %s", err)
+			log.Warn("Failed to resign after we failed becoming the leader, this might not be a problem if we were never the leader", "err", err)
 		}
 		return
 		// TODO: what to do here?
@@ -209,7 +210,7 @@ func (m *member) tryToBeLeader(ctx context.Context) {
 	// the previous leader to detect the new leadership (if there was one) and
 	// stop its processes
 	// TODO: is this too cautious?
-	log.Debugf("[%s] Waiting %d seconds before running OnStartedLeading", m.memberID, m.leaseTTL)
+	log.Debug("timeout before OnStartedLeading", "id", m.memberID, "timeout", m.leaseTTL)
 	time.Sleep(time.Second * time.Duration(m.leaseTTL))
 
 	// We are the leader, execute our code
@@ -221,6 +222,6 @@ func (m *member) tryToBeLeader(ctx context.Context) {
 func (m *member) resignOnCancel(ctx context.Context) {
 	<-ctx.Done()
 	if err := m.election.Resign(m.client.Ctx()); err != nil {
-		log.Errorf("Failed to resign after the context was canceled: %s", err)
+		log.Error("Failed to resign after the context was canceled", "err", err)
 	}
 }

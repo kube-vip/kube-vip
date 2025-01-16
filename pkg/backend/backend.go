@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -40,26 +41,26 @@ func (e *Entry) Check() bool {
 		config, err = k8s.NewRestConfig(adminConfigPath, false, k8sAddr)
 		// client, err = k8s.NewClientset(adminConfigPath, false, k8sAddr)
 		if err != nil {
-			log.Errorf("could not create k8s REST config for external file: %q: %v", adminConfigPath, err)
+			log.Error("create k8s REST config", "path", adminConfigPath, "err", err)
 			return false
 		}
 	default:
 		config, err = k8s.NewRestConfig("", true, k8sAddr)
 		if err != nil {
-			log.Errorf("could not create k8s REST config %v", err)
+			log.Error("create k8s REST config", "err", err)
 			return false
 		}
 	}
 
 	client, err = k8s.NewClientset(config)
 	if err != nil {
-		log.Errorf("failed to create k8s client: %v", err)
+		log.Error("create k8s client", "err", err)
 		return false
 	}
 
 	_, err = client.DiscoveryClient.ServerVersion()
 	if err != nil {
-		log.Errorf("failed check k8s server version: %s", err)
+		log.Error("discover k8s version", "err", err)
 		return false
 	}
 	return true

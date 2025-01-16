@@ -5,7 +5,8 @@ import (
 	"net"
 	"strconv"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 
@@ -57,10 +58,10 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		if svcInterface == kubevip.Auto {
 			link, err = autoFindInterface(address)
 			if err != nil {
-				log.Errorf("failed to automatically discover network interface for annotated IP address [%s] with error: %s", address, err.Error())
+				log.Error("automatically discover network interface for annotated IP", "address", address, "err", err)
 			} else {
 				if link == nil {
-					log.Errorf("failed to automatically discover network interface for annotated IP address [%s]", address)
+					log.Error("automatically discover network interface for annotated IP address", "address", address)
 				}
 			}
 			if link == nil {
@@ -75,9 +76,9 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			case kubevip.Auto:
 				link, err = autoFindInterface(address)
 				if err != nil {
-					log.Errorf("failed to automatically discover network interface for IP address [%s] with error: %s - defaulting to: %s", address, err.Error(), config.Interface)
+					log.Error("failed to automatically discover network interface for address", "ip", address, "err", err, "interface", config.Interface)
 				} else if link == nil {
-					log.Errorf("failed to automatically discover network interface for IP address [%s] - defaulting to: %s", address, config.Interface)
+					log.Error("failed to automatically discover network interface for address", "ip", address, "defaulting to", config.Interface)
 				}
 				svcInterface = getAutoInterfaceName(link, config.Interface)
 			case "":
@@ -229,7 +230,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	for _, vipConfig := range instance.vipConfigs {
 		c, err := cluster.InitCluster(vipConfig, false)
 		if err != nil {
-			log.Errorf("Failed to add Service %s/%s", svc.Namespace, svc.Name)
+			log.Error("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 			return nil, err
 		}
 
@@ -238,7 +239,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 		}
 
 		instance.clusters = append(instance.clusters, c)
-		log.Infof("(svcs) adding VIP [%s] via %s for [%s/%s]", vipConfig.VIP, vipConfig.Interface, svc.Namespace, svc.Name)
+		log.Info("(svcs) adding VIP", "ip", vipConfig.VIP, "interface", vipConfig.Interface, "namespace", svc.Namespace, "name", svc.Name)
 
 	}
 
@@ -317,7 +318,7 @@ func (i *Instance) startDHCP() error {
 	// Check if the interface doesn't exist first
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
-		log.Infof("Creating new macvlan interface for DHCP [%s]", interfaceName)
+		log.Info("creating new macvlan interface for DHCP", "interface", interfaceName)
 
 		hwaddr, err := net.ParseMAC(i.dhcpInterfaceHwaddr)
 		if i.dhcpInterfaceHwaddr != "" && err != nil {
@@ -329,7 +330,7 @@ func (i *Instance) startDHCP() error {
 			}
 		}
 
-		log.Infof("New interface [%s] mac is %s", interfaceName, hwaddr)
+		log.Info("new macvlan interface", "interface", interfaceName, "hardware address", hwaddr)
 		mac := &netlink.Macvlan{
 			LinkAttrs: netlink.LinkAttrs{
 				Name:         interfaceName,
@@ -354,7 +355,7 @@ func (i *Instance) startDHCP() error {
 			return fmt.Errorf("error finding new DHCP interface by name [%v]", err)
 		}
 	} else {
-		log.Infof("Using existing macvlan interface for DHCP [%s]", interfaceName)
+		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
 	}
 
 	var initRebootFlag bool
@@ -366,7 +367,7 @@ func (i *Instance) startDHCP() error {
 
 	// Add hostname to dhcp client if annotated
 	if i.dhcpHostname != "" {
-		log.Infof("Hostname specified for dhcp lease: [%s] - [%s]", interfaceName, i.dhcpHostname)
+		log.Info("Hostname specified for dhcp lease", "interface", interfaceName, "hostname", i.dhcpHostname)
 		client.WithHostName(i.dhcpHostname)
 	}
 

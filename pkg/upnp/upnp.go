@@ -4,9 +4,10 @@ import (
 	"context"
 	"strings"
 
+	log "log/slog"
+
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway2"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -47,7 +48,7 @@ func GetGatewayClients(ctx context.Context) []Gateway {
 		if wanipv6clients, err := internetgateway2.NewWANIPv6FirewallControl1ClientsByURLCtx(ctx, gatewayURL); err == nil {
 			gatewayClients[i].WANIPv6FirewallControlClient = wanipv6clients[0]
 		} else {
-			log.Warnf("[UPNP] Unable to find WANIPv6FirewallControl1Clients for Gateway %s [%s]", gatewayURL, err.Error())
+			log.Warn("[UPNP] Unable to find WANIPv6FirewallControl1Clients", "Gateway", gatewayURL, "err", err)
 		}
 	}
 	return gatewayClients
@@ -84,7 +85,7 @@ func GetConnectionClients(ctx context.Context) []ConnectionClient {
 	var routers []ConnectionClient
 
 	if err := tasks.Wait(); err != nil {
-		log.Errorf("[UPNP] Could not finish querying UPNP connection clients [%s]", err.Error())
+		log.Error("[UPNP] Could not finish querying UPNP connection clients", "err", err.Error())
 		return routers
 	}
 
@@ -92,7 +93,7 @@ func GetConnectionClients(ctx context.Context) []ConnectionClient {
 	errors = append(errors, ppp1Error...)
 
 	for _, e := range errors {
-		log.Warnf("[UPNP] UPNP Gateway responded with an error while querying WAN Connection Client [%s]", e.Error())
+		log.Warn("[UPNP] UPNP Gateway responded with an error while querying WAN Connection Client", "err", e)
 	}
 
 	for _, c := range ip1Clients {

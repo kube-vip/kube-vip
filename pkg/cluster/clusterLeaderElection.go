@@ -19,7 +19,8 @@ import (
 
 	"github.com/packethost/packngo"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -96,7 +97,7 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
 	var err error
 
-	log.Infof("Beginning cluster membership, namespace [%s], lock name [%s], id [%s]", c.Namespace, c.LeaseName, c.NodeName)
+	log.Info("cluster membership", "namespace", c.Namespace, "lock", c.LeaseName, "id", c.NodeName)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
@@ -136,7 +137,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	for i := range cluster.Network {
 		err = cluster.Network[i].DeleteIP()
 		if err != nil {
-			log.Errorf("could not delete virtualIP: %v", err)
+			log.Error("could not delete virtualIP", "err", err)
 		}
 	}
 
@@ -153,7 +154,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		if c.ProviderConfig != "" {
 			key, project, err := equinixmetal.GetPacketConfig(c.ProviderConfig)
 			if err != nil {
-				log.Error(err)
+				log.Error("retrieve Equinix metal config", "err", err)
 			} else {
 				// Set the environment variable with the key for the project
 				os.Setenv("PACKET_AUTH_TOKEN", key)
@@ -163,15 +164,15 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		}
 		packetClient, err = packngo.NewClient()
 		if err != nil {
-			log.Error(err)
+			log.Error("create Equinix metal client", "err", err)
 		}
 
 		// We're using Equinix Metal with BGP, populate the Peer information from the API
 		if c.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from Equinix Metal")
+			log.Info("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, c)
 			if err != nil {
-				log.Error(err)
+				log.Error("retrieve Equinix metal BPG config", "err", err)
 			}
 		}
 	}
@@ -181,7 +182,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
 		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig, nil)
 		if err != nil {
-			log.Error(err)
+			log.Error("new BGP server", "err", err)
 		}
 	}
 
@@ -193,7 +194,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 			// As we're leading lets start the vip service
 			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient)
 			if err != nil {
-				log.Errorf("Error starting the VIP service on the leader [%s]", err)
+				log.Error("starting VIP service on leader", "err", err)
 			}
 		},
 		onStoppedLeading: func() {
@@ -209,22 +210,23 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 			if bgpServer != nil {
 				err := bgpServer.Close()
 				if err != nil {
-					log.Warnf("%v", err)
+					log.Warn("close BGP server", "err", err)
 				}
 			}
 
 			for i := range cluster.Network {
 				err := cluster.Network[i].DeleteIP()
 				if err != nil {
-					log.Warnf("%v", err)
+					log.Warn("delete VIP", "err", err)
 				}
 			}
 
-			log.Fatal("lost leadership, restarting kube-vip")
+			log.Error("lost leadership, restarting kube-vip")
+			panic("") // TODO - we could also return here
 		},
 		onNewLeader: func(identity string) {
 			// we're notified when new leader elected
-			log.Infof("Node [%s] is assuming leadership of the cluster", identity)
+			log.Info("New leader", "leader", identity)
 		},
 	}
 
@@ -307,7 +309,7 @@ func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *run
 
 func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	log.Infof("Kube-Vip is watching nodes for control-plane labels")
+	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
 	listOptions := metav1.ListOptions{
 		LabelSelector: "node-role.kubernetes.io/control-plane",
@@ -345,7 +347,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
-						log.Errorf("add IPVS backend [%v]", err)
+						log.Error("add IPVS backend", "err", err)
 					}
 				}
 			}
@@ -360,12 +362,12 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
-						log.Errorf("Del IPVS backend [%v]", err)
+						log.Error("Del IPVS backend", "err", err)
 					}
 				}
 			}
 
-			log.Infof("Node [%s] has been deleted", node.Name)
+			log.Info("Node deleted", "name", node.Name)
 
 		case watch.Bookmark:
 			// Un-used
@@ -380,11 +382,11 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 			}
 
 			status := statusErr.ErrStatus
-			log.Errorf("%v", status)
+			log.Error("watcher", "status", status)
 		default:
 		}
 	}
 
-	log.Infoln("Exiting Node watcher")
+	log.Info("Exiting Node watcher")
 	return nil
 }
