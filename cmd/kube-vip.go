@@ -261,7 +261,7 @@ var kubeVipManager = &cobra.Command{
 		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Welome messages
-		log.Info("kube-vip.io", "verison", Release.Version, "build", Release.Build)
+		log.Info("kube-vip.io", "version", Release.Version, "build", Release.Build)
 
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
