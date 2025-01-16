@@ -314,11 +314,10 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
-	svcUID := string(svc.UID)
-	log.Debugf("service UID: %s", svcUID)
+	log.Debugf("service UID: %s", svc.UID)
 	for i := range sm.serviceInstances {
-		log.Debugf("saved service instance %d UID: %s", i, sm.serviceInstances[i].UID)
-		if sm.serviceInstances[i].UID == svcUID {
+		log.Debugf("saved service instance %d UID: %s", i, sm.serviceInstances[i].serviceSnapshot.UID)
+		if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
 			return sm.serviceInstances[i]
 		}
 	}

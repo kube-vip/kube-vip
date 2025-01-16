@@ -34,9 +34,9 @@ type Instance struct {
 	upnpGatewayIPs []string
 
 	// Kubernetes service mapping
-	VIPs          []string
-	UID           string
-	ExternalPorts []Port
+	//VIPs          []string
+	//UID           string
+	//ExternalPorts []Port
 
 	serviceSnapshot *v1.Service
 }
@@ -48,7 +48,7 @@ type Port struct {
 
 func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	instanceAddresses := fetchServiceAddresses(svc)
-	instanceUID := string(svc.UID)
+	//instanceUID := string(svc.UID)
 
 	var newVips []*kubevip.Config
 	var link netlink.Link
@@ -174,16 +174,16 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 
 	// Create new service
 	instance := &Instance{
-		UID:             instanceUID,
-		VIPs:            instanceAddresses,
+		//UID:             instanceUID,
+		//VIPs:            instanceAddresses,
 		serviceSnapshot: svc,
 	}
-	for _, port := range svc.Spec.Ports {
-		instance.ExternalPorts = append(instance.ExternalPorts, Port{
-			Port: uint16(port.Port), //nolint
-			Type: string(port.Protocol),
-		})
-	}
+	// for _, port := range svc.Spec.Ports {
+	// 	instance.ExternalPorts = append(instance.ExternalPorts, Port{
+	// 		Port: uint16(port.Port), //nolint
+	// 		Type: string(port.Protocol),
+	// 	})
+	// }
 
 	if svc.Annotations != nil {
 		instance.dhcpInterfaceHwaddr = svc.Annotations[hwAddrKey]
@@ -192,9 +192,9 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 	}
 
 	configPorts := make([]kubevip.Port, 0)
-	for _, p := range instance.ExternalPorts {
+	for _, p := range svc.Spec.Ports {
 		configPorts = append(configPorts, kubevip.Port{
-			Type: p.Type,
+			Type: string(p.Protocol),
 			Port: int(p.Port),
 		})
 	}
@@ -316,7 +316,7 @@ func (i *Instance) startDHCP() error {
 	}
 
 	// Generate name from UID
-	interfaceName := fmt.Sprintf("vip-%s", i.UID[0:8])
+	interfaceName := fmt.Sprintf("vip-%s", i.serviceSnapshot.UID[0:8])
 
 	// Check if the interface doesn't exist first
 	iface, err := net.InterfaceByName(interfaceName)

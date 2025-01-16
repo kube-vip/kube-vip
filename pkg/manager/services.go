@@ -13,6 +13,7 @@ import (
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/kube-vip/kube-vip/pkg/upnp"
@@ -27,7 +28,7 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 	// Iterate through the synchronising services
 	foundInstance := false
 	newServiceAddresses := fetchServiceAddresses(svc)
-	newServiceUID := string(svc.UID)
+	newServiceUID := svc.UID
 
 	ingressIPs := []string{}
 
@@ -43,7 +44,7 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 		}
 		for _, newServiceAddress := range newServiceAddresses {
 			log.Debugf("isDHCP: %t, newServiceAddress: %s", sm.serviceInstances[x].isDHCP, newServiceAddress)
-			if sm.serviceInstances[x].UID == newServiceUID {
+			if sm.serviceInstances[x].serviceSnapshot.UID == newServiceUID {
 				// If the found instance's DHCP configuration doesn't match the new service, delete it.
 				if (sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0") ||
 					(!sm.serviceInstances[x].isDHCP && newServiceAddress == "0.0.0.0") ||
@@ -120,7 +121,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 		log.Debugf("(svcs) will update [%s/%s]", newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
 		if err := sm.updateStatus(newService); err != nil {
 			// delete service to collect garbage
-			if deleteErr := sm.deleteService(newService.UID); deleteErr != nil {
+			if deleteErr := sm.deleteService(newService.serviceSnapshot.UID); deleteErr != nil {
 				return deleteErr
 			}
 			return err
@@ -205,7 +206,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	return nil
 }
 
-func (sm *Manager) deleteService(uid string) error {
+func (sm *Manager) deleteService(uid types.UID) error {
 	// protect multiple calls
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
@@ -214,9 +215,9 @@ func (sm *Manager) deleteService(uid string) error {
 	var serviceInstance *Instance
 	found := false
 	for x := range sm.serviceInstances {
-		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].UID)
+		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].serviceSnapshot.UID)
 		// Add the running services to the new array
-		if sm.serviceInstances[x].UID != uid {
+		if sm.serviceInstances[x].serviceSnapshot.UID != uid {
 			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
 		} else {
 			// Flip the found when we match
@@ -230,14 +231,16 @@ func (sm *Manager) deleteService(uid string) error {
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
 		return nil
 	}
+
+	// Determine if this this VIP is shared with other loadbalancers
 	shared := false
 	vipSet := make(map[string]interface{})
 	for x := range updatedInstances {
-		for _, vip := range updatedInstances[x].VIPs {
+		for _, vip := range fetchServiceAddresses(updatedInstances[x].serviceSnapshot) { //updatedInstances[x].serviceSnapshot.Spec.LoadBalancerIP {
 			vipSet[vip] = nil
 		}
 	}
-	for _, vip := range serviceInstance.VIPs {
+	for _, vip := range fetchServiceAddresses(serviceInstance.serviceSnapshot) {
 		if _, found := vipSet[vip]; found {
 			shared = true
 		}
@@ -308,14 +311,14 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 	// Reset Gateway IPs to remove stale addresses
 	s.upnpGatewayIPs = make([]string, 0)
 
-	for _, vip := range s.VIPs {
-		for _, port := range s.ExternalPorts {
+	for _, vip := range fetchServiceAddresses(s.serviceSnapshot) {
+		for _, port := range s.serviceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
 				log.Infof("[UPNP] Adding map to [%s:%d - %s] on gateway %s", vip, port.Port, s.serviceSnapshot.Name, gw.WANIPv6FirewallControlClient.Location)
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
-					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", port.Port, vip, port.Port, upnp.MapProtocolToIANA(port.Type), 3600)
+					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(string(port.Protocol)), 3600) //nolint  TODO
 					if pinholeErr == nil {
 						forwardSucessful = true
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
@@ -326,7 +329,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
-					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", port.Port, strings.ToUpper(port.Type), port.Port, vip, true, s.serviceSnapshot.Name, 3600)
+					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600) //nolint  TODO
 					if portMappingErr == nil {
 						log.Infof("[UPNP] Service should be accessible externally on port [%d]", port.Port)
 						forwardSucessful = true
