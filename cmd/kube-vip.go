@@ -111,7 +111,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging
-	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 4, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 0, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
