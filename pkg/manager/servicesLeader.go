@@ -50,10 +50,12 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			Identity: sm.config.NodeName,
 		},
 	}
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
 
 	activeService[string(service.UID)] = true
 	// start the leader election code loop
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+	leaderelection.RunOrDie(childCtx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
 		// IMPORTANT: you MUST ensure that any code you have that
 		// is protected by the lease must terminate **before**
@@ -70,9 +72,10 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				// Mark this service as active (as we've started leading)
 				// we run this in background as it's blocking
 				wg.Add(1)
-				if err := sm.syncServices(ctx, service, wg); err != nil {
-					log.Error(err)
-				}
+					if err := sm.syncServices(ctx, service, wg); err != nil {
+						log.Error(err)
+						childCancel()
+					}
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
