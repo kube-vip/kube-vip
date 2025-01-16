@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 )
 
 // IPUpdater is the interface to plug dns updaters

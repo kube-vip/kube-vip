@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
+	log "github.com/gookit/slog"
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway2"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 

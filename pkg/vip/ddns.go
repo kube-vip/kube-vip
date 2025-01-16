@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 // DDNSManager will start a dhclient to retrieve and keep the lease for the IP

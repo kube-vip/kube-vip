@@ -3,8 +3,8 @@ package cluster
 import (
 	"context"
 
+	log "github.com/gookit/slog"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -16,7 +16,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	// Start kube-vip as a single node server
 
 	// TODO - Split all this code out as a separate function
-	log.Infoln("Starting kube-vip as a single node cluster")
+	log.Info("Starting kube-vip as a single node cluster")
 
 	log.Info("This node is assuming leadership of the cluster")
 
@@ -60,7 +60,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 		}
 		close(cluster.completed)
 	}()
-	log.Infoln("Started Load Balancer and Virtual IP")
+	log.Info("Started Load Balancer and Virtual IP")
 	return nil
 }
 

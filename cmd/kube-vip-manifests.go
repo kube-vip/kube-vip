@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 )
@@ -42,7 +43,8 @@ var kubeManifestPod = &cobra.Command{
 		var err error
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLevel(log.Level(logLevel))
+		log.SetExitFunc(os.Exit)
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
@@ -52,14 +54,14 @@ var kubeManifestPod = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Fatal("No address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 		}
 
@@ -75,7 +77,8 @@ var kubeManifestDaemon = &cobra.Command{
 		var err error
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLevel(log.Level(logLevel))
+		log.SetExitFunc(os.Exit)
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
@@ -87,14 +90,14 @@ var kubeManifestDaemon = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Fatal("No address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 		}
 
@@ -110,7 +113,8 @@ var kubeManifestRbac = &cobra.Command{
 		var err error
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLevel(log.Level(logLevel))
+		log.SetExitFunc(os.Exit)
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
@@ -120,14 +124,14 @@ var kubeManifestRbac = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Fatal("No address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Fatal(err)
 			}
 		}
 

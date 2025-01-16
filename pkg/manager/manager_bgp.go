@@ -6,13 +6,13 @@ import (
 	"os"
 	"syscall"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/packethost/packngo"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
@@ -42,7 +42,7 @@ func (sm *Manager) startBGP() error {
 
 		// We're using Equinix Metal with BGP, populate the Peer information from the API
 		if sm.config.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from Equinix Metal")
+			log.Info("Looking up the BGP configuration from Equinix Metal")
 			err = equinixmetal.BGPLookup(packetClient, sm.config)
 			if err != nil {
 				return err

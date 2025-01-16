@@ -3,10 +3,10 @@ package equinixmetal
 import (
 	"fmt"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 // BGPLookup will use the Equinix Metal API functions to populate the BGP information

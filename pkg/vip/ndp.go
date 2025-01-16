@@ -7,7 +7,7 @@ import (
 
 	"github.com/mdlayher/ndp"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 )
 
 // NdpResponder defines the parameters for the NDP connection.

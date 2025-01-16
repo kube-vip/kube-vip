@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/davecgh/go-spew/spew"
 	v1 "k8s.io/api/core/v1"
@@ -129,7 +129,7 @@ func (sm *Manager) annotationsWatcher() error {
 		}
 	}
 	close(exitFunction)
-	log.Infoln("Exiting Annotations watcher")
+	log.Info("Exiting Annotations watcher")
 	return nil
 
 }

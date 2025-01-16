@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	log "github.com/gookit/slog"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
-	log "github.com/sirupsen/logrus"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance

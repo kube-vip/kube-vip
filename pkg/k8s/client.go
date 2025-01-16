@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/gookit/slog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"

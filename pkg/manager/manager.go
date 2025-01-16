@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -19,7 +20,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -72,7 +72,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// we set it to hostname as a fallback.
 	// This mimics legacy behavior and should work on old kube-vip installations.
 	if config.NodeName == "" {
-		log.Warning("Node name is missing from the config, fall back to hostname")
+		log.Warn("Node name is missing from the config, fall back to hostname")
 		hostname, err := os.Hostname()
 		if err != nil {
 			return nil, fmt.Errorf("could not get hostname: %v", err)
@@ -210,7 +210,7 @@ func (sm *Manager) Start() error {
 			return err
 		}
 
-		log.Infoln("Starting Kube-vip Manager with the BGP engine")
+		log.Info("Starting Kube-vip Manager with the BGP engine")
 		return sm.startBGP()
 	}
 
@@ -238,21 +238,21 @@ func (sm *Manager) Start() error {
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
-		log.Infoln("Starting Kube-vip Manager with the ARP engine")
+		log.Info("Starting Kube-vip Manager with the ARP engine")
 		return sm.startARP(sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
-		log.Infoln("Starting Kube-vip Manager with the Wireguard engine")
+		log.Info("Starting Kube-vip Manager with the Wireguard engine")
 		return sm.startWireguard(sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
-		log.Infoln("Starting Kube-vip Manager with the Routing Table engine")
+		log.Info("Starting Kube-vip Manager with the Routing Table engine")
 		return sm.startTableMode(sm.config.NodeName)
 	}
 
-	log.Errorln("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
+	log.Error("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
 	return nil
 }
 

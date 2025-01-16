@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
+	log "github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

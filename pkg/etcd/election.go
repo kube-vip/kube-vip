@@ -5,8 +5,8 @@ import (
 	"hash/fnv"
 	"time"
 
+	log "github.com/gookit/slog"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
