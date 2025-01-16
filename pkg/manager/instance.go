@@ -34,10 +34,6 @@ type Instance struct {
 	upnpGatewayIPs []string
 
 	// Kubernetes service mapping
-	//VIPs          []string
-	//UID           string
-	//ExternalPorts []Port
-
 	serviceSnapshot *v1.Service
 }
 

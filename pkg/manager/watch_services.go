@@ -263,7 +263,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							for {
 								select {
 								case <-activeServiceLoadBalancer[string(svc.UID)].Done():
-									fmt.Println("Task cancelled")
+									log.Warnf("(svcs) restartable service watcher ending for [%s]", svc.UID)
 									return
 								default:
 									log.Infof("(svcs) restartable service watcher starting for [%s]", svc.UID)
