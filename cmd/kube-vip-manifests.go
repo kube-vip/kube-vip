@@ -3,8 +3,9 @@ package cmd
 import (
 	"fmt"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 )
@@ -41,25 +42,29 @@ var kubeManifestPod = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
 
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
-			log.Fatalf("Error parsing environment from config: %v", err)
+			log.Error("parsing environment", "err", err)
+			return
 		}
+
+		// Set the logging level for all subsequent functions
+		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Error("No address is specified for kube-vip to expose services on")
+			return
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("No interface is specified for kube-vip to bind to")
+				return
 			}
 		}
 
@@ -74,27 +79,29 @@ var kubeManifestDaemon = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
 
-		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
-			log.Fatalf("error parsing environment config: %v", err)
+			log.Error("parsing environment", "err", err)
+			return
 		}
 
-		// TODO - check for certain things VIP/interfaces
+		// Set the logging level for all subsequent functions
+		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Error("No address is specified for kube-vip to expose services on")
+			return
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("No interface is specified for kube-vip to bind to")
+				return
 			}
 		}
 
@@ -110,24 +117,27 @@ var kubeManifestRbac = &cobra.Command{
 		var err error
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLoggerLevel(log.Level(logLevel))
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
-			log.Fatalf("Error parsing environment from config: %v", err)
+			log.Error("parsing environment", "err", err)
+			return
 		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Fatalln("No address is specified for kube-vip to expose services on")
+			log.Error("No address is specified for kube-vip to expose services on")
+			return
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("generating CIDR", "err", err)
+				return
 			}
 		}
 

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
@@ -343,7 +344,7 @@ func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
 	if err := insertCommonIPTablesRules(ipt, vip, comment); err != nil {
 		return fmt.Errorf("could not add common iptables rules: %w", err)
 	}
-	log.Debugf("add iptables rules, vip: %s, ports: %+v", vip, configurator.ports)
+	log.Debug("add iptables rules", "vip", vip, "ports", configurator.ports)
 	if err := configurator.insertIPTablesRulesForServicePorts(ipt, vip, comment); err != nil {
 		return fmt.Errorf("could not add iptables rules for service ports: %v", err)
 	}
@@ -448,7 +449,7 @@ func (configurator *network) removeIptablesRuleToLimitTrafficPorts() error {
 		return fmt.Errorf("could not delete common iptables rules: %w", err)
 	}
 
-	log.Debugf("remove iptables rules, vip: %s, ports: %+v", vip, configurator.ports)
+	log.Debug("remove iptables rules", "vip", vip, "ports", configurator.ports)
 	for _, port := range configurator.ports {
 		// iptables -D INPUT -d  <VIP> -p <protocol> --dport <port> -j ACCEPT
 		if err := ipt.DeleteIfExists(iptables.TableFilter, iptables.ChainInput, "-d", vip, "-p", string(port.Protocol),

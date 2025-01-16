@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
+	log "log/slog"
+
 	"github.com/google/go-cmp/cmp"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,7 +24,7 @@ import (
 func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
-	log.Debugf("[STARTING] Service Sync")
+	log.Debug("[STARTING] Service Sync")
 
 	// Iterate through the synchronising services
 	foundInstance := false
@@ -43,7 +44,7 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.W
 			break
 		}
 		for _, newServiceAddress := range newServiceAddresses {
-			log.Debugf("isDHCP: %t, newServiceAddress: %s", sm.serviceInstances[x].isDHCP, newServiceAddress)
+			log.Debug("service", "isDHCP", sm.serviceInstances[x].isDHCP, "newServiceAddress", newServiceAddress)
 			if sm.serviceInstances[x].serviceSnapshot.UID == newServiceUID {
 				// If the found instance's DHCP configuration doesn't match the new service, delete it.
 				if (sm.serviceInstances[x].isDHCP && newServiceAddress != "0.0.0.0") ||
@@ -102,23 +103,23 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	if newService.isDHCP && len(newService.vipConfigs) == 1 {
 		go func() {
 			for ip := range newService.dhcpClient.IPChannel() {
-				log.Debugf("IP %s may have changed", ip)
+				log.Debug("IP changed", "ip", ip)
 				newService.vipConfigs[0].VIP = ip
 				newService.dhcpInterfaceIP = ip
 				if !sm.config.DisableServiceUpdates {
 					if err := sm.updateStatus(newService); err != nil {
-						log.Warnf("error updating svc: %s", err)
+						log.Warn("updating svc", "err", err)
 					}
 				}
 			}
-			log.Debugf("IP update channel closed, stopping")
+			log.Debug("IP update channel closed, stopping")
 		}()
 	}
 
 	sm.serviceInstances = append(sm.serviceInstances, newService)
 
 	if !sm.config.DisableServiceUpdates {
-		log.Debugf("(svcs) will update [%s/%s]", newService.serviceSnapshot.Namespace, newService.serviceSnapshot.Name)
+		log.Debug("service update", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name)
 		if err := sm.updateStatus(newService); err != nil {
 			// delete service to collect garbage
 			if deleteErr := sm.deleteService(newService.serviceSnapshot.UID); deleteErr != nil {
@@ -132,26 +133,26 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
 
-		log.Debugf("Flushing conntrack rules for service [%s]", svc.Name)
+		log.Debug("Flushing conntrack rules", "service", svc.Name)
 		for _, serviceIP := range serviceIPs {
 			err = vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
-				log.Errorf("Error flushing any remaining egress connections [%s]", err)
+				log.Error("flushing any remaining egress connections", "err", err)
 			}
 			err = vip.DeleteExistingSessions(serviceIP, true, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
-				log.Errorf("Error flushing any remaining ingress connections [%s]", err)
+				log.Error("flushing any remaining ingress connections", "err", err)
 			}
 		}
 	}
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if svc.Annotations[egress] == "true" && len(serviceIPs) > 0 {
-		log.Debugf("Enabling egress for the service [%s]", svc.Name)
+		log.Debug("enabling egress", "service", svc.Name)
 		// We will need to modify the iptables rules
 		err = sm.iptablesCheck()
 		if err != nil {
-			log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+			log.Error("configuring egress", "service", svc.Name, "err", err)
 		}
 		var podIP string
 		errList := []error{}
@@ -168,7 +169,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
-							log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+							log.Error("configuring egress", "service", svc.Name, "err", err)
 						}
 					}
 				}
@@ -182,7 +183,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
-					log.Errorf("Error configuring egress for loadbalancer [%s]", err)
+					log.Error("configuring egress", "service", svc.Name, "err", err)
 				}
 			}
 		}
@@ -195,13 +196,13 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 			}
 			err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
 			if err != nil {
-				log.Errorf("error configuring egress annotation for loadbalancer [%s]", err)
+				log.Error("configuring egress", "service", svc.Name, "err", err)
 			}
 		}
 	}
 
 	finishTime := time.Since(startTime)
-	log.Infof("[service] synchronised in %dms", finishTime.Milliseconds())
+	log.Info("[service] synchronised", "in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
 
 	return nil
 }
@@ -215,7 +216,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 	var serviceInstance *Instance
 	found := false
 	for x := range sm.serviceInstances {
-		log.Debugf("Looking for [%s], found [%s]", uid, sm.serviceInstances[x].serviceSnapshot.UID)
+		log.Debug("service lookup", "target UID", uid, "found UID ", sm.serviceInstances[x].serviceSnapshot.UID)
 		// Add the running services to the new array
 		if sm.serviceInstances[x].serviceSnapshot.UID != uid {
 			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
@@ -269,17 +270,17 @@ func (sm *Manager) deleteService(uid types.UID) error {
 				if err != nil {
 					return fmt.Errorf("[BGP] error deleting BGP host: %v", err)
 				}
-				log.Debugf("[BGP] deleted host: %s", cidrVip)
+				log.Debug("[BGP] delete", "host", cidrVip)
 			}
 		}
 
 		// We will need to tear down the egress
 		if serviceInstance.serviceSnapshot.Annotations[egress] == "true" {
 			if serviceInstance.serviceSnapshot.Annotations[activeEndpoint] != "" {
-				log.Infof("service [%s] has an egress re-write enabled", serviceInstance.serviceSnapshot.Name)
+				log.Info("egress re-write enabled", "service", serviceInstance.serviceSnapshot.Name)
 				err := sm.TeardownEgress(serviceInstance.serviceSnapshot.Annotations[activeEndpoint], serviceInstance.serviceSnapshot.Spec.LoadBalancerIP, serviceInstance.serviceSnapshot.Namespace, serviceInstance.serviceSnapshot.Annotations)
 				if err != nil {
-					log.Errorf("%v", err)
+					log.Error("egress teardown", "err", err)
 				}
 			}
 		}
@@ -288,7 +289,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 	// Update the service array
 	sm.serviceInstances = updatedInstances
 
-	log.Infof("Removed [%s] from manager, [%d] advertised services remain", uid, len(sm.serviceInstances))
+	log.Info("Removed instance from manager", "uid", uid, "remaining advertised services", len(sm.serviceInstances))
 
 	return nil
 }
@@ -301,7 +302,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 		return
 	}
 	if !sm.upnp {
-		log.Warnf("[UPNP] Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding service %s", s.serviceSnapshot.Name)
+		log.Warn("[UPNP] Found kube-vip.io/forwardUPNP on service while UPNP forwarding is disabled in the kube-vip config. Not forwarding", "service", s.serviceSnapshot.Name)
 	}
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - check if this implementation for dualstack is correct
@@ -314,28 +315,28 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 	for _, vip := range fetchServiceAddresses(s.serviceSnapshot) {
 		for _, port := range s.serviceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
-				log.Infof("[UPNP] Adding map to [%s:%d - %s] on gateway %s", vip, port.Port, s.serviceSnapshot.Name, gw.WANIPv6FirewallControlClient.Location)
+				log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.serviceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
 					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(string(port.Protocol)), 3600) //nolint  TODO
 					if pinholeErr == nil {
 						forwardSucessful = true
-						log.Infof("[UPNP] Service should be accessible externally on port [%d]; PinholeID is [%d]", port.Port, pinholeID)
+						log.Info("[UPNP] Service should be accessible externally", "port", port.Port, "pinhold ID", pinholeID)
 					} else {
 						//TODO: Cleanup
-						log.Errorf("[UPNP] Unable to map port to gateway using Pinhole API[%s]", pinholeErr.Error())
+						log.Error("[UPNP] Unable to map port to gateway using Pinhole API", "err", pinholeErr.Error())
 					}
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
 					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.serviceSnapshot.Name, 3600) //nolint  TODO
 					if portMappingErr == nil {
-						log.Infof("[UPNP] Service should be accessible externally on port [%d]", port.Port)
+						log.Info("[UPNP] Service should be accessible externally", "port", port.Port)
 						forwardSucessful = true
 					} else {
 						//TODO: Cleanup
-						log.Errorf("[UPNP] Unable to map port to gateway using PortForward API[%s]", portMappingErr.Error())
+						log.Error("[UPNP] Unable to map port to gateway using PortForward API", "err", portMappingErr.Error())
 					}
 				}
 
@@ -379,14 +380,14 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		}
 
 		if currentService.Annotations["development.kube-vip.io/synthetic-api-server-error-on-update"] == "true" {
-			log.Errorf("(Synthetic error thrown) Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
+			log.Error("(Synthetic error ) updating Spec", "service", i.serviceSnapshot.Name, "err", err)
 			return fmt.Errorf("(Synthetic) simulating api server errors")
 		}
 
 		if !cmp.Equal(currentService, currentServiceCopy) {
 			currentService, err = sm.clientSet.CoreV1().Services(currentServiceCopy.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 			if err != nil {
-				log.Errorf("Error updating Service Spec [%s] : %v", i.serviceSnapshot.Name, err)
+				log.Error("updating Spec", "service", i.serviceSnapshot.Name, "err", err)
 				return err
 			}
 		}
@@ -435,7 +436,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 			currentService.Status.LoadBalancer.Ingress = ingresses
 			_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
 			if err != nil {
-				log.Errorf("Error updating Service %s/%s Status: %v", i.serviceSnapshot.Namespace, i.serviceSnapshot.Name, err)
+				log.Error("updating Service", "namespace", i.serviceSnapshot.Namespace, "name", i.serviceSnapshot.Name, "err", err)
 				return err
 			}
 		}
@@ -443,7 +444,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 	})
 
 	if retryErr != nil {
-		log.Errorf("Failed to set Services: %v", retryErr)
+		log.Error("Failed to set Services", "err", retryErr)
 		return retryErr
 	}
 	return nil

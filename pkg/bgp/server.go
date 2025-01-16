@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	log "log/slog"
+
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
-	log "github.com/sirupsen/logrus"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -42,7 +43,7 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 
 	if err = b.s.WatchEvent(context.Background(), &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
 		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
-			log.Infof("[BGP] %s", p.String())
+			log.Info("[BGP]", "peer", p.String())
 			if peerStateChangeCallback != nil {
 				peerStateChangeCallback(p)
 			}

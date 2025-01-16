@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"path"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 )
 
 // AttachEIP will use the Equinix Metal APIs to move an EIP and attach to a host
@@ -34,7 +35,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, _ string) error {
 	for _, ip := range ips {
 		// Find the device id for our EIP
 		if ip.Address == vip {
-			log.Infof("Found EIP ->%s ID -> %s\n", ip.Address, ip.ID)
+			log.Info("Found EIP", "address", ip.Address, "id", ip.ID)
 			// If attachments already exist then remove them
 			if len(ip.Assignments) != 0 {
 				hrefID := path.Base(ip.Assignments[0].Href)
@@ -53,7 +54,7 @@ func AttachEIP(c *packngo.Client, k *kubevip.Config, _ string) error {
 	}
 
 	// Assign the EIP to this device
-	log.Infof("Assigning EIP to -> %s\n", thisDevice.Hostname)
+	log.Info("Assigning EIP", "hostname", thisDevice.Hostname)
 	_, _, err := c.DeviceIPs.Assign(thisDevice.ID, &packngo.AddressStruct{
 		Address: vip,
 	})

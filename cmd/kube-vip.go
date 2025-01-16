@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	log "log/slog"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 
@@ -191,16 +192,18 @@ var kubeVipService = &cobra.Command{
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(logLevel))
+		log.SetLogLoggerLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Fatalln(err)
+			log.Error("parsing env", "err", err)
+			return
 		}
 
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Fatalln(err)
+			log.Error("checking interface", "err", err)
+			return
 		}
 
 		// User Environment variables as an option to make manifest clearer
@@ -213,20 +216,23 @@ var kubeVipService = &cobra.Command{
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("generating CIDR", "err", err)
+				return
 			}
 		}
 
 		// Define the new service manager
 		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
-			log.Fatalf("%v", err)
+			log.Error("new manager", "err", err)
+			return
 		}
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {
-			log.Fatalf("%v", err)
+			log.Error("manager start", "err", err)
+			return
 		}
 	},
 }
@@ -238,23 +244,24 @@ var kubeVipManager = &cobra.Command{
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Fatalln(err)
+			log.Error("parsing environment", "err", err)
+			return
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("No interface is specified for kube-vip to bind to")
+				return
 			}
 		}
 
 		// Set the logging level for all subsequent functions
-		log.SetLevel(log.Level(initConfig.Logging))
+		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Welome messages
-		log.Infof("Starting kube-vip.io [%s]", Release.Version)
-		log.Infof("Build kube-vip.io [%s]", Release.Build)
+		log.Info("kube-vip.io", "verison", Release.Version, "build", Release.Build)
 
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
@@ -282,19 +289,22 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Provide configuration to output/logging
-		log.Infof("namespace [%s], Mode: [%s], Features(s): Control Plane:[%t], Services:[%t]", initConfig.Namespace, mode, initConfig.EnableControlPlane, initConfig.EnableServices)
+		log.Info("starting", "namespace", initConfig.Namespace, "Mode", mode, "Control Plane", initConfig.EnableControlPlane, "Services", initConfig.EnableServices)
 
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPlane {
-			log.Fatalln("no features are enabled")
+			log.Error("no features are enabled")
+			return
 		}
 
 		if !initConfig.EnableARP && strings.Contains(initConfig.VIPCIDR, kubevip.Auto) {
-			log.Fatalln("auto subnet discovery cannot be used outside ARP mode")
+			log.Error("auto subnet discovery cannot be used outside ARP mode")
+			return
 		}
 
 		if strings.Contains(initConfig.VIPCIDR, kubevip.Auto) && initConfig.Address != "" {
-			log.Fatalln("auto subnet discovery cannot be used if VIP address was provided")
+			log.Error("auto subnet discovery cannot be used if VIP address was provided")
+			return
 		}
 
 		// If we're using wireguard then all traffic goes through the wg0 interface
@@ -304,48 +314,55 @@ var kubeVipManager = &cobra.Command{
 				initConfig.Interface = "wg0"
 			}
 
-			log.Infof("configuring Wireguard networking")
+			log.Info("configuring Wireguard networking")
 			l, err := netlink.LinkByName(initConfig.Interface)
 			if err != nil {
 				if strings.Contains(err.Error(), "Link not found") {
-					log.Warnf("interface \"%s\" doesn't exist, attempting to create wireguard interface", initConfig.Interface)
+					log.Warn("attempting to create wireguard interface", "interface not found", initConfig.Interface)
 					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
 					if err != nil {
-						log.Fatalln(err)
+						log.Error("adding link", "err", err)
+						return
 					}
 					l, err = netlink.LinkByName(initConfig.Interface)
 					if err != nil {
-						log.Fatalln(err)
+						log.Error("finding link", "err", err)
+						return
 					}
 				}
 			}
 			err = netlink.LinkSetUp(l)
 			if err != nil {
-				log.Fatalln(err)
+				log.Error("setting link UP", "err", err)
+				return
 			}
 
 		} else { // if we're not using Wireguard then we'll need to use an actual interface
 			// Check if the interface needs auto-detecting
 			if initConfig.Interface == "" {
-				log.Infof("No interface is specified for VIP in config, auto-detecting default Interface")
+				log.Info("No interface is specified for VIP in config, auto-detecting default Interface")
 				defaultIF, err := vip.GetDefaultGatewayInterface()
 				if err != nil {
 					_ = cmd.Help()
-					log.Fatalf("unable to detect default interface -> [%v]", err)
+					log.Error("detecting interface", "err", err)
+					return
 				}
 				initConfig.Interface = defaultIF.Name
-				log.Infof("kube-vip will bind to interface [%s]", initConfig.Interface)
+				log.Info("kube-vip bind", "interface", initConfig.Interface)
 
 				go func() {
 					if err := vip.MonitorDefaultInterface(context.TODO(), defaultIF); err != nil {
-						log.Fatalf("crash: %s", err.Error())
+
+						log.Error("interface monitor", "err", err)
+						return
 					}
 				}()
 			}
 		}
-		// Perform a check on th state of the interface
+		// Perform a check on the state of the interface
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Fatalln(err)
+			log.Error("checking interface", "err", err)
+			return
 		}
 
 		// User Environment variables as an option to make manifest clearer
@@ -359,7 +376,8 @@ var kubeVipManager = &cobra.Command{
 			if providerConfig != "" {
 				providerAPI, providerProject, err := equinixmetal.GetPacketConfig(providerConfig)
 				if err != nil {
-					log.Fatalf("%v", err)
+					log.Error("retrieving equinix metal config", "err", err)
+					return
 				}
 				initConfig.MetalAPIKey = providerAPI
 				initConfig.MetalProject = providerProject
@@ -369,7 +387,8 @@ var kubeVipManager = &cobra.Command{
 		// Define the new service manager
 		mgr, err := manager.New(configMap, &initConfig)
 		if err != nil {
-			log.Fatalf("configuring new Manager error -> %v", err)
+			log.Error("new manager", "err", err)
+			return
 		}
 
 		prometheus.MustRegister(mgr.PrometheusCollector()...)
@@ -377,7 +396,8 @@ var kubeVipManager = &cobra.Command{
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start()
 		if err != nil {
-			log.Fatalf("starting new Manager error -> %v", err)
+			log.Error("start manager", "err", err)
+			return
 		}
 	},
 }
@@ -410,15 +430,16 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 
 	go func() {
 		if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen:%+s\n", err)
+			log.Error("prometheus HTTP server", "err", err)
+			return
 		}
 	}()
 
-	log.Printf("prometheus HTTP server started")
+	log.Info("prometheus HTTP server started")
 
 	<-ctx.Done()
 
-	log.Printf("prometheus HTTP server stopped")
+	log.Info("prometheus HTTP server stopped")
 
 	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer func() {
@@ -426,7 +447,8 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	}()
 
 	if err = srv.Shutdown(ctxShutDown); err != nil {
-		log.Fatalf("server Shutdown Failed:%+s", err)
+		log.Error("shutting down prometheus HTTP server", "err", err)
+		return
 	}
 
 	if err == http.ErrServerClosed {

@@ -6,7 +6,8 @@ import (
 	"net"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -99,21 +100,21 @@ func FindWorkingKubernetesAddress(configPath string, inCluster bool) (*rest.Conf
 		return nil, err
 	}
 	for x := range ips {
-		log.Debugf("[k8s client] checking with IP address [%s]", ips[x].String())
+		log.Debug("[k8s client] testing", "address", ips[x].String())
 		c, err := NewRestConfig(configPath, inCluster, net.JoinHostPort(ips[x].String(), "6443"))
 		if err != nil {
-			log.Errorf("failed to create k8s REST config: %v", err)
+			log.Error("failed to create k8s REST config", "err", err)
 		}
 
 		c.Timeout = 2 * time.Second
 		k, err := NewClientset(c)
 		if err != nil {
-			log.Errorf("failed to create k8s clientset: %v", err)
+			log.Error("failed to create k8s clientset", "err", err)
 		}
 
 		_, err = k.DiscoveryClient.ServerVersion()
 		if err == nil {
-			log.Infof("[k8s client] working with IP address [%s]", ips[x].String())
+			log.Info("[k8s client] working", "address", ips[x].String())
 			c.Timeout = defaultTimeout
 			return c, nil
 		}

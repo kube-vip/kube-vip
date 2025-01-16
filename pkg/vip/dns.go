@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
 )
 
 // IPUpdater is the interface to plug dns updaters
@@ -29,7 +29,7 @@ func (d *ipUpdater) Run(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Infof("stop ipUpdater")
+				log.Info("stop ipUpdater")
 				return
 			default:
 				mode := "ipv4"
@@ -39,18 +39,18 @@ func (d *ipUpdater) Run(ctx context.Context) {
 
 				ip, err := LookupHost(d.vip.DNSName(), mode)
 				if err != nil {
-					log.Warnf("cannot lookup %s: %v", d.vip.DNSName(), err)
+					log.Warn("cannot lookup", "name", d.vip.DNSName(), "err", err)
 					// fallback to renewing the existing IP
 					ip = []string{d.vip.IP()}
 				}
 
-				log.Infof("setting %s as an IP", ip)
+				log.Info("setting IP", "address", ip)
 				if err := d.vip.SetIP(ip[0]); err != nil {
-					log.Errorf("setting %s as an IP: %v", ip, err)
+					log.Error("setting IP", "address", ip, "err", err)
 				}
 
 				if err := d.vip.AddIP(false); err != nil {
-					log.Errorf("error adding virtual IP: %v", err)
+					log.Error("error adding virtual IP", "err", err)
 				}
 
 			}
