@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
@@ -148,7 +149,32 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						log.Warnf("(svcs) already found existing address [%s] on adapter [%s]", addr, sm.config.Interface)
 					}
 				}
+				// This service has been modified, but it was also active..
+				if activeService[string(svc.UID)] {
 
+					i := sm.findServiceInstance(svc)
+					if i != nil {
+						originalService := fetchServiceAddresses(i.serviceSnapshot)
+						newService := fetchServiceAddresses(svc)
+						if !reflect.DeepEqual(originalService, newService) {
+
+							// Calls the cancel function of the context
+							if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
+								log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
+								activeServiceLoadBalancerCancel[string(svc.UID)]()
+								<-activeServiceLoadBalancer[string(svc.UID)].Done()
+								log.Warn("(svcs) waiting for load balancer to finish")
+							}
+							err = sm.deleteService(svc.UID)
+							if err != nil {
+								log.Errorf("(svc) unable to remove existing [%s]", svc.UID)
+							}
+						}
+						// in theory this should never fail
+
+					}
+
+				}
 			}
 
 			// Architecture walkthrough: (Had to do this as this code path is making my head hurt)
@@ -230,30 +256,25 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							wg.Done()
 						}()
 					} else {
-						log.Info("(svcs) restartable service watcher starting")
-						// Increment the waitGroup before the service Func is called (Done is completed in there)
 						wg.Add(1)
 
 						go func() {
-							leaderContext := context.WithoutCancel(ctx)
-
-							// This is a blocking function, that will restart (in the event of failure)
+							defer wg.Done()
 							for {
-								// if the context isn't cancelled restart
-								if leaderContext.Err() != context.Canceled {
-									activeService[string(svc.UID)] = true
-
+								select {
+								case <-activeServiceLoadBalancer[string(svc.UID)].Done():
+									log.Warnf("(svcs) restartable service watcher ending for [%s]", svc.UID)
+									return
+								default:
+									log.Infof("(svcs) restartable service watcher starting for [%s]", svc.UID)
 									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
 
 									if err != nil {
 										log.Error(err)
 									}
-									activeService[string(svc.UID)] = false
-								} else {
-									activeService[string(svc.UID)] = false
-									break
 								}
 							}
+
 						}()
 					}
 				} else {
