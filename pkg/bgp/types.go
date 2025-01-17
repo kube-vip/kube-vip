@@ -12,10 +12,13 @@ type Peer struct {
 
 // Config defines the BGP server configuration
 type Config struct {
-	AS       uint32
-	RouterID string
-	SourceIP string
-	SourceIF string
+	AS           uint32
+	RouterID     string
+	SourceIP     string
+	SourceIF     string
+	MpbgpNexthop string
+	MpbgpIPv4    string
+	MpbgpIPv6    string
 
 	HoldTime          uint64
 	KeepaliveInterval uint64
