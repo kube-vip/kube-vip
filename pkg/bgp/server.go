@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
 	log "github.com/sirupsen/logrus"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
-func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (b *Server, err error) {
+func NewBGPServer(c *v1alpha1.BGPConfig, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent), ctrlClient client.Client) (b *Server, err error) {
 	if c.AS == 0 {
 		return nil, fmt.Errorf("you need to provide AS")
 	}
@@ -23,6 +25,14 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 	if len(c.Peers) == 0 {
 		return nil, fmt.Errorf("you need to provide at least one peer")
 	}
+
+	peers := v1alpha1.BGPPeerList{}
+
+	if err := ctrlClient.List(context.Background(), &peers, &client.ListOptions{}); err != nil {
+		return nil, fmt.Errorf("failed to list BGP peers from CRDs: %w", err)
+	}
+
+	c.UpdatePeers(&peers)
 
 	b = &Server{
 		s: gobgp.NewBgpServer(),

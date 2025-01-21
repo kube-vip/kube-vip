@@ -1,6 +1,8 @@
 package utils
 
-import "os"
+import (
+	"os"
+)
 
 func FileExists(filename string) bool {
 	info, err := os.Stat(filename)

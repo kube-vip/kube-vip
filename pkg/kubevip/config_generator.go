@@ -410,15 +410,15 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			},
 			{
 				Name:  bgpPeerAddress,
-				Value: c.BGPPeerConfig.Address,
+				Value: c.BGPPeerConfig.Spec.Address,
 			},
 			{
 				Name:  bgpPeerPassword,
-				Value: c.BGPPeerConfig.Password,
+				Value: c.BGPPeerConfig.Spec.Password,
 			},
 			{
 				Name:  bgpPeerAS,
-				Value: fmt.Sprintf("%d", c.BGPPeerConfig.AS),
+				Value: fmt.Sprintf("%d", c.BGPPeerConfig.Spec.AS),
 			},
 		}
 

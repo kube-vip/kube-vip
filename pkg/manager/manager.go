@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const plunderLock = "plndr-svcs-lock"
@@ -31,6 +32,7 @@ const plunderLock = "plndr-svcs-lock"
 type Manager struct {
 	clientSet   *kubernetes.Clientset
 	rwClientSet *kubernetes.Clientset
+	CtrlClient  client.Client
 	configMap   string
 	config      *kubevip.Config
 
@@ -64,7 +66,7 @@ type Manager struct {
 }
 
 // New will create a new managing object
-func New(configMap string, config *kubevip.Config) (*Manager, error) {
+func New(configMap string, config *kubevip.Config, ctrlClientOpt *client.Options) (*Manager, error) {
 
 	// Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
@@ -138,6 +140,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	}
 
 	var rwClientSet *kubernetes.Clientset
+	var ctrlClient client.Client
 	// if clientConfig is not nil, then we are not using etcd leader election
 	// we need to create non-timeout clientset for RetryWatcher
 	if clientConfig != nil {
@@ -146,6 +149,10 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		rwClientSet, err = k8s.NewClientset(&rwConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not create k8s clientset for retry watcher: %w", err)
+		}
+
+		if ctrlClient, err = client.New(clientConfig, *ctrlClientOpt); err != nil {
+			return nil, fmt.Errorf("could not create controller-runtime client: %w", err)
 		}
 	}
 
@@ -169,6 +176,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	return &Manager{
 		clientSet:   clientset,
 		rwClientSet: rwClientSet,
+		CtrlClient:  ctrlClient,
 		configMap:   configMap,
 		config:      config,
 		countServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{

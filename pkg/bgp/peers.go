@@ -9,6 +9,7 @@ import (
 
 	//nolint
 	"github.com/golang/protobuf/ptypes/any"
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/osrg/gobgp/v3/pkg/server"
@@ -16,12 +17,12 @@ import (
 )
 
 // AddPeer will add peers to the BGP configuration
-func (b *Server) AddPeer(peer Peer) (err error) {
+func (b *Server) AddPeer(peer v1alpha1.BGPPeer) (err error) {
 	p := &api.Peer{
 		Conf: &api.PeerConf{
-			NeighborAddress: peer.Address,
-			PeerAsn:         peer.AS,
-			AuthPassword:    peer.Password,
+			NeighborAddress: peer.Spec.Address,
+			PeerAsn:         peer.Spec.AS,
+			AuthPassword:    peer.Spec.Password,
 		},
 
 		Timers: &api.Timers{
@@ -34,13 +35,13 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 
 		// This enables routes to be sent to routers across multiple hops
 		EbgpMultihop: &api.EbgpMultihop{
-			Enabled:     peer.MultiHop,
+			Enabled:     peer.Spec.MultiHop,
 			MultihopTtl: 50,
 		},
 
 		Transport: &api.Transport{
 			MtuDiscovery:  true,
-			RemoteAddress: peer.Address,
+			RemoteAddress: peer.Spec.Address,
 			RemotePort:    uint32(179),
 		},
 	}
@@ -67,9 +68,9 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 			},
 		}
 
-		peer.setMpbgpOptions(b.c)
+		peer.SetMpbgpOptions(b.c)
 
-		ipv4Address, ipv6Address, err := peer.findMpbgpAddresses(p, b.c)
+		ipv4Address, ipv6Address, err := peer.FindMpbgpAddresses(p, b.c)
 		if err != nil {
 			return fmt.Errorf("failed to get MP-BGP addresses: %w", err)
 		}
@@ -173,7 +174,7 @@ func (b *Server) getPath(ip net.IP) (path *api.Path) {
 }
 
 // ParseBGPPeerConfig - take a string and parses it into an array of peers
-func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
+func ParseBGPPeerConfig(config string) (bgpPeers []v1alpha1.BGPPeer, err error) {
 	peers := strings.Split(config, ",")
 	if len(peers) == 0 {
 		return nil, fmt.Errorf("no BGP Peer configurations found")
@@ -244,16 +245,17 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 			}
 		}
 
-		peerConfig := Peer{
-			Address:      address,
-			AS:           uint32(ASNumber),
-			Password:     password,
-			MultiHop:     multiHop,
-			MpbgpNexthop: mpbgpNexthop,
-			MpbgpIPv4:    mpbgpIPv4,
-			MpbgpIPv6:    mpbgpIPv6,
+		peerConfig := v1alpha1.BGPPeer{
+			Spec: v1alpha1.BGPPeerSpec{
+				Address:      address,
+				AS:           uint32(ASNumber),
+				Password:     password,
+				MultiHop:     multiHop,
+				MpbgpNexthop: mpbgpNexthop,
+				MpbgpIPv4:    mpbgpIPv4,
+				MpbgpIPv6:    mpbgpIPv6,
+			},
 		}
-
 		bgpPeers = append(bgpPeers, peerConfig)
 	}
 	return

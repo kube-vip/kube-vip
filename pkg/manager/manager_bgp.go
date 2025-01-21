@@ -67,7 +67,7 @@ func (sm *Manager) startBGP() error {
 				"peer":  peerDescription,
 			}).Set(metricValue)
 		}
-	})
+	}, sm.CtrlClient)
 	if err != nil {
 		return err
 	}

@@ -431,7 +431,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.BGPPeerConfig.AS = uint32(u64)
+		c.BGPPeerConfig.Spec.AS = uint32(u64)
 	}
 
 	// Peer AS
@@ -469,13 +469,13 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			return err
 		}
-		c.BGPPeerConfig.MultiHop = b
+		c.BGPPeerConfig.Spec.MultiHop = b
 	}
 
 	// BGP Peer password
 	env = os.Getenv(bgpPeerPassword)
 	if env != "" {
-		c.BGPPeerConfig.Password = env
+		c.BGPPeerConfig.Spec.Password = env
 	}
 
 	// BGP Source Interface
@@ -493,7 +493,7 @@ func ParseEnvironment(c *Config) error {
 	// BGP Peer options, add them if relevant
 	env = os.Getenv(bgpPeerAddress)
 	if env != "" {
-		c.BGPPeerConfig.Address = env
+		c.BGPPeerConfig.Spec.Address = env
 		// If we've added in a peer configuration, then we should add it to the BGP configuration
 		c.BGPConfig.Peers = append(c.BGPConfig.Peers, c.BGPPeerConfig)
 	}

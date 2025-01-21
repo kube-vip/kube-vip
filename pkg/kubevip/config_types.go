@@ -1,7 +1,7 @@
 package kubevip
 
 import (
-	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 )
 
 // Config defines all of the settings for the Kube-Vip Pod
@@ -131,8 +131,8 @@ type Config struct {
 	CleanRoutingTable bool `yaml:"cleanRoutingTable"`
 
 	// BGP Configuration
-	BGPConfig     bgp.Config
-	BGPPeerConfig bgp.Peer
+	BGPConfig     v1alpha1.BGPConfig
+	BGPPeerConfig v1alpha1.BGPPeer
 	BGPPeers      []string
 
 	// EnableMetal, will use the metal API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
