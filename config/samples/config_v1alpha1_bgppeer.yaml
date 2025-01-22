@@ -1,0 +1,9 @@
+apiVersion: config.kube-vip.io/v1alpha1
+kind: BGPPeer
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-vip
+    app.kubernetes.io/managed-by: kustomize
+  name: bgppeer-sample
+spec:
+  # TODO(user): Add fields here

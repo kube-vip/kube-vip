@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/davecgh/go-spew/spew"
@@ -149,8 +149,8 @@ func (sm *Manager) annotationsWatcher() error {
 // * `<info>` is the relevant information, such as `node-asn` or `peer-ip`
 // * `{{n}}` is the number of the peer, always starting with `0`
 // * kube-vip is only designed to manage one peer, just look for {{n}} == 0
-func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
-	bgpPeer := bgp.Peer{}
+func parseBgpAnnotations(bgpConfig v1alpha1.BGPConfig, node *v1.Node, prefix string) (v1alpha1.BGPConfig, v1alpha1.BGPPeer, error) {
+	bgpPeer := v1alpha1.BGPPeer{}
 
 	nodeASN := ""
 	for k, v := range node.Annotations {
@@ -201,7 +201,7 @@ func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bg
 		return bgpConfig, bgpPeer, err
 	}
 
-	bgpPeer.AS = uint32(u64)
+	bgpPeer.Spec.AS = uint32(u64)
 
 	peerIPString := ""
 	for k, v := range node.Annotations {
@@ -214,12 +214,12 @@ func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bg
 
 	peerIPs := strings.Split(peerIPString, ",")
 
-	bgpConfig.Peers = make([]bgp.Peer, 0, len(peerIPs))
+	bgpConfig.Peers = make([]v1alpha1.BGPPeer, 0, len(peerIPs))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 
 		if ipAddr != "" {
-			bgpPeer.Address = ipAddr
+			bgpPeer.Spec.Address = ipAddr
 			// Check if we're also expecting a password for this peer
 			base64BGPPassword := ""
 			for k, v := range node.Annotations {
@@ -235,7 +235,7 @@ func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bg
 					return bgpConfig, bgpPeer, err
 				}
 				// Set the password for each peer
-				bgpPeer.Password = string(decodedPassword)
+				bgpPeer.Spec.Password = string(decodedPassword)
 			}
 			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
 		}

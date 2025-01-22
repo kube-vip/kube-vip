@@ -3,7 +3,7 @@ package equinixmetal
 import (
 	"fmt"
 
-	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
@@ -50,11 +50,13 @@ func BGPLookup(c *packngo.Client, k *kubevip.Config) error {
 
 	// Add the peer(s)
 	for x := range neighbours[0].PeerIps {
-		peer := bgp.Peer{
-			Address:  neighbours[0].PeerIps[x],
-			AS:       uint32(neighbours[0].PeerAs), //nolint (being removed)
-			MultiHop: neighbours[0].Multihop,
-			Password: neighbours[0].Md5Password,
+		peer := v1alpha1.BGPPeer{
+			Spec: v1alpha1.BGPPeerSpec{
+				Address:  neighbours[0].PeerIps[x],
+				AS:       uint32(neighbours[0].PeerAs), //nolint (being removed)
+				MultiHop: neighbours[0].Multihop,
+				Password: neighbours[0].Md5Password,
+			},
 		}
 		k.BGPConfig.Peers = append(k.BGPConfig.Peers, peer)
 	}

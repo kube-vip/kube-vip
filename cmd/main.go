@@ -14,11 +14,19 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
+	"github.com/kube-vip/kube-vip/api/v1alpha1"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+
+	// +kubebuilder:scaffold:imports
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Is kube-vip running within cluster
@@ -53,7 +61,16 @@ var kubeVipCmd = &cobra.Command{
 	Short: "This is a server for providing a Virtual IP and load-balancer for the Kubernetes control-plane",
 }
 
+var (
+	scheme = runtime.NewScheme()
+)
+
 func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	// +kubebuilder:scaffold:scheme
+
 	// Basic flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
@@ -99,10 +116,10 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.AS, "localAS", 65000, "The local AS number for the bgp server")
 	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.HoldTime, "bgpHoldTimer", 30, "The hold timer for all bgp peers (it defines the time a session is held)")
 	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.KeepaliveInterval, "bgpKeepAliveInterval", 10, "The keepalive interval for all bgp peers (it defines the heartbeat of keepalive messages)")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
-	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.MultiHop, "multihop", false, "This will enable BGP multihop support")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Spec.Address, "peerAddress", "", "The address of a BGP peer")
+	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.Spec.AS, "peerAS", 65000, "The AS number for a BGP peer")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Spec.Password, "peerPass", "", "The md5 password for a BGP peer")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPPeerConfig.Spec.MultiHop, "multihop", false, "This will enable BGP multihop support")
 	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPPeers, "bgppeers", []string{}, "Comma separated BGP Peer, format: address:as:password:multihop")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
 
@@ -217,8 +234,12 @@ var kubeVipService = &cobra.Command{
 			}
 		}
 
+		ctrlClientOptions := &client.Options{
+			Scheme: scheme,
+		}
+
 		// Define the new service manager
-		mgr, err := manager.New(configMap, &initConfig)
+		mgr, err := manager.New(configMap, &initConfig, ctrlClientOptions)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -366,8 +387,12 @@ var kubeVipManager = &cobra.Command{
 			}
 		}
 
+		ctrlClientOptions := &client.Options{
+			Scheme: scheme,
+		}
+
 		// Define the new service manager
-		mgr, err := manager.New(configMap, &initConfig)
+		mgr, err := manager.New(configMap, &initConfig, ctrlClientOptions)
 		if err != nil {
 			log.Fatalf("configuring new Manager error -> %v", err)
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/packethost/packngo"
 
@@ -30,12 +31,14 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	watchtools "k8s.io/client-go/tools/watch"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
 	KubernetesClient   *kubernetes.Clientset
 	RetryWatcherClient *kubernetes.Clientset
+	CtrlMgr            ctrl.Manager
 	// This channel is used to signal a shutdown
 	SignalChan chan os.Signal
 
@@ -86,9 +89,20 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create k8s client for retry watcher: %w", err)
 	}
 
+	ctrlConfig, err := k8s.NewRestConfig(path, inCluster, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create k8s REST config for controller-runtime client: %w", err)
+	}
+
+	ctrlMgr, err := ctrl.NewManager(ctrlConfig, manager.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create controller-runtime client: %w", err)
+	}
+
 	return &Manager{
 		KubernetesClient:   clientset,
 		RetryWatcherClient: rwClientSet,
+		CtrlMgr:            ctrlMgr,
 	}, nil
 }
 
@@ -179,7 +193,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	if c.EnableBGP && bgpServer == nil {
 		// Lets start BGP
 		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
-		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig, nil)
+		bgpServer, err = bgp.NewBGPServer(&c.BGPConfig, nil, sm.CtrlMgr.GetClient())
 		if err != nil {
 			log.Error(err)
 		}

@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- config_v1alpha1_bgppeer.yaml
+- config_v1alpha1_testtest.yaml
+- config_v1alpha1_testtesttest.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
