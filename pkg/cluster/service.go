@@ -131,7 +131,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				if isIPv6 {
 					ndp, err = vip.NewNDPResponder(cluster.Network[i].Interface())
 					if err != nil {
-						log.Fatalf("failed to create new NDP Responder")
+						log.Fatalf("failed to create new NDP Responder: %v", err)
 					}
 				}
 
@@ -350,7 +350,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			if vip.IsIPv6(ipString) {
 				ndp, err = vip.NewNDPResponder(network.Interface())
 				if err != nil {
-					log.Fatalf("failed to create new NDP Responder")
+					log.Fatalf("failed to create new NDP Responder: %v", err)
 				}
 			}
 			go func(ctx context.Context) {
