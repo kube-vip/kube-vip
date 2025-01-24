@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 
-	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -64,7 +63,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	return nil
 }
 
-func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp.Server, packetClient *packngo.Client) error {
+func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp.Server) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	ctxArp, cancelArp := context.WithCancel(context.Background())
@@ -75,5 +74,5 @@ func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp
 	ctxDNS, cancelDNS := context.WithCancel(context.Background())
 	defer cancelDNS()
 
-	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp, packetClient)
+	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp)
 }

@@ -3,14 +3,11 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
-	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	api "github.com/osrg/gobgp/v3/api"
-	"github.com/packethost/packngo"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 )
@@ -20,35 +17,6 @@ func (sm *Manager) startBGP() error {
 	var cpCluster *cluster.Cluster
 	// var ns string
 	var err error
-
-	// If Equinix Metal is enabled then we can begin our preparation work
-	var packetClient *packngo.Client
-	if sm.config.EnableMetal {
-		if sm.config.ProviderConfig != "" {
-			key, project, err := equinixmetal.GetPacketConfig(sm.config.ProviderConfig)
-			if err != nil {
-				return err
-			}
-			// Set the environment variable with the key for the project
-			os.Setenv("PACKET_AUTH_TOKEN", key)
-			// Update the configuration with the project key
-			sm.config.MetalProjectID = project
-
-		}
-		packetClient, err = packngo.NewClient()
-		if err != nil {
-			return err
-		}
-
-		// We're using Equinix Metal with BGP, populate the Peer information from the API
-		if sm.config.EnableBGP {
-			log.Infoln("Looking up the BGP configuration from Equinix Metal")
-			err = equinixmetal.BGPLookup(packetClient, sm.config)
-			if err != nil {
-				return err
-			}
-		}
-	}
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
 	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
@@ -112,7 +80,7 @@ func (sm *Manager) startBGP() error {
 			if sm.config.EnableLeaderElection {
 				err = cpCluster.StartCluster(sm.config, clusterManager, sm.bgpServer)
 			} else {
-				err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer, packetClient)
+				err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer)
 			}
 			if err != nil {
 				log.Errorf("Control Plane Error [%v]", err)
