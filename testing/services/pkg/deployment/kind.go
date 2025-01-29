@@ -48,6 +48,10 @@ func (config *TestConfig) CreateKind() error {
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.DualStackFamily
 	}
 
+	if config.Cilium {
+		clusterConfig.Networking.DisableDefaultCNI = true
+	}
+
 	if config.ControlPlane {
 		err := config.manifestGen()
 		if err != nil {
@@ -120,6 +124,11 @@ func (config *TestConfig) CreateKind() error {
 					return err
 				}
 			}
+		}
+
+		if config.Cilium {
+			cmd := exec.Command("cilium", "install", "--helm-set", "ipv6.enabled=true", "--helm-set", "--enable-ipv6-ndp=true")
+			_, _ = cmd.CombinedOutput()
 		}
 
 		// HMMM, if we want to run workloads on the control planes (todo)
