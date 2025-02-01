@@ -42,6 +42,9 @@ type TestConfig struct {
 	DeploymentName string
 	ServiceName    string
 	LeaderName     string
+
+	// Cilium config
+	Cilium bool
 }
 
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {

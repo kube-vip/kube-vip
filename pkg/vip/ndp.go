@@ -66,6 +66,7 @@ func (n *NdpResponder) advertise(dst, target netip.Addr, gratuitous bool) error 
 			},
 		},
 	}
+  
 	log.Debug("ndp", "advertisement", m)
 	return n.conn.WriteTo(m, nil, dst)
 }
