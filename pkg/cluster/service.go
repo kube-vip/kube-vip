@@ -377,12 +377,12 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	ipString := network.IP()
 	if vip.IsIPv6(ipString) {
 		if network.IPisLinkLocal() {
-			log.Errorf("IPv6 address[%s] is link-local can't advertise with NDP", ipString)
+			log.Error("layer2 is link-local can't use NDP", "address", ipString)
 
 		} else {
 			ndp, err = vip.NewNDPResponder(network.Interface())
 			if err != nil {
-				log.Errorf("failed to create new NDP Responder: %v", err)
+				log.Error("failed to create new NDP Responder", "error", err)
 			} else {
 				if ndp != nil {
 					defer ndp.Close()
@@ -391,18 +391,18 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 		}
 	}
 
-	log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
+	log.Debug("layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 
 	for {
 		select {
 		case <-ctx.Done(): // if cancel() execute
-			log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
+			log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 			return
 		default:
 			cluster.ensureIPAndSendGratuitous(network, ndp)
 		}
 		if c.ArpBroadcastRate < 500 {
-			log.Errorf("arp broadcast rate is [%d], this shouldn't be lower that 300ms (defaulting to 3000)", c.ArpBroadcastRate)
+			log.Error("arp broadcast rate is too low", "rate (ms)", c.ArpBroadcastRate, "setting to (ms)", "3000")
 			c.ArpBroadcastRate = 3000
 		}
 		time.Sleep(time.Duration(c.ArpBroadcastRate) * time.Millisecond)
