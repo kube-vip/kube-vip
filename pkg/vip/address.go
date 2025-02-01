@@ -34,6 +34,7 @@ type Network interface {
 	UpdateRoutes() (bool, error)
 	IsSet() (bool, error)
 	IP() string
+	IPisLinkLocal() bool
 	PrepareRoute() *netlink.Route
 	SetIP(ip string) error
 	SetServicePorts(service *v1.Service)
@@ -636,6 +637,14 @@ func (configurator *network) IP() string {
 	defer configurator.mu.Unlock()
 
 	return configurator.address.IP.String()
+}
+
+// IP - return the IP Address
+func (configurator *network) IPisLinkLocal() bool {
+	configurator.mu.Lock()
+	defer configurator.mu.Unlock()
+
+	return configurator.address.IP.IsLinkLocalUnicast()
 }
 
 // DNSName return the configured dnsName when use DNS

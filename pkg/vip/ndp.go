@@ -50,7 +50,7 @@ func (n *NdpResponder) SendGratuitous(address string) error {
 		return fmt.Errorf("failed to parse address %s", ip)
 	}
 
-	log.Infof("Broadcasting NDP update for %s (%s) via %s", address, n.hardwareAddr, n.intf)
+	log.Debugf("Broadcasting NDP update for %s (%s) via %s", address, n.hardwareAddr, n.intf)
 	return n.advertise(netip.IPv6LinkLocalAllNodes(), ip, true)
 }
 
@@ -66,6 +66,6 @@ func (n *NdpResponder) advertise(dst, target netip.Addr, gratuitous bool) error 
 			},
 		},
 	}
-	log.Infof("ndp: %v", m)
+	log.Debugf("ndp: %v", m)
 	return n.conn.WriteTo(m, nil, dst)
 }
