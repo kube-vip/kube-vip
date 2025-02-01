@@ -364,7 +364,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 }
 
 // Layer2Update, handles the creation of the
-func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config) error {
+func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config) {
 	log.Info("layer 2 broadcaster starting")
 	var ndp *vip.NdpResponder
 	var err error
@@ -377,19 +377,21 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 			ndp, err = vip.NewNDPResponder(network.Interface())
 			if err != nil {
 				log.Errorf("failed to create new NDP Responder: %v", err)
+			} else {
+				if ndp != nil {
+					defer ndp.Close()
+				}
 			}
 		}
 	}
-	if ndp != nil {
-		defer ndp.Close()
-	}
+
 	log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
 
 	for {
 		select {
 		case <-ctx.Done(): // if cancel() execute
 			log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
-			return nil
+			return
 		default:
 			cluster.ensureIPAndSendGratuitous(network, ndp)
 		}
