@@ -129,9 +129,14 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 				var ndp *vip.NdpResponder
 				if isIPv6 {
-					ndp, err = vip.NewNDPResponder(cluster.Network[i].Interface())
-					if err != nil {
-						log.Fatalf("failed to create new NDP Responder: %v", err)
+					if cluster.Network[i].IPisLinkLocal() {
+						log.Errorf("IPv6 address[%s] is link-local can't advertise with NDP", ipString)
+
+					} else {
+						ndp, err = vip.NewNDPResponder(cluster.Network[i].Interface())
+						if err != nil {
+							log.Errorf("failed to create new NDP Responder: %v", err)
+						}
 					}
 				}
 
@@ -348,9 +353,14 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			ipString := network.IP()
 			var ndp *vip.NdpResponder
 			if vip.IsIPv6(ipString) {
-				ndp, err = vip.NewNDPResponder(network.Interface())
-				if err != nil {
-					log.Fatalf("failed to create new NDP Responder: %v", err)
+				if cluster.Network[i].IPisLinkLocal() {
+					log.Errorf("IPv6 address[%s] is link-local can't advertise with NDP", ipString)
+
+				} else {
+					ndp, err = vip.NewNDPResponder(cluster.Network[i].Interface())
+					if err != nil {
+						log.Errorf("failed to create new NDP Responder: %v", err)
+					}
 				}
 			}
 			go func(ctx context.Context) {
