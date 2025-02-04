@@ -13,11 +13,9 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	"github.com/packethost/packngo"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,7 +23,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, packetClient *packngo.Client) error {
+func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
 	var err error
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
@@ -71,18 +69,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			}
 			if err = cluster.Network[i].AddIP(false); err != nil {
 				log.Fatalf("%v", err)
-			}
-		}
-
-		if c.EnableMetal {
-			// We're not using Equinix Metal with BGP
-			if !c.EnableBGP {
-				// Attempt to attach the EIP in the standard manner
-				log.Debugf("Attaching the Equinix Metal EIP through the API to this host")
-				err = equinixmetal.AttachEIP(packetClient, c, c.NodeName)
-				if err != nil {
-					log.Error(err)
-				}
 			}
 		}
 
