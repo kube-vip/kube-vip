@@ -541,6 +541,9 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 					"NET_ADMIN",
 					"NET_RAW",
 				},
+				Drop: []corev1.Capability{
+					"ALL",
+				},
 			},
 		}
 	}
