@@ -19,10 +19,6 @@ func ParseEnvironment(c *Config) error {
 	}
 	// Ensure that logging is set through the environment variables
 	env := os.Getenv(vipLogLevel)
-	// Set default value
-	if env == "" {
-		env = "4"
-	}
 
 	if env != "" {
 		logLevel, err := strconv.ParseInt(env, 10, 32)
@@ -442,6 +438,24 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.BGPConfig.Peers = peers
+	}
+
+	// MPBGP mode
+	env = os.Getenv(mpbgpNexthop)
+	if env != "" {
+		c.BGPConfig.MpbgpNexthop = env
+	}
+
+	// MPBGP fixed IPv4
+	env = os.Getenv(mpbgpIPv4)
+	if env != "" {
+		c.BGPConfig.MpbgpIPv4 = env
+	}
+
+	// MPBGP fixed IPv6
+	env = os.Getenv(mpbgpIPv6)
+	if env != "" {
+		c.BGPConfig.MpbgpIPv6 = env
 	}
 
 	// BGP Peer mutlihop

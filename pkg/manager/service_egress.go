@@ -8,9 +8,10 @@ import (
 	"os"
 	"strings"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -58,7 +59,7 @@ func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how thi
 				matchingFamily = append(matchingFamily, cidr)
 				selectedCIDR, err := checkCIDR(ip, cidr)
 				if err != nil {
-					log.Warnf("IPv6 CIDR check failed: %s", err.Error())
+					log.Warn("IPv6 CIDR check ", "err", err)
 					continue
 				}
 				if selectedCIDR != "" {
@@ -70,7 +71,7 @@ func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how thi
 				matchingFamily = append(matchingFamily, cidr)
 				selectedCidr, err := checkCIDR(ip, cidr)
 				if err != nil {
-					log.Warnf("IPv4 CIDR check failed: %s", err.Error())
+					log.Warn("IPv4 CIDR check ", "err", err)
 					continue
 				}
 				if selectedCidr != "" {
@@ -121,7 +122,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	}
 
 	if discoverErr != nil {
-		log.Warn(discoverErr)
+		log.Warn("autodiscover CIDR", "err", discoverErr)
 	}
 
 	if sm.config.EgressPodCidr != "" {
@@ -156,21 +157,21 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		serviceCidr = defaultServiceCIDR
 	}
 
-	log.Infof("[Egress] pod CIDR [%s], service CIDR [%s] for vip [%s] / pod [%s]", podCidr, serviceCidr, vipIP, podIP)
+	log.Info("[Egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
 
 	// checking if all addresses are of the same IP family
 	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {
-		log.Errorf("[Egress] pod's IP [%s] and Pod CIDR [%s] family is not matching. Backing off...", podIP, podCidr)
+		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "podCIDR", podCidr)
 		return nil
 	}
 
 	if vip.IsIPv4(vipIP) != vip.IsIPv4CIDR(serviceCidr) {
-		log.Errorf("[Egress] VIP's IP [%s] and Service CIDR [%s] family is not matching. Backing off...", podIP, podCidr)
+		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "serviceCIDR", serviceCidr)
 		return nil
 	}
 
 	if vip.IsIPv4(vipIP) != vip.IsIPv4(podIP) {
-		log.Errorf("[Egress] VIP's IP [%s] and Pod's IP [%s] family is not matching. Backing off...", podIP, podCidr)
+		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "vipIP", vipIP)
 		return nil
 	}
 
@@ -279,7 +280,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 }
 
 func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
-	log.Debugf("Trying to automatically discover Service and Pod CIDRs")
+	log.Debug("Trying to automatically discover Service and Pod CIDRs")
 	options := v1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
