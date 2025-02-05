@@ -44,6 +44,8 @@ func main() {
 	flag.StringVar(&t.KindVersionImage, "kindImage", "", "The image to use for the kind nodes e.g. (kindest/node:v1.21.14)")
 	flag.BoolVar(&existing, "existing", false, "Use an existing cluster")
 
+	flag.BoolVar(&t.Cilium, "cilium", false, "Use cilium as a CNI")
+
 	flag.Parse()
 
 	slog.Infof("🔬 beginning e2e tests, image: [%s] DualStack [%t]", t.ImagePath, t.DualStack)

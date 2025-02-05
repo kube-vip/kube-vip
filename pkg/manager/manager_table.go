@@ -8,10 +8,11 @@ import (
 	"syscall"
 	"time"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -27,14 +28,14 @@ func (sm *Manager) startTableMode(id string) error {
 	// want to step down
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	log.Infof("all routing table entries will exist in table [%d] with protocol [%d]", sm.config.RoutingTableID, sm.config.RoutingProtocol)
+	log.Info("destination for routes", "table", sm.config.RoutingTableID, "protocol", sm.config.RoutingProtocol)
 
 	if sm.config.CleanRoutingTable {
 		go func() {
 			// we assume that after 10s all services should be configured so we can delete redundant routes
 			time.Sleep(time.Second * 10)
 			if err := sm.cleanRoutes(); err != nil {
-				log.Errorf("error checking for old routes: %v", err)
+				log.Error("error checking for old routes", "err", err)
 			}
 		}()
 	}
@@ -43,12 +44,12 @@ func (sm *Manager) startTableMode(id string) error {
 	if egressCleanEnv != "" {
 		egressClean, err := strconv.ParseBool(egressCleanEnv)
 		if err != nil {
-			log.Warnf("failed to parse EGRESS_CLEAN env value [%s]. Egress cleaning will not be performed: %s", egressCleanEnv, err.Error())
+			log.Warn("failed to parse EGRESS_CLEAN env value [%s]. Egress cleaning will not be performed: %s", egressCleanEnv, err.Error())
 		}
 		if egressClean {
 			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
-			log.Debug("IPTables rules cleaned on startup")
+			log.Debug("IPtables rules cleaned on startup")
 		}
 	}
 
@@ -76,28 +77,28 @@ func (sm *Manager) startTableMode(id string) error {
 		}
 
 		if err := cpCluster.StartVipService(sm.config, clusterManager, nil, nil); err != nil {
-			log.Errorf("Control Plane Error [%v]", err)
+			log.Error("Control Plane", "err", err)
 			// Trigger the shutdown of this manager instance
 			sm.signalChan <- syscall.SIGINT
 		}
 	} else {
 		ns, err := returnNameSpace()
 		if err != nil {
-			log.Warnf("unable to auto-detect namespace, dropping to [%s]", sm.config.Namespace)
+			log.Warn("unable to auto-detect namespace", "dropping to", sm.config.Namespace)
 			ns = sm.config.Namespace
 		}
 
 		// Start a services watcher (all kube-vip pods will watch services), upon a new service
 		// a lock based upon that service is created that they will all leaderElection on
 		if sm.config.EnableServicesElection {
-			log.Infof("beginning watching services, leaderelection will happen for every service")
+			log.Info("beginning watching services, leaderelection will happen for every service")
 			err = sm.startServicesWatchForLeaderElection(ctx)
 			if err != nil {
 				return err
 			}
 		} else if sm.config.EnableLeaderElection {
 
-			log.Infof("beginning services leadership, namespace [%s], lock name [%s], id [%s]", ns, plunderLock, id)
+			log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
 			// we use the Lease lock type since edits to Leases are less common
 			// and fewer objects in the cluster watch "all Leases".
 			lock := &resourcelock.LeaseLock{
@@ -127,19 +128,21 @@ func (sm *Manager) startTableMode(id string) error {
 					OnStartedLeading: func(ctx context.Context) {
 						err = sm.servicesWatcher(ctx, sm.syncServices)
 						if err != nil {
-							log.Fatal(err)
+							log.Error(err.Error())
+							panic("")
 						}
 					},
 					OnStoppedLeading: func() {
 						// we can do cleanup here
-						log.Infof("leader lost: %s", id)
+						log.Info("leader lost", "id", id)
 						for _, instance := range sm.serviceInstances {
 							for _, cluster := range instance.clusters {
 								cluster.Stop()
 							}
 						}
 
-						log.Fatal("lost leadership, restarting kube-vip")
+						log.Error("lost leadership, restarting kube-vip")
+						panic("")
 					},
 					OnNewLeader: func(identity string) {
 						// we're notified when new leader elected
@@ -147,15 +150,15 @@ func (sm *Manager) startTableMode(id string) error {
 							// I just got the lock
 							return
 						}
-						log.Infof("new leader elected: %s", identity)
+						log.Info("new leader elected", "id", identity)
 					},
 				},
 			})
 		} else {
-			log.Infof("beginning watching services without leader election")
+			log.Info("beginning watching services without leader election")
 			err = sm.servicesWatcher(ctx, sm.syncServices)
 			if err != nil {
-				log.Errorf("Cannot watch services, %v", err)
+				log.Error("Cannot watch services", "err", err)
 			}
 		}
 	}
@@ -189,9 +192,9 @@ func (sm *Manager) cleanRoutes() error {
 		if !found {
 			err = netlink.RouteDel(&(routes[i]))
 			if err != nil {
-				log.Errorf("[route] error deleting route: %v", routes[i])
+				log.Error("[route] deletion", "route", routes[i], "err", err)
 			}
-			log.Debugf("[route] deleted route: %v", routes[i])
+			log.Debug("[route] deletion", "route", routes[i])
 		}
 
 	}

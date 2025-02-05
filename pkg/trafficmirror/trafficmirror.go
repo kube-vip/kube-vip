@@ -4,7 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -27,16 +28,15 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 		return fmt.Errorf("failed to find nic %s: %v", toNICName, err)
 	}
 	toNICID := toNIC.Attrs().Index
+	log.Debug(fmt.Sprintf("interface %s has index %d", fromNICName, fromNICID))
+	log.Debug(fmt.Sprintf("interface %s has index %d", toNICName, toNICID))
 
-	log.Debugf("interface %s has index %d", fromNICName, fromNICID)
-	log.Debugf("interface %s has index %d", toNICName, toNICID)
-
-	log.Debugf("clean up interface %s first in case it has stale qdsic", fromNICName)
+	log.Debug(fmt.Sprintf("clean up interface %s first in case it has stale qdsic", fromNICName))
 	if err := CleanupQDSICFromNIC(fromNICName); err != nil {
 		return err
 	}
 
-	log.Debugf("step 1: tc qdisc add dev %s ingress", fromNICName)
+	log.Debug(fmt.Sprintf("step 1: tc qdisc add dev %s ingress", fromNICName))
 	qdisc1 := &netlink.Ingress{
 		QdiscAttrs: netlink.QdiscAttrs{
 			LinkIndex: fromNICID,
@@ -48,7 +48,7 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 		return fmt.Errorf("failed to add qdisc for interface %s: %v", fromNICName, err)
 	}
 
-	log.Debugf("step 2: tc filter add dev %s parent ffff: protocol ip u32 match u8 0 0 action mirred egress mirror dev %s", fromNICName, toNICName)
+	log.Debug(fmt.Sprintf("step 2: tc filter add dev %s parent ffff: protocol ip u32 match u8 0 0 action mirred egress mirror dev %s", fromNICName, toNICName))
 	// add a filter to mirror traffic from index1 to index2
 	filter1 := &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
@@ -71,7 +71,7 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 		return fmt.Errorf("failed to add filter for interface %s: %v", fromNICName, err)
 	}
 
-	log.Debugf("step 3: tc qdisc add dev %s ingress", fromNICName)
+	log.Debug(fmt.Sprintf("step 3: tc qdisc add dev %s ingress", fromNICName))
 	qdiscTemp := netlink.NewPrio(netlink.QdiscAttrs{
 		LinkIndex: fromNICID,
 		Parent:    netlink.HANDLE_ROOT,
@@ -90,7 +90,7 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 		return err
 	}
 
-	log.Debugf("step 4: tc filter add dev %s parent %d: protocol ip u32 match u8 0 0 action mirred egress mirror dev %s", fromNICName, qdiscID, toNICName)
+	log.Debug(fmt.Sprintf("step 4: tc filter add dev %s parent %d: protocol ip u32 match u8 0 0 action mirred egress mirror dev %s", fromNICName, qdiscID, toNICName))
 
 	filter2 := &netlink.U32{
 		FilterAttrs: netlink.FilterAttrs{
@@ -113,7 +113,7 @@ func MirrorTrafficFromNIC(fromNICName, toNICName string) error {
 		return fmt.Errorf("failed to add filter for interface %s: %v", fromNICName, err)
 	}
 
-	log.Infof("traffic mirroring has been set up from interface %s to interface %s", toNICName, fromNICName)
+	log.Info("traffic mirroring has been set up", "src", toNICName, "dst", fromNICName)
 	return nil
 }
 
@@ -126,7 +126,7 @@ func CleanupQDSICFromNIC(nicName string) error {
 	}
 	nicID := toNIC.Attrs().Index
 
-	log.Debugf("interface %s has index %d", nicName, nicID)
+	log.Debug(fmt.Sprintf("interface %s has index %d", nicName, nicID))
 
 	log.Debug("step 1: delete ingress qdisc")
 	if err := tryCleanupQdiscByType(nicID, nicName, "ingress"); err != nil {
@@ -138,7 +138,7 @@ func CleanupQDSICFromNIC(nicName string) error {
 		return err
 	}
 
-	log.Infof("finished cleaning up all qdisc config on interface %s", nicName)
+	log.Info("finished cleaning up all qdisc config", "interface", nicName)
 	return nil
 }
 
@@ -154,7 +154,7 @@ func getQdiscFromInterfaceByType(nicID int, nicName string, qType string) (uint3
 			return q.Attrs().Handle, nil
 		}
 	}
-	log.Errorf("no qdisc under interface %s is %s type", nicName, qType)
+	log.Error("no qdisc", "interface", nicName, "is of type", qType)
 	return 0, errQdiscNotFound
 }
 
@@ -178,7 +178,7 @@ func tryCleanupQdiscByType(nicID int, nicName, qType string) error {
 	_, err := getQdiscFromInterfaceByType(nicID, nicName, qType)
 	if err != nil {
 		if err == errQdiscNotFound {
-			log.Debugf("%s type qdisc doesn't exist on interface %s, skip deleting", qType, nicName)
+			log.Debug(fmt.Sprintf("%s type qdisc doesn't exist on interface %s, skip deleting", qType, nicName))
 			return nil
 		}
 		return err

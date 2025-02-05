@@ -9,8 +9,9 @@ import (
 	"sync"
 	"syscall"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -85,17 +86,17 @@ func (ep *endpointsProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]
 
 	for _, subset := range ep.endpoints.Subsets {
 		for _, address := range subset.Addresses {
-			log.Debugf("[%s] processing endpoint [%s]", ep.label, address.IP)
+			log.Debug("processing endpoint", "label", ep.label, "ip", address.IP)
 
 			// 1. Compare the Nodename
 			if address.NodeName != nil && id == *address.NodeName {
-				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s, node: %s", ep.label, address.IP, address.Hostname, *address.NodeName)
+				log.Debug("found local endpoint", "label", ep.label, "ip", address.IP, "hostname", address.Hostname, "nodename", *address.NodeName)
 				localEndpoints = append(localEndpoints, address.IP)
 				continue
 			}
 			// 2. Compare the Hostname (only useful if address.NodeName is not available)
 			if id == address.Hostname {
-				log.Debugf("[%s] found local endpoint - address: %s, hostname: %s", ep.label, address.IP, address.Hostname)
+				log.Debug("found local endpoint", "label", ep.label, "ip", address.IP, "hostname", address.Hostname)
 				localEndpoints = append(localEndpoints, address.IP)
 				continue
 			}
@@ -122,14 +123,14 @@ func (ep *endpointsProvider) updateServiceAnnotation(endpoint string, _ string, 
 
 		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
-			log.Errorf("[%s] error updating Service Spec [%s] : %v", ep.getLabel(), currentServiceCopy.Name, err)
+			log.Error("error updating Service Spec", "label", ep.getLabel(), "name", currentServiceCopy.Name, "err", err)
 			return err
 		}
 		return nil
 	})
 
 	if retryErr != nil {
-		log.Errorf("[%s] failed to set Services: %v", ep.getLabel(), retryErr)
+		log.Error("failed to set Services", "label", ep.getLabel(), "err", retryErr)
 		return retryErr
 	}
 	return nil
@@ -144,7 +145,7 @@ func (ep *endpointsProvider) getProtocol() string {
 }
 
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup, provider epProvider) error {
-	log.Infof("[%s] watching for service [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
+	log.Info("watching", "provider", provider.getLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	leaderContext, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -161,21 +162,21 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 	go func() {
 		select {
 		case <-ctx.Done():
-			log.Debugf("[%s] context cancelled", provider.getLabel())
+			log.Debug("context cancelled", "provider", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
 			cancel()
 			return
 		case <-sm.shutdownChan:
-			log.Debugf("[%s] shutdown called", provider.getLabel())
+			log.Debug("shutdown called", "provider", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
 			cancel()
 			return
 		case <-exitFunction:
-			log.Debugf("[%s] function ending", provider.getLabel())
+			log.Debug("function ending", "provider", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
@@ -244,11 +245,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if sm.config.EnableRoutingTable {
 							if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP,
 								service.Namespace, service.Annotations); err != nil {
-								log.Warnf("error removing redundant egress rules: %s", err.Error())
+								log.Warn("removing redundant egress rules", "err", err)
 							}
 						}
 						if leaderElectionActive && (sm.config.EnableServicesElection || sm.config.EnableLeaderElection) {
-							log.Warnf("[%s] existing [%s] has been removed, restarting leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
+							log.Warn(" existing endpoint has been removed, restarting leaderElection", "provider", provider.getLabel(), "endpoint", lastKnownGoodEndpoint)
 							// Stop the existing leaderElection
 							cancel()
 							// disable last leaderElection flag
@@ -272,7 +273,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 								leaderElectionActive = true
 								err := sm.StartServicesLeaderElection(leaderContext, service, wg)
 								if err != nil {
-									log.Error(err)
+									log.Error(err.Error())
 								}
 								leaderElectionActive = false
 							} else {
@@ -303,15 +304,15 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 												return fmt.Errorf("[%s] error updating existing routes: %w", provider.getLabel(), err)
 											}
 											if isUpdated {
-												log.Debugf("[%s] updated route: %s", provider.getLabel(), cluster.Network[i].IP())
+												log.Debug("updated route", "provider", provider.getLabel(), "ip", cluster.Network[i].IP())
 											}
 										} else {
 											// If other error occurs, return error
 											return fmt.Errorf("[%s] error adding route: %s", provider.getLabel(), err.Error())
 										}
 									} else {
-										log.Infof("[%s] added route: %s, service: %s/%s, interface: %s, table: %d",
-											provider.getLabel(), cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+										log.Info("added route", "provider",
+											provider.getLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", sm.config.RoutingTableID)
 										configuredLocalRoutes.Store(string(service.UID), true)
 										leaderElectionActive = true
 									}
@@ -326,13 +327,13 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
 									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									log.Debugf("[%s] attempting to advertise BGP service: %s", provider.getLabel(), address)
+									log.Debug("attempting to advertise BGP service", "provider", provider.getLabel(), "ip", address)
 									err := sm.bgpServer.AddHost(address)
 									if err != nil {
-										log.Errorf("[%s] error adding BGP host %s\n", err.Error(), provider.getLabel())
+										log.Error("error adding BGP hos", "provider", provider.getLabel(), "err", err)
 									} else {
-										log.Infof("[%s] added BGP host: %s, service: %s/%s",
-											provider.getLabel(), address, service.Namespace, service.Name)
+										log.Info("added BGP host", "provider",
+											provider.getLabel(), "ip", address, "service name", service.Name, "namespace", service.Namespace)
 										configuredLocalRoutes.Store(string(service.UID), true)
 										leaderElectionActive = true
 									}
@@ -359,10 +360,10 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
 									err := sm.bgpServer.DelHost(address)
 									if err != nil {
-										log.Errorf("[%s] error deleting BGP host%s:  %s\n", provider.getLabel(), address, err.Error())
+										log.Error("deleting BGP host", "provider", provider.getLabel(), "ip", address, "err", err)
 									} else {
-										log.Infof("[%s] deleted BGP host: %s, service: %s/%s",
-											provider.getLabel(), address, service.Namespace, service.Name)
+										log.Info("deleted BGP host", "provider",
+											provider.getLabel(), "ip", address, "service name", service.Name, "namespace", service.Namespace)
 										configuredLocalRoutes.Store(string(service.UID), false)
 										leaderElectionActive = false
 									}
@@ -374,9 +375,9 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 				// If there are no local endpoints, and we had one then remove it and stop the leaderElection
 				if lastKnownGoodEndpoint != "" {
-					log.Warnf("[%s] existing [%s] has been removed, no remaining endpoints for leaderElection", provider.getLabel(), lastKnownGoodEndpoint)
+					log.Warn("existing  endpoint has been removed, no remaining endpoints for leaderElection", "provider", provider.getLabel(), "endpoint", lastKnownGoodEndpoint)
 					if err := sm.TeardownEgress(lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations); err != nil {
-						log.Errorf("error removing redundant egress rules: %s", err.Error())
+						log.Error("error removing redundant egress rules", "err", err)
 					}
 
 					lastKnownGoodEndpoint = "" // reset endpoint
@@ -391,8 +392,8 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				service.Annotations[activeEndpointAnnotation] = lastKnownGoodEndpoint
 			}
 
-			log.Debugf("[%s watcher] service %s/%s: local endpoint(s) [%d], known good [%s], active election [%t]",
-				provider.getLabel(), service.Namespace, service.Name, len(endpoints), lastKnownGoodEndpoint, leaderElectionActive)
+			log.Debug("watcher", "provider",
+				provider.getLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", lastKnownGoodEndpoint, "active leader election", leaderElectionActive)
 
 		case watch.Deleted:
 			// When no-leader-elecition mode
@@ -426,17 +427,17 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
 			close(exitFunction)
-			log.Infof("[%s] deleted stopping watching for [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
+			log.Info("stopping watching", "provider", provider.getLabel(), "service name", service.Name, "namespace", service.Namespace)
 
 			return nil
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Errorf("[%s] -> %v", provider.getLabel(), statusErr)
+			log.Error("watch error", "provider", provider.getLabel(), "err", statusErr)
 		}
 	}
 	close(exitFunction)
-	log.Infof("[%s] stopping watching for [%s] in namespace [%s]", provider.getLabel(), service.Name, service.Namespace)
+	log.Info("stopping watching", "provider", provider.getLabel(), "service name", service.Name, "namespace", service.Namespace)
 	return nil //nolint:govet
 }
 
@@ -450,11 +451,11 @@ func (sm *Manager) clearRoutes(service *v1.Service) []error {
 				if sm.countRouteReferences(route) <= 1 {
 					err := cluster.Network[i].DeleteRoute()
 					if err != nil && !errors.Is(err, syscall.ESRCH) {
-						log.Errorf("failed to delete route for %s: %s", cluster.Network[i].IP(), err.Error())
+						log.Error("failed to delete route", "ip", cluster.Network[i].IP(), "err", err)
 						errs = append(errs, err)
 					}
-					log.Debugf("deleted route: %s, service: %s/%s, interface: %s, table: %d",
-						cluster.Network[i].IP(), service.Namespace, service.Name, cluster.Network[i].Interface(), sm.config.RoutingTableID)
+					log.Debug("deleted route", "ip",
+						cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", sm.config.RoutingTableID)
 				}
 			}
 		}
@@ -469,10 +470,10 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 				address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
 				err := sm.bgpServer.DelHost(address)
 				if err != nil {
-					log.Errorf("[endpoint] error deleting BGP host %s\n", err.Error())
+					log.Error("[endpoint] error deleting BGP host", "err", err)
 				} else {
-					log.Debugf("[endpoint] deleted BGP host: %s, service: %s/%s",
-						address, service.Namespace, service.Name)
+					log.Debug("[endpoint] deleted BGP host", "ip",
+						address, "service name", service.Name, "namespace", service.Namespace)
 				}
 			}
 		}

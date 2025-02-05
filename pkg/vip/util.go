@@ -8,8 +8,9 @@ import (
 	"strings"
 	"syscall"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -167,7 +168,7 @@ func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) erro
 	for {
 		select {
 		case r := <-routeCh:
-			log.Debugf("type: %d, route: %+v", r.Type, r.Route)
+			log.Debug(fmt.Sprintf("type: %d, route: %+v", r.Type, r.Route))
 			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
 				return fmt.Errorf("default route deleted and the default interface may be invalid")
 			}
@@ -191,7 +192,7 @@ func GenerateMac() (mac string) {
 	 * - https://macaddress.io/database-download
 	 */
 	mac = fmt.Sprintf("%s:%s:%s:%02x:%02x:%02x", "00", "00", "6C", buf[0], buf[1], buf[2])
-	log.Infof("Generated mac: %s", mac)
+	log.Info("Generated mac", "address", mac)
 	return mac
 }
 
@@ -201,4 +202,51 @@ func Split(values string) []string {
 		result[i] = strings.TrimSpace(result[i])
 	}
 	return result
+}
+
+// GetInterfaceByIP returns the network interface that has the specified IP address assigned.
+func GetInterfaceByIP(ipAddr string) (*netlink.Link, error) {
+	ip := net.ParseIP(ipAddr)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
+	}
+
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list network interfaces: %v", err)
+	}
+
+	for i := range links {
+		addrs, err := netlink.AddrList(links[i], netlink.FAMILY_ALL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list addresses for interface %s: %v", links[i].Attrs().Name, err)
+		}
+
+		for _, addr := range addrs {
+			if addr.IP.Equal(ip) {
+				return &links[i], nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no interface found with IP address: %s", ipAddr)
+}
+
+// GetNonLinkLocalIP returns the first non link-local IPv4/IPv6 address on the given interface.
+func GetNonLinkLocalIP(iface *netlink.Link, family int) (string, error) {
+	a, err := netlink.AddrList(*iface, family)
+	if err != nil {
+		return "", fmt.Errorf("failed to list addresses for interface %s: %v", (*iface).Attrs().Name, err)
+	}
+
+	for _, addr := range a {
+		if addr.IPNet != nil {
+			ip := addr.IPNet.IP
+			if !ip.IsLinkLocalUnicast() {
+				return ip.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("failed to find non-local IP on interface: %s", (*iface).Attrs().Name)
 }

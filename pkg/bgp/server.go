@@ -5,23 +5,24 @@ import (
 	"fmt"
 	"time"
 
+	log "log/slog"
+
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
-	log "github.com/sirupsen/logrus"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
 func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (b *Server, err error) {
 	if c.AS == 0 {
-		return nil, fmt.Errorf("You need to provide AS")
+		return nil, fmt.Errorf("you need to provide AS")
 	}
 
 	if c.SourceIP != "" && c.SourceIF != "" {
-		return nil, fmt.Errorf("SourceIP and SourceIF are mutually exclusive")
+		return nil, fmt.Errorf("sourceIP and SourceIF are mutually exclusive")
 	}
 
 	if len(c.Peers) == 0 {
-		return nil, fmt.Errorf("You need to provide at least one peer")
+		return nil, fmt.Errorf("you need to provide at least one peer")
 	}
 
 	b = &Server{
@@ -42,7 +43,7 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 
 	if err = b.s.WatchEvent(context.Background(), &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
 		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
-			log.Infof("[BGP] %s", p.String())
+			log.Info("[BGP]", "peer", p.String())
 			if peerStateChangeCallback != nil {
 				peerStateChangeCallback(p)
 			}

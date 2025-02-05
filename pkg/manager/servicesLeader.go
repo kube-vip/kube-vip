@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "log/slog"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -29,7 +30,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 		}
 	}
 
-	log.Infof("Shutting down kube-Vip")
+	log.Info("Shutting down kube-Vip")
 
 	return nil
 }
@@ -37,7 +38,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Infof("(svc election) service [%s], namespace [%s], lock name [%s], host id [%s]", service.Name, service.Namespace, serviceLease, sm.config.NodeName)
+	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", sm.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -73,16 +74,16 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				// we run this in background as it's blocking
 				wg.Add(1)
 				if err := sm.syncServices(ctx, service, wg); err != nil {
-					log.Error(err)
+					log.Error("service sync", "err", err)
 					childCancel()
 				}
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
-				log.Infof("(svc election) service [%s] leader lost: [%s]", service.Name, sm.config.NodeName)
+				log.Info("leadership lost", "service", service.Name, "leader", sm.config.NodeName)
 				if activeService[string(service.UID)] {
 					if err := sm.deleteService(service.UID); err != nil {
-						log.Error(err)
+						log.Error("service deletion", "err", err)
 					}
 				}
 				// Mark this service is inactive
@@ -94,10 +95,10 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 					// I just got the lock
 					return
 				}
-				log.Infof("(svc election) new leader elected: %s", identity)
+				log.Info("new leader", "leader", identity)
 			},
 		},
 	})
-	log.Infof("(svc election) for service [%s] stopping", service.Name)
+	log.Info("stopping leader election", "service", service.Name)
 	return nil
 }
