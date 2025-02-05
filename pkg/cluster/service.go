@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	log "log/slog"
+
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
@@ -18,7 +20,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/packethost/packngo"
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,13 +42,13 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	for i := range cluster.Network {
 		if cluster.Network[i].IsDDNS() {
 			if err := cluster.StartDDNS(ctxDNS); err != nil {
-				log.Error(err)
+				log.Error(err.Error())
 			}
 		}
 
 		// start the dns updater if address is dns
 		if cluster.Network[i].IsDNS() {
-			log.Infof("starting the DNS updater for the address %s", cluster.Network[i].DNSName())
+			log.Info("starting the DNS updater", "address", cluster.Network[i].DNSName())
 			ipUpdater := vip.NewIPUpdater(cluster.Network[i])
 			ipUpdater.Run(ctxDNS)
 		}
@@ -63,14 +64,16 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					subnet = subnets[1]
 				}
 				if subnet == "" {
-					log.Fatalf("no subnet provided for IP %s", cluster.Network[i].IP())
+					log.Error("no subnet provided", "IP", cluster.Network[i].IP())
+					panic("")
 				}
 				if err = cluster.Network[i].SetMask(subnet); err != nil {
-					log.Fatalf("failed to set mask %s: %s", subnet, err.Error())
+					log.Error("failed to set mask", "subnet", subnet, "err", err)
+					panic("")
 				}
 			}
 			if err = cluster.Network[i].AddIP(false); err != nil {
-				log.Fatalf("%v", err)
+				log.Error(err.Error())
 			}
 		}
 
@@ -78,10 +81,10 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			// We're not using Equinix Metal with BGP
 			if !c.EnableBGP {
 				// Attempt to attach the EIP in the standard manner
-				log.Debugf("Attaching the Equinix Metal EIP through the API to this host")
+				log.Debug("Attaching the Equinix Metal EIP through the API to this host")
 				err = equinixmetal.AttachEIP(packetClient, c, c.NodeName)
 				if err != nil {
-					log.Error(err)
+					log.Error(err.Error())
 				}
 			}
 		}
@@ -89,26 +92,26 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			cidrVip := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), c.VIPCIDR)
-			log.Debugf("Attempting to advertise the address [%s] over BGP", cidrVip)
+			log.Debug("Attempting to advertise over BGP", "address", cidrVip)
 
 			err = bgpServer.AddHost(cidrVip)
 			if err != nil {
-				log.Error(err)
+				log.Error(err.Error())
 			}
 		}
 
 		if c.EnableLoadBalancer {
-			log.Infof("Starting IPVS LoadBalancer")
+			log.Info("Starting IPVS LoadBalancer")
 
 			lb, err := loadbalancer.NewIPVSLB(cluster.Network[i].IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval)
 			if err != nil {
-				log.Errorf("Error creating IPVS LoadBalancer [%s]", err)
+				log.Error("Error creating IPVS LoadBalancer", "err", err)
 			}
 
 			go func() {
 				err = sm.NodeWatcher(lb, c.Port)
 				if err != nil {
-					log.Errorf("Error watching node labels [%s]", err)
+					log.Error("Error watching node labels", "err", err)
 				}
 			}()
 			// Shutdown function that will wait on this signal, unless we call it ourselves
@@ -116,7 +119,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				<-signalChan
 				err = lb.RemoveIPVSLB()
 				if err != nil {
-					log.Errorf("Error stopping IPVS LoadBalancer [%s]", err)
+					log.Error("Error stopping IPVS LoadBalancer", "err", err)
 				}
 				log.Info("Stopping IPVS LoadBalancer")
 			}()
@@ -142,7 +145,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		ips := []string{}
 		if nodename != "" {
 			if ips, err = getNodeIPs(ctxArp, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
-				log.Error("failed to get IP of control-plane node: %w", err)
+				log.Error("failed to get IP of control-plane nod", "err", err)
 			}
 		}
 
@@ -157,7 +160,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				ips = append(ips, "::1")
 			}
 
-			log.Infof("no IP address found for node - will fallback to use localhost address: %v", ips)
+			log.Info("no IP address found for node - will fallback to use localhost address", "addresses", ips)
 		}
 
 		for _, ip := range ips {
@@ -199,17 +202,17 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					if entry.Check() {
 						err = cluster.Network[i].AddIP(true)
 						if err != nil {
-							log.Fatalf("error adding IP: %v", err)
+							log.Error("error adding address", "err", err)
 						}
 						if !(*backendMap)[entry] {
-							log.Infof("added IP: %s", cluster.Network[i].IP())
+							log.Info("added backend", "ip", cluster.Network[i].IP())
 						}
 
 						err = cluster.Network[i].AddRoute(true)
 						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
-							log.Warnf("%v", err)
+							log.Warn(err.Error())
 						} else if err == nil && !(*backendMap)[entry] {
-							log.Infof("added route: %s", cluster.Network[i].PrepareRoute().String())
+							log.Info("added route", "route", cluster.Network[i].PrepareRoute().String())
 						}
 
 						(*backendMap)[entry] = true
@@ -229,9 +232,9 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				if deleteAddress {
 					err = cluster.Network[i].DeleteRoute()
 					if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
-						log.Warnf("error while deleting route: %v", err)
+						log.Warn("deleting route", "err", err)
 					} else if err == nil {
-						log.Infof("deleted route: %s", cluster.Network[i].PrepareRoute().String())
+						log.Info("deleted route", "route", cluster.Network[i].PrepareRoute().String())
 					}
 
 					isSet, err := cluster.Network[i].IsSet()
@@ -241,9 +244,10 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					if isSet {
 						err = cluster.Network[i].DeleteIP()
 						if err != nil {
-							log.Fatalf("error deleting IP: %v", err)
+							log.Error("error deleting IP", "err", err)
+							panic("")
 						}
-						log.Infof("deleted IP: %s", cluster.Network[i].IP())
+						log.Info("deleted address", "ip", cluster.Network[i].IP())
 					}
 				}
 			}
@@ -290,12 +294,12 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 		err := network.DeleteIP()
 		if err != nil {
-			log.Warnf("Attempted to clean existing VIP => %v", err)
+			log.Warn("Attempted to clean existing VIP", "err", err)
 		}
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
 			err = network.AddRoute(false)
 			if err != nil {
-				log.Warnf("%v", err)
+				log.Warn(err.Error())
 			}
 		} else if !c.EnableRoutingTable {
 			if c.EnableARP {
@@ -308,14 +312,16 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 					subnet = subnets[1]
 				}
 				if subnet == "" {
-					log.Fatalf("no subnet provided for IP %s", cluster.Network[i].IP())
+					log.Error("no subnet provided for address", "ip", cluster.Network[i].IP())
+					panic("")
 				}
 				if err = network.SetMask(subnet); err != nil {
-					log.Fatalf("failed to set mask %s: %s", subnet, err.Error())
+					log.Error("failed to set mask", "subnet", subnet, "err", err)
+					panic("")
 				}
 			}
 			if err = network.AddIP(false); err != nil {
-				log.Warnf("%v", err)
+				log.Warn(err.Error())
 			}
 		}
 
@@ -326,10 +332,10 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			cidrVip := fmt.Sprintf("%s/%s", network.IP(), c.VIPCIDR)
-			log.Debugf("(svcs) attempting to advertise the address [%s] over BGP", cidrVip)
+			log.Debug("(svcs) attempting to advertise over BGP", "address", cidrVip)
 			err = bgp.AddHost(cidrVip)
 			if err != nil {
-				log.Error(err)
+				log.Error(err.Error())
 			}
 		}
 	}
@@ -343,9 +349,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 		if c.EnableRoutingTable {
 			for i := range cluster.Network {
-				log.Infof("[VIP] Deleting Route for Virtual IP [%s]", cluster.Network[i].IP())
+				log.Info("[VIP] Deleting Route for VIP [%s]", "ip", cluster.Network[i].IP())
 				if err := cluster.Network[i].DeleteRoute(); err != nil {
-					log.Warnf("%v", err)
+					log.Warn(err.Error())
 				}
 			}
 
@@ -353,9 +359,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			return
 		}
 		for i := range cluster.Network {
-			log.Infof("[VIP] Releasing the Virtual IP [%s]", cluster.Network[i].IP())
+			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
 			if err := cluster.Network[i].DeleteIP(); err != nil {
-				log.Warnf("%v", err)
+				log.Warn(err.Error())
 			}
 		}
 
@@ -371,12 +377,12 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	ipString := network.IP()
 	if vip.IsIPv6(ipString) {
 		if network.IPisLinkLocal() {
-			log.Errorf("IPv6 address[%s] is link-local can't advertise with NDP", ipString)
+			log.Error("layer2 is link-local can't use NDP", "address", ipString)
 
 		} else {
 			ndp, err = vip.NewNDPResponder(network.Interface())
 			if err != nil {
-				log.Errorf("failed to create new NDP Responder: %v", err)
+				log.Error("failed to create new NDP Responder", "error", err)
 			} else {
 				if ndp != nil {
 					defer ndp.Close()
@@ -385,18 +391,18 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 		}
 	}
 
-	log.Debugf("(svcs) broadcasting ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
+	log.Debug("layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 
 	for {
 		select {
 		case <-ctx.Done(): // if cancel() execute
-			log.Debugf("(svcs) ending ARP update for %s via %s, every %dms", ipString, network.Interface(), c.ArpBroadcastRate)
+			log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 			return
 		default:
 			cluster.ensureIPAndSendGratuitous(network, ndp)
 		}
 		if c.ArpBroadcastRate < 500 {
-			log.Errorf("arp broadcast rate is [%d], this shouldn't be lower that 300ms (defaulting to 3000)", c.ArpBroadcastRate)
+			log.Error("arp broadcast rate is too low", "rate (ms)", c.ArpBroadcastRate, "setting to (ms)", "3000")
 			c.ArpBroadcastRate = 3000
 		}
 		time.Sleep(time.Duration(c.ArpBroadcastRate) * time.Millisecond)
@@ -412,23 +418,23 @@ func (cluster *Cluster) ensureIPAndSendGratuitous(network vip.Network, ndp *vip.
 
 	// Check if IP is dadfailed
 	if network.IsDADFAIL() {
-		log.Warnf("IP address is in dadfailed state, removing [%s] from interface [%s]", ipString, iface)
+		log.Warn("IP address is in dadfailed state, removing config", "ip", ipString, "interface", iface)
 		err := network.DeleteIP()
 		if err != nil {
-			log.Warnf("%v", err)
+			log.Warn(err.Error())
 		}
 	}
 
 	// Ensure the address exists on the interface before attempting to ARP
 	set, err := network.IsSet()
 	if err != nil {
-		log.Warnf("%v", err)
+		log.Warn(err.Error())
 	}
 	if !set {
-		log.Warnf("Re-applying the VIP configuration [%s] to the interface [%s]", ipString, iface)
+		log.Warn("Re-applying the VIP configuration", "ip", ipString, "interface", iface)
 		err = network.AddIP(false)
 		if err != nil {
-			log.Warnf("%v", err)
+			log.Warn(err.Error())
 		}
 	}
 
@@ -439,7 +445,7 @@ func (cluster *Cluster) ensureIPAndSendGratuitous(network vip.Network, ndp *vip.
 		} else {
 			err := ndp.SendGratuitous(ipString)
 			if err != nil {
-				log.Warnf("%v", err)
+				log.Warn(err.Error())
 			}
 		}
 
@@ -447,7 +453,7 @@ func (cluster *Cluster) ensureIPAndSendGratuitous(network vip.Network, ndp *vip.
 		// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 		err := vip.ARPSendGratuitous(ipString, iface)
 		if err != nil {
-			log.Warnf("%v", err)
+			log.Warn(err.Error())
 		}
 	}
 

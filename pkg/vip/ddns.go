@@ -5,8 +5,9 @@ import (
 	"net"
 	"time"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 // DDNSManager will start a dhclient to retrieve and keep the lease for the IP
@@ -55,7 +56,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 		client.Stop()
 		return "", errors.New("failed to get IP from dhcp for ddns in 1 minutes")
 	case ip = <-client.IPChannel():
-		log.Info("got ip from dhcp: ", ip)
+		log.Info("got address from dhcp", "ip", ip)
 	}
 
 	// lease.FixedAddress.String() could return <nil>
@@ -74,7 +75,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 				client.Stop()
 				return
 			case ip := <-client.IPChannel():
-				log.Info("got ip from dhcp: ", ip)
+				log.Info("got address from dhcp", "ip", ip)
 			}
 		}
 	}(ddns.ctx)
