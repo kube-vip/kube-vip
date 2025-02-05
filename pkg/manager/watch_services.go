@@ -46,10 +46,7 @@ func init() {
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service, *sync.WaitGroup) error) error {
-	// Watch function
-	var wg sync.WaitGroup
-
+func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context.Context, *v1.Service) error) error {
 	// first start port mirroring if enabled
 	if err := sm.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -187,7 +184,6 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			if !activeService[string(svc.UID)] {
 				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", fetchServiceAddresses(svc))
 
-				wg.Add(1)
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
 
 				if sm.config.EnableServicesElection || // Service Election
@@ -203,28 +199,24 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint or EndpointSlices watcher
-									wg.Add(1)
 									var provider epProvider
 									if !sm.config.EnableEndpointSlices {
 										provider = &endpointsProvider{label: "endpoints"}
 									} else {
 										provider = &endpointslicesProvider{label: "endpointslices"}
 									}
-									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, &wg, provider); err != nil {
+									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
 										log.Error(err.Error())
 									}
-									wg.Done()
 								}
 							}()
 
 							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
-								wg.Add(1)
 								go func() {
-									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
 									if err != nil {
 										log.Error(err.Error())
 									}
-									wg.Done()
 								}()
 							}
 							// We're now watching this service
@@ -234,33 +226,27 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						go func() {
 							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 								// Add Endpoint watcher
-								wg.Add(1)
 								var provider epProvider
 								if !sm.config.EnableEndpointSlices {
 									provider = &endpointsProvider{label: "endpoints"}
 								} else {
 									provider = &endpointslicesProvider{label: "endpointslices"}
 								}
-								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, &wg, provider); err != nil {
+								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
 									log.Error(err.Error())
 								}
-								wg.Done()
 							}
 						}()
 
-						wg.Add(1)
 						go func() {
-							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
 							if err != nil {
 								log.Error(err.Error())
 							}
-							wg.Done()
 						}()
 					} else {
-						wg.Add(1)
 
 						go func() {
-							defer wg.Done()
 							for {
 								select {
 								case <-activeServiceLoadBalancer[string(svc.UID)].Done():
@@ -268,7 +254,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									return
 								default:
 									log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
-									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
 
 									if err != nil {
 										log.Error(err.Error())
@@ -280,12 +266,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 				} else {
 					// Increment the waitGroup before the service Func is called (Done is completed in there)
-					wg.Add(1)
-					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc, &wg)
+					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
 					if err != nil {
 						log.Error(err.Error())
 					}
-					wg.Done()
 				}
 				activeService[string(svc.UID)] = true
 			}

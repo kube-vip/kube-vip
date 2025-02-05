@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"syscall"
 
 	log "log/slog"
@@ -144,7 +143,7 @@ func (ep *endpointsProvider) getProtocol() string {
 	return ""
 }
 
-func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup, provider epProvider) error {
+func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, provider epProvider) error {
 	log.Info("watching", "provider", provider.getLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	leaderContext, cancel := context.WithCancel(ctx)
@@ -271,7 +270,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 							// if the context isn't cancelled restart
 							if leaderContext.Err() != context.Canceled {
 								leaderElectionActive = true
-								err := sm.StartServicesLeaderElection(leaderContext, service, wg)
+								err := sm.StartServicesLeaderElection(leaderContext, service)
 								if err != nil {
 									log.Error(err.Error())
 								}
