@@ -108,7 +108,7 @@ var kubeManifestRbac = &cobra.Command{
 	Short: "Generate an RBAC Manifest",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
-		
+
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
