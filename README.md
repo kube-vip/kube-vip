@@ -32,6 +32,7 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Service LoadBalancer address pools per namespace or global
 - Service LoadBalancer address via (existing network DHCP)
 - Service LoadBalancer address exposure to gateway via UPNP
+- Egress! Kube-vip will utilise a service loadbalancer as both the ingress and **egress** for a pod. 
 - ... manifest generation, vendor API integrations and many more...
 
 ## Why?
