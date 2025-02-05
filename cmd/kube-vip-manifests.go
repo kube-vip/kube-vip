@@ -60,7 +60,7 @@ var kubeManifestPod = &cobra.Command{
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Error("No interface is specified for kube-vip to bind to")
+				log.Error("config parse", "err", err)
 				return
 			}
 		}
@@ -93,7 +93,7 @@ var kubeManifestDaemon = &cobra.Command{
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
 			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
-				log.Error("No interface is specified for kube-vip to bind to")
+				log.Error("config parse", "err", err)
 				return
 			}
 		}
