@@ -29,7 +29,7 @@ var inCluster bool
 var configMap string
 
 // Configure the level of logging
-var logLevel uint32
+var logLevel int32
 
 // Provider Config
 var providerConfig string
@@ -111,7 +111,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging
-	kubeVipCmd.PersistentFlags().Uint32Var(&logLevel, "log", 0, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().Int32Var(&logLevel, "log", 0, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
@@ -159,6 +159,9 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipSample)
 	kubeVipCmd.AddCommand(kubeVipService)
 	kubeVipCmd.AddCommand(kubeVipVersion)
+
+	// Set the logging level for all subsequent functions
+	log.SetLogLoggerLevel(log.Level(logLevel))
 }
 
 // Execute - starts the command parsing process
@@ -191,8 +194,6 @@ var kubeVipService = &cobra.Command{
 	Use:   "service",
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(logLevel))
 
 		// parse environment variables, these will overwrite anything loaded or flags
 		err := kubevip.ParseEnvironment(&initConfig)
@@ -256,9 +257,6 @@ var kubeVipManager = &cobra.Command{
 				return
 			}
 		}
-
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Welome messages
 		log.Info("kube-vip.io", "version", Release.Version, "build", Release.Build)

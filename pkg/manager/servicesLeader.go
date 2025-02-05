@@ -38,7 +38,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock name", serviceLease, "host id", sm.config.NodeName)
+	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", sm.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{

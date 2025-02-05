@@ -34,8 +34,7 @@ var kubeKubeadmInit = &cobra.Command{
 	Short: "kube-vip init",
 	Long:  "The \"init\" subcommand will generate the Kubernetes manifest that will be started by kubeadm through the kubeadm init process",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(logLevel))
+
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		err := kubevip.ParseEnvironment(&initConfig)
@@ -75,8 +74,6 @@ var kubeKubeadmJoin = &cobra.Command{
 	Use:   "join",
 	Short: "kube-vip join",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(logLevel))
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening

@@ -145,7 +145,7 @@ func (ep *endpointsProvider) getProtocol() string {
 }
 
 func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, wg *sync.WaitGroup, provider epProvider) error {
-	log.Info("watching", "provide", provider.getLabel(), "service name", service.Name, "namespace", service.Namespace)
+	log.Info("watching", "provider", provider.getLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	leaderContext, cancel := context.WithCancel(ctx)
 	defer cancel()

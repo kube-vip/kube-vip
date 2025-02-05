@@ -49,9 +49,6 @@ var kubeManifestPod = &cobra.Command{
 			return
 		}
 
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
-
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
@@ -85,10 +82,6 @@ var kubeManifestDaemon = &cobra.Command{
 			log.Error("parsing environment", "err", err)
 			return
 		}
-
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
-
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
@@ -115,9 +108,7 @@ var kubeManifestRbac = &cobra.Command{
 	Short: "Generate an RBAC Manifest",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 		var err error
-
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(logLevel))
+		
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
