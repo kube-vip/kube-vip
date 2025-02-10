@@ -202,6 +202,9 @@ var kubeVipService = &cobra.Command{
 			return
 		}
 
+		// Set the logging level for all subsequent functions
+		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
+
 		if err := initConfig.CheckInterface(); err != nil {
 			log.Error("checking interface", "err", err)
 			return
@@ -248,6 +251,9 @@ var kubeVipManager = &cobra.Command{
 			log.Error("parsing environment", "err", err)
 			return
 		}
+
+		// Set the logging level for all subsequent functions
+		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
