@@ -720,8 +720,7 @@ func (configurator *network) SetMask(mask string) error {
 	}
 
 	if m > size {
-		log.Warn("provided mask is greater than the highest mask value for the IP family - will use max possible value", "family", family, "mask", m, "max", size)
-		m = size
+		return fmt.Errorf("provided CIDR mask '%d' is greater than the highest mask value for the %s family (%d)", m, family, size)
 	}
 
 	toSet := net.CIDRMask(m, size)
