@@ -28,9 +28,6 @@ var inCluster bool
 // ConfigMap name within a Kubernetes cluster
 var configMap string
 
-// Configure the level of logging
-var logLevel int32
-
 // Provider Config
 var providerConfig string
 
@@ -111,7 +108,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
 
 	// Manage logging
-	kubeVipCmd.PersistentFlags().Int32Var(&logLevel, "log", 0, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.Logging, "log", 0, "Set the level of logging")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
@@ -161,7 +158,7 @@ func init() {
 	kubeVipCmd.AddCommand(kubeVipVersion)
 
 	// Set the logging level for all subsequent functions
-	log.SetLogLoggerLevel(log.Level(logLevel))
+	log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 }
 
 // Execute - starts the command parsing process
