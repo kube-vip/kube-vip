@@ -25,7 +25,7 @@ func ParseEnvironment(c *Config) error {
 		if err != nil {
 			panic("Unable to parse environment variable [vip_loglevel], should be int")
 		}
-		c.Logging = int(logLevel)
+		c.Logging = int32(logLevel)
 	}
 
 	// Find interface
