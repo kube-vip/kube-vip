@@ -463,9 +463,12 @@ func GenerateCidrRange(address string) (string, error) {
 	addresses := strings.Split(address, ",")
 	for _, a := range addresses {
 		ip := net.ParseIP(a)
-
 		if ip == nil {
-			return "", fmt.Errorf("invalid IP address: %s from [%s]", a, address)
+			ips, err := net.LookupIP(a)
+			if len(ips) == 0 || err != nil {
+				return "", fmt.Errorf("invalid IP address: %s from [%s], %v", a, address, err)
+			}
+			ip = ips[0]
 		}
 
 		if ip.To4() != nil {
