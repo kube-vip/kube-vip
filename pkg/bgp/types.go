@@ -13,6 +13,7 @@ import (
 // Peer defines a BGP Peer
 type Peer struct {
 	Address      string
+	Port         uint16
 	AS           uint32
 	Password     string
 	MultiHop     bool

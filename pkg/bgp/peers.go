@@ -225,6 +225,16 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 			}
 		}
 
+		var port uint64
+		if len(peer) >= 5 {
+			port, err = strconv.ParseUint(peer[4], 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
+			}
+		} else {
+			port = 179
+		}
+
 		var mpbgpNexthop, mpbgpIPv4, mpbgpIPv6 string
 
 		if len(config) > 1 {
@@ -247,6 +257,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 		peerConfig := Peer{
 			Address:      address,
 			AS:           uint32(ASNumber),
+			Port:         uint16(port),
 			Password:     password,
 			MultiHop:     multiHop,
 			MpbgpNexthop: mpbgpNexthop,
