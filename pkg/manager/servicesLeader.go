@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	log "log/slog"
@@ -36,7 +35,7 @@ func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) erro
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service, wg *sync.WaitGroup) error {
+func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.Service) error {
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", sm.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
@@ -72,8 +71,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			OnStartedLeading: func(ctx context.Context) {
 				// Mark this service as active (as we've started leading)
 				// we run this in background as it's blocking
-				wg.Add(1)
-				if err := sm.syncServices(ctx, service, wg); err != nil {
+				if err := sm.syncServices(ctx, service); err != nil {
 					log.Error("service sync", "err", err)
 					childCancel()
 				}

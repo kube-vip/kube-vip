@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	log "log/slog"
@@ -21,9 +20,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
-func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
-	defer wg.Done()
-
+func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service) error {
 	log.Debug("[STARTING] Service Sync")
 
 	// Iterate through the synchronising services
