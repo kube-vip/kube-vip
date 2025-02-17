@@ -11,7 +11,7 @@ RUN --mount=type=cache,sharing=locked,id=gomod,target=/go/pkg/mod/cache \
     --mount=type=cache,sharing=locked,id=goroot,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux make build
 
-FROM alpine:3.21.2
+FROM alpine:3.21.3
 # Update pkgs and add iptables
 RUN apk upgrade && \
     apk add --no-cache iptables iptables-legacy
