@@ -212,7 +212,11 @@ func (sm *Manager) Start() error {
 			fmt.Fprintf(w, "OK")
 		})
 		go func() {
-			err := http.ListenAndServe(fmt.Sprintf(":%d", sm.config.HealthCheckPort), nil)
+			server := &http.Server{
+				Addr:              fmt.Sprintf(":%d", sm.config.HealthCheckPort),
+				ReadHeaderTimeout: 3 * time.Second,
+			}
+			err := server.ListenAndServe()
 			if err != nil {
 				log.Error("healthcheck", "unable to start", err)
 			}
