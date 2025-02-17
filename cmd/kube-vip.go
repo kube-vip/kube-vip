@@ -136,6 +136,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpointSlices, "enableEndpointSlices", false, "If enabled, kube-vip will only advertise services, but will use EndpointSlices instead of endpoints to get IPs of Pods")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.HealthCheckPort, "healthCheckPort", 0, "If set to non-zero (> 1024), then this is the port that the healthcheck will listen on")
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
@@ -147,7 +148,6 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.Etcd.Endpoints, "etcdEndpoints", nil, "Etcd member endpoints")
 
 	// Kubernetes client specific flags
-
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.K8sConfigFile, "k8sConfigPath", "/etc/kubernetes/admin.conf", "Path to the configuration file used with the Kubernetes client")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -201,6 +202,19 @@ func (sm *Manager) Start() error {
 
 	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
 	sm.shutdownChan = make(chan struct{})
+
+	// HealthCheck
+	if sm.config.HealthCheckPort != 0 {
+		if sm.config.HealthCheckPort < 1024 {
+			return fmt.Errorf("healthcheck port is using a port that is less than 1024 [%d]", sm.config.HealthCheckPort)
+		}
+		http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "OK")
+		})
+		go func() {
+			http.ListenAndServe(fmt.Sprintf(":%d", sm.config.HealthCheckPort), nil)
+		}()
+	}
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {

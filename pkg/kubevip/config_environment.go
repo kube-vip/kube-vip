@@ -642,5 +642,17 @@ func ParseEnvironment(c *Config) error {
 		c.BackendHealthCheckInterval = int(i)
 	}
 
+	env = os.Getenv(healthCheckPort)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		if i < 1024 {
+			return fmt.Errorf("health check port should be > 1024")
+		}
+		c.HealthCheckPort = int(i)
+	}
+
 	return nil
 }
