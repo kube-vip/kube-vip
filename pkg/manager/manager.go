@@ -208,11 +208,14 @@ func (sm *Manager) Start() error {
 		if sm.config.HealthCheckPort < 1024 {
 			return fmt.Errorf("healthcheck port is using a port that is less than 1024 [%d]", sm.config.HealthCheckPort)
 		}
-		http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "OK")
 		})
 		go func() {
-			http.ListenAndServe(fmt.Sprintf(":%d", sm.config.HealthCheckPort), nil)
+			err := http.ListenAndServe(fmt.Sprintf(":%d", sm.config.HealthCheckPort), nil)
+			if err != nil {
+				log.Error("healthcheck", "unable to start", err)
+			}
 		}()
 	}
 
