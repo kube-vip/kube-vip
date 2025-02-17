@@ -710,10 +710,27 @@ func (configurator *network) SetMask(mask string) error {
 	if err != nil {
 		return err
 	}
+
 	size := 32
-	if IsIPv6(configurator.address.IP.String()) {
+	family := "IPv4"
+
+	if IsIPv6(configurator.IP()) {
 		size = 128
+		family = "IPv6"
 	}
-	configurator.address.IPNet.Mask = net.CIDRMask(m, size)
+
+	if m > size {
+		return fmt.Errorf("provided CIDR mask '%d' is greater than the highest mask value for the %s family (%d)", m, family, size)
+	}
+
+	toSet := net.CIDRMask(m, size)
+	if toSet == nil {
+		return fmt.Errorf("failed to create mask /%d", m)
+	}
+
+	configurator.mu.Lock()
+	defer configurator.mu.Unlock()
+
+	configurator.address.Mask = toSet
 	return nil
 }
