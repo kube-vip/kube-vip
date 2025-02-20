@@ -195,6 +195,9 @@ type Config struct {
 
 	// LoInterfaceGlobalScope, if true will set global scope when using the lo interface, otherwise a host scope will be used
 	LoInterfaceGlobalScope bool `yaml:"loInterfaceGlobalScope"`
+
+	// HealthCheckPort, if non-zero then will enable the healthcheck to return ok on this port
+	HealthCheckPort int `yaml:"healthCheckPort"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
