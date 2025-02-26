@@ -528,6 +528,16 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		newEnvironment = append(newEnvironment, mdif...)
 	}
 
+	if c.HealthCheckPort != 0 {
+		healthPort := []corev1.EnvVar{
+			{
+				Name:  healthCheckPort,
+				Value: fmt.Sprintf("%d", c.HealthCheckPort),
+			},
+		}
+		newEnvironment = append(newEnvironment, healthPort...)
+	}
+
 	var securityContext *corev1.SecurityContext
 	if c.LoadBalancerForwardingMethod == "masquerade" {
 		var privileged = true
