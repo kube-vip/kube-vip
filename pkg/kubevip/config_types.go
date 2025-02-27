@@ -135,18 +135,6 @@ type Config struct {
 	BGPPeerConfig bgp.Peer
 	BGPPeers      []string
 
-	// EnableMetal, will use the metal API to update the EIP <-> VIP (if BGP is enabled then BGP will be used)
-	EnableMetal bool `yaml:"enableMetal"`
-
-	// MetalAPIKey, is the API token used to authenticate to the API
-	MetalAPIKey string
-
-	// MetalProject, is the name of a particular defined project
-	MetalProject string
-
-	// MetalProjectID, is the name of a particular defined project
-	MetalProjectID string
-
 	// ProviderConfig, is the path to a provider configuration file
 	ProviderConfig string
 

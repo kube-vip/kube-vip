@@ -512,30 +512,6 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.KeepaliveInterval = u64
 	}
 
-	// Enable the Equinix Metal API calls
-	env = os.Getenv(vipPacket)
-	if env != "" {
-		b, err := strconv.ParseBool(env)
-		if err != nil {
-			return err
-		}
-		c.EnableMetal = b
-	}
-
-	// Find the Equinix Metal project name
-	env = os.Getenv(vipPacketProject)
-	if env != "" {
-		// TODO - parse address net.Host()
-		c.MetalProject = env
-	}
-
-	// Find the Equinix Metal project ID
-	env = os.Getenv(vipPacketProjectID)
-	if env != "" {
-		// TODO - parse address net.Host()
-		c.MetalProjectID = env
-	}
-
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
