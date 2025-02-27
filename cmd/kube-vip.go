@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 
-	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -27,9 +26,6 @@ var inCluster bool
 
 // ConfigMap name within a Kubernetes cluster
 var configMap string
-
-// Provider Config
-var providerConfig string
 
 // Points to a kubernetes configuration file
 var kubeConfigPath string
@@ -81,13 +77,6 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.LeaseDuration, "leaseDuration", 5, "Length of time (in seconds) a Kubernetes leader lease can be held for")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RenewDeadline, "leaseRenewDuration", 3, "Length of time (in seconds) a Kubernetes leader can attempt to renew its lease")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RetryPeriod, "leaseRetry", 1, "Length of time (in seconds) the LeaderElector clients should wait between tries of actions")
-
-	// Equinix Metal flags
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableMetal, "metal", false, "This will use the Equinix Metal API (requires the token ENV) to update the EIP <-> VIP")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalAPIKey, "metalKey", "", "The API token for authenticating with the Equinix Metal API")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProject, "metalProject", "", "The name of project already created within Equinix Metal")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.MetalProjectID, "metalProjectID", "", "The ID of project already created within Equinix Metal")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ProviderConfig, "provider-config", "", "The path to a provider configuration")
 
 	// BGP flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableBGP, "bgp", false, "This will enable BGP support within kube-vip")
@@ -370,19 +359,6 @@ var kubeVipManager = &cobra.Command{
 		envConfigMap := os.Getenv("vip_configmap")
 		if envConfigMap != "" {
 			configMap = envConfigMap
-		}
-
-		// If Equinix Metal is enabled and there is a provider configuration passed
-		if initConfig.EnableMetal {
-			if providerConfig != "" {
-				providerAPI, providerProject, err := equinixmetal.GetPacketConfig(providerConfig)
-				if err != nil {
-					log.Error("retrieving equinix metal config", "err", err)
-					return
-				}
-				initConfig.MetalAPIKey = providerAPI
-				initConfig.MetalProject = providerProject
-			}
 		}
 
 		// Define the new service manager

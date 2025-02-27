@@ -66,11 +66,11 @@ func TestParseBgpAnnotations(t *testing.T) {
 	assert.EqualValues(t, 5, bgpConfig.KeepaliveInterval, "base bgpConfig.KeepaliveInterval should not be overwritten")
 }
 
-// Node, or local, ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-node-asn
-// Peer ASN, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-asn
-// Peer IP, default annotation metal.equinix.com/bgp-peers-{{n}}-peer-ip
-// Source IP to use when communicating with peer, default annotation metal.equinix.com/bgp-peers-{{n}}-src-ip
-// BGP password for peer, default annotation metal.equinix.com/bgp-peers-{{n}}-bgp-pass
+// Node ASN, configuration annotation: <prefix>/node-asn
+// Peer ASN, configuration annotation: <prefix>/peer-asn
+// Peer IP, configuration annotation: <prefix>/peer-ip
+// Source IP for peer communication: <prefix>/src-ip
+// BGP password for peer: <prefix>/bgp-pass
 
 func TestParseNewBgpAnnotations(t *testing.T) {
 	node := &corev1.Node{
@@ -87,11 +87,11 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 	}
 
 	node.Annotations = map[string]string{
-		"bgp/bgp-peers-0-node-asn": "65000",
-		"bgp/bgp-peers-0-peer-asn": "64000",
-		"bgp/bgp-peers-0-peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
-		"bgp/bgp-peers-0-src-ip":   "10.0.0.254",
-		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // password
+		"bgp/node-asn": "65000",
+		"bgp/peer-asn": "64000",
+		"bgp/peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/src-ip":   "10.0.0.254",
+		"bgp/bgp-pass": "cGFzc3dvcmQ=", // password
 	}
 
 	bgpConfig, bgpPeer, err := parseBgpAnnotations(bgpConfigBase, node, "bgp")

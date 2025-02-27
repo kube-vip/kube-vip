@@ -87,13 +87,13 @@ const (
 	vipStartLeader = "vip_startleader"
 
 	// vipPacket defines that the packet API will be used for EIP
-	vipPacket = "vip_packet"
+	//vipPacket = "vip_packet"
 
 	// vipPacketProject defines which project within Packet to use
-	vipPacketProject = "vip_packetproject"
+	//vipPacketProject = "vip_packetproject"
 
 	// vipPacketProjectID defines which projectID within Packet to use
-	vipPacketProjectID = "vip_packetprojectid"
+	//vipPacketProjectID = "vip_packetprojectid"
 
 	// providerConfig defines a path to a configuration that should be parsed
 	providerConfig = "provider_config"
