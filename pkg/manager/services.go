@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -462,14 +463,25 @@ func fetchServiceAddresses(s *v1.Service) []string {
 		}
 	}
 
+	lbStatusAddresses := []string{}
 	if !annotationAvailable {
 		if len(s.Status.LoadBalancer.Ingress) > 0 {
-			addresses := []string{}
 			for _, ingress := range s.Status.LoadBalancer.Ingress {
-				addresses = append(addresses, ingress.IP)
+				lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
 			}
-			return addresses
 		}
+	}
+
+	lbIP := net.ParseIP(s.Spec.LoadBalancerIP)
+	isLbIPv4 := vip.IsIPv4(s.Spec.LoadBalancerIP)
+
+	if len(lbStatusAddresses) > 0 {
+		for _, a := range lbStatusAddresses {
+			if lbStatusIP := net.ParseIP(a); lbStatusIP != nil && lbIP != nil && vip.IsIPv4(a) == isLbIPv4 && !lbIP.Equal(lbStatusIP) {
+				return []string{s.Spec.LoadBalancerIP}
+			}
+		}
+		return lbStatusAddresses
 	}
 
 	if s.Spec.LoadBalancerIP != "" {

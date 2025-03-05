@@ -167,6 +167,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							if err != nil {
 								log.Error("(svc) unable to remove", "service", svc.UID)
 							}
+							activeService[string(svc.UID)] = false
+							watchedService[string(svc.UID)] = false
+							delete(activeServiceLoadBalancer, string(svc.UID))
+							configuredLocalRoutes.Store(string(svc.UID), false)
 						}
 						// in theory this should never fail
 

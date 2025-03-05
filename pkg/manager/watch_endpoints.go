@@ -329,7 +329,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 									log.Debug("attempting to advertise BGP service", "provider", provider.getLabel(), "ip", address)
 									err := sm.bgpServer.AddHost(address)
 									if err != nil {
-										log.Error("error adding BGP hos", "provider", provider.getLabel(), "err", err)
+										log.Error("error adding BGP host", "provider", provider.getLabel(), "err", err)
 									} else {
 										log.Info("added BGP host", "provider",
 											provider.getLabel(), "ip", address, "service name", service.Name, "namespace", service.Namespace)
