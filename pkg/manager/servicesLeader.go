@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -12,6 +13,14 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
+
+var (
+	svcLocks map[string]*sync.Mutex
+)
+
+func init() {
+	svcLocks = make(map[string]*sync.Mutex)
+}
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (sm *Manager) startServicesWatchForLeaderElection(ctx context.Context) error {
@@ -52,6 +61,13 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 	}
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
+
+	if _, ok := svcLocks[serviceLease]; !ok {
+		svcLocks[serviceLease] = new(sync.Mutex)
+	}
+
+	svcLocks[serviceLease].Lock()
+	defer svcLocks[serviceLease].Unlock()
 
 	activeService[string(service.UID)] = true
 	// start the leader election code loop
