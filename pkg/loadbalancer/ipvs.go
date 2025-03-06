@@ -152,7 +152,7 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 	if _, ok := lb.backendMap[backend]; !ok {
 		isHealth := backend.Check()
 		if isHealth {
-			err := lb.addBackend(backend)
+			err := lb.addBackend(address, port)
 			if err != nil {
 				return err
 			}
@@ -162,7 +162,8 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 	return nil
 }
 
-func (lb *IPVSLoadBalancer) addBackend(backend backend.Entry) error {
+func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
+	backend := backend.Entry{Addr: address, Port: port}
 	// Check if this is the first backend
 	backends, err := lb.client.Destinations(lb.loadBalancerService)
 	if err != nil && strings.Contains(err.Error(), "file does not exist") {
@@ -279,7 +280,7 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 			if newStatus {
 				// old status -> health
 				if !oldStatus {
-					err := lb.AddBackend(backend.Addr, backend.Port)
+					err := lb.addBackend(backend.Addr, backend.Port)
 					if err != nil {
 						log.Error("add backend", "err", err)
 					}
