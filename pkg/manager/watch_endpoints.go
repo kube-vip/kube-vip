@@ -291,7 +291,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				if !sm.config.EnableServicesElection && !sm.config.EnableLeaderElection && !isRouteConfigured {
 					// If routing table mode is enabled - routes should be added per node
 					if sm.config.EnableRoutingTable {
-						if instance := sm.findServiceInstance(service); instance != nil {
+						instance, err := sm.findServiceInstanceWithTimeout(ctx, service)
+						if err != nil {
+							log.Error("error finding instance", "service", service.UID, "provider", provider.getLabel(), "err", err)
+						}
+						if instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
 									err := cluster.Network[i].AddRoute(false)
@@ -322,7 +326,11 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 					// If BGP mode is enabled - hosts should be added per node
 					if sm.config.EnableBGP {
-						if instance := sm.findServiceInstance(service); instance != nil {
+						instance, err := sm.findServiceInstanceWithTimeout(ctx, service)
+						if err != nil {
+							log.Error("error finding instance", "service", service.UID, "provider", provider.getLabel(), "err", err)
+						}
+						if instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
 									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
