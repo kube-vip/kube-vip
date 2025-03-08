@@ -350,6 +350,31 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
 	return nil
 }
 
+func (sm *Manager) findServiceInstanceWithTimeout(ctx context.Context, svc *v1.Service) (*Instance, error) {
+	log.Debug("finding service with timeout", "UID", svc.UID)
+
+	ctxTimeout, ctxTimeoutCancel := context.WithTimeout(ctx, time.Minute)
+	defer ctxTimeoutCancel()
+
+	for {
+		for i := range sm.serviceInstances {
+			log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
+			if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
+				return sm.serviceInstances[i], nil
+			}
+		}
+
+		t := time.NewTimer(time.Millisecond * 100)
+		select {
+		case <-ctxTimeout.Done():
+			t.Stop()
+			return nil, fmt.Errorf("failed to wait for the service instance: %w", ctx.Err())
+		case <-t.C:
+			log.Debug("waiting for the service to be discovered", "UID", svc.UID)
+		}
+	}
+}
+
 // Refresh UPNP Port Forwards for all Service Instances registered in the SM
 func (sm *Manager) refreshUPNPForwards() {
 	log.Info("Starting UPNP Port Refresher")
