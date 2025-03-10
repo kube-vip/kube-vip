@@ -1,9 +1,11 @@
 package loadbalancer
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"sync"
 
@@ -125,11 +127,10 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		forwardingMethod:    m,
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
+		stop:                make(chan struct{}),
 	}
 
-	if strings.ToLower(forwardingMethod) == "masquerade" {
-		go lb.healthCheck()
-	}
+	go lb.healthCheck()
 
 	// Return our created load-balancer
 	return lb, nil
@@ -254,7 +255,7 @@ func (lb *IPVSLoadBalancer) removeBackend(address string, port uint16) error {
 		Weight:  1,
 	}
 	err := lb.client.RemoveDestination(lb.loadBalancerService, dst)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("error removing backend: %v", err)
 	}
 	return nil
@@ -289,7 +290,7 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 			} else {
 				// old status -> not health
 				if oldStatus {
-					log.Info("healthCheck failed removing backend", "address", backend.Addr, "port", backend.Port)
+					log.Info("healthCheck failed - removing backend", "address", backend.Addr, "port", backend.Port)
 					err := lb.removeBackend(backend.Addr, backend.Port)
 					if err != nil {
 						log.Error("failed to remove backend", "address", backend.Addr, "port", backend.Port, "err", err)
