@@ -14,8 +14,9 @@ import (
 )
 
 type Entry struct {
-	Addr string
-	Port uint16
+	Addr    string
+	Port    uint16
+	IsLocal bool
 }
 
 type Map map[Entry]bool
