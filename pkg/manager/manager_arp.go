@@ -58,13 +58,12 @@ func (sm *Manager) startARP(id string) error {
 				log.Error("starting control plane", "err", err)
 				// Trigger the shutdown of this manager instance
 				sm.signalChan <- syscall.SIGINT
-
 			}
 		}()
 
 		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
 		if !sm.config.EnableServices {
-			<-sm.signalChan
+			<-sm.shutdownChan
 			log.Info("Shutting down Kube-Vip")
 
 			return nil
