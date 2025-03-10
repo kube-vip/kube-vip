@@ -76,5 +76,5 @@ func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp
 	ctxDNS, cancelDNS := context.WithCancel(context.Background())
 	defer cancelDNS()
 
-	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp, packetClient)
+	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp, packetClient, nil)
 }

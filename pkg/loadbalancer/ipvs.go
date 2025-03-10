@@ -1,6 +1,7 @@
 package loadbalancer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +16,8 @@ import (
 	"github.com/cloudflare/ipvs/netmask"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
+	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/vishvananda/netlink"
 )
 
 /*
@@ -48,9 +51,12 @@ type IPVSLoadBalancer struct {
 	interval            int
 	lock                sync.Mutex
 	stop                chan struct{}
+	networkInterface    string
+	leaderCancel        context.CancelFunc
+	signal              chan os.Signal
 }
 
-func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string, leaderCancel context.CancelFunc, signal chan os.Signal) (*IPVSLoadBalancer, error) {
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
@@ -124,6 +130,9 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
 		stop:                make(chan struct{}),
+		networkInterface:    networkInterface,
+		leaderCancel:        leaderCancel,
+		signal:              signal,
 	}
 
 	go lb.healthCheck()
@@ -153,7 +162,17 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 }
 
 func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
-	backend := backend.Entry{Addr: address, Port: port}
+	isLocal := false
+	var err error
+	if lb.forwardingMethod == ipvs.Local {
+		log.Info("checking if backend is local", "addr", address)
+		isLocal, err = lb.isLocal(address)
+		if err != nil {
+			log.Error("checking if backend is local", "err", err)
+		}
+	}
+
+	backend := backend.Entry{Addr: address, Port: port, IsLocal: isLocal}
 
 	lb.lock.Lock()
 	defer lb.lock.Unlock()
@@ -283,6 +302,7 @@ func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
 func (lb *IPVSLoadBalancer) healthCheck() {
 	backend.Watch(func() {
 		lb.lock.Lock()
+		defer lb.lock.Unlock()
 		for backend, oldStatus := range lb.backendMap {
 			newStatus := backend.Check()
 			if newStatus {
@@ -304,8 +324,55 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 					}
 					lb.backendMap[backend] = newStatus
 				}
+				if lb.forwardingMethod == ipvs.Local && !lb.localBackendExists() {
+					if lb.signal != nil {
+						close(lb.signal)
+					}
+
+					if lb.leaderCancel != nil {
+						lb.leaderCancel()
+					}
+				}
 			}
 		}
-		lb.lock.Unlock()
 	}, lb.interval, lb.stop)
+}
+
+func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
+	link, err := netlink.LinkByName(lb.networkInterface)
+	if err != nil {
+		return false, fmt.Errorf("getting link '%s': %w", lb.networkInterface, err)
+	}
+
+	family := netlink.FAMILY_V6
+	if vip.IsIPv4(address) {
+		family = netlink.FAMILY_V4
+	}
+
+	target := net.ParseIP(address)
+	if target == nil {
+		return false, fmt.Errorf("address '%s' is not a valid IP address", address)
+	}
+
+	addrs, err := netlink.AddrList(link, family)
+	if err != nil {
+		return false, fmt.Errorf("listing addresses for link '%s': %w", lb.networkInterface, err)
+	}
+
+	for _, addr := range addrs {
+		if addr.IP.Equal(target) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (lb *IPVSLoadBalancer) localBackendExists() bool {
+	for backend, isHealthy := range lb.backendMap {
+		if backend.IsLocal && isHealthy {
+			return true
+		}
+	}
+	return false
 }
