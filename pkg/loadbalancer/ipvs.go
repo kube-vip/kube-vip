@@ -125,6 +125,7 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		forwardingMethod:    m,
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
+		stop:                make(chan struct{}),
 	}
 
 	if strings.ToLower(forwardingMethod) == "masquerade" {
