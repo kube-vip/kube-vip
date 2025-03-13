@@ -1,4 +1,4 @@
-package manager
+package services
 
 import (
 	"bufio"
@@ -22,7 +22,7 @@ const (
 	defaultServiceCIDR = "10.96.0.0/12"
 )
 
-func (sm *Manager) iptablesCheck() error {
+func (p *Processor) iptablesCheck() error {
 	file, err := os.Open("/proc/modules")
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func (sm *Manager) nftablesCheck() error {
+func (p *Processor) nftablesCheck() error {
 	file, err := os.Open("/proc/modules")
 	if err != nil {
 		return err
@@ -133,7 +133,7 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
+func (p *Processor) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -143,16 +143,16 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	deniedNetworks := annotations[kubevip.EgressDeniedNetworks]
 	allowedNetworks := annotations[kubevip.EgressAllowedNetworks]
 
-	if sm.config.EgressPodCidr == "" || sm.config.EgressServiceCidr == "" {
-		autoServiceCIDR, autoPodCIDR, discoverErr = sm.AutoDiscoverCIDRs()
+	if p.config.EgressPodCidr == "" || p.config.EgressServiceCidr == "" {
+		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs()
 	}
 
 	if discoverErr != nil {
 		log.Warn("autodiscover CIDR", "err", discoverErr)
 	}
 
-	if sm.config.EgressPodCidr != "" {
-		podCidr = getSameFamilyCidr(sm.config.EgressPodCidr, podIP)
+	if p.config.EgressPodCidr != "" {
+		podCidr = getSameFamilyCidr(p.config.EgressPodCidr, podIP)
 	} else {
 		if discoverErr == nil {
 			podCidr = getSameFamilyCidr(autoPodCIDR, podIP)
@@ -167,8 +167,8 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		podCidr = defaultPodCIDR
 	}
 
-	if sm.config.EgressServiceCidr != "" {
-		serviceCidr = getSameFamilyCidr(sm.config.EgressServiceCidr, vipIP)
+	if p.config.EgressServiceCidr != "" {
+		serviceCidr = getSameFamilyCidr(p.config.EgressServiceCidr, vipIP)
 	} else {
 		if discoverErr == nil {
 			serviceCidr = getSameFamilyCidr(autoServiceCIDR, vipIP)
@@ -206,7 +206,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		protocol = iptables.ProtocolIPv6
 	}
 
-	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
+	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
@@ -305,12 +305,12 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	return nil
 }
 
-func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
+func (p *Processor) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
 	options := v1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
-	podList, err := sm.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
+	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
 	if err != nil {
 		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
 	}

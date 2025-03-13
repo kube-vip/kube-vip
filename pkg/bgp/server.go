@@ -9,10 +9,11 @@ import (
 
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
-func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (b *Server, err error) {
+func NewBGPServer(c *Config) (b *Server, err error) {
 	if c.AS == 0 {
 		return nil, fmt.Errorf("you need to provide AS")
 	}
@@ -28,13 +29,25 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 	b = &Server{
 		s: gobgp.NewBgpServer(),
 		c: c,
+
+		BGPSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "kube_vip",
+			Subsystem: "manager",
+			Name:      "bgp_session_info",
+			Help:      "Display state of session by setting metric for label value with current state to 1",
+		}, []string{"state", "peer"}),
 	}
+	return
+}
+
+// Start starts the BGP server
+func (b *Server) Start(peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (err error) {
 	go b.s.Serve()
 
 	if err = b.s.StartBgp(context.Background(), &api.StartBgpRequest{
 		Global: &api.Global{
-			Asn:        c.AS,
-			RouterId:   c.RouterID,
+			Asn:        b.c.AS,
+			RouterId:   b.c.RouterID,
 			ListenPort: -1,
 		},
 	}); err != nil {
@@ -52,17 +65,17 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 		return
 	}
 
-	for _, p := range c.Peers {
+	for _, p := range b.c.Peers {
 		if err = b.AddPeer(p); err != nil {
 			return
 		}
 	}
 
-	if c.Zebra.Enabled {
+	if b.c.Zebra.Enabled {
 		if err = b.s.EnableZebra(context.Background(), &api.EnableZebraRequest{
-			Url:          c.Zebra.URL,
-			Version:      c.Zebra.Version,
-			SoftwareName: c.Zebra.SoftwareName,
+			Url:          b.c.Zebra.URL,
+			Version:      b.c.Zebra.Version,
+			SoftwareName: b.c.Zebra.SoftwareName,
 		}); err != nil {
 			log.Error(err.Error())
 			return
