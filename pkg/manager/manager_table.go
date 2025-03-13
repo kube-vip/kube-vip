@@ -3,14 +3,13 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"syscall"
 	"time"
 
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
@@ -40,17 +39,10 @@ func (sm *Manager) startTableMode(id string) error {
 		}()
 	}
 
-	egressCleanEnv := os.Getenv("EGRESS_CLEAN")
-	if egressCleanEnv != "" {
-		egressClean, err := strconv.ParseBool(egressCleanEnv)
-		if err != nil {
-			log.Warn("failed to parse EGRESS_CLEAN env value [%s]. Egress cleaning will not be performed: %s", egressCleanEnv, err.Error())
-		}
-		if egressClean {
-			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
-			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
-			log.Debug("IPtables rules cleaned on startup")
-		}
+	if sm.config.EgressClean {
+		vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
+		vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
+		log.Debug("IPtables rules cleaned on startup")
 	}
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
@@ -92,7 +84,7 @@ func (sm *Manager) startTableMode(id string) error {
 		// a lock based upon that service is created that they will all leaderElection on
 		if sm.config.EnableServicesElection {
 			log.Info("beginning watching services, leaderelection will happen for every service")
-			err = sm.startServicesWatchForLeaderElection(ctx)
+			err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
 			if err != nil {
 				return err
 			}
@@ -126,7 +118,7 @@ func (sm *Manager) startTableMode(id string) error {
 				RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 				Callbacks: leaderelection.LeaderCallbacks{
 					OnStartedLeading: func(ctx context.Context) {
-						err = sm.servicesWatcher(ctx, sm.syncServices)
+						err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 						if err != nil {
 							log.Error(err.Error())
 							panic("")
@@ -137,11 +129,7 @@ func (sm *Manager) startTableMode(id string) error {
 						sm.mutex.Lock()
 						defer sm.mutex.Unlock()
 						log.Info("leader lost", "id", id)
-						for _, instance := range sm.serviceInstances {
-							for _, cluster := range instance.Clusters {
-								cluster.Stop()
-							}
-						}
+						sm.svcProcessor.Stop()
 
 						log.Error("lost leadership, restarting kube-vip")
 						panic("")
@@ -158,7 +146,7 @@ func (sm *Manager) startTableMode(id string) error {
 			})
 		} else {
 			log.Info("beginning watching services without leader election")
-			err = sm.servicesWatcher(ctx, sm.syncServices)
+			err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 			if err != nil {
 				log.Error("Cannot watch services", "err", err)
 			}
@@ -181,17 +169,17 @@ func (sm *Manager) cleanRoutes() error {
 		if sm.config.EnableControlPlane {
 			found = (routes[i].Dst.IP.String() == sm.config.Address)
 		} else {
-			found = sm.countRouteReferences(&routes[i]) > 0
+			found = endpoints.CountRouteReferences(&routes[i], &sm.svcProcessor.ServiceInstances) > 0
 		}
 
 		if !found {
 			err = netlink.RouteDel(&(routes[i]))
 			if err != nil {
-				log.Error("[route] failed to delete", "route", routes[i], "err", err)
-			} else {
-				log.Debug("[route] deleted", "route", routes[i])
+				log.Error("[route] deletion", "route", routes[i], "err", err)
 			}
+			log.Debug("[route] deletion", "route", routes[i])
 		}
+
 	}
 	return nil
 }

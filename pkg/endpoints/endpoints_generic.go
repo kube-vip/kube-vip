@@ -6,22 +6,24 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/services"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
 
 type endpointWorker interface {
-	processInstance(svcCtx *services.Context, service *v1.Service, leaderElectionActive *bool) error
-	clear(svcCtx *services.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool)
+	processInstance(svcCtx *servicecontext.Context, service *v1.Service, leaderElectionActive *bool) error
+	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool)
 	getEndpoints(service *v1.Service, id string) ([]string, error)
 	removeEgress(service *v1.Service, lastKnownGoodEndpoint *string)
 	delete(service *v1.Service, id string) error
 	setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
 }
 
-func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*services.Instance) endpointWorker {
+func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance) endpointWorker {
 	generic := newGeneric(config, provider, instances)
 
 	if config.EnableRoutingTable {
@@ -37,10 +39,10 @@ func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpS
 type generic struct {
 	config    *kubevip.Config
 	provider  providers.Provider
-	instances *[]*services.Instance
+	instances *[]*instance.Instance
 }
 
-func newGeneric(config *kubevip.Config, provider providers.Provider, instances *[]*services.Instance) generic {
+func newGeneric(config *kubevip.Config, provider providers.Provider, instances *[]*instance.Instance) generic {
 	return generic{
 		config:    config,
 		provider:  provider,
@@ -48,18 +50,18 @@ func newGeneric(config *kubevip.Config, provider providers.Provider, instances *
 	}
 }
 
-func (g *generic) processInstance(_ *services.Context, _ *v1.Service, _ *bool) error {
+func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service, _ *bool) error {
 	return nil
 }
 
-func (g *generic) clear(_ *services.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
+func (g *generic) clear(_ *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
 	g.clearEgress(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
 }
 
 func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
 	if *lastKnownGoodEndpoint != "" {
 		log.Warn("existing  endpoint has been removed, no remaining endpoints for leaderElection", "provider", g.provider.GetLabel(), "endpoint", lastKnownGoodEndpoint)
-		if err := services.TeardownEgress(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations, g.config.EgressWithNftables); err != nil {
+		if err := egress.Teardown(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations, g.config.EgressWithNftables); err != nil {
 			log.Error("error removing redundant egress rules", "err", err)
 		}
 
