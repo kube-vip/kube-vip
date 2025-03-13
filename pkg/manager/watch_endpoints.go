@@ -150,7 +150,6 @@ func (sm *Manager) watchEndpoint(svcCtx *serviceContext, id string, service *v1.
 
 	rw, err := provider.createRetryWatcher(leaderCtx, sm, service)
 	if err != nil {
-		svcCtx.cancel()
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.getLabel(), err)
 	}
 
