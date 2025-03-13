@@ -228,4 +228,10 @@ const (
 
 	// healthCheckPort, if set to non-zero will be the port the health check will listen on
 	healthCheckPort = "health_check_port"
+
+	// enableUPNP enables UPNP functions
+	enableUPNP = "enable_upnp"
+
+	// egressClean enables egress cleaning on kube-vip's start
+	egressClean = "egress_clean"
 )

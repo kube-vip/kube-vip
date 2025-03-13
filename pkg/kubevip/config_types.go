@@ -180,6 +180,12 @@ type Config struct {
 
 	// HealthCheckPort, if non-zero then will enable the healthcheck to return ok on this port
 	HealthCheckPort int `yaml:"healthCheckPort"`
+
+	// EnableUPNP, enables UPNP functions
+	EnableUPNP bool `yaml:"enableUPNP"`
+
+	// EgressClean, enables egress cleaning on Kube-vip's start
+	EgressClean bool `yaml:"egressClean"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
