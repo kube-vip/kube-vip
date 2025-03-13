@@ -41,7 +41,7 @@ func (p *Processor) AddModify(svcCtx *serviceContext, event watch.Event,
 		return false, err
 	}
 
-	if err := p.worker.SetInstanceEndpointsStatus(service, endpoints); err != nil {
+	if err := p.worker.SetInstanceEndpointsStatus(service, len(endpoints) > 0); err != nil {
 		log.Error("updating instance", "err", err)
 	}
 
@@ -67,8 +67,13 @@ func (p *Processor) AddModify(svcCtx *serviceContext, event watch.Event,
 			}()
 		}
 
+		isRouteConfigured, err := isRouteConfigured(service.UID)
+		if err != nil {
+			return false, fmt.Errorf("[%s] error while checking if route is configured: %w", p.provider.getLabel(), err)
+		}
+
 		// There are local endpoints available on the node
-		if !p.sm.config.EnableServicesElection && !p.sm.config.EnableLeaderElection { // && !isRouteConfigured {
+		if !p.sm.config.EnableServicesElection && !p.sm.config.EnableLeaderElection && !isRouteConfigured {
 			if err := p.worker.ProcessInstance(svcCtx, service, leaderElectionActive); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -105,7 +110,6 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 	stillExists := false
 
 	for x := range endpoints {
-		log.Info("endpoint", "address", endpoints[x])
 		if endpoints[x] == *lastKnownGoodEndpoint {
 			stillExists = true
 		}
