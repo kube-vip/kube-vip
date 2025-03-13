@@ -9,8 +9,9 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/services"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -21,11 +22,11 @@ type Processor struct {
 	provider  providers.Provider
 	bgpServer *bgp.Server
 	worker    endpointWorker
-	instances *[]*services.Instance
+	instances *[]*instance.Instance
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*services.Instance) *Processor {
+	instances *[]*instance.Instance) *Processor {
 	return &Processor{
 		config:    config,
 		provider:  provider,
@@ -35,7 +36,7 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 	}
 }
 
-func (p *Processor) AddOrModify(ctx *services.Context, event watch.Event,
+func (p *Processor) AddOrModify(ctx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string, leaderElectionActive *bool,
 	serviceFunc func(context.Context, *v1.Service) error,
 	leaderCtx *context.Context, cancel *context.CancelFunc) (bool, error) {
@@ -91,7 +92,7 @@ func (p *Processor) AddOrModify(ctx *services.Context, event watch.Event,
 	p.updateAnnotations(service, lastKnownGoodEndpoint)
 
 	log.Debug("watcher", "provider",
-		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", lastKnownGoodEndpoint, "active leader election", leaderElectionActive)
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", *leaderElectionActive)
 
 	return false, nil
 }
