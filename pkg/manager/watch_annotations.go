@@ -142,23 +142,20 @@ func (sm *Manager) annotationsWatcher() error {
 // Parsed annotation config overlays config in passed bgpConfig in order to preserve configs
 // set by other means with the exception that bgpConfig.Peers is overwritten.
 //
-// The BGP configuration is managed through Kubernetes node annotations
-// using a simple key-value format: <prefix>/<info>
+// The regex expression for each annotation ensures (at least in terms of annotations) backwards
+// compatibility with the Equinix Metal annotation format changed in
+// https://github.com/equinix/cloud-provider-equinix-metal/releases/tag/v3.3.0
 //
-// For example:
-// * <prefix>/node-asn - The ASN (Autonomous System Number) of the node
-// * <prefix>/peer-asn - The ASN of the BGP peer
-// * <prefix>/peer-ip  - The IP address(es) of the BGP peer(s), comma-separated for multiple peers
-// * <prefix>/src-ip   - The source IP address used for BGP communication
-// * <prefix>/bgp-pass - Optional base64-encoded BGP password
-//
-// The prefix is configurable and typically set to 'bgp' or similar value
+// "metal.equinix.com/<info>`" --> "metal.equinix.com/bgp-peers-{{n}}-<info>`"
+// * `<info>` is the relevant information, such as `node-asn` or `peer-ip`
+// * `{{n}}` is the number of the peer, always starting with `0`
+// * kube-vip is only designed to manage one peer, just look for {{n}} == 0
 func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
 	bgpPeer := bgp.Peer{}
 
 	nodeASN := ""
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/node-asn$", prefix))
+		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?node-asn", prefix))
 		if regex.Match([]byte(k)) {
 			nodeASN = v
 		}

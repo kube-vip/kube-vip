@@ -363,6 +363,16 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, routingtable...)
 	}
+	// If BGP
+	if c.EnableBGP {
+		bgp := []corev1.EnvVar{
+			{
+				Name:  bgpEnable,
+				Value: strconv.FormatBool(c.EnableBGP),
+			},
+		}
+		newEnvironment = append(newEnvironment, bgp...)
+	}
 
 	// If BGP
 	if c.EnableBGP {
