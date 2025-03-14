@@ -135,9 +135,6 @@ type Config struct {
 	BGPPeerConfig bgp.Peer
 	BGPPeers      []string
 
-	// ProviderConfig, is the path to a provider configuration file
-	ProviderConfig string
-
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 
