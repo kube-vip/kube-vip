@@ -49,12 +49,6 @@ func ParseEnvironment(c *Config) error {
 		c.ServicesInterface = env
 	}
 
-	// Find provider configuration
-	env = os.Getenv(providerConfig)
-	if env != "" {
-		c.ProviderConfig = env
-	}
-
 	// Find Kubernetes Leader Election configuration
 	env = os.Getenv(vipLeaderElection)
 	if env != "" {
