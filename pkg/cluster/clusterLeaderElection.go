@@ -345,9 +345,16 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 			// Find the node IP address (this isn't foolproof)
 			for x := range node.Status.Addresses {
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
-					err = lb.AddBackend(node.Status.Addresses[x].Address, port)
-					if err != nil {
-						log.Error("add IPVS backend", "err", err)
+					if checkIfNodeIsReady(node) {
+						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
+						if err != nil {
+							log.Error("add IPVS backend", "err", err)
+						}
+					} else {
+						err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
+						if err != nil {
+							log.Error("remove IPVS backend", "err", err)
+						}
 					}
 				}
 			}
@@ -389,4 +396,18 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 
 	log.Info("Exiting Node watcher")
 	return nil
+}
+
+func checkIfNodeIsReady(node *v1.Node) bool {
+	if node == nil {
+		return false
+	}
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == v1.NodeReady {
+			if condition.Status == v1.ConditionTrue {
+				return true
+			}
+		}
+	}
+	return false
 }
