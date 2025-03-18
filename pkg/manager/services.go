@@ -15,6 +15,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/kube-vip/kube-vip/pkg/upnp"
@@ -119,11 +120,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	if !sm.config.DisableServiceUpdates {
 		log.Debug("service update", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name)
 		if err := sm.updateStatus(newService); err != nil {
-			// delete service to collect garbage
-			if deleteErr := sm.deleteService(newService.serviceSnapshot.UID); deleteErr != nil {
-				return deleteErr
-			}
-			return err
+			log.Error("updating status", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name, "err", err)
 		}
 	}
 
@@ -354,7 +351,15 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 }
 
 func (sm *Manager) updateStatus(i *Instance) error {
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	// let's retry status update every 10ms for 30s
+	retryConfig := wait.Backoff{
+		Steps:    3000,
+		Duration: 10 * time.Millisecond,
+		Factor:   0,
+		Jitter:   0.1,
+	}
+	// will retry for every error encountered, TODO: should a list of errors that will trigger retry be specified?
+	err := retry.OnError(retryConfig, func(error) bool { return true }, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
 		currentService, err := sm.clientSet.CoreV1().Services(i.serviceSnapshot.Namespace).Get(context.TODO(), i.serviceSnapshot.Name, metav1.GetOptions{})
@@ -441,11 +446,7 @@ func (sm *Manager) updateStatus(i *Instance) error {
 		return nil
 	})
 
-	if retryErr != nil {
-		log.Error("Failed to set Services", "err", retryErr)
-		return retryErr
-	}
-	return nil
+	return err
 }
 
 // fetchServiceAddresses tries to get the addresses from annotations
