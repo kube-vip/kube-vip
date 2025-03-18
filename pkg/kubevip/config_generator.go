@@ -331,17 +331,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 
 	}
 
-	// If we're specifying a configuration
-	if c.ProviderConfig != "" {
-		provider := []corev1.EnvVar{
-			{
-				Name:  providerConfig,
-				Value: c.ProviderConfig,
-			},
-		}
-		newEnvironment = append(newEnvironment, provider...)
-	}
-
 	// Detect and enable wireguard mode
 	if c.EnableWireguard {
 		wireguard := []corev1.EnvVar{
@@ -587,26 +576,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Hostnames: []string{"kubernetes"},
 		}
 		newManifest.Spec.HostAliases = append(newManifest.Spec.HostAliases, hostAlias)
-	}
-
-	if c.ProviderConfig != "" {
-		providerConfigMount := corev1.VolumeMount{
-			Name:      "cloud-sa-volume",
-			MountPath: "/etc/cloud-sa",
-			ReadOnly:  true,
-		}
-		newManifest.Spec.Containers[0].VolumeMounts = append(newManifest.Spec.Containers[0].VolumeMounts, providerConfigMount)
-
-		providerConfigVolume := corev1.Volume{
-			Name: "cloud-sa-volume",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: "provider-cloud-config",
-				},
-			},
-		}
-		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, providerConfigVolume)
-
 	}
 
 	return newManifest
