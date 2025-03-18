@@ -95,9 +95,6 @@ const (
 	// vipPacketProjectID defines which projectID within Packet to use
 	//vipPacketProjectID = "vip_packetprojectid"
 
-	// providerConfig defines a path to a configuration that should be parsed
-	providerConfig = "provider_config"
-
 	// bgpEnable defines if BGP should be enabled
 	bgpEnable = "bgp_enable"
 	// bgpRouterID defines the routerID for the BGP server
