@@ -1,4 +1,4 @@
-package manager
+package providers
 
 import (
 	"context"
@@ -13,17 +13,24 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/util/retry"
 )
 
-type endpointslicesProvider struct {
+type Endpointslices struct {
 	label     string
 	endpoints *discoveryv1.EndpointSlice
 }
 
-func (ep *endpointslicesProvider) createRetryWatcher(ctx context.Context, sm *Manager,
+func NewEndpointslices() Provider {
+	return &Endpointslices{
+		label: "endpointslices",
+	}
+}
+
+func (ep *Endpointslices) CreateRetryWatcher(ctx context.Context, clientSet *kubernetes.Clientset,
 	service *v1.Service) (*watchtools.RetryWatcher, error) {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": service.Name}}
 
@@ -33,7 +40,7 @@ func (ep *endpointslicesProvider) createRetryWatcher(ctx context.Context, sm *Ma
 
 	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.rwClientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
+			return clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
 		},
 	})
 	if err != nil {
@@ -43,7 +50,7 @@ func (ep *endpointslicesProvider) createRetryWatcher(ctx context.Context, sm *Ma
 	return rw, nil
 }
 
-func (ep *endpointslicesProvider) loadObject(endpoints runtime.Object, cancel context.CancelFunc) error {
+func (ep *Endpointslices) LoadObject(endpoints runtime.Object, cancel context.CancelFunc) error {
 	eps, ok := endpoints.(*discoveryv1.EndpointSlice)
 	if !ok {
 		cancel()
@@ -53,7 +60,7 @@ func (ep *endpointslicesProvider) loadObject(endpoints runtime.Object, cancel co
 	return nil
 }
 
-func (ep *endpointslicesProvider) getAllEndpoints() ([]string, error) {
+func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for _, ep := range ep.endpoints.Endpoints {
 		result = append(result, ep.Addresses...)
@@ -61,7 +68,7 @@ func (ep *endpointslicesProvider) getAllEndpoints() ([]string, error) {
 	return result, nil
 }
 
-func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
+func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
 	for _, endpoint := range ep.endpoints.Endpoints {
 		if !*endpoint.Conditions.Serving {
@@ -91,11 +98,11 @@ func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config
 	return localEndpoints, nil
 }
 
-func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6 string, service *v1.Service, sm *Manager) error {
+func (ep *Endpointslices) UpdateServiceAnnotation(endpoint, endpointIPv6 string, service *v1.Service, clientSet *kubernetes.Clientset) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+		currentService, err := clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -105,10 +112,10 @@ func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6
 			currentServiceCopy.Annotations = make(map[string]string)
 		}
 
-		currentServiceCopy.Annotations[activeEndpoint] = endpoint
-		currentServiceCopy.Annotations[activeEndpointIPv6] = endpointIPv6
+		currentServiceCopy.Annotations[kubevip.ActiveEndpoint] = endpoint
+		currentServiceCopy.Annotations[kubevip.ActiveEndpointIPv6] = endpointIPv6
 
-		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+		_, err = clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
 			log.Error("error updating Service Spec", "provider", ep.label, "service name", currentServiceCopy.Name, "err", err)
 			return err
@@ -123,10 +130,10 @@ func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6
 	return nil
 }
 
-func (ep *endpointslicesProvider) getLabel() string {
+func (ep *Endpointslices) GetLabel() string {
 	return ep.label
 }
 
-func (ep *endpointslicesProvider) getProtocol() string {
+func (ep *Endpointslices) GetProtocol() string {
 	return string(ep.endpoints.AddressType)
 }

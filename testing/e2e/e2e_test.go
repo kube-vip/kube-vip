@@ -34,7 +34,7 @@ import (
 	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gexec"
 
-	kvcluster "github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
@@ -164,7 +164,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
-
 					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -797,7 +796,7 @@ func createTestDS(name, namespace string, client kubernetes.Interface) {
 
 func createTestService(name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy, ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy) {
 	svcAnnotations := make(map[string]string)
-	svcAnnotations[kvcluster.LoadbalancerIPAnnotation] = lbAddress
+	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
 
 	labels := make(map[string]string)
 	labels["app"] = target

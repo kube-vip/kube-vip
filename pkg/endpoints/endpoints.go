@@ -1,4 +1,4 @@
-package manager
+package endpoints
 
 import (
 	"context"
@@ -7,41 +7,50 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/services"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
 type Processor struct {
-	sm       *Manager
-	provider epProvider
-	worker   EndpointWorker
+	config    *kubevip.Config
+	provider  providers.Provider
+	bgpServer *bgp.Server
+	worker    endpointWorker
+	instances *[]*services.Instance
 }
 
-func NewEndpointProcessor(sm *Manager, provider epProvider) *Processor {
+func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
+	instances *[]*services.Instance) *Processor {
 	return &Processor{
-		sm:       sm,
-		provider: provider,
+		config:    config,
+		provider:  provider,
+		bgpServer: bgpServer,
+		instances: instances,
+		worker:    newEndpointWorker(config, provider, bgpServer, instances),
 	}
 }
 
-func (p *Processor) AddModify(svcCtx *serviceContext, event watch.Event,
+func (p *Processor) AddOrModify(ctx *services.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string, leaderElectionActive *bool,
+	serviceFunc func(context.Context, *v1.Service) error,
 	leaderCtx *context.Context, cancel *context.CancelFunc) (bool, error) {
 
 	var err error
-	if err = p.provider.loadObject(event.Object, *cancel); err != nil {
-		return false, fmt.Errorf("[%s] error loading k8s object: %w", p.provider.getLabel(), err)
+	if err = p.provider.LoadObject(event.Object, *cancel); err != nil {
+		return false, fmt.Errorf("[%s] error loading k8s object: %w", p.provider.GetLabel(), err)
 	}
 
-	p.worker = NewEndpointWorker(p.sm, p.provider) // TODO: this could be created on kube-vip's start
-
-	endpoints, err := p.worker.GetEndpoints(service, id)
+	endpoints, err := p.worker.getEndpoints(service, id)
 	if err != nil {
 		return false, err
 	}
 
-	if err := p.worker.SetInstanceEndpointsStatus(service, len(endpoints) > 0); err != nil {
+	if err := p.worker.setInstanceEndpointsStatus(service, endpoints); err != nil {
 		log.Error("updating instance", "err", err)
 	}
 
@@ -54,47 +63,42 @@ func (p *Processor) AddModify(svcCtx *serviceContext, event watch.Event,
 	// Check that we have local endpoints
 	if len(endpoints) != 0 {
 		// Ignore IPv4
-		if service.Annotations[egressIPv6] == "true" && net.ParseIP(endpoints[0]).To4() != nil {
+		if service.Annotations[kubevip.EgressIPv6] == "true" && net.ParseIP(endpoints[0]).To4() != nil {
 			return true, nil
 		}
 
 		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service, leaderElectionActive, *cancel)
 		// start leader election if it's enabled and not already started
-		if !*leaderElectionActive && p.sm.config.EnableServicesElection {
+		if !*leaderElectionActive && p.config.EnableServicesElection {
 			go func() {
-				*leaderCtx, *cancel = context.WithCancel(svcCtx.ctx)
-				startLeaderElection(*leaderCtx, p.sm, leaderElectionActive, service)
+				*leaderCtx, *cancel = context.WithCancel(ctx.Ctx)
+				startLeaderElection(*leaderCtx, leaderElectionActive, service, serviceFunc)
 			}()
 		}
 
-		isRouteConfigured, err := isRouteConfigured(service.UID)
-		if err != nil {
-			return false, fmt.Errorf("[%s] error while checking if route is configured: %w", p.provider.getLabel(), err)
-		}
-
 		// There are local endpoints available on the node
-		if !p.sm.config.EnableServicesElection && !p.sm.config.EnableLeaderElection && !isRouteConfigured {
-			if err := p.worker.ProcessInstance(svcCtx, service, leaderElectionActive); err != nil {
+		if !p.config.EnableServicesElection && !p.config.EnableLeaderElection {
+			if err := p.worker.processInstance(ctx, service, leaderElectionActive); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
 		}
 	} else {
 		// There are no local endpoints
-		p.worker.Clear(svcCtx, lastKnownGoodEndpoint, service, *cancel, leaderElectionActive)
+		p.worker.clear(ctx, lastKnownGoodEndpoint, service, *cancel, leaderElectionActive)
 	}
 
 	// Set the service accordingly
 	p.updateAnnotations(service, lastKnownGoodEndpoint)
 
 	log.Debug("watcher", "provider",
-		p.provider.getLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", *leaderElectionActive)
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", lastKnownGoodEndpoint, "active leader election", leaderElectionActive)
 
 	return false, nil
 }
 
 func (p *Processor) Delete(service *v1.Service, id string) error {
-	if err := p.worker.Delete(service, id); err != nil {
-		return fmt.Errorf("[%s] error deleting service: %w", p.provider.getLabel(), err)
+	if err := p.worker.delete(service, id); err != nil {
+		return fmt.Errorf("[%s] error deleting service: %w", p.provider.GetLabel(), err)
 	}
 	return nil
 }
@@ -116,9 +120,9 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 	}
 	// If the last endpoint no longer exists, we cancel our leader Election, and set another endpoint as last known good
 	if !stillExists {
-		p.worker.RemoveEgress(service, lastKnownGoodEndpoint)
-		if *leaderElectionActive && (p.sm.config.EnableServicesElection || p.sm.config.EnableLeaderElection) {
-			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.getLabel(), "endpoint", *lastKnownGoodEndpoint)
+		p.worker.removeEgress(service, lastKnownGoodEndpoint)
+		if *leaderElectionActive && (p.config.EnableServicesElection || p.config.EnableLeaderElection) {
+			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.GetLabel(), "endpoint", *lastKnownGoodEndpoint)
 			// Stop the existing leaderElection
 			cancel()
 			// disable last leaderElection flag
@@ -131,23 +135,23 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 
 func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string) {
 	// Set the service accordingly
-	if service.Annotations[egress] == "true" {
-		activeEndpointAnnotation := activeEndpoint
+	if service.Annotations[kubevip.Egress] == "true" {
+		activeEndpointAnnotation := kubevip.ActiveEndpoint
 
-		if p.sm.config.EnableEndpointSlices && p.provider.getProtocol() == string(discoveryv1.AddressTypeIPv6) {
-			activeEndpointAnnotation = activeEndpointIPv6
+		if p.config.EnableEndpointSlices && p.provider.GetProtocol() == string(discoveryv1.AddressTypeIPv6) {
+			activeEndpointAnnotation = kubevip.ActiveEndpointIPv6
 		}
 		service.Annotations[activeEndpointAnnotation] = *lastKnownGoodEndpoint
 	}
 }
 
-func startLeaderElection(ctx context.Context, sm *Manager, leaderElectionActive *bool, service *v1.Service) {
+func startLeaderElection(ctx context.Context, leaderElectionActive *bool, service *v1.Service, serviceFunc func(context.Context, *v1.Service) error) {
 	// This is a blocking function, that will restart (in the event of failure)
 	for {
 		// if the context isn't cancelled restart
 		if ctx.Err() != context.Canceled {
 			*leaderElectionActive = true
-			err := sm.StartServicesLeaderElection(ctx, service)
+			err := serviceFunc(ctx, service)
 			if err != nil {
 				log.Error(err.Error())
 			}
