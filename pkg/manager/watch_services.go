@@ -9,6 +9,9 @@ import (
 	log "log/slog"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kube-vip/kube-vip/pkg/endpoints"
+	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
@@ -128,7 +131,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			svcAddresses := fetchServiceAddresses(svc)
+			svcAddresses := services.FetchServiceAddresses(svc)
 
 			// We only care about LoadBalancer services that have been allocated an address
 			if len(svcAddresses) <= 0 {
@@ -150,10 +153,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				// This service has been modified, but it was also active..
 				if activeService[string(svc.UID)] {
 
-					i := sm.findServiceInstance(svc)
+					i := services.FindServiceInstance(svc, sm.serviceInstances)
 					if i != nil {
-						originalService := fetchServiceAddresses(i.serviceSnapshot)
-						newService := fetchServiceAddresses(svc)
+						originalService := services.FetchServiceAddresses(i.ServiceSnapshot)
+						newService := services.FetchServiceAddresses(svc)
 						if !reflect.DeepEqual(originalService, newService) {
 
 							// Calls the cancel function of the context
@@ -186,7 +189,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			//
 
 			if !activeService[string(svc.UID)] {
-				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", fetchServiceAddresses(svc))
+				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", services.FetchServiceAddresses(svc))
 
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
 
@@ -203,11 +206,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint or EndpointSlices watcher
-									var provider epProvider
+									var provider providers.Provider
 									if !sm.config.EnableEndpointSlices {
-										provider = &endpointsProvider{label: "endpoints"}
+										provider = providers.NewEndpoints()
 									} else {
-										provider = &endpointslicesProvider{label: "endpointslices"}
+										provider = providers.NewEndpointslices()
 									}
 									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
 										log.Error(err.Error())
@@ -230,11 +233,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						go func() {
 							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 								// Add Endpoint watcher
-								var provider epProvider
+								var provider providers.Provider
 								if !sm.config.EnableEndpointSlices {
-									provider = &endpointsProvider{label: "endpoints"}
+									provider = providers.NewEndpoints()
 								} else {
-									provider = &endpointslicesProvider{label: "endpointslices"}
+									provider = providers.NewEndpointslices()
 								}
 								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
 									log.Error(err.Error())
@@ -302,7 +305,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				// If no leader election is enabled, delete routes here
 				if !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
 					sm.config.EnableRoutingTable && isRouteConfigured {
-					if errs := sm.clearRoutes(svc); len(errs) == 0 {
+					if errs := endpoints.ClearRoutes(svc, &sm.serviceInstances); len(errs) == 0 {
 						configuredLocalRoutes.Store(string(svc.UID), false)
 					}
 				}
@@ -323,8 +326,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && sm.config.EnableLeaderElection && !sm.config.EnableServicesElection {
 				if sm.config.EnableBGP {
-					instance := sm.findServiceInstance(svc)
-					for _, vip := range instance.vipConfigs {
+					instance := services.FindServiceInstance(svc, sm.serviceInstances)
+					for _, vip := range instance.VipConfigs {
 						vipCidr := fmt.Sprintf("%s/%s", vip.VIP, vip.VIPCIDR)
 						err = sm.bgpServer.DelHost(vipCidr)
 						if err != nil {
@@ -332,7 +335,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						}
 					}
 				} else {
-					sm.clearRoutes(svc)
+					endpoints.ClearRoutes(svc, &sm.serviceInstances)
 				}
 			}
 
