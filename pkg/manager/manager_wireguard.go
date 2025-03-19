@@ -101,7 +101,7 @@ func (sm *Manager) startWireguard(id string) error {
 					// we can do cleanup here
 					log.Info("leader lost", "id", id)
 					for _, instance := range sm.serviceInstances {
-						for _, cluster := range instance.clusters {
+						for _, cluster := range instance.Clusters {
 							cluster.Stop()
 						}
 					}
