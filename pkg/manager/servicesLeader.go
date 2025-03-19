@@ -77,7 +77,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 		return fmt.Errorf("failed to get context for service %q with UID %q: nil context", service.Name, service.UID)
 	}
 
-	svcCtx.isActive = true
+	svcCtx.IsActive = true
 
 	// start the leader election code loop
 	leaderelection.RunOrDie(childCtx, leaderelection.LeaderElectionConfig{
@@ -104,13 +104,13 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 			OnStoppedLeading: func() {
 				// we can do cleanup here
 				log.Info("leadership lost", "service", service.Name, "leader", sm.config.NodeName)
-				if svcCtx.isActive {
+				if svcCtx.IsActive {
 					if err := sm.deleteService(service.UID); err != nil {
 						log.Error("service deletion", "err", err)
 					}
 				}
 				// Mark this service is inactive
-				svcCtx.isActive = false
+				svcCtx.IsActive = false
 			},
 			OnNewLeader: func(identity string) {
 				// we're notified when new leader elected

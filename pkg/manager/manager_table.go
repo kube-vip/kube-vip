@@ -195,7 +195,3 @@ func (sm *Manager) cleanRoutes() error {
 	}
 	return nil
 }
-
-func (sm *Manager) countRouteReferences(route *netlink.Route) int {
-	return cluster.CountRouteReferences(&sm.serviceInstances, route)
-}
