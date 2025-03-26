@@ -67,19 +67,51 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf(" %d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
 	if strings.ToLower(forwardingMethod) == "masquerade" {
-		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/vs/conntrack", "1")
-		if err != nil {
-			log.Error("ensuring net.ipv4.vs.conntrack enabled", "err", err)
-			panic("")
-		}
-		log.Info("sysctl set net.ipv4.vs.conntrack to 1")
+		conntrackFile := "/proc/sys/net/ipv4/vs/conntrack"
 
-		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/ip_forward", "1")
+		var isConntrackEnabled bool
+		var isIPv4ForwardEnabled bool
+
+		isConntrackEnabled, err = sysctl.CheckProcSys(conntrackFile)
 		if err != nil {
-			log.Error("ensuring net.ipv4.ip_forward enabled", "err", err)
+			log.Error("checking net.ipv4.vs.conntrack enabled", "err", err)
 			panic("")
 		}
-		log.Info("sysctl set net.ipv4.ip_forward to 1")
+		if !isConntrackEnabled {
+			err = sysctl.WriteProcSys(conntrackFile, "1")
+			if err != nil {
+				if errors.Is(err, os.ErrPermission) {
+					log.Error("no permission to write to the file - please ensure that the kube-vip is running with proper capabilities/privileged mode to write to sysfs",
+						"file", conntrackFile, "err", err)
+				} else {
+					log.Error("ensuring net.ipv4.vs.conntrack enabled", "err", err)
+				}
+				panic("")
+			}
+			log.Info("sysctl set net.ipv4.vs.conntrack to 1")
+		}
+
+		ipv4ForwardFile := "/proc/sys/net/ipv4/ip_forward"
+
+		isIPv4ForwardEnabled, err = sysctl.CheckProcSys(ipv4ForwardFile)
+		if err != nil {
+			log.Error("checking net.ipv4.ip_forward enabled", "err", err)
+			panic("")
+		}
+
+		if !isIPv4ForwardEnabled {
+			err = sysctl.WriteProcSys(ipv4ForwardFile, "1")
+			if err != nil {
+				if errors.Is(err, os.ErrPermission) {
+					log.Error("no permission to write to the file - please ensure that kube-vip is running with proper capabilities/privileged mode to write to sysfs",
+						"file", ipv4ForwardFile, "err", err)
+				} else {
+					log.Error("ensuring net.ipv4.ip_forward enabled", "err", err)
+				}
+				panic("")
+			}
+			log.Info("sysctl set net.ipv4.ip_forward to 1")
+		}
 	}
 
 	ip, family := ipAndFamily(address)
