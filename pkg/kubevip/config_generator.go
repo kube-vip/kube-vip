@@ -331,40 +331,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 
 	}
 
-	// If we're specifying a configuration
-	if c.ProviderConfig != "" {
-		provider := []corev1.EnvVar{
-			{
-				Name:  providerConfig,
-				Value: c.ProviderConfig,
-			},
-		}
-		newEnvironment = append(newEnvironment, provider...)
-	}
-
-	// If Equinix Metal is enabled then add it to the manifest
-	if c.EnableMetal {
-		packet := []corev1.EnvVar{
-			{
-				Name:  vipPacket,
-				Value: strconv.FormatBool(c.EnableMetal),
-			},
-			{
-				Name:  vipPacketProject,
-				Value: c.MetalProject,
-			},
-			{
-				Name:  vipPacketProjectID,
-				Value: c.MetalProjectID,
-			},
-			{
-				Name:  "PACKET_AUTH_TOKEN",
-				Value: c.MetalAPIKey,
-			},
-		}
-		newEnvironment = append(newEnvironment, packet...)
-	}
-
 	// Detect and enable wireguard mode
 	if c.EnableWireguard {
 		wireguard := []corev1.EnvVar{
@@ -386,8 +352,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, routingtable...)
 	}
-
-	// If BGP, but we're not using Equinix Metal
+	// If BGP
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{
 			{
@@ -397,8 +362,9 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 		}
 		newEnvironment = append(newEnvironment, bgp...)
 	}
-	// If BGP, but we're not using Equinix Metal
-	if c.EnableBGP && !c.EnableMetal {
+
+	// If BGP
+	if c.EnableBGP {
 		bgpConfig := []corev1.EnvVar{
 			{
 				Name:  bgpRouterID,
@@ -610,26 +576,6 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Hostnames: []string{"kubernetes"},
 		}
 		newManifest.Spec.HostAliases = append(newManifest.Spec.HostAliases, hostAlias)
-	}
-
-	if c.ProviderConfig != "" {
-		providerConfigMount := corev1.VolumeMount{
-			Name:      "cloud-sa-volume",
-			MountPath: "/etc/cloud-sa",
-			ReadOnly:  true,
-		}
-		newManifest.Spec.Containers[0].VolumeMounts = append(newManifest.Spec.Containers[0].VolumeMounts, providerConfigMount)
-
-		providerConfigVolume := corev1.Volume{
-			Name: "cloud-sa-volume",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: "metal-cloud-config",
-				},
-			},
-		}
-		newManifest.Spec.Volumes = append(newManifest.Spec.Volumes, providerConfigVolume)
-
 	}
 
 	return newManifest
