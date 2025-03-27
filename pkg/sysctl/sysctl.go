@@ -54,3 +54,21 @@ func CheckProcSys(path string) (bool, error) {
 
 	return isEnabled, nil
 }
+
+func EnableProcSys(path string) (bool, error) {
+	isEnabled, err := CheckProcSys(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to check '%s' status: %w", path, err)
+	}
+	if !isEnabled {
+		if err := WriteProcSys(path, "1"); err != nil {
+			if os.IsPermission(err) {
+				return false, fmt.Errorf("no permission to write to the file '%s' - please ensure that kube-vip is running with proper capabilities/privileged mode to write to sysfs: %w", path, err)
+			}
+			return false, fmt.Errorf("failed to enable '%s': %w", path, err)
+		}
+
+		return true, nil
+	}
+	return false, nil
+}

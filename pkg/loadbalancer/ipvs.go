@@ -69,55 +69,16 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	}
 	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf(" %d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
+	ip, family := ipAndFamily(address)
+
 	if strings.ToLower(forwardingMethod) == "masquerade" {
-		conntrackFile := "/proc/sys/net/ipv4/vs/conntrack"
-
-		var isConntrackEnabled bool
-		var isIPv4ForwardEnabled bool
-
-		isConntrackEnabled, err = sysctl.CheckProcSys(conntrackFile)
-		if err != nil {
-			log.Error("checking net.ipv4.vs.conntrack enabled", "err", err)
-			panic("")
-		}
-		if !isConntrackEnabled {
-			err = sysctl.WriteProcSys(conntrackFile, "1")
-			if err != nil {
-				if errors.Is(err, os.ErrPermission) {
-					log.Error("no permission to write to the file - please ensure that kube-vip is running with proper capabilities/privileged mode to write to sysfs",
-						"file", conntrackFile, "err", err)
-				} else {
-					log.Error("ensuring net.ipv4.vs.conntrack enabled", "err", err)
-				}
-				panic("")
-			}
-			log.Info("sysctl set net.ipv4.vs.conntrack to 1")
-		}
-
-		ipv4ForwardFile := "/proc/sys/net/ipv4/ip_forward"
-
-		isIPv4ForwardEnabled, err = sysctl.CheckProcSys(ipv4ForwardFile)
-		if err != nil {
-			log.Error("checking net.ipv4.ip_forward enabled", "err", err)
-			panic("")
-		}
-
-		if !isIPv4ForwardEnabled {
-			err = sysctl.WriteProcSys(ipv4ForwardFile, "1")
-			if err != nil {
-				if errors.Is(err, os.ErrPermission) {
-					log.Error("no permission to write to the file - please ensure that kube-vip is running with proper capabilities/privileged mode to write to sysfs",
-						"file", ipv4ForwardFile, "err", err)
-				} else {
-					log.Error("ensuring net.ipv4.ip_forward enabled", "err", err)
-				}
-				panic("")
-			}
-			log.Info("sysctl set net.ipv4.ip_forward to 1")
+		if family == ipvs.INET6 {
+			EnableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding")
+		} else {
+			EnableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack")
+			EnableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward")
 		}
 	}
-
-	ip, family := ipAndFamily(address)
 
 	netMask := netmask.MaskFrom(31, 32) // For ipv4
 	if family == ipvs.INET6 {
@@ -169,6 +130,17 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 
 	// Return our created load-balancer
 	return lb, nil
+}
+
+func EnableProcSys(path, name string) {
+	isSet, err := sysctl.EnableProcSys(path)
+	if err != nil {
+		log.Error(fmt.Sprintf("ensuring %s enabled", name), "err", err)
+		panic("")
+	}
+	if isSet {
+		log.Info(fmt.Sprintf("sysctl set %s to 1", name))
+	}
 }
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
