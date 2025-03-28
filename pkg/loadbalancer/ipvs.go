@@ -1,9 +1,11 @@
 package loadbalancer
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"sync"
 
@@ -60,27 +62,23 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	if err != nil {
 		log.Error("ensure IPVS kernel modules are loaded")
 		log.Error("Error retrieving IPVS info", "err", err)
+		if errors.Is(err, os.ErrPermission) {
+			log.Error("no permission to get IPVS info - please ensure that kube-vip is running with proper capabilities/privileged mode")
+		}
 		panic("")
 	}
 	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf(" %d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
-	if strings.ToLower(forwardingMethod) == "masquerade" {
-		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/vs/conntrack", "1")
-		if err != nil {
-			log.Error("ensuring net.ipv4.vs.conntrack enabled", "err", err)
-			panic("")
-		}
-		log.Info("sysctl set net.ipv4.vs.conntrack to 1")
-
-		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/ip_forward", "1")
-		if err != nil {
-			log.Error("ensuring net.ipv4.ip_forward enabled", "err", err)
-			panic("")
-		}
-		log.Info("sysctl set net.ipv4.ip_forward to 1")
-	}
-
 	ip, family := ipAndFamily(address)
+
+	if strings.ToLower(forwardingMethod) == "masquerade" {
+		if family == ipvs.INET6 {
+			EnableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding")
+		} else {
+			EnableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack")
+			EnableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward")
+		}
+	}
 
 	netMask := netmask.MaskFrom(31, 32) // For ipv4
 	if family == ipvs.INET6 {
@@ -125,14 +123,24 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		forwardingMethod:    m,
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
+		stop:                make(chan struct{}),
 	}
 
-	if strings.ToLower(forwardingMethod) == "masquerade" {
-		go lb.healthCheck()
-	}
+	go lb.healthCheck()
 
 	// Return our created load-balancer
 	return lb, nil
+}
+
+func EnableProcSys(path, name string) {
+	isSet, err := sysctl.EnableProcSys(path)
+	if err != nil {
+		log.Error(fmt.Sprintf("ensuring %s enabled", name), "err", err)
+		panic("")
+	}
+	if isSet {
+		log.Info(fmt.Sprintf("sysctl set %s to 1", name))
+	}
 }
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
@@ -254,7 +262,7 @@ func (lb *IPVSLoadBalancer) removeBackend(address string, port uint16) error {
 		Weight:  1,
 	}
 	err := lb.client.RemoveDestination(lb.loadBalancerService, dst)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("error removing backend: %v", err)
 	}
 	return nil
@@ -289,7 +297,7 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 			} else {
 				// old status -> not health
 				if oldStatus {
-					log.Info("healthCheck failed removing backend", "address", backend.Addr, "port", backend.Port)
+					log.Info("healthCheck failed - removing backend", "address", backend.Addr, "port", backend.Port)
 					err := lb.removeBackend(backend.Addr, backend.Port)
 					if err != nil {
 						log.Error("failed to remove backend", "address", backend.Addr, "port", backend.Port, "err", err)

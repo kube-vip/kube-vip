@@ -67,6 +67,8 @@ type network struct {
 	routeTable       int
 	routingTableType int
 	routingProtocol  int
+
+	ipvsEnabled bool
 }
 
 func netlinkParse(addr string) (*netlink.Addr, error) {
@@ -78,7 +80,7 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -94,6 +96,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			routingProtocol:  routingProtocol,
 			forwardMethod:    forwardMethod,
 			iptablesBackend:  iptablesBackend,
+			ipvsEnabled:      ipvsEnabled,
 		}
 
 		// Check if the subnet needs overriding
@@ -310,7 +313,7 @@ func (configurator *network) configureIPTables() error {
 		}
 	}
 
-	if configurator.forwardMethod == "masquerade" {
+	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" {
 		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules for masquerade")
 		}
@@ -484,7 +487,7 @@ func (configurator *network) DeleteIP() error {
 		}
 	}
 
-	if configurator.forwardMethod == "masquerade" {
+	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" {
 		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not remove iptables masquerade rules ")
 		}
