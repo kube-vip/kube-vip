@@ -39,6 +39,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
+
 	for i := range cluster.Network {
 		if cluster.Network[i].IsDDNS() {
 			if err := cluster.StartDDNS(ctxDNS); err != nil {
@@ -101,8 +103,6 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if c.EnableLoadBalancer {
-			log.Info("Starting IPVS LoadBalancer")
-
 			lb, err := loadbalancer.NewIPVSLB(cluster.Network[i].IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan)
 			if err != nil {
 				log.Error("Error creating IPVS LoadBalancer", "err", err)
@@ -114,19 +114,23 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					log.Error("Error watching node labels", "err", err)
 				}
 			}()
-			// Shutdown function that will wait on this signal, unless we call it ourselves
-			go func() {
-				<-signalChan
-				err = lb.RemoveIPVSLB()
-				if err != nil {
-					log.Error("Error stopping IPVS LoadBalancer", "err", err)
-				}
-				log.Info("Stopping IPVS LoadBalancer")
-			}()
+
+			loadbalancers = append(loadbalancers, lb)
 		}
 
 		if c.EnableARP {
 			go cluster.layer2Update(ctxArp, cluster.Network[i], c)
+		}
+	}
+
+	if c.EnableLoadBalancer {
+		// Shutdown function that will wait on this signal, unless we call it ourselves
+		<-signalChan
+		for _, lb := range loadbalancers {
+			err = lb.RemoveIPVSLB()
+			if err != nil {
+				log.Error("Error stopping IPVS LoadBalancer", "err", err)
+			}
 		}
 	}
 

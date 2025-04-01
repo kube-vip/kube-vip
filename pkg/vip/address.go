@@ -313,7 +313,8 @@ func (configurator *network) configureIPTables() error {
 		}
 	}
 
-	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" {
+	// It seems that masquerading is only reuired with IPv4 for IPVS to work.
+	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules for masquerade")
 		}
@@ -487,7 +488,7 @@ func (configurator *network) DeleteIP() error {
 		}
 	}
 
-	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" {
+	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not remove iptables masquerade rules ")
 		}
