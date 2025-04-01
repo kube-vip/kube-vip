@@ -54,9 +54,13 @@ type IPVSLoadBalancer struct {
 	networkInterface    string
 	leaderCancel        context.CancelFunc
 	signal              chan os.Signal
+	address             string
+	family              ipvs.AddressFamily
 }
 
 func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string, leaderCancel context.CancelFunc, signal chan os.Signal) (*IPVSLoadBalancer, error) {
+	log.Info("Starting IPVS LoadBalancer", "address", address)
+
 	// Create IPVS client
 	c, err := ipvs.New()
 	if err != nil {
@@ -73,16 +77,16 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		}
 		panic("")
 	}
-	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf(" %d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
+	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf("%d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
 	ip, family := ipAndFamily(address)
 
 	if strings.ToLower(forwardingMethod) == "masquerade" {
+		enableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack")
 		if family == ipvs.INET6 {
-			EnableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding")
+			enableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding")
 		} else {
-			EnableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack")
-			EnableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward")
+			enableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward")
 		}
 	}
 
@@ -133,6 +137,8 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		networkInterface:    networkInterface,
 		leaderCancel:        leaderCancel,
 		signal:              signal,
+		address:             address,
+		family:              family,
 	}
 
 	go lb.healthCheck()
@@ -141,7 +147,7 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	return lb, nil
 }
 
-func EnableProcSys(path, name string) {
+func enableProcSys(path, name string) {
 	isSet, err := sysctl.EnableProcSys(path)
 	if err != nil {
 		log.Error(fmt.Sprintf("ensuring %s enabled", name), "err", err)
@@ -153,6 +159,7 @@ func EnableProcSys(path, name string) {
 }
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
+	log.Info("Stopping IPVS LoadBalancer", "address", lb.address)
 	close(lb.stop)
 	err := lb.client.RemoveService(lb.loadBalancerService)
 	if err != nil {
@@ -164,6 +171,12 @@ func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 	isLocal := false
 	var err error
+
+	// Discard backend if it is of different IP family than LB address.
+	if _, family := ipAndFamily(address); family != lb.family {
+		return nil
+	}
+
 	if lb.forwardingMethod == ipvs.Local {
 		log.Info("checking if backend is local", "addr", address)
 		isLocal, err = lb.isLocal(address)

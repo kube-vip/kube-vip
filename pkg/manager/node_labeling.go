@@ -66,7 +66,7 @@ func applyPatchLabels(ctx context.Context, clientSet *kubernetes.Clientset,
 	node, err := clientSet.CoreV1().Nodes().Patch(ctx,
 		name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
-		log.Error("node patch marshaling failed", "err", err)
+		log.Error("node patching failed", "err", err)
 		return
 	}
 	log.Debug("updated", "node", name, "labels", node.Labels)
