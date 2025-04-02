@@ -92,7 +92,7 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 								},
 								{
 									Name:  "vip_loglevel",
-									Value: "5",
+									Value: "-4",
 								},
 								{
 									Name:  "egress_withnftables",
@@ -323,6 +323,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		for _, lbAddress := range loadBalancerAddresses {
 			err = httpTest(lbAddress)
 			if err != nil {
+				slog.Infof("web retrieval err: %s", err.Error())
 				return "", nil, fmt.Errorf("web retrieval timeout ")
 
 			}

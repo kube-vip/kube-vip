@@ -177,16 +177,7 @@ func (sm *Manager) cleanRoutes() error {
 		if sm.config.EnableControlPlane {
 			found = (routes[i].Dst.IP.String() == sm.config.Address)
 		} else {
-			for _, instance := range sm.serviceInstances {
-				for _, cluster := range instance.clusters {
-					for n := range cluster.Network {
-						r := cluster.Network[n].PrepareRoute()
-						if r.Dst.String() == routes[i].Dst.String() {
-							found = true
-						}
-					}
-				}
-			}
+			found = sm.countRouteReferences(&routes[i]) > 0
 		}
 
 		if !found {
@@ -204,11 +195,13 @@ func (sm *Manager) cleanRoutes() error {
 func (sm *Manager) countRouteReferences(route *netlink.Route) int {
 	cnt := 0
 	for _, instance := range sm.serviceInstances {
-		for _, cluster := range instance.clusters {
-			for n := range cluster.Network {
-				r := cluster.Network[n].PrepareRoute()
-				if r.Dst.String() == route.Dst.String() {
-					cnt++
+		if instance.HasEndpoints {
+			for _, cluster := range instance.clusters {
+				for n := range cluster.Network {
+					r := cluster.Network[n].PrepareRoute()
+					if r.Dst.String() == route.Dst.String() {
+						cnt++
+					}
 				}
 			}
 		}
