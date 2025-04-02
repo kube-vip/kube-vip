@@ -30,6 +30,7 @@ type Instance struct {
 	dhcpInterfaceIP     string
 	dhcpHostname        string
 	dhcpClient          *vip.DHCPClient
+	HasEndpoints        bool
 
 	// External Gateway IP the service is forwarded from
 	upnpGatewayIPs []string
