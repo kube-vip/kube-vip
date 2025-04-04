@@ -11,13 +11,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/equinixmetal"
 	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
-
-	"github.com/packethost/packngo"
 
 	log "log/slog"
 
@@ -148,35 +145,6 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		}
 	}()
 
-	// If Equinix Metal is enabled then we can begin our preparation work
-	var packetClient *packngo.Client
-	if c.EnableMetal {
-		if c.ProviderConfig != "" {
-			key, project, err := equinixmetal.GetPacketConfig(c.ProviderConfig)
-			if err != nil {
-				log.Error("retrieve Equinix metal config", "err", err)
-			} else {
-				// Set the environment variable with the key for the project
-				os.Setenv("PACKET_AUTH_TOKEN", key)
-				// Update the configuration with the project key
-				c.MetalProjectID = project
-			}
-		}
-		packetClient, err = packngo.NewClient()
-		if err != nil {
-			log.Error("create Equinix metal client", "err", err)
-		}
-
-		// We're using Equinix Metal with BGP, populate the Peer information from the API
-		if c.EnableBGP {
-			log.Info("Looking up the BGP configuration from Equinix Metal")
-			err = equinixmetal.BGPLookup(packetClient, c)
-			if err != nil {
-				log.Error("retrieve Equinix metal BPG config", "err", err)
-			}
-		}
-	}
-
 	if c.EnableBGP && bgpServer == nil {
 		// Lets start BGP
 		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
@@ -192,7 +160,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		sm:      sm,
 		onStartedLeading: func(ctx context.Context) { //nolint TODO: potential clean code
 			// As we're leading lets start the vip service
-			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, packetClient, cancel)
+			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, cancel)
 			if err != nil {
 				log.Error("starting VIP service on leader", "err", err)
 			}
