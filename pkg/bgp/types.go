@@ -7,6 +7,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -127,4 +128,8 @@ type Config struct {
 type Server struct {
 	s *gobgp.BgpServer
 	c *Config
+
+	// This is a prometheus gauge indicating the state of the sessions.
+	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
+	BGPSessionInfoGauge *prometheus.GaugeVec
 }

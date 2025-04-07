@@ -3,7 +3,6 @@ package vip
 import (
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +55,7 @@ type network struct {
 	link           netlink.Link
 	ports          []v1.ServicePort
 	serviceName    string
+	enableSecurity bool
 	ignoreSecurity bool
 
 	dnsName string
@@ -80,7 +80,8 @@ func netlinkParse(addr string) (*netlink.Addr, error) {
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int,
+	routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled, enableSecurity bool) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -97,6 +98,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			forwardMethod:    forwardMethod,
 			iptablesBackend:  iptablesBackend,
 			ipvsEnabled:      ipvsEnabled,
+			enableSecurity:   enableSecurity,
 		}
 
 		// Check if the subnet needs overriding
@@ -134,6 +136,8 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 					iptablesBackend:  iptablesBackend,
 					isDDNS:           isDDNS,
 					dnsName:          address,
+					ipvsEnabled:      ipvsEnabled,
+					enableSecurity:   enableSecurity,
 				}
 
 				networks = append(networks, result)
@@ -152,6 +156,8 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 				iptablesBackend:  iptablesBackend,
 				isDDNS:           isDDNS,
 				dnsName:          address,
+				ipvsEnabled:      ipvsEnabled,
+				enableSecurity:   enableSecurity,
 			}
 
 			// we're able to resolve store this as the initial IP
@@ -307,7 +313,7 @@ func (configurator *network) AddIP(precheck bool) error {
 }
 
 func (configurator *network) configureIPTables() error {
-	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
+	if configurator.enableSecurity && !configurator.ignoreSecurity {
 		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
 		}
@@ -482,7 +488,7 @@ func (configurator *network) DeleteIP() error {
 		return errors.Wrap(err, "could not delete ip")
 	}
 
-	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
+	if configurator.enableSecurity && !configurator.ignoreSecurity {
 		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
 		}

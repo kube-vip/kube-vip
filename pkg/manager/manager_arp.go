@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"os"
 	"syscall"
 	"time"
 
@@ -80,7 +79,7 @@ func (sm *Manager) startARP(id string) error {
 	}
 
 	// This will tidy any dangling kube-vip iptables rules
-	if os.Getenv("EGRESS_CLEAN") != "" {
+	if sm.config.EgressClean {
 		vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 	}
 
@@ -88,7 +87,7 @@ func (sm *Manager) startARP(id string) error {
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.startServicesWatchForLeaderElection(ctx)
+		err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
 		if err != nil {
 			return err
 		}
@@ -123,7 +122,7 @@ func (sm *Manager) startARP(id string) error {
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
-					err = sm.servicesWatcher(ctx, sm.syncServices)
+					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 					if err != nil {
 						log.Error("service watcher", "err", err)
 						panic("") // TODO: - emulating log.fatal here
@@ -132,11 +131,7 @@ func (sm *Manager) startARP(id string) error {
 				OnStoppedLeading: func() {
 					// we can do cleanup here
 					log.Info("leader lost", "new leader", id)
-					for _, instance := range sm.serviceInstances {
-						for _, cluster := range instance.clusters {
-							cluster.Stop()
-						}
-					}
+					sm.svcProcessor.Stop()
 
 					log.Error("lost leadership, restarting kube-vip")
 					panic("") // TODO: - emulating log.fatal here

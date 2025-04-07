@@ -7,9 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -18,11 +16,9 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -39,11 +35,6 @@ type Manager struct {
 	// Manager services
 	// service bool
 
-	// Keeps track of all running instances
-	serviceInstances []*Instance
-
-	// UPNP functionality
-	upnp bool
 	// BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 
@@ -53,16 +44,7 @@ type Manager struct {
 	// This channel is used to signal a shutdown
 	shutdownChan chan struct{}
 
-	// This is a prometheus counter used to count the number of events received
-	// from the service watcher
-	countServiceWatchEvent *prometheus.CounterVec
-
-	// This is a prometheus gauge indicating the state of the sessions.
-	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
-	bgpSessionInfoGauge *prometheus.GaugeVec
-
-	// This mutex is to protect calls from various goroutines
-	mutex sync.Mutex
+	svcProcessor *services.Processor
 }
 
 // New will create a new managing object
@@ -168,41 +150,36 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// 	}
 	// }
 
+	var bgpServer *bgp.Server
+
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
+	signalChan := make(chan os.Signal, 1)
+	// Add Notification for Userland interrupt
+	signal.Notify(signalChan, syscall.SIGINT)
+
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGTERM)
+
+	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
+	shutdownChan := make(chan struct{})
+
+	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan)
+
 	return &Manager{
-		clientSet:   clientset,
-		rwClientSet: rwClientSet,
-		configMap:   configMap,
-		config:      config,
-		countServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "all_services_events",
-			Help:      "Count all events fired by the service watcher categorised by event type",
-		}, []string{"type"}),
-		bgpSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "bgp_session_info",
-			Help:      "Display state of session by setting metric for label value with current state to 1",
-		}, []string{"state", "peer"}),
+		clientSet:    clientset,
+		rwClientSet:  rwClientSet,
+		configMap:    configMap,
+		config:       config,
+		signalChan:   signalChan,
+		shutdownChan: shutdownChan,
+		svcProcessor: svcProcessor,
 	}, nil
 }
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start() error {
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	sm.signalChan = make(chan os.Signal, 1)
-	// Add Notification for Userland interrupt
-	signal.Notify(sm.signalChan, syscall.SIGINT)
-
-	// Add Notification for SIGTERM (sent from Kubernetes)
-	signal.Notify(sm.signalChan, syscall.SIGTERM)
-
-	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
-	sm.shutdownChan = make(chan struct{})
-
 	// HealthCheck
 	if sm.config.HealthCheckPort != 0 {
 		if sm.config.HealthCheckPort < 1024 {
@@ -237,16 +214,12 @@ func (sm *Manager) Start() error {
 	}
 
 	if sm.config.EnableARP || sm.config.EnableWireguard {
-		// Before starting the leader Election enable any additional functionality
-		upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
-
-		if upnpEnabled {
-			sm.upnp = true
+		if sm.config.EnableUPNP {
 			clients := upnp.GetConnectionClients(context.TODO())
 			if len(clients) == 0 {
 				log.Error("Error Enabling UPNP. No Clients found")
 				// Set the struct to false so nothing should use it in future
-				sm.upnp = false
+				sm.config.EnableUPNP = false
 			} else {
 				for _, c := range clients {
 					ip, err := c.GetExternalIPAddress()
@@ -254,12 +227,11 @@ func (sm *Manager) Start() error {
 						log.Error("unable to find IGD2 Gateway address", "err", err)
 					}
 					log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
-
 				}
 			}
 		}
 		// TODO: It would be nice to run the UPNP refresh only on the leader.
-		go sm.refreshUPNPForwards()
+		go sm.svcProcessor.RefreshUPNPForwards()
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
@@ -303,90 +275,4 @@ func (sm *Manager) parseAnnotations() error {
 		return err
 	}
 	return nil
-}
-
-func (sm *Manager) serviceInterface() string {
-	svcIf := sm.config.Interface
-	if sm.config.ServicesInterface != "" {
-		svcIf = sm.config.ServicesInterface
-	}
-	return svcIf
-}
-
-func (sm *Manager) startTrafficMirroringIfEnabled() error {
-	if sm.config.MirrorDestInterface != "" {
-		svcIf := sm.serviceInterface()
-		log.Info("mirroring traffic", "src", svcIf, "dest", sm.config.MirrorDestInterface)
-		if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
-			return err
-		}
-	} else {
-		log.Debug("skip starting traffic mirroring since it's not enabled.")
-	}
-	return nil
-}
-
-func (sm *Manager) stopTrafficMirroringIfEnabled() error {
-	if sm.config.MirrorDestInterface != "" {
-		svcIf := sm.serviceInterface()
-		log.Info("clean up qdisc config", "interface", svcIf)
-		if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
-			return err
-		}
-	} else {
-		log.Debug("skip stopping traffic mirroring since it's not enabled.")
-	}
-	return nil
-}
-
-func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
-	log.Debug("finding service", "UID", svc.UID)
-	for i := range sm.serviceInstances {
-		log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
-		if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
-			return sm.serviceInstances[i]
-		}
-	}
-	return nil
-}
-
-func (sm *Manager) findServiceInstanceWithTimeout(ctx context.Context, svc *v1.Service) (*Instance, error) {
-	log.Debug("finding service with timeout", "UID", svc.UID)
-
-	ctxTimeout, ctxTimeoutCancel := context.WithTimeout(ctx, time.Minute)
-	defer ctxTimeoutCancel()
-
-	for {
-		for i := range sm.serviceInstances {
-			log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
-			if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
-				return sm.serviceInstances[i], nil
-			}
-		}
-
-		t := time.NewTimer(time.Millisecond * 100)
-		select {
-		case <-ctxTimeout.Done():
-			t.Stop()
-			return nil, fmt.Errorf("failed to wait for the service instance: %w", ctx.Err())
-		case <-t.C:
-			log.Debug("waiting for the service to be discovered", "UID", svc.UID)
-		}
-	}
-}
-
-// Refresh UPNP Port Forwards for all Service Instances registered in the SM
-func (sm *Manager) refreshUPNPForwards() {
-	log.Info("Starting UPNP Port Refresher")
-	for {
-		time.Sleep(300 * time.Second)
-
-		log.Info("[UPNP] Refreshing Instances", "number of instances", len(sm.serviceInstances))
-		for i := range sm.serviceInstances {
-			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
-			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
-				log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].serviceSnapshot.Name, "err", err)
-			}
-		}
-	}
 }
