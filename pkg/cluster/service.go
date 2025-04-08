@@ -93,10 +93,25 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-			cidrVip := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), c.VIPCIDR)
-			log.Debug("Attempting to advertise over BGP", "address", cidrVip)
+			subnets := vip.Split(c.VIPCIDR)
+			subnet := ""
+			if len(subnets) > 0 {
+				subnet = subnets[0]
+			}
+			if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
+				subnet = subnets[1]
+			}
+			if subnet == "" {
+				log.Error("no subnet provided", "IP", cluster.Network[i].IP())
+				panic("")
+			}
+			if err = cluster.Network[i].SetMask(subnet); err != nil {
+				log.Error("failed to set mask", "subnet", subnet, "err", err)
+				panic("")
+			}
+			log.Debug("Attempting to advertise over BGP", "address", cluster.Network[i].CIDR())
 
-			err = bgpServer.AddHost(cidrVip)
+			err = bgpServer.AddHost(cluster.Network[i].CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -335,9 +350,24 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-			cidrVip := fmt.Sprintf("%s/%s", network.IP(), c.VIPCIDR)
-			log.Debug("(svcs) attempting to advertise over BGP", "address", cidrVip)
-			err = bgp.AddHost(cidrVip)
+			subnets := vip.Split(c.VIPCIDR)
+			subnet := ""
+			if len(subnets) > 0 {
+				subnet = subnets[0]
+			}
+			if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
+				subnet = subnets[1]
+			}
+			if subnet == "" {
+				log.Error("no subnet provided", "IP", cluster.Network[i].IP())
+				panic("")
+			}
+			if err = cluster.Network[i].SetMask(subnet); err != nil {
+				log.Error("failed to set mask", "subnet", subnet, "err", err)
+				panic("")
+			}
+			log.Debug("(svcs) attempting to advertise over BGP", "address", cluster.Network[i].CIDR())
+			err = bgp.AddHost(cluster.Network[i].CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}

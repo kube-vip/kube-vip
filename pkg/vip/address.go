@@ -35,6 +35,7 @@ type Network interface {
 	UpdateRoutes() (bool, error)
 	IsSet() (bool, error)
 	IP() string
+	CIDR() string
 	IPisLinkLocal() bool
 	PrepareRoute() *netlink.Route
 	SetIP(ip string) error
@@ -642,6 +643,13 @@ func (configurator *network) IP() string {
 	defer configurator.mu.Unlock()
 
 	return configurator.address.IP.String()
+}
+
+func (configuration *network) CIDR() string {
+	configuration.mu.Lock()
+	defer configuration.mu.Unlock()
+
+	return configuration.address.IPNet.String()
 }
 
 // IP - return the IP Address
