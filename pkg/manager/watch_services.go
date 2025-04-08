@@ -137,25 +137,29 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 			if event.Type == watch.Modified {
-				for _, addr := range svcAddresses {
-					// log.Debugf("(svcs) Retreiving local addresses, to ensure that this modified address doesn't exist: %s", addr)
-					f, err := vip.GarbageCollect(sm.config.Interface, addr)
-					if err != nil {
-						log.Error("(svcs) cleaning existing address error", "err", err)
-					}
-					if f {
-						log.Warn("(svcs) already found existing config", "address", addr, "adapter", sm.config.Interface)
+				i := sm.findServiceInstance(svc)
+				originalService := []string{}
+				shouldGarbageCollect := true
+				if i != nil {
+					originalService = fetchServiceAddresses(i.serviceSnapshot)
+					shouldGarbageCollect = !reflect.DeepEqual(originalService, svcAddresses)
+				}
+				if shouldGarbageCollect {
+					for _, addr := range svcAddresses {
+						// log.Debugf("(svcs) Retreiving local addresses, to ensure that this modified address doesn't exist: %s", addr)
+						f, err := vip.GarbageCollect(sm.config.Interface, addr)
+						if err != nil {
+							log.Error("(svcs) cleaning existing address error", "err", err)
+						}
+						if f {
+							log.Warn("(svcs) already found existing config", "address", addr, "adapter", sm.config.Interface)
+						}
 					}
 				}
 				// This service has been modified, but it was also active..
 				if activeService[string(svc.UID)] {
-
-					i := sm.findServiceInstance(svc)
 					if i != nil {
-						originalService := fetchServiceAddresses(i.serviceSnapshot)
-						newService := fetchServiceAddresses(svc)
-						if !reflect.DeepEqual(originalService, newService) {
-
+						if !reflect.DeepEqual(originalService, svcAddresses) {
 							// Calls the cancel function of the context
 							if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
 								log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
@@ -173,9 +177,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							configuredLocalRoutes.Store(string(svc.UID), false)
 						}
 						// in theory this should never fail
-
 					}
-
 				}
 			}
 
