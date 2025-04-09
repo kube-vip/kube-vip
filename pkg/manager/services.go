@@ -118,9 +118,9 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	sm.serviceInstances = append(sm.serviceInstances, newService)
 
 	if !sm.config.DisableServiceUpdates {
-		log.Debug("service update", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name)
+		log.Debug("[service] update", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name)
 		if err := sm.updateStatus(newService); err != nil {
-			log.Error("updating status", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name, "err", err)
+			log.Error("[service] updating status", "namespace", newService.serviceSnapshot.Namespace, "name", newService.serviceSnapshot.Name, "err", err)
 		}
 	}
 
@@ -128,26 +128,26 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[flushContrack] == "true" {
 
-		log.Debug("Flushing conntrack rules", "service", svc.Name)
+		log.Debug("[service] Flushing conntrack rules", "service", svc.Name, "namespace", svc.Namespace)
 		for _, serviceIP := range serviceIPs {
 			err = vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
-				log.Error("flushing any remaining egress connections", "err", err)
+				log.Error("[service] flushing any remaining egress connections", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 			err = vip.DeleteExistingSessions(serviceIP, true, svc.Annotations[egressDestinationPorts], svc.Annotations[egressSourcePorts])
 			if err != nil {
-				log.Error("flushing any remaining ingress connections", "err", err)
+				log.Error("[service] flushing any remaining ingress connections", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
 	}
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if svc.Annotations[egress] == "true" && len(serviceIPs) > 0 {
-		log.Debug("enabling egress", "service", svc.Name)
+		log.Debug("[service] enabling egress", "service", svc.Name, "namespace", svc.Namespace)
 		// We will need to modify the iptables rules
 		err = sm.iptablesCheck()
 		if err != nil {
-			log.Error("configuring egress", "service", svc.Name, "err", err)
+			log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 		}
 		var podIP string
 		errList := []error{}
@@ -164,7 +164,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
-							log.Error("configuring egress", "service", svc.Name, "err", err)
+							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 						}
 					}
 				}
@@ -178,7 +178,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
-					log.Error("configuring egress", "service", svc.Name, "err", err)
+					log.Error("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 				}
 			}
 		}
@@ -191,13 +191,13 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 			}
 			err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
 			if err != nil {
-				log.Error("configuring egress", "service", svc.Name, "err", err)
+				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
 	}
 
 	finishTime := time.Since(startTime)
-	log.Info("[service] synchronised", "in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
+	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
 
 	return nil
 }
