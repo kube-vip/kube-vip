@@ -71,7 +71,7 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 									Value: "true",
 								},
 								{
-									Name:  "vip_cidr",
+									Name:  "vip_subnet",
 									Value: "32",
 								},
 								{
