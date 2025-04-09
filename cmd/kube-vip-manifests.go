@@ -13,6 +13,7 @@ import (
 // manifests will be used to generate:
 // - Pod spec manifest, mainly used for a static pod (kubeadm)
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
+// - RBAC manifest, used to generate the RBAC permissions for kube-vip
 
 var taint, role, rolebinding bool
 
