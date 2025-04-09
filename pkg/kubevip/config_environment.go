@@ -238,12 +238,6 @@ func ParseEnvironment(c *Config) error {
 		}
 	}
 
-	// Find vip address cidr range
-	env = os.Getenv(vipCidr)
-	if env != "" {
-		c.VIPCIDR = env
-	}
-
 	// Find vip address subnet
 	env = os.Getenv(vipSubnet)
 	if env != "" {

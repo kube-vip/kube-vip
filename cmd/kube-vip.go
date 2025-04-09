@@ -56,11 +56,10 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc..")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc.. (Default to 32 for IPv4 and 128 for IPv6)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.NodeName, "nodeName", "", "Name to be used for lease holder. Must be unique for each node/instance")
 
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPCIDR, "cidr", "", "The CIDR range for the virtual IP address. Default to 32 for IPv4 and 128 for IPv6") // todo: deprecate
-
+	// VIP flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Address, "address", "", "an address (IP or DNS name) to use as a VIP")
 	kubeVipCmd.PersistentFlags().Uint16Var(&initConfig.Port, "port", 6443, "Port for the VIP")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for VIP changes")
@@ -214,8 +213,8 @@ var kubeVipService = &cobra.Command{
 		}
 
 		// Ensure there is an address to generate the CIDR from
-		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
-			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
 				log.Error("generating CIDR", "err", err)
 				return
@@ -253,8 +252,8 @@ var kubeVipManager = &cobra.Command{
 		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Ensure there is an address to generate the CIDR from
-		if initConfig.VIPCIDR == "" && initConfig.Address != "" {
-			initConfig.VIPCIDR, err = GenerateCidrRange(initConfig.Address)
+		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
 			if err != nil {
 				log.Error("No interface is specified for kube-vip to bind to")
 				return
@@ -298,12 +297,12 @@ var kubeVipManager = &cobra.Command{
 			return
 		}
 
-		if !initConfig.EnableARP && strings.Contains(initConfig.VIPCIDR, kubevip.Auto) {
+		if !initConfig.EnableARP && strings.Contains(initConfig.VIPSubnet, kubevip.Auto) {
 			log.Error("auto subnet discovery cannot be used outside ARP mode")
 			return
 		}
 
-		if strings.Contains(initConfig.VIPCIDR, kubevip.Auto) && initConfig.Address != "" {
+		if strings.Contains(initConfig.VIPSubnet, kubevip.Auto) && initConfig.Address != "" {
 			log.Error("auto subnet discovery cannot be used if VIP address was provided")
 			return
 		}

@@ -39,9 +39,6 @@ const (
 	// vipServicesInterface - defines the interface that the service vips should bind too
 	vipServicesInterface = "vip_servicesinterface"
 
-	// vipCidr - defines the cidr that the vip will use (for BGP)
-	vipCidr = "vip_cidr"
-
 	// vipSubnet - defines the subnet that the vip will use
 	vipSubnet = "vip_subnet"
 
