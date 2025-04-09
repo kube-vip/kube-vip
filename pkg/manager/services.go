@@ -11,7 +11,6 @@ import (
 	log "log/slog"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -260,15 +259,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		}
 		for i := range serviceInstance.vipConfigs {
 			if serviceInstance.vipConfigs[i].EnableBGP {
-				cidrVip, err := formatAddressWithSubnetMask(serviceInstance.vipConfigs[i].VIP, serviceInstance.vipConfigs[i].VIPSubnet)
-				if err != nil {
-					return errors.Wrap(err, "error formatting address with subnet mask")
-				}
-				err = sm.bgpServer.DelHost(cidrVip)
-				if err != nil {
-					return fmt.Errorf("[BGP] error deleting BGP host: %v", err)
-				}
-				log.Debug("[BGP] delete", "host", cidrVip)
+				sm.clearBGPHosts(serviceInstance.serviceSnapshot)
 			}
 		}
 
