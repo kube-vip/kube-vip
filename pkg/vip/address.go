@@ -645,11 +645,11 @@ func (configurator *network) IP() string {
 	return configurator.address.IP.String()
 }
 
-func (configuration *network) CIDR() string {
-	configuration.mu.Lock()
-	defer configuration.mu.Unlock()
+func (configurator *network) CIDR() string {
+	configurator.mu.Lock()
+	defer configurator.mu.Unlock()
 
-	return configuration.address.IPNet.String()
+	return configurator.address.IPNet.String()
 }
 
 // IP - return the IP Address
