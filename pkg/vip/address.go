@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,6 +92,11 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			forwardMethod:    forwardMethod,
 			iptablesBackend:  iptablesBackend,
 			ipvsEnabled:      ipvsEnabled,
+		}
+
+		subnet, err = SelectSubnet(address, subnet)
+		if err != nil {
+			return networks, fmt.Errorf("unable to select subnet for IP %q from %q: %w", address, subnet, err)
 		}
 
 		// Check if the subnet needs overriding
@@ -716,7 +722,12 @@ func GarbageCollect(adapter, address string) (found bool, err error) {
 }
 
 func (configurator *network) SetMask(mask string) error {
-	m, err := strconv.Atoi(mask)
+	selectedMask, err := SelectSubnet(configurator.IP(), mask)
+	if err != nil {
+		return fmt.Errorf("failed to select mask", "subnet", mask, "err", err)
+	}
+
+	m, err := strconv.Atoi(selectedMask)
 	if err != nil {
 		return err
 	}
@@ -743,4 +754,37 @@ func (configurator *network) SetMask(mask string) error {
 
 	configurator.address.Mask = toSet
 	return nil
+}
+
+// SelectSubnet formats an IP address with the appropriate CIDR based on the input.
+// The input SubnetMasks can be "32,128" (dual-stack), "32", "128" (SingleStack).
+func SelectSubnet(rawIP string, subnetMasks string) (string, error) {
+	// Split the SubnetMasks input into DualStack or SingleStack
+	// If the input is "32,128", it will be split into ["32", "128"]
+	subnetMasksParts := strings.Split(subnetMasks, ",")
+	if len(subnetMasksParts) == 0 {
+		return "", fmt.Errorf("no subnetMasks provided got: %q", subnetMasks)
+	} else if len(subnetMasksParts) > 2 {
+		return "", fmt.Errorf("invalid subnetMasks provided got: %q", subnetMasks)
+	}
+	if slices.Contains(subnetMasksParts, "auto") {
+		return "", fmt.Errorf("auto subnet discovery only works for services: %q", subnetMasks)
+	}
+
+	// Parse the raw IP address
+	ip := net.ParseIP(rawIP)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP address: %s", rawIP)
+	}
+	if ip.To4() != nil {
+		return subnetMasksParts[0], nil
+	}
+	if ip.To16() != nil {
+		subnetMask := subnetMasksParts[0]
+		if len(subnetMasksParts) == 2 {
+			subnetMask = subnetMasksParts[1]
+		}
+		return subnetMask, nil
+	}
+	return "", fmt.Errorf("unable to select subnet mask for: IP %q and masks %q", rawIP, subnetMasks)
 }
