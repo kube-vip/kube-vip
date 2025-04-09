@@ -17,6 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
 const (
@@ -72,14 +73,6 @@ type network struct {
 	ipvsEnabled bool
 }
 
-func netlinkParse(addr string) (*netlink.Addr, error) {
-	mask, err := GetFullMask(addr)
-	if err != nil {
-		return nil, err
-	}
-	return netlink.ParseAddr(addr + mask)
-}
-
 // NewConfig will attempt to provide an interface to the kernel network configuration
 func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool) ([]Network, error) {
 	networks := []Network{}
@@ -101,16 +94,13 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 		}
 
 		// Check if the subnet needs overriding
-		if subnet != "" {
-			result.address, err = netlink.ParseAddr(address + subnet)
-			if err != nil {
-				return networks, errors.Wrapf(err, "could not parse address '%s'", address)
-			}
-		} else {
-			result.address, err = netlinkParse(address)
-			if err != nil {
-				return networks, errors.Wrapf(err, "could not parse address '%s'", address)
-			}
+		cidr, err := utils.FormatIPWithSubnetMask(address, subnet)
+		if err != nil {
+			return networks, errors.Wrapf(err, "could not format address '%s' with subnetMask '%s'", address, subnet)
+		}
+		result.address, err = netlink.ParseAddr(cidr)
+		if err != nil {
+			return networks, errors.Wrapf(err, "could not parse address '%s'", address)
 		}
 
 		if iface == "lo" && !loGlobalScope {
@@ -156,7 +146,8 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			}
 
 			// we're able to resolve store this as the initial IP
-			if result.address, err = netlinkParse(ip); err != nil {
+
+			if result.address, err = netlink.ParseAddr(fmt.Sprintf("%s/%s", ip, subnet)); err != nil {
 				return networks, err
 			}
 			// set ValidLft so that the VIP expires if the DNS entry is updated, otherwise it'll be refreshed by the DNS prober
@@ -480,9 +471,8 @@ func (configurator *network) DeleteIP() error {
 	}
 
 	if err = netlink.AddrDel(configurator.link, configurator.address); err != nil {
-		return errors.Wrap(err, "could not delete ip")
+		return fmt.Errorf("could not delete IP %q from interface %q: %w", configurator.address.IPNet.String(), configurator.link.Attrs().Name, err)
 	}
-
 	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
@@ -598,7 +588,7 @@ func (configurator *network) IsSet() (result bool, err error) {
 	if err != nil {
 		err = errors.Wrap(err, "could not list addresses")
 
-		return
+		return false, err
 	}
 
 	for _, address := range addresses {
@@ -615,7 +605,15 @@ func (configurator *network) SetIP(ip string) error {
 	configurator.mu.Lock()
 	defer configurator.mu.Unlock()
 
-	addr, err := netlinkParse(ip)
+	if strings.Contains("/", ip) {
+		return fmt.Errorf("ip should not contain CIDR notation got: %s", ip)
+	}
+	ones, _ := configurator.address.Mask.Size()
+	cidr, err := utils.FormatIPWithSubnetMask(ip, strconv.Itoa(ones))
+	if err != nil {
+		return fmt.Errorf("could not format address '%s' with subnetMask '%s'", ip, strconv.Itoa(ones))
+	}
+	addr, err := netlink.ParseAddr(cidr)
 	if err != nil {
 		return err
 	}
