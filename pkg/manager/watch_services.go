@@ -327,7 +327,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				if sm.config.EnableBGP {
 					instance := sm.findServiceInstance(svc)
 					for _, vip := range instance.vipConfigs {
-						vipCidr := fmt.Sprintf("%s/%s", vip.VIP, vip.VIPCIDR)
+						vipCidr, err := formatAddressWithSubnetMask(vip.VIP, vip.VIPSubnet)
+						if err != nil {
+							log.Error("error formatting address with subnet mask", "vip", vip.VIP, "err", err)
+						}
 						err = sm.bgpServer.DelHost(vipCidr)
 						if err != nil {
 							log.Error("error deleting host", "ip", vipCidr, "err", err)
