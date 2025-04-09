@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -342,14 +342,17 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
-									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									log.Debug("attempting to advertise BGP service", "provider", provider.getLabel(), "ip", address)
-									err := sm.bgpServer.AddHost(address)
+									cidrVip, err := formatAddressWithSubnetMask(cluster.Network[i].IP(), sm.config.VIPSubnet)
+									if err != nil {
+										log.Error("error formatting address with subnet mask", "err", err)
+									}
+									log.Debug("attempting to advertise BGP service", "provider", provider.getLabel(), "ip", cidrVip)
+									err = sm.bgpServer.AddHost(cidrVip)
 									if err != nil {
 										log.Error("error adding BGP host", "provider", provider.getLabel(), "err", err)
 									} else {
 										log.Info("added BGP host", "provider",
-											provider.getLabel(), "ip", address, "service name", service.Name, "namespace", service.Namespace)
+											provider.getLabel(), "ip", cidrVip, "service name", service.Name, "namespace", service.Namespace)
 										configuredLocalRoutes.Store(string(service.UID), true)
 										leaderElectionActive = true
 									}
@@ -377,13 +380,16 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance := sm.findServiceInstance(service); instance != nil {
 							for _, cluster := range instance.clusters {
 								for i := range cluster.Network {
-									address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-									err := sm.bgpServer.DelHost(address)
+									cidrVip, err := formatAddressWithSubnetMask(cluster.Network[i].IP(), sm.config.VIPSubnet)
 									if err != nil {
-										log.Error("deleting BGP host", "provider", provider.getLabel(), "ip", address, "err", err)
+										return errors.Wrap(err, "[endpoint] error formatting address with subnet mask")
+									}
+									err = sm.bgpServer.DelHost(cidrVip)
+									if err != nil {
+										log.Error("[endpoint] deleting BGP host", "provider", provider.getLabel(), "ip", cidrVip, "err", err)
 									} else {
-										log.Info("deleted BGP host", "provider",
-											provider.getLabel(), "ip", address, "service name", service.Name, "namespace", service.Namespace)
+										log.Info("[endpoint] deleted BGP host", "provider",
+											provider.getLabel(), "ip", cidrVip, "service name", service.Name, "namespace", service.Namespace)
 										configuredLocalRoutes.Store(string(service.UID), false)
 										leaderElectionActive = false
 									}
@@ -487,13 +493,16 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 	if instance := sm.findServiceInstance(service); instance != nil {
 		for _, cluster := range instance.clusters {
 			for i := range cluster.Network {
-				address := fmt.Sprintf("%s/%s", cluster.Network[i].IP(), sm.config.VIPCIDR)
-				err := sm.bgpServer.DelHost(address)
+				cidrVip, err := formatAddressWithSubnetMask(cluster.Network[i].IP(), sm.config.VIPSubnet)
+				if err != nil {
+					log.Error("[endpoint] error formatting address with subnet mask", "err", err)
+				}
+				err = sm.bgpServer.DelHost(cidrVip)
 				if err != nil {
 					log.Error("[endpoint] error deleting BGP host", "err", err)
 				} else {
 					log.Debug("[endpoint] deleted BGP host", "ip",
-						address, "service name", service.Name, "namespace", service.Namespace)
+						cidrVip, "service name", service.Name, "namespace", service.Namespace)
 				}
 			}
 		}
