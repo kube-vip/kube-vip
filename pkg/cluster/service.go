@@ -40,71 +40,41 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
 
 	for i := range cluster.Network {
-		if cluster.Network[i].IsDDNS() {
+		network := cluster.Network[i]
+		if err := network.SetMask(c.VIPSubnet); err != nil {
+			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
+			panic("")
+		}
+		if network.IsDDNS() {
 			if err := cluster.StartDDNS(ctxDNS); err != nil {
 				log.Error(err.Error())
 			}
 		}
 
 		// start the dns updater if address is dns
-		if cluster.Network[i].IsDNS() {
-			log.Info("starting the DNS updater", "address", cluster.Network[i].DNSName())
-			ipUpdater := vip.NewIPUpdater(cluster.Network[i])
+		if network.IsDNS() {
+			log.Info("starting the DNS updater", "address", network.DNSName())
+			ipUpdater := vip.NewIPUpdater(network)
 			ipUpdater.Run(ctxDNS)
 		}
 
 		if !c.EnableRoutingTable {
-			if c.EnableARP {
-				subnets := vip.Split(c.VIPCIDR)
-				subnet := ""
-				if len(subnets) > 0 {
-					subnet = subnets[0]
-				}
-				if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
-					subnet = subnets[1]
-				}
-				if subnet == "" {
-					log.Error("no subnet provided", "IP", cluster.Network[i].IP())
-					panic("")
-				}
-				if err = cluster.Network[i].SetMask(subnet); err != nil {
-					log.Error("failed to set mask", "subnet", subnet, "err", err)
-					panic("")
-				}
-			}
-			if err = cluster.Network[i].AddIP(false); err != nil {
+			if err = network.AddIP(false); err != nil {
 				log.Error(err.Error())
 			}
 		}
 
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-			subnets := vip.Split(c.VIPCIDR)
-			subnet := ""
-			if len(subnets) > 0 {
-				subnet = subnets[0]
-			}
-			if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
-				subnet = subnets[1]
-			}
-			if subnet == "" {
-				log.Error("no subnet provided", "IP", cluster.Network[i].IP())
-				panic("")
-			}
-			if err = cluster.Network[i].SetMask(subnet); err != nil {
-				log.Error("failed to set mask", "subnet", subnet, "err", err)
-				panic("")
-			}
-			log.Debug("Attempting to advertise over BGP", "address", cluster.Network[i].CIDR())
-
-			err = bgpServer.AddHost(cluster.Network[i].CIDR())
+			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
+			err = bgpServer.AddHost(network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
 		}
 
 		if c.EnableLoadBalancer {
-			lb, err := loadbalancer.NewIPVSLB(cluster.Network[i].IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan)
+			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan)
 			if err != nil {
 				log.Error("Error creating IPVS LoadBalancer", "err", err)
 			}
@@ -120,7 +90,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if c.EnableARP {
-			go cluster.layer2Update(ctxArp, cluster.Network[i], c)
+			go cluster.layer2Update(ctxArp, network, c)
 		}
 	}
 
@@ -191,7 +161,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		backend.Watch(func() {
 			for i := range cluster.Network {
-				networkIP := cluster.Network[i].IP()
+				network := cluster.Network[i]
+				networkIP := network.IP()
 				isNetworkV6, err := isV6(networkIP)
 				if err != nil {
 					log.Error("failed to check IP type", "IP", networkIP, "error", err)
@@ -205,19 +176,19 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 				for entry := range *backendMap {
 					if entry.Check() {
-						err = cluster.Network[i].AddIP(true)
+						err = network.AddIP(true)
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
 						if !(*backendMap)[entry] {
-							log.Info("added backend", "ip", cluster.Network[i].IP())
+							log.Info("added backend", "ip", network.IP())
 						}
 
-						err = cluster.Network[i].AddRoute(true)
+						err = network.AddRoute(true)
 						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
 							log.Warn(err.Error())
 						} else if err == nil && !(*backendMap)[entry] {
-							log.Info("added route", "route", cluster.Network[i].PrepareRoute().String())
+							log.Info("added route", "route", network.PrepareRoute().String())
 						}
 
 						(*backendMap)[entry] = true
@@ -235,24 +206,24 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				}
 
 				if deleteAddress {
-					err = cluster.Network[i].DeleteRoute()
+					err = network.DeleteRoute()
 					if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
 						log.Warn("deleting route", "err", err)
 					} else if err == nil {
-						log.Info("deleted route", "route", cluster.Network[i].PrepareRoute().String())
+						log.Info("deleted route", "route", network.PrepareRoute().String())
 					}
 
-					isSet, err := cluster.Network[i].IsSet()
+					isSet, err := network.IsSet()
 					if err != nil {
 						log.Error("failed to check IP address", "error", err)
 					}
 					if isSet {
-						err = cluster.Network[i].DeleteIP()
+						err = network.DeleteIP()
 						if err != nil {
 							log.Error("error deleting IP", "err", err)
 							panic("")
 						}
-						log.Info("deleted address", "ip", cluster.Network[i].IP())
+						log.Info("deleted address", "ip", network.IP())
 					}
 				}
 			}
@@ -296,7 +267,10 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
-
+		if err := network.SetMask(c.VIPSubnet); err != nil {
+			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
+			panic("")
+		}
 		err := network.DeleteIP()
 		if err != nil {
 			log.Warn("Attempted to clean existing VIP", "err", err)
@@ -307,53 +281,19 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 				log.Warn(err.Error())
 			}
 		} else if !c.EnableRoutingTable {
-			if c.EnableARP {
-				subnets := vip.Split(c.VIPCIDR)
-				subnet := ""
-				if len(subnets) > 0 {
-					subnet = subnets[0]
-				}
-				if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
-					subnet = subnets[1]
-				}
-				if subnet == "" {
-					log.Error("no subnet provided for address", "ip", cluster.Network[i].IP())
-					panic("")
-				}
-				if err = network.SetMask(subnet); err != nil {
-					log.Error("failed to set mask", "subnet", subnet, "err", err)
-					panic("")
-				}
-			}
 			if err = network.AddIP(false); err != nil {
 				log.Warn(err.Error())
 			}
 		}
 
 		if c.EnableARP {
-			go cluster.layer2Update(ctxArp, cluster.Network[i], c)
+			go cluster.layer2Update(ctxArp, network, c)
 		}
 
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-			subnets := vip.Split(c.VIPCIDR)
-			subnet := ""
-			if len(subnets) > 0 {
-				subnet = subnets[0]
-			}
-			if vip.IsIPv6(cluster.Network[i].IP()) && len(subnets) > 1 {
-				subnet = subnets[1]
-			}
-			if subnet == "" {
-				log.Error("no subnet provided", "IP", cluster.Network[i].IP())
-				panic("")
-			}
-			if err = cluster.Network[i].SetMask(subnet); err != nil {
-				log.Error("failed to set mask", "subnet", subnet, "err", err)
-				panic("")
-			}
-			log.Debug("(svcs) attempting to advertise over BGP", "address", cluster.Network[i].CIDR())
-			err = bgp.AddHost(cluster.Network[i].CIDR())
+			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
+			err = bgp.AddHost(network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}

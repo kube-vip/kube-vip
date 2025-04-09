@@ -11,6 +11,7 @@ import (
 	log "log/slog"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -257,11 +258,13 @@ func (sm *Manager) deleteService(uid types.UID) error {
 				return fmt.Errorf("error deleting DHCP Link : %v", err)
 			}
 		}
-		// TODO: Implement dual-stack loadbalancer support if BGP is enabled
 		for i := range serviceInstance.vipConfigs {
 			if serviceInstance.vipConfigs[i].EnableBGP {
-				cidrVip := fmt.Sprintf("%s/%s", serviceInstance.vipConfigs[i].VIP, serviceInstance.vipConfigs[i].VIPCIDR)
-				err := sm.bgpServer.DelHost(cidrVip)
+				cidrVip, err := formatAddressWithSubnetMask(serviceInstance.vipConfigs[i].VIP, serviceInstance.vipConfigs[i].VIPSubnet)
+				if err != nil {
+					return errors.Wrap(err, "error formatting address with subnet mask")
+				}
+				err = sm.bgpServer.DelHost(cidrVip)
 				if err != nil {
 					return fmt.Errorf("[BGP] error deleting BGP host: %v", err)
 				}

@@ -98,7 +98,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			}
 		}
 
-		cidrs := vip.Split(config.VIPCIDR)
+		cidrs := vip.Split(config.VIPSubnet)
 
 		ipv4AutoSubnet := false
 		ipv6AutoSubnet := false
@@ -123,7 +123,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
 				}
 			} else {
-				if cidrs[0] != "" {
+				if cidrs[0] != "" && cidrs[0] != kubevip.Auto {
 					subnet = cidrs[0]
 				} else {
 					subnet = "32"
@@ -136,7 +136,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
 				}
 			} else {
-				if len(cidrs) > 1 {
+				if len(cidrs) > 1 && cidrs[1] != "" && cidrs[1] != kubevip.Auto {
 					subnet = cidrs[1]
 				} else {
 					subnet = "128"
@@ -153,8 +153,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config) (*Instance, error) {
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
 			EnableBGP:              config.EnableBGP,
-			VIPCIDR:                subnet,
-			VIPSubnet:              config.VIPSubnet,
+			VIPSubnet:              subnet,
 			EnableRoutingTable:     config.EnableRoutingTable,
 			RoutingTableID:         config.RoutingTableID,
 			RoutingTableType:       config.RoutingTableType,
