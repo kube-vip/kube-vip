@@ -44,7 +44,7 @@ func isValidInterface(iface string) error {
 	// From kernek.org: "Interface is in unknown state, neither driver nor
 	// userspace has set operational state. Interface must be considered for user
 	// data as setting operational state has not been implemented in every driver."
-	if attrs.OperState == netlink.OperUnknown && iface != "lo" {
+	if attrs.OperState == netlink.OperUnknown {
 		log.Warn(
 			"the status of the interface is unknown. Ensure your interface is ready to accept traffic, if so you can safely ignore this message", "interface",
 			iface,
