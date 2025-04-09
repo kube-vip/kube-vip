@@ -86,15 +86,6 @@ const (
 	// vipStartLeader - will start this instance as the leader of the cluster
 	vipStartLeader = "vip_startleader"
 
-	// vipPacket defines that the packet API will be used for EIP
-	//vipPacket = "vip_packet"
-
-	// vipPacketProject defines which project within Packet to use
-	//vipPacketProject = "vip_packetproject"
-
-	// vipPacketProjectID defines which projectID within Packet to use
-	//vipPacketProjectID = "vip_packetprojectid"
-
 	// bgpEnable defines if BGP should be enabled
 	bgpEnable = "bgp_enable"
 	// bgpRouterID defines the routerID for the BGP server
