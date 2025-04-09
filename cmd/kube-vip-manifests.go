@@ -14,10 +14,10 @@ import (
 // - Pod spec manifest, mainly used for a static pod (kubeadm)
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
 
-// var inCluster bool
 var taint, role, rolebinding bool
 
 func init() {
+	kubeManifest.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
 	kubeManifestDaemon.PersistentFlags().BoolVar(&taint, "taint", false, "Taint the manifest for only running on control planes")
 	kubeManifestRbac.PersistentFlags().BoolVar(&role, "role", false, "Generate only a Role inside the serviceNamespace access")
 	kubeManifestRbac.PersistentFlags().BoolVar(&rolebinding, "rolebinding", false, "Generate only a RoleBinding for namespaced access")
