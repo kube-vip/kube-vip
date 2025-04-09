@@ -724,7 +724,7 @@ func GarbageCollect(adapter, address string) (found bool, err error) {
 func (configurator *network) SetMask(mask string) error {
 	selectedMask, err := SelectSubnet(configurator.IP(), mask)
 	if err != nil {
-		return fmt.Errorf("failed to select mask", "subnet", mask, "err", err)
+		return fmt.Errorf("failed to select mask %q: %w", mask, err)
 	}
 
 	m, err := strconv.Atoi(selectedMask)
