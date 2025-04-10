@@ -2,11 +2,14 @@ package kubevip
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	applyCoreV1 "k8s.io/client-go/applyconfigurations/core/v1"
 	applyMetaV1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
@@ -14,11 +17,43 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// TransformApplyObjectToManifest transforms an apply object into a normal Kubernetes manifest
+func TransformApplyObjectToManifest(applyObject interface{}) string {
+	// Convert the apply object to an unstructured object
+	unstructuredObj := &unstructured.Unstructured{}
+	err := runtime.DefaultUnstructuredConverter.FromUnstructured(applyConfigToMap(applyObject), unstructuredObj)
+	if err != nil {
+		log.Fatalf("Error converting apply object to unstructured: %v", err)
+	}
+
+	// Marshal the unstructured object into YAML
+	yamlData, err := yaml.Marshal(unstructuredObj.Object)
+	if err != nil {
+		log.Fatalf("Error marshaling unstructured object to YAML: %v", err)
+	}
+
+	return string(yamlData)
+}
+
+// Helper function to convert apply configuration to a map
+func applyConfigToMap(applyConfig interface{}) map[string]interface{} {
+	data, err := runtime.DefaultUnstructuredConverter.ToUnstructured(applyConfig)
+	if err != nil {
+		log.Fatalf("Error converting apply configuration to map: %v", err)
+	}
+	return data
+}
+
 // GenerateSA will create the service account for kube-vip
-func GenerateSA() *applyCoreV1.ServiceAccountApplyConfiguration {
+func GenerateSA(c *Config) *applyCoreV1.ServiceAccountApplyConfiguration {
 	kind := "ServiceAccount"
 	name := "kube-vip"
-	namespace := "kube-system"
+	var namespace string
+	if c.ServiceNamespace != "" {
+		namespace = c.ServiceNamespace
+	} else {
+		namespace = metav1.NamespaceSystem
+	}
 	newManifest := &applyCoreV1.ServiceAccountApplyConfiguration{
 		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &corev1.SchemeGroupVersion.Version, Kind: &kind},
 		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
@@ -30,15 +65,31 @@ func GenerateSA() *applyCoreV1.ServiceAccountApplyConfiguration {
 }
 
 // GenerateCR will generate the Cluster role for kube-vip
-func GenerateCR() *applyRbacV1.ClusterRoleApplyConfiguration {
-	name := "system:kube-vip-role"
-	roleRefKind := "ClusterRole"
-	apiVersion := "rbac.authorization.k8s.io/v1"
+func GenerateRole(c *Config, role bool) *applyRbacV1.RoleApplyConfiguration {
+	var kind, name string
+	var namespace *string
+	if role {
+		kind = "Role"
+		name = "kube-vip"
+		if c.ServiceNamespace != "" {
+			namespace = &c.ServiceNamespace
+		} else {
+			// If the namespace is empty then we need to set it to the system namespace
+			copiedNamespace := metav1.NamespaceSystem
+			namespace = &copiedNamespace
+		}
 
-	newManifest := &applyRbacV1.ClusterRoleApplyConfiguration{
-		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &apiVersion, Kind: &roleRefKind},
+	} else {
+		kind = "ClusterRole"
+		name = "system:kube-vip-role"
+
+	}
+	apiVersion := "rbac.authorization.k8s.io/v1"
+	newManifest := &applyRbacV1.RoleApplyConfiguration{
+		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &apiVersion, Kind: &kind},
 		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
-			Name: &name,
+			Name:      &name,
+			Namespace: namespace,
 		},
 		Rules: []applyRbacV1.PolicyRuleApplyConfiguration{
 			{
@@ -61,38 +112,54 @@ func GenerateCR() *applyRbacV1.ClusterRoleApplyConfiguration {
 				Resources: []string{"leases"},
 				Verbs:     []string{"list", "get", "watch", "update", "create"},
 			},
+			{
+				APIGroups: []string{"discovery.k8s.io"},
+				Resources: []string{"endpointslices"},
+				Verbs:     []string{"list", "get", "watch", "update"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"list"},
+			},
 		},
 	}
 	return newManifest
 }
 
-// GenerateCRB will generate the clusterRoleBinding
-func GenerateCRB() *applyRbacV1.ClusterRoleBindingApplyConfiguration {
-	kind := "ClusterRoleBinding"
+// GenerateCRB will generate the clusterRoleBinding or rolebinding
+func GenerateRoleBinding(rolebinding bool, saCfg *applyCoreV1.ServiceAccountApplyConfiguration, crCfg *applyRbacV1.RoleApplyConfiguration) *applyRbacV1.RoleBindingApplyConfiguration {
 	apiVersion := "rbac.authorization.k8s.io/v1"
-	subjectKind := "ServiceAccount"
 	apiGroup := "rbac.authorization.k8s.io"
-	roleRefKind := "ClusterRole"
-	roleRefName := "system:kube-vip-role"
-	name := "kube-vip"
-	bindName := "system:kube-vip-role-binding"
-	namespace := "kube-system"
-
-	newManifest := &applyRbacV1.ClusterRoleBindingApplyConfiguration{
+	var kind, bindName string
+	var namespace, objectNamespace *string
+	if rolebinding {
+		kind = "RoleBinding"
+		bindName = "kube-vip"
+		namespace = nil
+		objectNamespace = saCfg.Namespace
+	} else {
+		kind = "ClusterRoleBinding"
+		bindName = "system:kube-vip-binding"
+		namespace = saCfg.Namespace
+		objectNamespace = nil
+	}
+	newManifest := &applyRbacV1.RoleBindingApplyConfiguration{
 		TypeMetaApplyConfiguration: applyMetaV1.TypeMetaApplyConfiguration{APIVersion: &apiVersion, Kind: &kind},
 		ObjectMetaApplyConfiguration: &applyMetaV1.ObjectMetaApplyConfiguration{
-			Name: &bindName,
+			Name:      &bindName,
+			Namespace: objectNamespace,
 		},
 		RoleRef: &applyRbacV1.RoleRefApplyConfiguration{
 			APIGroup: &apiGroup,
-			Kind:     &roleRefKind,
-			Name:     &roleRefName,
+			Kind:     crCfg.Kind,
+			Name:     crCfg.Name,
 		},
 		Subjects: []applyRbacV1.SubjectApplyConfiguration{
 			{
-				Kind:      &subjectKind,
-				Name:      &name,
-				Namespace: &namespace,
+				Kind:      saCfg.Kind,
+				Name:      saCfg.Name,
+				Namespace: namespace,
 			},
 		},
 	}

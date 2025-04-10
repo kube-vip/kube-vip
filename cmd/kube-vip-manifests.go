@@ -7,20 +7,21 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
 )
 
 // manifests will eventually deprecate the kubeadm set of subcommands
 // manifests will be used to generate:
 // - Pod spec manifest, mainly used for a static pod (kubeadm)
 // - Daemonset manifest, mainly used to run kube-vip as a deamonset within Kubernetes (k3s/rke)
+// - RBAC manifest, used to generate the RBAC permissions for kube-vip
 
-// var inCluster bool
-var taint bool
+var taint, role, rolebinding bool
 
 func init() {
 	kubeManifest.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
 	kubeManifestDaemon.PersistentFlags().BoolVar(&taint, "taint", false, "Taint the manifest for only running on control planes")
+	kubeManifestRbac.PersistentFlags().BoolVar(&role, "role", false, "Generate only a Role inside the serviceNamespace access")
+	kubeManifestRbac.PersistentFlags().BoolVar(&rolebinding, "rolebinding", false, "Generate only a RoleBinding for namespaced access")
 
 	kubeManifest.AddCommand(kubeManifestPod)
 	kubeManifest.AddCommand(kubeManifestDaemon)
@@ -131,9 +132,19 @@ var kubeManifestRbac = &cobra.Command{
 				return
 			}
 		}
+		saCfg := kubevip.GenerateSA(&initConfig)
+		roleCfg := kubevip.GenerateRole(&initConfig, role)
+		if role {
+			rolebinding = true
+		}
+		roleBindingCfg := kubevip.GenerateRoleBinding(rolebinding, saCfg, roleCfg)
 
-		cfg := kubevip.GenerateSA()
-		b, _ := yaml.Marshal(cfg)
-		fmt.Println(string(b)) // output manifest to stdout
+		// Output the YAML manifests to stdout
+		fmt.Println("---") // Separator for YAML documents
+		fmt.Println(kubevip.TransformApplyObjectToManifest(saCfg))
+		fmt.Println("---") // Separator for YAML documents
+		fmt.Println(kubevip.TransformApplyObjectToManifest(roleCfg))
+		fmt.Println("---") // Separator for YAML documents
+		fmt.Println(kubevip.TransformApplyObjectToManifest(roleBindingCfg))
 	},
 }
