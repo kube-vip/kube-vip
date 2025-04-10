@@ -132,9 +132,12 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	// (attempt to) Remove the virtual IP, in case it already exists
 
 	for i := range cluster.Network {
-		err = cluster.Network[i].DeleteIP()
+		deleted, err := cluster.Network[i].DeleteIP()
 		if err != nil {
 			log.Error("could not delete virtualIP", "err", err)
+		}
+		if deleted {
+			log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
 		}
 	}
 
@@ -183,9 +186,12 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 			}
 
 			for i := range cluster.Network {
-				err := cluster.Network[i].DeleteIP()
+				deleted, err := cluster.Network[i].DeleteIP()
 				if err != nil {
 					log.Warn("delete VIP", "err", err)
+				}
+				if deleted {
+					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
 				}
 			}
 

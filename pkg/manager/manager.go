@@ -15,9 +15,11 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -63,6 +65,12 @@ type Manager struct {
 
 	// This mutex is to protect calls from various goroutines
 	mutex sync.Mutex
+
+	// This tracks used network interfaces and guards them with mutex for concurrent changes.
+	intfMgr *networkinterface.Manager
+
+	// This tracks VIPs and performs ARP/NDP advertisement.
+	arpMgr *arp.Manager
 }
 
 // New will create a new managing object
@@ -185,6 +193,8 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			Name:      "bgp_session_info",
 			Help:      "Display state of session by setting metric for label value with current state to 1",
 		}, []string{"state", "peer"}),
+		intfMgr: networkinterface.NewManager(),
+		arpMgr:  arp.NewManager(config),
 	}, nil
 }
 

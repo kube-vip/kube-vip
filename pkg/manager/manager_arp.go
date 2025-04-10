@@ -28,6 +28,9 @@ func (sm *Manager) startARP(id string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	log.Info("Start ARP/NDP advertisement")
+	go sm.arpMgr.StartAdvertisement(ctx)
+
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
 		<-sm.signalChan
@@ -42,7 +45,7 @@ func (sm *Manager) startARP(id string) error {
 	}()
 
 	if sm.config.EnableControlPlane {
-		cpCluster, err = cluster.InitCluster(sm.config, false)
+		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
 		if err != nil {
 			return err
 		}

@@ -67,7 +67,7 @@ func (sm *Manager) startBGP() error {
 	}()
 
 	if sm.config.EnableControlPlane {
-		cpCluster, err = cluster.InitCluster(sm.config, false)
+		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
 		if err != nil {
 			return err
 		}
