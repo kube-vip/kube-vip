@@ -121,17 +121,6 @@ func IsIPv6CIDR(cidr string) bool {
 	return ip.To4() == nil
 }
 
-// GetFullMask returns /32 for an IPv4 address and /128 for an IPv6 address
-func GetFullMask(address string) (string, error) {
-	if IsIPv4(address) {
-		return "/32", nil
-	}
-	if IsIPv6(address) {
-		return "/128", nil
-	}
-	return "", fmt.Errorf("failed to parse %s as either IPv4 or IPv6", address)
-}
-
 // GetDefaultGatewayInterface return default gateway interface link
 func GetDefaultGatewayInterface() (*net.Interface, error) {
 	routes, err := netlink.RouteList(nil, syscall.AF_INET)

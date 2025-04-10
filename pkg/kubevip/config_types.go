@@ -76,9 +76,6 @@ type Config struct {
 	// VipSubnet is the Subnet that is applied to the VIP
 	VIPSubnet string `yaml:"vipSubnet"`
 
-	// VIPCIDR is cidr range for the VIP (primarily needed for BGP)
-	VIPCIDR string `yaml:"vipCidr"`
-
 	// Address is the IP or DNS Name to use as a VirtualIP
 	Address string `yaml:"address"`
 

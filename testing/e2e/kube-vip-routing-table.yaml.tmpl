@@ -32,8 +32,8 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: spec.nodeName
-    - name: vip_cidr
-      value: '32'
+    - name: vip_subnet
+      value: '32,128'
     - name: cp_namespace
       value: kube-system
     - name: svc_enable
