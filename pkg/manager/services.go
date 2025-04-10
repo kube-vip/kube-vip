@@ -88,13 +88,14 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	startTime := time.Now()
 
-	newService, err := NewInstance(svc, sm.config)
+	newService, err := NewInstance(svc, sm.config, sm.intfMgr, sm.arpMgr)
 	if err != nil {
 		return err
 	}
 
 	for x := range newService.vipConfigs {
-		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer)
+		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace)
+		newService.clusters[x].StartLoadBalancerService(newService.vipConfigs[x], sm.bgpServer, svc.Name)
 	}
 
 	sm.upnpMap(ctx, newService)
@@ -228,6 +229,12 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		return nil
 	}
 
+	for _, c := range serviceInstance.clusters {
+		for n := range c.Network {
+			c.Network[n].SetHasEndpoints(false)
+		}
+	}
+
 	// Determine if this this VIP is shared with other loadbalancers
 	shared := false
 	vipSet := make(map[string]interface{})
@@ -241,10 +248,10 @@ func (sm *Manager) deleteService(uid types.UID) error {
 			shared = true
 		}
 	}
+	for x := range serviceInstance.clusters {
+		serviceInstance.clusters[x].Stop()
+	}
 	if !shared {
-		for x := range serviceInstance.clusters {
-			serviceInstance.clusters[x].Stop()
-		}
 		if serviceInstance.isDHCP {
 			serviceInstance.dhcpClient.Stop()
 			macvlan, err := netlink.LinkByName(serviceInstance.dhcpInterface)

@@ -9,10 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -59,7 +59,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if !c.EnableRoutingTable {
-			if err = network.AddIP(false); err != nil {
+			if _, err = network.AddIP(false); err != nil {
 				log.Error(err.Error())
 			}
 		}
@@ -176,7 +176,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 				for entry := range *backendMap {
 					if entry.Check() {
-						err = network.AddIP(true)
+						_, err = network.AddIP(true)
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
@@ -213,17 +213,13 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 						log.Info("deleted route", "route", network.PrepareRoute().String())
 					}
 
-					isSet, err := network.IsSet()
+					deleted, err := network.DeleteIP()
 					if err != nil {
-						log.Error("failed to check IP address", "error", err)
+						log.Error("error deleting IP", "err", err)
+						panic("")
 					}
-					if isSet {
-						err = network.DeleteIP()
-						if err != nil {
-							log.Error("error deleting IP", "err", err)
-							panic("")
-						}
-						log.Info("deleted address", "ip", network.IP())
+					if deleted {
+						log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
 					}
 				}
 			}
@@ -256,7 +252,7 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server) {
+func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server, name string) {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
@@ -271,17 +267,21 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			panic("")
 		}
-		err := network.DeleteIP()
+		deleted, err := network.DeleteIP()
 		if err != nil {
-			log.Warn("Attempted to clean existing VIP", "err", err)
+			log.Warn("attempted to clean existing VIP", "err", err)
 		}
+		if deleted {
+			log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
+		}
+
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
 			err = network.AddRoute(false)
 			if err != nil {
 				log.Warn(err.Error())
 			}
 		} else if !c.EnableRoutingTable {
-			if err = network.AddIP(false); err != nil {
+			if _, err = network.AddIP(false); err != nil {
 				log.Warn(err.Error())
 			}
 		}
@@ -305,7 +305,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		// Stop the Arp context if it is running
 		cancelArp()
 
-		log.Info("[LOADBALANCER] Stopping load balancers")
+		log.Info("[LOADBALANCER] Stopping load balancers", "name", name)
 
 		if c.EnableRoutingTable {
 			for i := range cluster.Network {
@@ -320,8 +320,12 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		}
 		for i := range cluster.Network {
 			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
-			if err := cluster.Network[i].DeleteIP(); err != nil {
+			deleted, err := cluster.Network[i].DeleteIP()
+			if err != nil {
 				log.Warn(err.Error())
+			}
+			if deleted {
+				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
 			}
 		}
 
@@ -353,68 +357,10 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 
 	log.Debug("layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 
-	for {
-		select {
-		case <-ctx.Done(): // if cancel() execute
-			log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
-			return
-		default:
-			cluster.ensureIPAndSendGratuitous(network, ndp)
-		}
-		if c.ArpBroadcastRate < 500 {
-			log.Error("arp broadcast rate is too low", "rate (ms)", c.ArpBroadcastRate, "setting to (ms)", "3000")
-			c.ArpBroadcastRate = 3000
-		}
-		time.Sleep(time.Duration(c.ArpBroadcastRate) * time.Millisecond)
-	}
-}
+	arpInstance := arp.NewInstance(network, ndp)
+	cluster.arpMgr.Insert(arpInstance)
 
-// ensureIPAndSendGratuitous - adds IP to the interface if missing, and send
-// either a gratuitous ARP or gratuitous NDP. Re-adds the interface if it is IPv6
-// and in a dadfailed state.
-func (cluster *Cluster) ensureIPAndSendGratuitous(network vip.Network, ndp *vip.NdpResponder) {
-	iface := network.Interface()
-	ipString := network.IP()
-
-	// Check if IP is dadfailed
-	if network.IsDADFAIL() {
-		log.Warn("IP address is in dadfailed state, removing config", "ip", ipString, "interface", iface)
-		err := network.DeleteIP()
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}
-
-	// Ensure the address exists on the interface before attempting to ARP
-	set, err := network.IsSet()
-	if err != nil {
-		log.Warn(err.Error())
-	}
-	if !set {
-		log.Warn("Re-applying the VIP configuration", "ip", ipString, "interface", iface)
-		err = network.AddIP(false)
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}
-
-	if vip.IsIPv6(ipString) {
-		// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
-		if ndp == nil {
-			log.Error("NDP responder was not created")
-		} else {
-			err := ndp.SendGratuitous(ipString)
-			if err != nil {
-				log.Warn(err.Error())
-			}
-		}
-
-	} else {
-		// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
-		err := vip.ARPSendGratuitous(ipString, iface)
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}
-
+	<-ctx.Done() // if cancel() execute
+	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
+	cluster.arpMgr.Remove(arpInstance)
 }

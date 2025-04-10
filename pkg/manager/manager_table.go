@@ -66,7 +66,7 @@ func (sm *Manager) startTableMode(id string) error {
 	}()
 
 	if sm.config.EnableControlPlane {
-		cpCluster, err = cluster.InitCluster(sm.config, false)
+		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
 		if err != nil {
 			return fmt.Errorf("cluster initialization error: %w", err)
 		}
@@ -195,9 +195,9 @@ func (sm *Manager) cleanRoutes() error {
 func (sm *Manager) countRouteReferences(route *netlink.Route) int {
 	cnt := 0
 	for _, instance := range sm.serviceInstances {
-		if instance.HasEndpoints {
-			for _, cluster := range instance.clusters {
-				for n := range cluster.Network {
+		for _, cluster := range instance.clusters {
+			for n := range cluster.Network {
+				if cluster.Network[n].HasEndpoints() {
 					r := cluster.Network[n].PrepareRoute()
 					if r.Dst.String() == route.Dst.String() {
 						cnt++
