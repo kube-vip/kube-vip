@@ -18,6 +18,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
@@ -30,12 +31,11 @@ const (
 
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
-	AddIP(precheck bool) error
+	AddIP(precheck bool) (bool, error)
 	AddRoute(precheck bool) error
-	DeleteIP() error
+	DeleteIP() (bool, error)
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
-	IsSet() (bool, error)
 	IP() string
 	CIDR() string
 	IPisLinkLocal() bool
@@ -49,6 +49,9 @@ type Network interface {
 	DDNSHostName() string
 	DNSName() string
 	SetMask(mask string) error
+	SetHasEndpoints(value bool)
+	HasEndpoints() bool
+	ARPName() string
 }
 
 // network - This allows network configuration
@@ -56,7 +59,7 @@ type network struct {
 	mu sync.Mutex
 
 	address        *netlink.Addr
-	link           netlink.Link
+	link           *networkinterface.Link
 	ports          []v1.ServicePort
 	serviceName    string
 	ignoreSecurity bool
@@ -72,10 +75,13 @@ type network struct {
 	routingProtocol  int
 
 	ipvsEnabled bool
+
+	hasEndpoints bool
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int, routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int,
+	routingProtocol int, dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool, intfMgr *networkinterface.Manager) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -83,9 +89,11 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 		return networks, errors.Wrapf(err, "could not get link for interface '%s'", iface)
 	}
 
+	networkLink := intfMgr.Get(link)
+
 	if IsIP(address) {
 		result := &network{
-			link:             link,
+			link:             networkLink,
 			routeTable:       tableID,
 			routingTableType: tableType,
 			routingProtocol:  routingProtocol,
@@ -123,7 +131,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			// when leader starts, should do get IP from DHCP for the domain
 			if isDDNS {
 				result := &network{
-					link:             link,
+					link:             networkLink,
 					routeTable:       tableID,
 					routingTableType: tableType,
 					routingProtocol:  routingProtocol,
@@ -141,7 +149,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 
 		for _, ip := range ips {
 			result := &network{
-				link:             link,
+				link:             networkLink,
 				routeTable:       tableID,
 				routingTableType: tableType,
 				routingProtocol:  routingProtocol,
@@ -201,7 +209,7 @@ func (configurator *network) PrepareRoute() *netlink.Route {
 	route := &netlink.Route{
 		Scope:     routeScope,
 		Dst:       configurator.address.IPNet,
-		LinkIndex: configurator.link.Attrs().Index,
+		LinkIndex: configurator.link.Intf.Attrs().Index,
 		Table:     configurator.routeTable,
 		Type:      configurator.routingTableType,
 		Protocol:  netlink.RouteProtocol(configurator.routingProtocol),
@@ -211,6 +219,8 @@ func (configurator *network) PrepareRoute() *netlink.Route {
 
 // AddRoute - Add an IP address to a route table
 func (configurator *network) AddRoute(precheck bool) error {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
 	route := configurator.PrepareRoute()
 
 	exists := false
@@ -232,7 +242,7 @@ func (configurator *network) AddRoute(precheck bool) error {
 }
 
 func (configurator *network) routeExists(route *netlink.Route) (bool, error) {
-	routes, err := netlink.RouteList(configurator.link, netlink.FAMILY_ALL)
+	routes, err := netlink.RouteList(configurator.link.Intf, netlink.FAMILY_ALL)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to list routes")
 	}
@@ -282,26 +292,30 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 }
 
 // AddIP - Add an IP address to the interface
-func (configurator *network) AddIP(precheck bool) error {
+func (configurator *network) AddIP(precheck bool) (bool, error) {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
 	exists := false
 	var err error
 	if precheck {
-		if exists, err = configurator.addressExists(); err != nil {
-			return errors.Wrap(err, "could not check if address exists")
+		if exists, err = configurator.isSet(); err != nil {
+			return false, errors.Wrap(err, "could not check if address exists")
 		}
 	}
 
-	if !exists {
-		if err := netlink.AddrReplace(configurator.link, configurator.address); err != nil {
-			return errors.Wrap(err, "could not add ip")
-		}
-
-		if err := configurator.configureIPTables(); err != nil {
-			return errors.Wrap(err, "could not configure IPTables")
-		}
+	if exists {
+		return false, nil
 	}
 
-	return nil
+	if err := netlink.AddrReplace(configurator.link.Intf, configurator.address); err != nil {
+		return false, errors.Wrap(err, "could not add ip")
+	}
+
+	if err := configurator.configureIPTables(); err != nil {
+		return true, errors.Wrap(err, "could not configure IPTables")
+	}
+
+	return true, nil
 }
 
 func (configurator *network) configureIPTables() error {
@@ -319,21 +333,6 @@ func (configurator *network) configureIPTables() error {
 	}
 
 	return nil
-}
-
-func (configurator *network) addressExists() (bool, error) {
-	addrs, err := netlink.AddrList(configurator.link, netlink.FAMILY_ALL)
-	if err != nil {
-		return false, errors.Wrap(err, "could not list addresses")
-	}
-
-	for _, addr := range addrs {
-		if addr.Equal(*configurator.address) {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }
 
 func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
@@ -465,33 +464,36 @@ func (configurator *network) removeIptablesRuleToLimitTrafficPorts() error {
 }
 
 // DeleteIP - Remove an IP address from the interface
-func (configurator *network) DeleteIP() error {
-	result, err := configurator.IsSet()
+func (configurator *network) DeleteIP() (bool, error) {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
+
+	result, err := configurator.isSet()
 	if err != nil {
-		return errors.Wrap(err, "ip check in DeleteIP failed")
+		return false, errors.Wrap(err, "ip check in DeleteIP failed")
 	}
 
 	// Nothing to delete
 	if !result {
-		return nil
+		return false, nil
 	}
 
-	if err = netlink.AddrDel(configurator.link, configurator.address); err != nil {
-		return fmt.Errorf("could not delete IP %q from interface %q: %w", configurator.address.IPNet.String(), configurator.link.Attrs().Name, err)
+	if err = netlink.AddrDel(configurator.link.Intf, configurator.address); err != nil {
+		return false, fmt.Errorf("could not delete IP %q from interface %q: %w", configurator.address.IPNet.String(), configurator.link.Intf.Attrs().Name, err)
 	}
 	if os.Getenv("enable_service_security") == "true" && !configurator.ignoreSecurity {
 		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
-			return errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
+			return true, errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
 		}
 	}
 
 	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
-			return errors.Wrap(err, "could not remove iptables masquerade rules ")
+			return true, errors.Wrap(err, "could not remove iptables masquerade rules ")
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 func (configurator *network) addIptablesRulesForMasquerade() error {
@@ -558,12 +560,15 @@ func delMasqueradeRuleForVIP(ipt *iptables.IPTables, vip, comment string) error 
 
 // IsDADFAIL - Returns true if the address is IPv6 and has DADFAILED flag
 func (configurator *network) IsDADFAIL() bool {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
+
 	if configurator.address == nil || !IsIPv6(configurator.address.IP.String()) {
 		return false
 	}
 
 	// Get all the address
-	addresses, err := netlink.AddrList(configurator.link, netlink.FAMILY_V6)
+	addresses, err := netlink.AddrList(configurator.link.Intf, netlink.FAMILY_V6)
 	if err != nil {
 		return false
 	}
@@ -582,15 +587,15 @@ func addressHasDADFAILEDFlag(address netlink.Addr) bool {
 	return address.Flags&unix.IFA_F_DADFAILED != 0
 }
 
-// IsSet - Check to see if VIP is set
-func (configurator *network) IsSet() (result bool, err error) {
+// isSet - Check to see if VIP is set
+func (configurator *network) isSet() (result bool, err error) {
 	var addresses []netlink.Addr
 
 	if configurator.address == nil {
 		return false, nil
 	}
 
-	addresses, err = netlink.AddrList(configurator.link, 0)
+	addresses, err = netlink.AddrList(configurator.link.Intf, 0)
 	if err != nil {
 		err = errors.Wrap(err, "could not list addresses")
 
@@ -610,6 +615,9 @@ func (configurator *network) IsSet() (result bool, err error) {
 func (configurator *network) SetIP(ip string) error {
 	configurator.mu.Lock()
 	defer configurator.mu.Unlock()
+
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
 
 	if strings.Contains("/", ip) {
 		return fmt.Errorf("ip should not contain CIDR notation got: %s", ip)
@@ -689,19 +697,23 @@ func (configurator *network) DDNSHostName() string {
 
 // Interface - return the Interface name
 func (configurator *network) Interface() string {
-	return configurator.link.Attrs().Name
+	return configurator.link.Intf.Attrs().Name
 }
 
-func GarbageCollect(adapter, address string) (found bool, err error) {
-
+func GarbageCollect(adapter, address string, intfMgr *networkinterface.Manager) (found bool, err error) {
 	// Get adapter
 	link, err := netlink.LinkByName(adapter)
 	if err != nil {
 		return true, errors.Wrapf(err, "could not get link for interface '%s'", adapter)
 	}
 
+	l := intfMgr.Get(link)
+
+	l.Lock.Lock()
+	defer l.Lock.Unlock()
+
 	// Get addresses on adapter
-	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+	addrs, err := netlink.AddrList(l.Intf, netlink.FAMILY_ALL)
 	if err != nil {
 		return false, err
 	}
@@ -713,7 +725,7 @@ func GarbageCollect(adapter, address string) (found bool, err error) {
 			found = true
 			// linting issue
 			existing := existing
-			if err = netlink.AddrDel(link, &existing); err != nil {
+			if err = netlink.AddrDel(l.Intf, &existing); err != nil {
 				return true, errors.Wrap(err, "could not delete ip")
 			}
 		}
@@ -754,6 +766,18 @@ func (configurator *network) SetMask(mask string) error {
 
 	configurator.address.Mask = toSet
 	return nil
+}
+
+func (configurator *network) SetHasEndpoints(value bool) {
+	configurator.hasEndpoints = value
+}
+
+func (configurator *network) HasEndpoints() bool {
+	return configurator.hasEndpoints
+}
+
+func (configurator *network) ARPName() string {
+	return fmt.Sprintf("%s-%s", configurator.CIDR(), configurator.Interface())
 }
 
 // SelectSubnet formats an IP address with the appropriate CIDR based on the input.

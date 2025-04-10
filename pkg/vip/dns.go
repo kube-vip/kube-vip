@@ -49,7 +49,7 @@ func (d *ipUpdater) Run(ctx context.Context) {
 					log.Error("setting IP", "address", ip, "err", err)
 				}
 
-				if err := d.vip.AddIP(false); err != nil {
+				if _, err := d.vip.AddIP(false); err != nil {
 					log.Error("error adding virtual IP", "err", err)
 				}
 
