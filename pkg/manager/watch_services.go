@@ -217,7 +217,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								}
 							}()
 
-							if (sm.config.EnableARP) || (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
+							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
 								go func() {
 									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
 									if err != nil {
