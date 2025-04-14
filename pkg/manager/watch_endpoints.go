@@ -215,8 +215,8 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				}
 			}
 
-			if sm.config.EnableRoutingTable || sm.config.EnableARP {
-				instance, err := sm.findServiceInstanceWithTimeout(ctx, service)
+			if sm.config.EnableRoutingTable {
+				instance := sm.findServiceInstance(service)
 				if err != nil {
 					log.Error("failed to find the instance", "service", service.UID, "provider", provider.getLabel(), "err", err)
 				}
@@ -225,6 +225,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 				} else {
 					for _, c := range instance.clusters {
 						for n := range c.Network {
+							c.Network[n].SetHasEndpoints(false)
 							if len(endpoints) > 0 {
 								networkV4 := true
 								if net.ParseIP(c.Network[n].IP()).To4() == nil {
@@ -238,8 +239,6 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 								if networkV4 == endpointv4 {
 									c.Network[n].SetHasEndpoints(true)
 								}
-							} else {
-								c.Network[n].SetHasEndpoints(false)
 							}
 						}
 					}

@@ -3,6 +3,7 @@ package arp
 import (
 	"context"
 	log "log/slog"
+	"sync"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -17,6 +18,7 @@ type Manager struct {
 type Instance struct {
 	network vip.Network
 	ndp     *vip.NdpResponder
+	mu      sync.Mutex
 	counter int
 }
 
@@ -40,28 +42,37 @@ func (i *Instance) Name() string {
 }
 
 func (m *Manager) Insert(instance *Instance) {
-	log.Info("inserting instance", "name", instance.Name())
 	i, ok := m.instances[instance.Name()]
 	if !ok {
-		log.Info("inserting new instance", "name", instance.Name())
+		log.Info("inserting ARP/NDP instance", "name", instance.Name())
 		m.instances[instance.Name()] = instance
 	} else {
-		log.Info("incremetning instance", "name", instance.Name())
+		i.mu.Lock()
+		defer i.mu.Unlock()
 		i.counter++
 	}
 }
 
 func (m *Manager) Remove(instance *Instance) {
-	log.Info("removing instance", "name", instance.Name())
 	if i, ok := m.instances[instance.Name()]; ok {
+		i.mu.Lock()
+		defer i.mu.Unlock()
 		if i.counter > 1 {
-			log.Info("decrementing instance", "name", instance.Name())
 			i.counter--
 		} else {
-			log.Info("deleting instance", "name", instance.Name())
+			log.Info("removing ARP/NDP instance", "name", instance.Name())
 			delete(m.instances, instance.Name())
 		}
 	}
+}
+
+func (m *Manager) Count(name string) int {
+	if i, ok := m.instances[name]; ok {
+		i.mu.Lock()
+		defer i.mu.Unlock()
+		return i.counter
+	}
+	return 0
 }
 
 func (m *Manager) StartAdvertisement(ctx context.Context) {
@@ -72,7 +83,6 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 			return
 		default:
 			for _, instance := range m.instances {
-				log.Info("processing instance", "name", instance.Name())
 				if instance.counter > 0 {
 					ensureIPAndSendGratuitous(instance)
 				}
@@ -102,21 +112,20 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 		}
 		if deleted {
 			log.Info("deleted and recreating address", "IP", ipString, "interface", iface)
-			if _, err := instance.network.AddIP(false); err != nil {
-				log.Error("failed to recreate address", "IP", ipString, "interface", iface)
-			}
+			// if _, err := instance.network.AddIP(false); err != nil {
+			// 	log.Error("failed to recreate address", "IP", ipString, "interface", iface)
+			// }
 		}
 	}
 
 	// Ensure the address exists on the interface before attempting to ARP
-	log.Info("ensureIPAndSendGratuitous()", "network", instance.network.IP(), "has endpoints", instance.network.HasEndpoints())
-	if instance.network.HasEndpoints() {
-		if added, err := instance.network.AddIP(true); err != nil {
-			log.Warn(err.Error())
-		} else if added {
-			log.Warn("Re-applied the VIP configuration", "ip", ipString, "interface", iface)
-		}
+	// if instance.network.HasEndpoints() {
+	if added, err := instance.network.AddIP(true); err != nil {
+		log.Warn(err.Error())
+	} else if added {
+		log.Warn("Re-applied the VIP configuration", "ip", ipString, "interface", iface)
 	}
+	// }
 
 	if vip.IsIPv6(ipString) {
 		// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
