@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	log "log/slog"
@@ -38,6 +39,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	signal.Notify(signalChan, syscall.SIGTERM)
 
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
+
+	var arpWG sync.WaitGroup
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
@@ -90,7 +93,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if c.EnableARP {
-			go cluster.layer2Update(ctxArp, network, c)
+			arpWG.Add(1)
+			go cluster.layer2Update(ctxArp, network, c, &arpWG)
 		}
 	}
 
@@ -261,18 +265,17 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
 
+	var arpWG sync.WaitGroup
+
 	for i := range cluster.Network {
 		network := cluster.Network[i]
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			panic("")
 		}
-		deleted, err := network.DeleteIP()
+		_, err := network.DeleteIP()
 		if err != nil {
 			log.Warn("attempted to clean existing VIP", "err", err)
-		}
-		if deleted {
-			log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
 		}
 
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
@@ -287,7 +290,8 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		}
 
 		if c.EnableARP {
-			go cluster.layer2Update(ctxArp, network, c)
+			arpWG.Add(1)
+			go cluster.layer2Update(ctxArp, network, c, &arpWG)
 		}
 
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
@@ -305,6 +309,8 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		// Stop the Arp context if it is running
 		cancelArp()
 
+		arpWG.Wait() // wait for all cluster ARP/NDP to be finished
+
 		log.Info("[LOADBALANCER] Stopping load balancers", "name", name)
 
 		if c.EnableRoutingTable {
@@ -319,6 +325,9 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			return
 		}
 		for i := range cluster.Network {
+			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 0 {
+				continue
+			}
 			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
 			deleted, err := cluster.Network[i].DeleteIP()
 			if err != nil {
@@ -334,7 +343,8 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 }
 
 // Layer2Update, handles the creation of the
-func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config) {
+func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config, arpWG *sync.WaitGroup) {
+	defer arpWG.Done()
 	log.Info("layer 2 broadcaster starting")
 	var ndp *vip.NdpResponder
 	var err error
