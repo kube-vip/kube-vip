@@ -311,7 +311,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *Instance) {
 	for _, vip := range fetchServiceAddresses(s.serviceSnapshot) {
 		for _, port := range s.serviceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
-				log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.serviceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
+				log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.serviceSnapshot.Name, "gateway", gw.ConnectionClient.GetServiceClient().Location)
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
