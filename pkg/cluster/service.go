@@ -19,6 +19,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -256,7 +257,7 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server, name string) {
+func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server, name string, serviceInstances *[]*Instance) {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
@@ -315,9 +316,13 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 
 		if c.EnableRoutingTable {
 			for i := range cluster.Network {
-				log.Info("[VIP] Deleting Route for VIP [%s]", "ip", cluster.Network[i].IP())
-				if err := cluster.Network[i].DeleteRoute(); err != nil {
-					log.Warn(err.Error())
+				// chek if route is not  referenced by another service
+				r := cluster.Network[i].PrepareRoute()
+				if CountRouteReferences(serviceInstances, r) < 1 {
+					log.Info("[VIP] Deleting Route for VIP", "IP", cluster.Network[i].IP())
+					if err := cluster.Network[i].DeleteRoute(); err != nil {
+						log.Warn(err.Error())
+					}
 				}
 			}
 
@@ -373,4 +378,21 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 	cluster.arpMgr.Remove(arpInstance)
+}
+
+func CountRouteReferences(serviceInstances *[]*Instance, route *netlink.Route) int {
+	cnt := 0
+	for _, instance := range *serviceInstances {
+		for _, cluster := range instance.Clusters {
+			for n := range cluster.Network {
+				if cluster.Network[n].HasEndpoints() {
+					r := cluster.Network[n].PrepareRoute()
+					if r.Dst.String() == route.Dst.String() {
+						cnt++
+					}
+				}
+			}
+		}
+	}
+	return cnt
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sync"
 
 	log "log/slog"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
@@ -34,8 +34,8 @@ var activeService map[string]bool
 // watchedService keeps track of services that are already being watched
 var watchedService map[string]bool
 
-// watchedService keeps track of routes that has been configured on the node
-var configuredLocalRoutes sync.Map
+// configuredNetworks keeps track of networks that has been configured on the node
+var configuredNetworks map[string]map[string]vip.Network
 
 func init() {
 	// Set up the caches for monitoring existing active or watched services
@@ -43,6 +43,7 @@ func init() {
 	activeServiceLoadBalancer = make(map[string]context.Context)
 	activeService = make(map[string]bool)
 	watchedService = make(map[string]bool)
+	configuredNetworks = make(map[string]map[string]vip.Network)
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
@@ -128,7 +129,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
-			svcAddresses := fetchServiceAddresses(svc)
+			svcAddresses := cluster.FetchServiceAddresses(svc)
 
 			// We only care about LoadBalancer services that have been allocated an address
 			if len(svcAddresses) <= 0 {
@@ -141,7 +142,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				originalService := []string{}
 				shouldGarbageCollect := true
 				if i != nil {
-					originalService = fetchServiceAddresses(i.serviceSnapshot)
+					originalService = cluster.FetchServiceAddresses(i.ServiceSnapshot)
 					shouldGarbageCollect = !reflect.DeepEqual(originalService, svcAddresses)
 				}
 				if shouldGarbageCollect {
@@ -174,7 +175,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 							activeService[string(svc.UID)] = false
 							watchedService[string(svc.UID)] = false
 							delete(activeServiceLoadBalancer, string(svc.UID))
-							configuredLocalRoutes.Store(string(svc.UID), false)
+							delete(configuredNetworks, string(svc.UID))
 						}
 						// in theory this should never fail
 					}
@@ -188,7 +189,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			//
 
 			if !activeService[string(svc.UID)] {
-				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", fetchServiceAddresses(svc))
+				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", cluster.FetchServiceAddresses(svc))
 
 				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
 
@@ -202,6 +203,13 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						// Start an endpoint watcher if we're not watching it already
 						if !watchedService[string(svc.UID)] {
 							// background the endpoint watcher
+							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
+								err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+								if err != nil {
+									log.Error(err.Error())
+								}
+							}
+
 							go func() {
 								if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 									// Add Endpoint or EndpointSlices watcher
@@ -217,18 +225,15 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								}
 							}()
 
-							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
-								go func() {
-									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
-									if err != nil {
-										log.Error(err.Error())
-									}
-								}()
-							}
 							// We're now watching this service
 							watchedService[string(svc.UID)] = true
 						}
 					} else if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
+						err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+						if err != nil {
+							log.Error(err.Error())
+						}
+
 						go func() {
 							if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 								// Add Endpoint watcher
@@ -243,13 +248,8 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								}
 							}
 						}()
-
-						go func() {
-							err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
-							if err != nil {
-								log.Error(err.Error())
-							}
-						}()
+						// We're now watching this service
+						watchedService[string(svc.UID)] = true
 					} else {
 
 						go func() {
@@ -297,15 +297,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					break
 				}
 
-				isRouteConfigured, err := isRouteConfigured(svc.UID)
-				if err != nil {
-					return fmt.Errorf("error while checkig if route is configured: %w", err)
-				}
 				// If no leader election is enabled, delete routes here
 				if !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
-					sm.config.EnableRoutingTable && isRouteConfigured {
+					sm.config.EnableRoutingTable && hasConfiguredNetworks(svc.UID) {
 					if errs := sm.clearRoutes(svc); len(errs) == 0 {
-						configuredLocalRoutes.Store(string(svc.UID), false)
+						delete(configuredNetworks, string(svc.UID))
 					}
 				}
 
@@ -392,15 +388,21 @@ func (sm *Manager) lbClassFilter(svc *v1.Service) bool {
 	return false
 }
 
-func isRouteConfigured(serviceUID types.UID) (bool, error) {
-	isConfigured := false
-	value, ok := configuredLocalRoutes.Load(string(serviceUID))
-	if ok {
-		isConfigured, ok = value.(bool)
-		if !ok {
-			return false, fmt.Errorf("error converting configuredLocalRoute item to boolean value")
-		}
+func hasConfiguredNetworks(serviceUID types.UID) bool {
+	_, ok := configuredNetworks[string(serviceUID)]
+	if !ok {
+		return false
 	}
 
-	return isConfigured, nil
+	return len(configuredNetworks[string(serviceUID)]) > 0
+}
+
+func isNetworkConfigured(serviceUID types.UID, network vip.Network) bool {
+	_, exists := configuredNetworks[string(serviceUID)]
+	if !exists {
+		return false
+	}
+
+	_, exists = configuredNetworks[string(serviceUID)][network.IP()]
+	return exists
 }

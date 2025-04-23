@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
@@ -103,7 +104,7 @@ func init() {
 
 	// Routing Table flags
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableID, "tableID", 198, "The routing table used for all table entries")
-	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableType, "tableType", 0, "The type of route that will be added to the routing table")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingTableType, "tableType", unix.RTN_UNICAST, "The type of route that will be added to the routing table")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.RoutingProtocol, "routingProtocol", 248, "The routing protocol value used to create routes")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.CleanRoutingTable, "cleanRoutingTable", false, "Clean routing table of redundant routes on start")
 
@@ -187,6 +188,11 @@ var kubeVipService = &cobra.Command{
 			return
 		}
 
+		// Change RTN_UNSPEC to default type
+		if initConfig.RoutingProtocol == unix.RTN_UNSPEC {
+			initConfig.RoutingProtocol = unix.RTN_UNICAST
+		}
+
 		// Set the logging level for all subsequent functions
 		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
@@ -235,6 +241,11 @@ var kubeVipManager = &cobra.Command{
 		if err != nil {
 			log.Error("parsing environment", "err", err)
 			return
+		}
+
+		// Change RTN_UNSPEC to default type
+		if initConfig.RoutingProtocol == unix.RTN_UNSPEC {
+			initConfig.RoutingProtocol = unix.RTN_UNICAST
 		}
 
 		// Set the logging level for all subsequent functions
