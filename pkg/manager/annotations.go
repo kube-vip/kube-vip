@@ -1,11 +1,6 @@
 package manager
 
 const (
-	// Hardware address of the host that has the VIP
-	hwAddrKey = "kube-vip.io/hwaddr"
-
-	// The IP address that is requested
-	requestedIP = "kube-vip.io/requestedIP"
 
 	// The host that has the VIP
 	vipHost = "kube-vip.io/vipHost"
@@ -37,8 +32,5 @@ const (
 	// Flush the conntrack rules (remove existing sessions) once Egress is configured
 	flushContrack = "kube-vip.io/flush-conntrack"
 
-	loadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
-	loadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
-	serviceInterface         = "kube-vip.io/serviceInterface"
-	upnpEnabled              = "kube-vip.io/forwardUPNP"
+	upnpEnabled = "kube-vip.io/forwardUPNP"
 )

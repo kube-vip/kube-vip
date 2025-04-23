@@ -769,10 +769,12 @@ func (configurator *network) SetMask(mask string) error {
 }
 
 func (configurator *network) SetHasEndpoints(value bool) {
+	log.Debug("setting HasEndpoints", "ip", configurator.IP(), "value", value)
 	configurator.hasEndpoints = value
 }
 
 func (configurator *network) HasEndpoints() bool {
+	log.Debug("getting HasEndpoints", "ip", configurator.IP(), "value", configurator.hasEndpoints)
 	return configurator.hasEndpoints
 }
 

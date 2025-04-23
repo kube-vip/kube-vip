@@ -17,6 +17,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -42,7 +43,7 @@ type Manager struct {
 	// service bool
 
 	// Keeps track of all running instances
-	serviceInstances []*Instance
+	serviceInstances []*cluster.Instance
 
 	// UPNP functionality
 	upnp bool
@@ -349,40 +350,17 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 	return nil
 }
 
-func (sm *Manager) findServiceInstance(svc *v1.Service) *Instance {
+func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
 	log.Debug("finding service", "UID", svc.UID)
 	for i := range sm.serviceInstances {
-		log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
-		if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
+		log.Debug("saved service", "instance", i, "UID", svc.UID)
+		if sm.serviceInstances[i].ServiceSnapshot.UID == svc.UID {
+			log.Debug("found service instance", "UID", svc.UID)
 			return sm.serviceInstances[i]
 		}
 	}
+	log.Debug("service instance not found", "UID", svc.UID)
 	return nil
-}
-
-func (sm *Manager) findServiceInstanceWithTimeout(ctx context.Context, svc *v1.Service) (*Instance, error) {
-	log.Debug("finding service with timeout", "UID", svc.UID)
-
-	ctxTimeout, ctxTimeoutCancel := context.WithTimeout(ctx, time.Minute)
-	defer ctxTimeoutCancel()
-
-	for {
-		for i := range sm.serviceInstances {
-			log.Debug("saved service", "instance", i, "UID", sm.serviceInstances[i].serviceSnapshot.UID)
-			if sm.serviceInstances[i].serviceSnapshot.UID == svc.UID {
-				return sm.serviceInstances[i], nil
-			}
-		}
-
-		t := time.NewTimer(time.Millisecond * 100)
-		select {
-		case <-ctxTimeout.Done():
-			t.Stop()
-			return nil, fmt.Errorf("failed to wait for the service instance: %w", ctx.Err())
-		case <-t.C:
-			log.Debug("waiting for the service to be discovered", "UID", svc.UID)
-		}
-	}
 }
 
 // Refresh UPNP Port Forwards for all Service Instances registered in the SM
@@ -395,7 +373,7 @@ func (sm *Manager) refreshUPNPForwards() {
 		for i := range sm.serviceInstances {
 			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
 			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
-				log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].serviceSnapshot.Name, "err", err)
+				log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].ServiceSnapshot.Name, "err", err)
 			}
 		}
 	}

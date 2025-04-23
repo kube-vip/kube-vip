@@ -1,9 +1,10 @@
-package manager
+package cluster
 
 import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	log "log/slog"
 
@@ -11,33 +12,44 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
+const (
+	// Hardware address of the host that has the VIP
+	HWAddrKey = "kube-vip.io/hwaddr"
+
+	// The IP address that is requested
+	RequestedIP = "kube-vip.io/requestedIP"
+
+	LoadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
+	ServiceInterface         = "kube-vip.io/serviceInterface"
+	LoadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
+)
+
 // Instance defines an instance of everything needed to manage vips
 type Instance struct {
 	// Virtual IP / Load Balancer configuration
-	vipConfigs []*kubevip.Config
+	VIPConfigs []*kubevip.Config
 
 	// cluster instances
-	clusters []*cluster.Cluster
+	Clusters []*Cluster
 
 	// Service uses DHCP
-	isDHCP              bool
-	dhcpInterface       string
-	dhcpInterfaceHwaddr string
-	dhcpInterfaceIP     string
-	dhcpHostname        string
-	dhcpClient          *vip.DHCPClient
+	IsDHCP              bool
+	DHCPInterface       string
+	DHCPInterfaceHwaddr string
+	DHCPInterfaceIP     string
+	DHCPHostname        string
+	DHCPClient          *vip.DHCPClient
 
 	// External Gateway IP the service is forwarded from
-	upnpGatewayIPs []string
+	UPNPGatewayIPs []string
 
 	// Kubernetes service mapping
-	serviceSnapshot *v1.Service
+	ServiceSnapshot *v1.Service
 }
 
 type Port struct {
@@ -46,7 +58,7 @@ type Port struct {
 }
 
 func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager) (*Instance, error) {
-	instanceAddresses := fetchServiceAddresses(svc)
+	instanceAddresses := FetchServiceAddresses(svc)
 	//instanceUID := string(svc.UID)
 
 	var newVips []*kubevip.Config
@@ -56,7 +68,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
 		var svcInterface string
-		svcInterface = svc.Annotations[serviceInterface] // If the service has a specific interface defined, then use it
+		svcInterface = svc.Annotations[ServiceInterface] // If the service has a specific interface defined, then use it
 		if svcInterface == kubevip.Auto {
 			link, err = autoFindInterface(address)
 			if err != nil {
@@ -174,7 +186,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	instance := &Instance{
 		//UID:             instanceUID,
 		//VIPs:            instanceAddresses,
-		serviceSnapshot: svc,
+		ServiceSnapshot: svc,
 	}
 	// for _, port := range svc.Spec.Ports {
 	// 	instance.ExternalPorts = append(instance.ExternalPorts, Port{
@@ -184,9 +196,9 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	// }
 
 	if svc.Annotations != nil {
-		instance.dhcpInterfaceHwaddr = svc.Annotations[hwAddrKey]
-		instance.dhcpInterfaceIP = svc.Annotations[requestedIP]
-		instance.dhcpHostname = svc.Annotations[loadbalancerHostname]
+		instance.DHCPInterfaceHwaddr = svc.Annotations[HWAddrKey]
+		instance.DHCPInterfaceIP = svc.Annotations[RequestedIP]
+		instance.DHCPHostname = svc.Annotations[LoadbalancerHostname]
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -207,7 +219,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 		vip.LoadBalancers = append(vip.LoadBalancers, newLB)
 	}
 	// Create Add configuration to the new service
-	instance.vipConfigs = newVips
+	instance.VIPConfigs = newVips
 
 	// If this was purposely created with the address 0.0.0.0,
 	// we will create a macvlan on the main interface and a DHCP client
@@ -218,18 +230,18 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 			return nil, err
 		}
 		select {
-		case err := <-instance.dhcpClient.ErrorChannel():
+		case err := <-instance.DHCPClient.ErrorChannel():
 			return nil, fmt.Errorf("error starting DHCP for %s/%s: error: %s",
-				instance.serviceSnapshot.Namespace, instance.serviceSnapshot.Name, err)
-		case ip := <-instance.dhcpClient.IPChannel():
-			instance.vipConfigs[0].Interface = instance.dhcpInterface
-			instance.vipConfigs[0].VIP = ip
-			instance.dhcpInterfaceIP = ip
+				instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
+		case ip := <-instance.DHCPClient.IPChannel():
+			instance.VIPConfigs[0].Interface = instance.DHCPInterface
+			instance.VIPConfigs[0].VIP = ip
+			instance.DHCPInterfaceIP = ip
 		}
 	}
 
-	for _, vipConfig := range instance.vipConfigs {
-		c, err := cluster.InitCluster(vipConfig, false, intfMgr, arpMgr)
+	for _, vipConfig := range instance.VIPConfigs {
+		c, err := InitCluster(vipConfig, false, intfMgr, arpMgr)
 		if err != nil {
 			log.Error("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 			return nil, err
@@ -239,7 +251,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 			c.Network[i].SetServicePorts(svc)
 		}
 
-		instance.clusters = append(instance.clusters, c)
+		instance.Clusters = append(instance.Clusters, c)
 		log.Info("(svcs) adding VIP", "ip", vipConfig.VIP, "interface", vipConfig.Interface, "namespace", svc.Namespace, "name", svc.Name)
 
 	}
@@ -305,24 +317,24 @@ func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
 }
 
 func (i *Instance) startDHCP() error {
-	if len(i.vipConfigs) != 1 {
-		return fmt.Errorf("DHCP requires exactly 1 VIP config, got: %v", len(i.vipConfigs))
+	if len(i.VIPConfigs) != 1 {
+		return fmt.Errorf("DHCP requires exactly 1 VIP config, got: %v", len(i.VIPConfigs))
 	}
-	parent, err := netlink.LinkByName(i.vipConfigs[0].Interface)
+	parent, err := netlink.LinkByName(i.VIPConfigs[0].Interface)
 	if err != nil {
 		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}
 
 	// Generate name from UID
-	interfaceName := fmt.Sprintf("vip-%s", i.serviceSnapshot.UID[0:8])
+	interfaceName := fmt.Sprintf("vip-%s", i.ServiceSnapshot.UID[0:8])
 
 	// Check if the interface doesn't exist first
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		log.Info("creating new macvlan interface for DHCP", "interface", interfaceName)
 
-		hwaddr, err := net.ParseMAC(i.dhcpInterfaceHwaddr)
-		if i.dhcpInterfaceHwaddr != "" && err != nil {
+		hwaddr, err := net.ParseMAC(i.DHCPInterfaceHwaddr)
+		if i.DHCPInterfaceHwaddr != "" && err != nil {
 			return err
 		} else if hwaddr == nil {
 			hwaddr, err = net.ParseMAC(vip.GenerateMac())
@@ -360,27 +372,70 @@ func (i *Instance) startDHCP() error {
 	}
 
 	var initRebootFlag bool
-	if i.dhcpInterfaceIP != "" {
+	if i.DHCPInterfaceIP != "" {
 		initRebootFlag = true
 	}
 
-	client := vip.NewDHCPClient(iface, initRebootFlag, i.dhcpInterfaceIP)
+	client := vip.NewDHCPClient(iface, initRebootFlag, i.DHCPInterfaceIP)
 
 	// Add hostname to dhcp client if annotated
-	if i.dhcpHostname != "" {
-		log.Info("Hostname specified for dhcp lease", "interface", interfaceName, "hostname", i.dhcpHostname)
-		client.WithHostName(i.dhcpHostname)
+	if i.DHCPHostname != "" {
+		log.Info("Hostname specified for dhcp lease", "interface", interfaceName, "hostname", i.DHCPHostname)
+		client.WithHostName(i.DHCPHostname)
 	}
 
 	go client.Start()
 
 	// Set that DHCP is enabled
-	i.isDHCP = true
+	i.IsDHCP = true
 	// Set the name of the interface so that it can be removed on Service deletion
-	i.dhcpInterface = interfaceName
-	i.dhcpInterfaceHwaddr = iface.HardwareAddr.String()
+	i.DHCPInterface = interfaceName
+	i.DHCPInterfaceHwaddr = iface.HardwareAddr.String()
 	// Add the client so that we can call it to stop function
-	i.dhcpClient = client
+	i.DHCPClient = client
 
 	return nil
+}
+
+// FetchServiceAddresses tries to get the addresses from annotations
+// kube-vip.io/loadbalancerIPs, then from spec.loadbalancerIP
+func FetchServiceAddresses(s *v1.Service) []string {
+	annotationAvailable := false
+	if s.Annotations != nil {
+		if v, annotationAvailable := s.Annotations[LoadbalancerIPAnnotation]; annotationAvailable {
+			ips := strings.Split(v, ",")
+			var trimmedIPs []string
+			for _, ip := range ips {
+				trimmedIPs = append(trimmedIPs, strings.TrimSpace(ip))
+			}
+			return trimmedIPs
+		}
+	}
+
+	lbStatusAddresses := []string{}
+	if !annotationAvailable {
+		if len(s.Status.LoadBalancer.Ingress) > 0 {
+			for _, ingress := range s.Status.LoadBalancer.Ingress {
+				lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
+			}
+		}
+	}
+
+	lbIP := net.ParseIP(s.Spec.LoadBalancerIP)
+	isLbIPv4 := vip.IsIPv4(s.Spec.LoadBalancerIP)
+
+	if len(lbStatusAddresses) > 0 {
+		for _, a := range lbStatusAddresses {
+			if lbStatusIP := net.ParseIP(a); lbStatusIP != nil && lbIP != nil && vip.IsIPv4(a) == isLbIPv4 && !lbIP.Equal(lbStatusIP) {
+				return []string{s.Spec.LoadBalancerIP}
+			}
+		}
+		return lbStatusAddresses
+	}
+
+	if s.Spec.LoadBalancerIP != "" {
+		return []string{s.Spec.LoadBalancerIP}
+	}
+
+	return []string{}
 }
