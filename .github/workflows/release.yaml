@@ -27,6 +27,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate Metadata
+        uses: docker/metadata-action@v5.7.0
+        id: metadata
+        with:
+          labels: |
+            org.opencontainers.image.documentation=https://kube-vip.io/docs/
       - name: Build and push main branch
         id: docker_build
         uses: docker/build-push-action@v6
@@ -34,6 +40,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x
           push: ${{ github.event_name != 'pull_request' }}
+          labels: ${{ steps.metadata.outputs.labels }}
           tags: >-
             plndr/kube-vip:${{ github.ref_name }},
             plndr/kube-vip:latest,
@@ -47,6 +54,7 @@ jobs:
           file: Dockerfile_iptables
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x
           push: ${{ github.event_name != 'pull_request' }}
+          labels: ${{ steps.metadata.outputs.labels }}
           tags: >-
             plndr/kube-vip-iptables:${{ github.ref_name }},
             plndr/kube-vip-iptables:latest,
