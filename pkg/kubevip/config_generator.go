@@ -100,7 +100,7 @@ func GenerateRole(c *Config, role bool) *applyRbacV1.RoleApplyConfiguration {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"services", "endpoints"},
-				Verbs:     []string{"list", "get", "watch", "endoints"},
+				Verbs:     []string{"list", "get", "watch", "endpoints"},
 			},
 			{
 				APIGroups: []string{""},
