@@ -53,6 +53,8 @@ func (e *Entry) Check() bool {
 		}
 	}
 
+	config.Insecure = true
+	config.CAData = []byte{}
 	client, err = k8s.NewClientset(config)
 	if err != nil {
 		log.Error("create k8s client", "err", err)

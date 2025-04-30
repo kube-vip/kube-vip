@@ -60,7 +60,7 @@ var _ = Describe("kube-vip with etcd leader election", func() {
 
 			test.kubeVipImage = os.Getenv("E2E_IMAGE_PATH")
 
-			test.vip = e2e.GenerateIPv4VIP()
+			test.vip = e2e.GenerateVIP(e2e.IPv4Family, 5)
 			test.logger.Printf("Selected VIP %s", test.vip)
 
 			test.currentDir, err = os.Getwd()
