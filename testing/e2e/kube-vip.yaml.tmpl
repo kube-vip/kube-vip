@@ -12,6 +12,8 @@ spec:
     - --prometheusHTTPServer
     - ""
     env:
+    - name: vip_loglevel
+      value: "-4"
     - name: vip_arp
       value: "true"
     - name: vip_interface
@@ -32,6 +34,12 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: spec.nodeName
+    - name: svc_enable
+      value: "{{ .SvcEnable }}"
+    - name: svc_election
+      value: "{{ .SvcElectionEnable }}"
+    - name: enable_endpointslices
+      value: "{{ .EnableEndpointslices }}"
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:

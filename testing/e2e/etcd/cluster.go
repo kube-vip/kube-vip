@@ -268,15 +268,6 @@ func (c *Cluster) Delete() {
 	Expect(c.provider.Delete(c.Name, "")).To(Succeed())
 }
 
-func startKubeletForEtcd(node nodes.Node) {
-	e2e.RunInNode(node,
-		"kubeadm", "init", "phase", "kubeconfig", "admin", "--config", "/kind/kubeadm.conf",
-	)
-	e2e.RunInNode(node,
-		"kubeadm", "init", "phase", "kubelet-start", "--config", "/kind/kubeadm.conf",
-	)
-}
-
 func createCerts(node nodes.Node) {
 	e2e.RunInNode(node,
 		"kubeadm",
