@@ -400,7 +400,7 @@ func (i *Instance) startDHCP() error {
 // FetchIngressAddresses tries to get the addresses from status.loadBalancerIP
 func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
 	// If the service has no status, return empty
-	if s.Status.LoadBalancer.Ingress == nil || len(s.Status.LoadBalancer.Ingress) == 0 {
+	if len(s.Status.LoadBalancer.Ingress) == 0 {
 		return []string{}
 	}
 
