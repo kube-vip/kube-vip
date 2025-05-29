@@ -134,6 +134,8 @@ func (sm *Manager) startTableMode(id string) error {
 					},
 					OnStoppedLeading: func() {
 						// we can do cleanup here
+						sm.mutex.Lock()
+						defer sm.mutex.Unlock()
 						log.Info("leader lost", "id", id)
 						for _, instance := range sm.serviceInstances {
 							for _, cluster := range instance.Clusters {
