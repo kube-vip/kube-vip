@@ -81,7 +81,7 @@ func (sm *Manager) getServiceInstanceAction(svc *v1.Service) ServiceInstanceActi
 						return ActionDelete
 					}
 				}
-				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
+				if !comparePortsAndPortStatuses(svc) {
 					return ActionDelete
 				}
 			}
@@ -96,6 +96,9 @@ func (sm *Manager) getServiceInstanceAction(svc *v1.Service) ServiceInstanceActi
 }
 
 func comparePortsAndPortStatuses(svc *v1.Service) bool {
+	if len(svc.Status.LoadBalancer.Ingress) == 0 {
+		return false
+	}
 	portsStatus := svc.Status.LoadBalancer.Ingress[0].Ports
 	if len(portsStatus) != len(svc.Spec.Ports) {
 		return false
