@@ -397,6 +397,28 @@ func (i *Instance) startDHCP() error {
 	return nil
 }
 
+// FetchIngressAddresses tries to get the addresses from status.loadBalancerIP
+func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
+	// If the service has no status, return empty
+	if s.Status.LoadBalancer.Ingress == nil || len(s.Status.LoadBalancer.Ingress) == 0 {
+		return []string{}
+	}
+
+	lbStatusAddresses := []string{}
+	for _, ingress := range s.Status.LoadBalancer.Ingress {
+		if ingress.IP != "" {
+			lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
+		}
+		// TODO: Handle hostname if needed
+	}
+
+	if len(lbStatusAddresses) > 0 {
+		return lbStatusAddresses
+	}
+
+	return []string{}
+}
+
 // FetchServiceAddresses tries to get the addresses from annotations
 // kube-vip.io/loadbalancerIPs, then from spec.loadbalancerIP
 func FetchServiceAddresses(s *v1.Service) []string {
