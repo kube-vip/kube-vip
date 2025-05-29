@@ -22,54 +22,77 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
+type ServiceInstanceAction string
+
+const (
+	ActionDelete ServiceInstanceAction = "delete"
+	ActionAdd    ServiceInstanceAction = "add"
+	ActionNone   ServiceInstanceAction = "none"
+)
+
 func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service) error {
-	log.Debug("[STARTING] Service Sync")
+	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name)
 
 	// Iterate through the synchronising services
-	foundInstance := false
-	newServiceAddresses := cluster.FetchServiceAddresses(svc)
-	newServiceUID := svc.UID
 
-	ingressIPs := []string{}
-
-	for _, ingress := range svc.Status.LoadBalancer.Ingress {
-		ingressIPs = append(ingressIPs, ingress.IP)
-	}
-
-	shouldBreake := false
-
-	for x := range sm.serviceInstances {
-		if shouldBreake {
-			break
+	action := sm.getServiceInstanceAction(svc)
+	switch action {
+	case ActionDelete:
+		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name)
+		if err := sm.deleteService(svc.UID); err != nil {
+			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
-		for _, newServiceAddress := range newServiceAddresses {
-			log.Debug("service", "isDHCP", sm.serviceInstances[x].IsDHCP, "newServiceAddress", newServiceAddress)
-			if sm.serviceInstances[x].ServiceSnapshot.UID == newServiceUID {
-				// If the found instance's DHCP configuration doesn't match the new service, delete it.
-				if (sm.serviceInstances[x].IsDHCP && newServiceAddress != "0.0.0.0") ||
-					(!sm.serviceInstances[x].IsDHCP && newServiceAddress == "0.0.0.0") ||
-					(!sm.serviceInstances[x].IsDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, newServiceAddress)) ||
-					(len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc)) ||
-					(sm.serviceInstances[x].IsDHCP && len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, sm.serviceInstances[x].DHCPInterfaceIP)) {
-					if err := sm.deleteService(newServiceUID); err != nil {
-						return err
-					}
-					shouldBreake = true
-					break
-				}
-				foundInstance = true
-			}
-		}
-	}
-
-	// This instance wasn't found, we need to add it to the manager
-	if !foundInstance && len(newServiceAddresses) > 0 {
+	case ActionAdd:
+		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name)
 		if err := sm.addService(ctx, svc); err != nil {
-			return err
+			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
+		}
+	case ActionNone:
+		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name)
+	}
+	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name)
+	return nil
+}
+
+func (sm *Manager) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
+	// protect against multiple calls
+	addresses := cluster.FetchServiceAddresses(svc)
+	ingressIPs := cluster.FetchLoadBalancerIngressAddresses(svc)
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	for _, instance := range sm.serviceInstances {
+		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
+			for _, address := range addresses {
+				// handle the case where the service instance needs to be deleted
+				if instance.IsDHCP {
+					if address != "0.0.0.0" {
+						return ActionDelete
+					}
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, instance.DHCPInterfaceIP) {
+						return ActionDelete
+					}
+				}
+				if !instance.IsDHCP {
+					if address == "0.0.0.0" {
+						return ActionDelete
+					}
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, address) {
+						return ActionDelete
+					}
+				}
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
+					return ActionDelete
+				}
+			}
+			// If we reach here, it means the service instance matches the service UID and is not a DHCP service, so we can return "no action"
+			return ActionNone
 		}
 	}
-
-	return nil
+	if len(addresses) > 0 {
+		return ActionAdd // If no matching instance is found, we need to add a new service instance
+	}
+	return ActionNone
 }
 
 func comparePortsAndPortStatuses(svc *v1.Service) bool {
@@ -86,6 +109,10 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 }
 
 func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
+	// protect against addService whil reading
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
 	startTime := time.Now()
 
 	newService, err := cluster.NewInstance(svc, sm.config, sm.intfMgr, sm.arpMgr)
@@ -212,7 +239,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 	var serviceInstance *cluster.Instance
 	found := false
 	for x := range sm.serviceInstances {
-		log.Debug("service lookup", "target UID", uid, "found UID ", sm.serviceInstances[x].ServiceSnapshot.UID)
+		log.Debug("service lookup", "target UID", uid, "found UID ", sm.serviceInstances[x].ServiceSnapshot.UID, "name", sm.serviceInstances[x].ServiceSnapshot.Name, "namespace", sm.serviceInstances[x].ServiceSnapshot.Namespace)
 		// Add the running services to the new array
 		if sm.serviceInstances[x].ServiceSnapshot.UID != uid {
 			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
