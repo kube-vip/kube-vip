@@ -351,11 +351,16 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 }
 
 func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
-	log.Debug("finding service", "UID", svc.UID)
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	if svc == nil {
+		return nil // If the service is nil then we cannot find it
+	}
+	log.Debug("finding service", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
 	for i := range sm.serviceInstances {
-		log.Debug("saved service", "instance", i, "UID", svc.UID)
+		log.Debug("saved service", "instance", i, "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
 		if sm.serviceInstances[i].ServiceSnapshot.UID == svc.UID {
-			log.Debug("found service instance", "UID", svc.UID)
+			log.Debug("found service instance", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace, "instance", i)
 			return sm.serviceInstances[i]
 		}
 	}
@@ -365,6 +370,8 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
 
 // Refresh UPNP Port Forwards for all Service Instances registered in the SM
 func (sm *Manager) refreshUPNPForwards() {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
 	log.Info("Starting UPNP Port Refresher")
 	for {
 		time.Sleep(300 * time.Second)
