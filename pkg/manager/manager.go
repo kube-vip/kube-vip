@@ -358,9 +358,9 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
 	}
 	log.Debug("finding service", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
 	for i := range sm.serviceInstances {
-		log.Debug("saved service", "instance", i, "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
+		log.Debug("saved service", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
 		if sm.serviceInstances[i].ServiceSnapshot.UID == svc.UID {
-			log.Debug("found service instance", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace, "instance", i)
+			log.Debug("found service instance", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
 			return sm.serviceInstances[i]
 		}
 	}
