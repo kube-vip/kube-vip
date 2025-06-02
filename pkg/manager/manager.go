@@ -370,18 +370,21 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
 
 // Refresh UPNP Port Forwards for all Service Instances registered in the SM
 func (sm *Manager) refreshUPNPForwards() {
-	sm.mutex.Lock()
-	defer sm.mutex.Unlock()
 	log.Info("Starting UPNP Port Refresher")
 	for {
 		time.Sleep(300 * time.Second)
 
 		log.Info("[UPNP] Refreshing Instances", "number of instances", len(sm.serviceInstances))
-		for i := range sm.serviceInstances {
-			sm.upnpMap(context.TODO(), sm.serviceInstances[i])
-			if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
-				log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].ServiceSnapshot.Name, "err", err)
+		func() {
+			sm.mutex.Lock()
+			defer sm.mutex.Unlock()
+
+			for i := range sm.serviceInstances {
+				sm.upnpMap(context.TODO(), sm.serviceInstances[i])
+				if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
+					log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].ServiceSnapshot.Name, "err", err)
+				}
 			}
-		}
+		}()
 	}
 }
