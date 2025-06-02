@@ -155,7 +155,7 @@ func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes
 					Containers: []v1.Container{
 						{
 							Name:  "kube-vip-web",
-							Image: "plndr/e2e:0.0.1",
+							Image: "docker.io/plndr/e2e:0.0.1",
 							Ports: []v1.ContainerPort{
 								{
 									Name:          "http",

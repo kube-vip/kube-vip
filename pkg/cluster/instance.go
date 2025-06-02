@@ -400,11 +400,12 @@ func (i *Instance) startDHCP() error {
 // FetchIngressAddresses tries to get the addresses from status.loadBalancerIP
 func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
 	// If the service has no status, return empty
+	lbStatusAddresses := []string{}
+
 	if len(s.Status.LoadBalancer.Ingress) == 0 {
-		return []string{}
+		return lbStatusAddresses
 	}
 
-	lbStatusAddresses := []string{}
 	for _, ingress := range s.Status.LoadBalancer.Ingress {
 		if ingress.IP != "" {
 			lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
@@ -412,11 +413,7 @@ func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
 		// TODO: Handle hostname if needed
 	}
 
-	if len(lbStatusAddresses) > 0 {
-		return lbStatusAddresses
-	}
-
-	return []string{}
+	return lbStatusAddresses
 }
 
 // FetchServiceAddresses tries to get the addresses from annotations

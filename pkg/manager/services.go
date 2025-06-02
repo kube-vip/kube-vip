@@ -90,6 +90,7 @@ func (sm *Manager) getServiceInstanceAction(svc *v1.Service) ServiceInstanceActi
 		}
 	}
 	if len(addresses) > 0 {
+		log.Debug("No matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
 		return ActionAdd // If no matching instance is found, we need to add a new service instance
 	}
 	return ActionNone
