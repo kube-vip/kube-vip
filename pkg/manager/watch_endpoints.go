@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -339,7 +340,9 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										} else {
 											log.Info("added route", "provider",
 												provider.getLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", sm.config.RoutingTableID)
-											storeConfiguredNetwork(string(service.UID), cluster.Network[i])
+											if err := storeConfiguredNetwork(service.UID, cluster.Network[i]); err != nil {
+												log.Error("failed to store configured network for service", "name", service.Name, "UID", service.UID)
+											}
 											leaderElectionActive = true
 										}
 									}
@@ -365,7 +368,9 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										} else {
 											log.Info("added BGP host", "provider",
 												provider.getLabel(), "ip", network.CIDR(), "service name", service.Name, "namespace", service.Namespace)
-											storeConfiguredNetwork(string(service.UID), cluster.Network[i])
+											if err := storeConfiguredNetwork(service.UID, cluster.Network[i]); err != nil {
+												log.Error("failed to store configured network for service", "name", service.Name, "UID", service.UID)
+											}
 											leaderElectionActive = true
 										}
 									}
@@ -380,7 +385,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					// If routing table mode is enabled - routes should be deleted
 					if sm.config.EnableRoutingTable {
 						if errs := sm.clearRoutes(service); len(errs) == 0 {
-							delete(configuredNetworks, string(service.UID))
+							configuredNetworks.Delete(service.UID)
 						} else {
 							for _, err := range errs {
 								log.Error("error while clearing routes", "err", err)
@@ -401,7 +406,10 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										log.Info("[endpoint] deleted BGP host", "provider",
 											provider.getLabel(), "ip", network.CIDR(), "service name", service.Name, "namespace", service.Namespace)
 
-										delete(configuredNetworks[string(service.UID)], cluster.Network[i].IP())
+										network := getConfiguredNetworks(service.UID)
+										if network != nil {
+											delete(network, cluster.Network[i].IP())
+										}
 										leaderElectionActive = false
 									}
 								}
@@ -517,10 +525,34 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 	}
 }
 
-func storeConfiguredNetwork(svcUID string, network vip.Network) {
-	if _, exists := configuredNetworks[svcUID]; !exists {
-		configuredNetworks[svcUID] = make(map[string]vip.Network)
+func storeConfiguredNetwork(uid types.UID, network vip.Network) error {
+	existing, ok := configuredNetworks.Load(uid)
+	if !ok {
+		n := make(map[string]vip.Network)
+		n[network.IP()] = network
+		configuredNetworks.Store(uid, n)
+		return nil
 	}
 
-	configuredNetworks[svcUID][network.IP()] = network
+	net, ok := existing.(map[string]vip.Network)
+	if !ok {
+		return fmt.Errorf("failed to cast configured network - UID: %s", string(uid))
+	}
+
+	net[network.IP()] = network
+	return nil
+}
+
+func getConfiguredNetworks(uid types.UID) map[string]vip.Network {
+	existing, ok := configuredNetworks.Load(uid)
+	if !ok {
+		return nil
+	}
+
+	net, ok := existing.(map[string]vip.Network)
+	if !ok {
+		return nil
+	}
+
+	return net
 }

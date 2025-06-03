@@ -32,7 +32,3 @@ func (m *Manager) Get(intf netlink.Link) *Link {
 	m.interfaces[intf.Attrs().Name] = result
 	return result
 }
-
-func (m *Manager) Delete(intf netlink.Link) {
-	delete(m.interfaces, intf.Attrs().Name)
-}
