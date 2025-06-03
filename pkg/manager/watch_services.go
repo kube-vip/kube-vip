@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 
 	log "log/slog"
 
@@ -22,28 +23,25 @@ import (
 
 // TODO: Fix the naming of these contexts
 
-// activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
-var activeServiceLoadBalancer map[string]context.Context
-
-// activeServiceLoadBalancer keeps track of services that already have a leaderElection in place
-var activeServiceLoadBalancerCancel map[string]func()
-
-// activeService keeps track of services that already have a leaderElection in place
-var activeService map[string]bool
-
-// watchedService keeps track of services that are already being watched
-var watchedService map[string]bool
+// services keeps track of services that already were processed
+var services sync.Map
 
 // configuredNetworks keeps track of networks that has been configured on the node
-var configuredNetworks map[string]map[string]vip.Network
+var configuredNetworks sync.Map
 
-func init() {
-	// Set up the caches for monitoring existing active or watched services
-	activeServiceLoadBalancerCancel = make(map[string]func())
-	activeServiceLoadBalancer = make(map[string]context.Context)
-	activeService = make(map[string]bool)
-	watchedService = make(map[string]bool)
-	configuredNetworks = make(map[string]map[string]vip.Network)
+type ServiceContext struct {
+	Context   context.Context
+	Cancel    context.CancelFunc
+	IsActive  bool
+	IsWatched bool
+}
+
+func NewServiceContext(ctx context.Context) *ServiceContext {
+	svcCtx, svcCancel := context.WithCancel(ctx)
+	return &ServiceContext{
+		Context: svcCtx,
+		Cancel:  svcCancel,
+	}
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
@@ -136,6 +134,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				break
 			}
 
+			svcCtx, err := getServiceContext(svc.UID)
+			if err != nil {
+				return fmt.Errorf("failed to get service context: %w", err)
+			}
+
 			// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 			if event.Type == watch.Modified {
 				i := sm.findServiceInstance(svc)
@@ -157,25 +160,26 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 						}
 					}
 				}
-				// This service has been modified, but it was also active..
-				if activeService[string(svc.UID)] {
+				// This service has been modified, but it was also active.
+				if svcCtx != nil && svcCtx.IsActive {
 					if i != nil {
 						if !reflect.DeepEqual(originalService, svcAddresses) {
+
 							// Calls the cancel function of the context
-							if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
+							if svcCtx != nil {
 								log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
-								activeServiceLoadBalancerCancel[string(svc.UID)]()
-								<-activeServiceLoadBalancer[string(svc.UID)].Done()
+								svcCtx.Cancel()
 								log.Warn("(svcs) waiting for load balancer to finish")
+								<-svcCtx.Context.Done()
 							}
+
 							err = sm.deleteService(svc.UID)
 							if err != nil {
 								log.Error("(svc) unable to remove", "service", svc.UID)
 							}
-							activeService[string(svc.UID)] = false
-							watchedService[string(svc.UID)] = false
-							delete(activeServiceLoadBalancer, string(svc.UID))
-							delete(configuredNetworks, string(svc.UID))
+
+							services.Delete(svc.UID)
+							configuredNetworks.Delete(svc.UID)
 						}
 						// in theory this should never fail
 					}
@@ -188,10 +192,13 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 			// Does this service use an election per service?
 			//
 
-			if !activeService[string(svc.UID)] {
+			if svcCtx == nil || svcCtx != nil && !svcCtx.IsActive {
 				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", cluster.FetchServiceAddresses(svc))
 
-				activeServiceLoadBalancer[string(svc.UID)], activeServiceLoadBalancerCancel[string(svc.UID)] = context.WithCancel(ctx)
+				if svcCtx == nil {
+					svcCtx = NewServiceContext(ctx)
+					services.Store(svc.UID, svcCtx)
+				}
 
 				if sm.config.EnableServicesElection || // Service Election
 					((sm.config.EnableRoutingTable || sm.config.EnableBGP) && // Routing table mode or BGP
@@ -201,10 +208,10 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 
 						// Start an endpoint watcher if we're not watching it already
-						if !watchedService[string(svc.UID)] {
+						if !svcCtx.IsWatched {
 							// background the endpoint watcher
 							if (sm.config.EnableRoutingTable || sm.config.EnableBGP) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
-								err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+								err = serviceFunc(svcCtx.Context, svc)
 								if err != nil {
 									log.Error(err.Error())
 								}
@@ -219,17 +226,17 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 									} else {
 										provider = &endpointslicesProvider{label: "endpointslices"}
 									}
-									if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
+									if err = sm.watchEndpoint(svcCtx.Context, sm.config.NodeName, svc, provider); err != nil {
 										log.Error(err.Error())
 									}
 								}
 							}()
 
 							// We're now watching this service
-							watchedService[string(svc.UID)] = true
+							svcCtx.IsWatched = true
 						}
 					} else if (sm.config.EnableBGP || sm.config.EnableRoutingTable) && (!sm.config.EnableLeaderElection && !sm.config.EnableServicesElection) {
-						err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+						err = serviceFunc(svcCtx.Context, svc)
 						if err != nil {
 							log.Error(err.Error())
 						}
@@ -243,24 +250,24 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								} else {
 									provider = &endpointslicesProvider{label: "endpointslices"}
 								}
-								if err = sm.watchEndpoint(activeServiceLoadBalancer[string(svc.UID)], sm.config.NodeName, svc, provider); err != nil {
+								if err = sm.watchEndpoint(svcCtx.Context, sm.config.NodeName, svc, provider); err != nil {
 									log.Error(err.Error())
 								}
 							}
 						}()
 						// We're now watching this service
-						watchedService[string(svc.UID)] = true
+						svcCtx.IsWatched = true
 					} else {
 
 						go func() {
 							for {
 								select {
-								case <-activeServiceLoadBalancer[string(svc.UID)].Done():
+								case <-svcCtx.Context.Done():
 									log.Warn("(svcs) restartable service watcher ending", "uid", svc.UID)
 									return
 								default:
 									log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
-									err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+									err = serviceFunc(svcCtx.Context, svc)
 
 									if err != nil {
 										log.Error(err.Error())
@@ -272,20 +279,23 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 					}
 				} else {
 					// Increment the waitGroup before the service Func is called (Done is completed in there)
-					err = serviceFunc(activeServiceLoadBalancer[string(svc.UID)], svc)
+					err = serviceFunc(svcCtx.Context, svc)
 					if err != nil {
 						log.Error(err.Error())
 					}
 				}
-				activeService[string(svc.UID)] = true
+				svcCtx.IsActive = true
 			}
 		case watch.Deleted:
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 			}
-			if activeService[string(svc.UID)] {
-
+			svcCtx, err := getServiceContext(svc.UID)
+			if err != nil {
+				return fmt.Errorf("(svcs) unable to get context: %w", err)
+			}
+			if svcCtx != nil && svcCtx.IsActive {
 				// We only care about LoadBalancer services
 				if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
 					break
@@ -301,7 +311,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				if !sm.config.EnableLeaderElection && !sm.config.EnableServicesElection &&
 					sm.config.EnableRoutingTable && hasConfiguredNetworks(svc.UID) {
 					if errs := sm.clearRoutes(svc); len(errs) == 0 {
-						delete(configuredNetworks, string(svc.UID))
+						configuredNetworks.Delete(svc.UID)
 					}
 				}
 
@@ -312,11 +322,11 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 
 				// Calls the cancel function of the context
-				if activeServiceLoadBalancerCancel[string(svc.UID)] != nil {
-					activeServiceLoadBalancerCancel[string(svc.UID)]()
-				}
-				activeService[string(svc.UID)] = false
-				watchedService[string(svc.UID)] = false
+				log.Warn("(svcs) The load balancer was deleted, cancelling context")
+				svcCtx.Cancel()
+				log.Warn("(svcs) waiting for load balancer to finish")
+				<-svcCtx.Context.Done()
+				services.Delete(svc.UID)
 			}
 
 			if sm.config.EnableLeaderElection && !sm.config.EnableServicesElection {
@@ -388,21 +398,40 @@ func (sm *Manager) lbClassFilter(svc *v1.Service) bool {
 	return false
 }
 
-func hasConfiguredNetworks(serviceUID types.UID) bool {
-	_, ok := configuredNetworks[string(serviceUID)]
+func hasConfiguredNetworks(uid types.UID) bool {
+	val, ok := configuredNetworks.Load(uid)
+	if !ok {
+		return false
+	}
+	conf, ok := val.(map[string]vip.Network)
 	if !ok {
 		return false
 	}
 
-	return len(configuredNetworks[string(serviceUID)]) > 0
+	return len(conf) > 0
 }
 
-func isNetworkConfigured(serviceUID types.UID, network vip.Network) bool {
-	_, exists := configuredNetworks[string(serviceUID)]
-	if !exists {
+func isNetworkConfigured(uid types.UID, network vip.Network) bool {
+	val, ok := configuredNetworks.Load(uid)
+	if !ok {
 		return false
 	}
-
-	_, exists = configuredNetworks[string(serviceUID)][network.IP()]
+	conf, ok := val.(map[string]vip.Network)
+	if !ok {
+		return false
+	}
+	_, exists := conf[network.IP()]
 	return exists
+}
+
+func getServiceContext(uid types.UID) (*ServiceContext, error) {
+	svcCtx, ok := services.Load(uid)
+	if !ok {
+		return nil, nil
+	}
+	ctx, ok := svcCtx.(*ServiceContext)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast service context pointer - UID: %s", uid)
+	}
+	return ctx, nil
 }
