@@ -169,6 +169,8 @@ func (sm *Manager) startTableMode(id string) error {
 }
 
 func (sm *Manager) cleanRoutes() error {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
 	routes, err := vip.ListRoutes(sm.config.RoutingTableID, sm.config.RoutingProtocol)
 	if err != nil {
 		return fmt.Errorf("error getting routes: %w", err)

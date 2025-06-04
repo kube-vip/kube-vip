@@ -381,6 +381,8 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 }
 
 func CountRouteReferences(serviceInstances *[]*Instance, route *netlink.Route) int {
+	// Count how many service instances have the same route
+	// This function is not thread-safe, it should be called only from the main thread with a lock held
 	cnt := 0
 	for _, instance := range *serviceInstances {
 		for _, cluster := range instance.Clusters {
