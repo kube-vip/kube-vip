@@ -10,7 +10,6 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -18,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -145,10 +143,10 @@ func (ep *endpointsProvider) getProtocol() string {
 	return ""
 }
 
-func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Service, provider epProvider) error {
+func (sm *Manager) watchEndpoint(svcCtx *serviceContext, id string, service *v1.Service, provider epProvider) error {
 	log.Info("watching", "provider", provider.getLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	leaderContext, cancel := context.WithCancel(ctx)
+	leaderContext, cancel := context.WithCancel(svcCtx.ctx)
 	defer cancel()
 
 	var leaderElectionActive bool
@@ -162,7 +160,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 	exitFunction := make(chan struct{})
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-svcCtx.ctx.Done():
 			log.Debug("context cancelled", "provider", provider.getLabel())
 			// Stop the retry watcher
 			rw.Stop()
@@ -288,7 +286,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 
 				if !leaderElectionActive && sm.config.EnableServicesElection {
 					go func() {
-						leaderContext, cancel = context.WithCancel(ctx)
+						leaderContext, cancel = context.WithCancel(svcCtx.ctx)
 
 						// This is a blocking function, that will restart (in the event of failure)
 						for {
@@ -316,7 +314,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance != nil {
 							for _, cluster := range instance.Clusters {
 								for i := range cluster.Network {
-									if !isNetworkConfigured(service.UID, cluster.Network[i]) && cluster.Network[i].HasEndpoints() {
+									if !svcCtx.isNetworkConfigured(cluster.Network[i].IP()) && cluster.Network[i].HasEndpoints() {
 										err := cluster.Network[i].AddRoute(false)
 										if err != nil {
 											if errors.Is(err, syscall.EEXIST) {
@@ -340,9 +338,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										} else {
 											log.Info("added route", "provider",
 												provider.getLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", sm.config.RoutingTableID)
-											if err := storeConfiguredNetwork(service.UID, cluster.Network[i]); err != nil {
-												log.Error("failed to store configured network for service", "name", service.Name, "UID", service.UID)
-											}
+											svcCtx.configuredNetworks.Store(cluster.Network[i].IP(), cluster.Network[i])
 											leaderElectionActive = true
 										}
 									}
@@ -356,7 +352,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 						if instance := sm.findServiceInstance(service); instance != nil {
 							for _, cluster := range instance.Clusters {
 								for i := range cluster.Network {
-									if !isNetworkConfigured(service.UID, cluster.Network[i]) {
+									if !svcCtx.isNetworkConfigured(cluster.Network[i].IP()) {
 										network := cluster.Network[i]
 										if err != nil {
 											log.Error("error formatting address with subnet mask", "err", err)
@@ -368,9 +364,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										} else {
 											log.Info("added BGP host", "provider",
 												provider.getLabel(), "ip", network.CIDR(), "service name", service.Name, "namespace", service.Namespace)
-											if err := storeConfiguredNetwork(service.UID, cluster.Network[i]); err != nil {
-												log.Error("failed to store configured network for service", "name", service.Name, "UID", service.UID)
-											}
+											svcCtx.configuredNetworks.Store(cluster.Network[i].IP(), cluster.Network[i])
 											leaderElectionActive = true
 										}
 									}
@@ -385,7 +379,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 					// If routing table mode is enabled - routes should be deleted
 					if sm.config.EnableRoutingTable {
 						if errs := sm.clearRoutes(service); len(errs) == 0 {
-							configuredNetworks.Delete(service.UID)
+							svcCtx.configuredNetworks.Clear()
 						} else {
 							for _, err := range errs {
 								log.Error("error while clearing routes", "err", err)
@@ -406,10 +400,7 @@ func (sm *Manager) watchEndpoint(ctx context.Context, id string, service *v1.Ser
 										log.Info("[endpoint] deleted BGP host", "provider",
 											provider.getLabel(), "ip", network.CIDR(), "service name", service.Name, "namespace", service.Namespace)
 
-										network := getConfiguredNetworks(service.UID)
-										if network != nil {
-											delete(network, cluster.Network[i].IP())
-										}
+										svcCtx.configuredNetworks.Delete(cluster.Network[i].IP())
 										leaderElectionActive = false
 									}
 								}
@@ -525,34 +516,7 @@ func (sm *Manager) clearBGPHosts(service *v1.Service) {
 	}
 }
 
-func storeConfiguredNetwork(uid types.UID, network vip.Network) error {
-	existing, ok := configuredNetworks.Load(uid)
-	if !ok {
-		n := make(map[string]vip.Network)
-		n[network.IP()] = network
-		configuredNetworks.Store(uid, n)
-		return nil
-	}
-
-	net, ok := existing.(map[string]vip.Network)
-	if !ok {
-		return fmt.Errorf("failed to cast configured network - UID: %s", string(uid))
-	}
-
-	net[network.IP()] = network
-	return nil
-}
-
-func getConfiguredNetworks(uid types.UID) map[string]vip.Network {
-	existing, ok := configuredNetworks.Load(uid)
-	if !ok {
-		return nil
-	}
-
-	net, ok := existing.(map[string]vip.Network)
-	if !ok {
-		return nil
-	}
-
-	return net
+func (svcCtx *serviceContext) isNetworkConfigured(ip string) bool {
+	_, exists := svcCtx.configuredNetworks.Load(ip)
+	return exists
 }
