@@ -43,6 +43,8 @@ func main() {
 	flag.BoolVar(&t.RetainCluster, "retain", false, "Retain the cluster")
 	flag.StringVar(&t.KindVersionImage, "kindImage", "", "The image to use for the kind nodes e.g. (kindest/node:v1.21.14)")
 	flag.BoolVar(&existing, "existing", false, "Use an existing cluster")
+	flag.BoolVar(&t.IPv6, "ipv6", false, "Perform an IPv6-only test")
+	flag.StringVar(&t.DockerNIC, "networkInterface", "br-", "Selects networking interface to use")
 
 	flag.BoolVar(&t.Cilium, "cilium", false, "Use cilium as a CNI")
 
@@ -50,9 +52,6 @@ func main() {
 
 	slog.Infof("🔬 beginning e2e tests, image: [%s] DualStack [%t]", t.ImagePath, t.DualStack)
 
-	// if !t.ignoreDualStack {
-	// 	t.Dualstack = true
-	// }
 	t.Affinity = os.Getenv("NODE_TOLERATE")
 
 	t.DeploymentName = "kube-vip-deploy"
@@ -134,7 +133,7 @@ func main() {
 			}
 		}
 
-		t.StartServiceTest(ctx, clientset)
+		errs := t.StartServiceTest(ctx, clientset)
+		os.Exit(len(errs))
 	}
-
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/gookit/slog"
 	v1 "k8s.io/api/core/v1"
@@ -45,6 +44,9 @@ type TestConfig struct {
 
 	// Cilium config
 	Cilium bool
+
+	// Docker config
+	DockerNIC string
 }
 
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
@@ -326,10 +328,6 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	var egress string
 	var found bool
 	timeout := 30
-	// Set up a local listener
-	go func() {
-		found = tcpServer(false, &egress, timeout)
-	}()
 
 	deploy := Deployment{
 		name:         config.DeploymentName,
@@ -339,7 +337,10 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	}
 
 	// Find this machines IP address
-	deploy.address = GetLocalIPv4()
+	deploy.address, err = GetLocalIPv4(config.DockerNIC)
+	if err != nil {
+		return fmt.Errorf("unable to detect local IP address: %w", err)
+	}
 	if deploy.address == "" {
 		return fmt.Errorf("unable to detect local IP address")
 	}
@@ -362,22 +363,22 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	if err != nil {
 		return err
 	}
-	egress = lbAddresses[0]
-
-	for i := 1; i < 15; i++ {
-		if found {
-			slog.Infof("🕵️  egress has correct IP address")
-			config.SuccessCounter++
-			break
-		}
-		time.Sleep(time.Second * 1)
+	if len(lbAddresses) < 1 {
+		return fmt.Errorf("no loadbalancer address found")
 	}
 
-	if !found {
+	egress = lbAddresses[0]
+
+	found = tcpServer(&egress, timeout, "tcp4")
+
+	if found {
+		slog.Infof("🕵️  egress has correct IP address")
+		config.SuccessCounter++
+	} else {
 		return fmt.Errorf("😱 No traffic found from loadbalancer address ")
 	}
 
-	return err
+	return nil
 }
 
 func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kubernetes.Clientset) error {
@@ -400,11 +401,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	slog.Infof("🧪 ---> egress IP re-write IPv6 (local policy) <---")
 	var egress string
 	var found bool
-	timeout := 60
-	// Set up a local listener
-	go func() {
-		found = tcpServer(true, &egress, timeout)
-	}()
+	timeout := 30
 
 	deploy := Deployment{
 		name:         config.DeploymentName,
@@ -414,9 +411,12 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	}
 
 	// Find this machines IP address
-	deploy.address = GetLocalIPv6()
+	deploy.address, err = GetLocalIPv6(config.DockerNIC)
+	if err != nil {
+		return fmt.Errorf("unable to detect local IP address: %w", err)
+	}
 	if deploy.address == "" {
-		slog.Fatalf("Unable to detect local IP address")
+		return fmt.Errorf("unable to detect local IP address")
 	}
 	slog.Infof("📠 found local address [%s]", deploy.address)
 	// Create a deployment that connects back to this machines IP address
@@ -430,7 +430,6 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		name:          config.ServiceName,
 		egress:        true,
 		egressIPv6:    true,
-		testHTTP:      false,
 		timeout:       timeout,
 		testDualstack: true,
 	}
@@ -441,9 +440,9 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	}
 	for x := range lbAddresses {
 		ip := net.ParseIP(lbAddresses[x])
-		// if ip == nil {
-		// 	return errors.New("invalid address")
-		// }
+		if ip == nil {
+			return fmt.Errorf("invalid address")
+		}
 		if ip.To4() == nil {
 			// use brackets for IPv6 address
 			egress = lbAddresses[x]
@@ -451,20 +450,20 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		}
 	}
 
-	for i := 1; i < timeout; i++ {
-		if found {
-			slog.Infof("🕵️  egress has correct IP address")
-			config.SuccessCounter++
-			break
-		}
-		time.Sleep(time.Second * 1)
+	if egress == "" {
+		return fmt.Errorf("no loadbalancer address found")
 	}
 
-	if !found {
-		slog.Error("😱 No traffic found from loadbalancer address ")
+	found = tcpServer(&egress, timeout, "tcp6")
+
+	if found {
+		slog.Infof("🕵️  egress has correct IP address")
+		config.SuccessCounter++
+	} else {
+		return fmt.Errorf("😱 No traffic found from loadbalancer address ")
 	}
 
-	return err
+	return nil
 }
 
 func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {

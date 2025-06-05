@@ -297,7 +297,6 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			// slog.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 			svc, ok := event.Object.(*v1.Service)
 			if !ok {
 				slog.Fatalf("unable to parse Kubernetes services from API watcher")
