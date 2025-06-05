@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gookit/slog"
+	"github.com/vishvananda/netlink"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -24,12 +26,14 @@ import (
 
 // 1. Create a deployment
 // 2. Expose the deployment
-func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kubernetes.Clientset) {
+func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kubernetes.Clientset) []error {
 	var err error
+	var errs []error
 	if config.Simple {
 		err = config.SimpleDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -37,6 +41,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.MultipleDeployments(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -45,6 +50,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.Failover(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -53,6 +59,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.Failover(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 	if config.LocalDeploy {
@@ -60,6 +67,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.LocalDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -68,6 +76,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.EgressDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -76,6 +85,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.Egressv6Deployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
@@ -84,10 +94,18 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		err = config.DualStackDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
+			errs = append(errs, err)
 		}
 	}
 
-	slog.Infof("🏆 Testing Complete [%d] passed", config.SuccessCounter)
+	const testComplete = "🏆 Testing Complete [%d] passed / [%d] failed"
+	if len(errs) > 0 {
+		slog.Errorf(testComplete, config.SuccessCounter, len(errs))
+		return errs
+	}
+	slog.Infof(testComplete, config.SuccessCounter, len(errs))
+
+	return errs
 }
 
 func httpTest(address string) error {
@@ -282,43 +300,62 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 	return nil
 }
 
-func tcpServer(IPv6 bool, egressAddress *string, timeout int) bool {
+func tcpServer(egressAddress *string, timeout int, network string) bool {
 	var listen net.Listener
 	var err error
-	if !IPv6 {
-		listen, err = net.Listen("tcp", ":12345") //nolint
-	} else {
-		listen, err = net.Listen("tcp6", ":12346") //nolint
 
+	port := ":12345"
+	if network == "tcp6" {
+		port = ":12346"
 	}
+
+	listen, err = net.Listen(network, port) //nolint
 	if err != nil {
 		slog.Error(err)
 	}
-	// close listener
-	go func() {
-		time.Sleep(time.Second * time.Duration(timeout))
-		listen.Close()
-	}()
-	for {
-		conn, err := listen.Accept()
-		if err != nil {
-			return false
-			// slog.Fatal(err)
-		}
-		remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		// If it is IPv6 expand the address
-		// if IPv6 {
-		// 	addr, _ := netip.ParseAddr(remoteAddress)
-		// 	remoteAddress = addr.StringExpanded()
-		// }
 
-		if remoteAddress == *egressAddress {
-			slog.Infof("📞 👍 incoming from egress Address [%s]", remoteAddress)
-			return true
+	srvChan := make(chan any)
+	finishChan := make(chan any)
+
+	go func() {
+		defer func() {
+			err = listen.Close()
+			if err != nil {
+				slog.Error(err)
+			}
+			close(finishChan)
+		}()
+		select {
+		case <-srvChan:
+			return
+		case <-time.After(time.Second * time.Duration(timeout)):
+			return
 		}
-		slog.Infof("📞 👎 incoming from pod address [%s]", remoteAddress)
-		go handleRequest(conn)
-	}
+	}()
+
+	result := false
+	go func() {
+		defer close(srvChan)
+		for {
+			conn, err := listen.Accept()
+			if err != nil {
+				result = false
+				return
+			}
+
+			remoteAddress, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+			if remoteAddress == *egressAddress {
+				slog.Infof("📞 👍 incoming from egress Address [%s]", remoteAddress)
+				result = true
+				return
+			}
+			slog.Infof("📞 👎 incoming from pod address [%s]", remoteAddress)
+			go handleRequest(conn)
+		}
+	}()
+
+	<-finishChan
+	return result
 }
 
 func handleRequest(conn net.Conn) {
@@ -339,34 +376,32 @@ func handleRequest(conn net.Conn) {
 	conn.Close()
 }
 
-func GetLocalIPv4() string {
-	addrs, err := net.InterfaceAddrs()
+func GetLocalIP(ifName string, family int) (string, error) {
+	links, err := netlink.LinkList()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("netlink: failed to list links: %w", err)
 	}
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return ipnet.IP.String()
+
+	for _, link := range links {
+		if strings.Contains(link.Attrs().Name, ifName) {
+			ip, _, err := getNetwork(link, family)
+			if err != nil {
+				return "", fmt.Errorf("failed to get IPv4 address: %w", err)
 			}
+			if ip == nil {
+				return "", fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
+			}
+			return ip.String(), nil
 		}
 	}
-	return ""
+
+	return "", nil
 }
 
-func GetLocalIPv6() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
-	}
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() == nil && !ipnet.IP.IsLinkLocalUnicast() {
-			if ipnet.IP.To16() != nil {
-				return ipnet.IP.String()
-			}
-		}
-	}
-	return ""
+func GetLocalIPv4(ifName string) (string, error) {
+	return GetLocalIP(ifName, netlink.FAMILY_V4)
+}
+
+func GetLocalIPv6(ifName string) (string, error) {
+	return GetLocalIP(ifName, netlink.FAMILY_V6)
 }

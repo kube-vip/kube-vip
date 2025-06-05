@@ -3,11 +3,13 @@ package deployment
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/gookit/slog"
+	"github.com/vishvananda/netlink"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cmd"
@@ -15,6 +17,11 @@ import (
 )
 
 var provider *cluster.Provider
+
+const (
+	defaultIPv4Pool = "172.18.100.10-172.18.100.30"
+	defaultIPv6Pool = "fd34:70db:8529:1e3d:0000:0000:0000:0010-fd34:70db:8529:1e3d:0000:0000:0000:0030"
+)
 
 type kubevipManifestValues struct {
 	ControlPlaneVIP string
@@ -39,13 +46,12 @@ func (config *TestConfig) CreateKind() error {
 		},
 	}
 
-	if config.IPv6 {
-		// Change Networking Family
-		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.IPv6Family
-	}
 	if config.DualStack {
-		// Change Networking Family
 		clusterConfig.Networking.IPFamily = kindconfigv1alpha4.DualStackFamily
+	} else {
+		if config.IPv6 || !config.Egress && config.EgressIPv6 {
+			clusterConfig.Networking.IPFamily = kindconfigv1alpha4.IPv6Family
+		}
 	}
 
 	if config.Cilium {
@@ -140,10 +146,51 @@ func (config *TestConfig) CreateKind() error {
 			}
 		}
 
-		globalRange := "172.18.100.10-172.18.100.30"
-		if config.IPv6 {
-			globalRange = "fd34:70db:8529:1e3d:0000:0000:0000:0010-fd34:70db:8529:1e3d:0000:0000:0000:0030"
+		ipv4Pool := defaultIPv4Pool
+		ipv6Pool := defaultIPv6Pool
+
+		var ipv4Net *net.IPNet
+		var ipv6Net *net.IPNet
+
+		links, err := netlink.LinkList()
+		if err != nil {
+			return fmt.Errorf("netlink: failed to list links: %w", err)
 		}
+
+		for _, link := range links {
+			if strings.Contains(link.Attrs().Name, config.DockerNIC) {
+				_, ipv4Net, err = getNetwork(link, netlink.FAMILY_V4)
+				if err != nil {
+					return fmt.Errorf("failed to get IPv4 network: %w", err)
+				}
+				if ipv4Net == nil {
+					return fmt.Errorf("failed to find IPv4 network on the docker interface")
+				}
+
+				ipv4Pool = generateRange(ipv4Net)
+
+				_, ipv6Net, err = getNetwork(link, netlink.FAMILY_V6)
+				if err != nil {
+					return fmt.Errorf("failed to get IPv6 network: %w", err)
+				}
+				if ipv6Net == nil {
+					return fmt.Errorf("failed to find IPv6 network on the docker interface")
+				}
+
+				ipv6Pool = generateRange(ipv6Net)
+			}
+		}
+
+		globalRange := ipv4Pool
+		if config.IPv6 {
+			globalRange = ipv6Pool
+		}
+
+		if config.DualStack {
+			globalRange = fmt.Sprintf("%s,%s", ipv4Pool, ipv6Pool)
+		}
+
+		slog.Infof("Cloud provider's range: %s", globalRange)
 
 		cmd := exec.Command("kubectl", "create", "configmap", "--namespace", "kube-system", "kubevip", "--from-literal", "range-global="+globalRange)
 		if _, err := cmd.CombinedOutput(); err != nil {
@@ -161,6 +208,43 @@ func (config *TestConfig) CreateKind() error {
 		time.Sleep(time.Second * 5)
 	}
 	return nil
+}
+
+func getNetwork(link netlink.Link, family int) (*net.IP, *net.IPNet, error) {
+	addrs, err := netlink.AddrList(link, family)
+	if err != nil {
+		return nil, nil, fmt.Errorf("netlink: failed to get addresses for link %q: %w", link.Attrs().Name, err)
+	}
+	if len(addrs) > 0 {
+		for _, a := range addrs {
+			if a.Scope == int(netlink.SCOPE_UNIVERSE) {
+				ip, cidr, err := net.ParseCIDR(a.IPNet.String())
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to parse CIDR: %w", err)
+				}
+				return &ip, cidr, nil
+			}
+		}
+	}
+
+	return nil, nil, nil
+}
+
+func generateRange(network *net.IPNet) string {
+	if network.IP.To4() != nil {
+		parts := strings.Split(network.IP.String(), ".")
+		p1 := fmt.Sprintf("%s.%s.100.10", parts[0], parts[1])
+		p2 := fmt.Sprintf("%s.%s.100.100", parts[0], parts[1])
+		return fmt.Sprintf("%s-%s", p1, p2)
+	}
+
+	if network.IP.To16() != nil {
+		parts := strings.Split(network.IP.String(), ":")
+		p1 := fmt.Sprintf("%s:%s:%s:%s:0000:0000:0100:0010", parts[0], parts[1], parts[2], parts[3])
+		p2 := fmt.Sprintf("%s:%s:%s:%s:0000:0000:0100:0100", parts[0], parts[1], parts[2], parts[3])
+		return fmt.Sprintf("%s-%s", p1, p2)
+	}
+	return ""
 }
 
 func DeleteKind() error {

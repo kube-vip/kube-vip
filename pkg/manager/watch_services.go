@@ -32,7 +32,7 @@ type serviceContext struct {
 	configuredNetworks sync.Map
 }
 
-func NewServiceContext(ctx context.Context) *serviceContext {
+func newServiceContext(ctx context.Context) *serviceContext {
 	svcCtx, svcCancel := context.WithCancel(ctx)
 	return &serviceContext{
 		ctx:    svcCtx,
@@ -191,7 +191,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ip", cluster.FetchServiceAddresses(svc))
 
 				if svcCtx == nil {
-					svcCtx = NewServiceContext(ctx)
+					svcCtx = newServiceContext(ctx)
 					services.Store(svc.UID, svcCtx)
 				}
 
@@ -395,7 +395,7 @@ func (sm *Manager) lbClassFilter(svc *v1.Service) bool {
 
 func (svcCtx *serviceContext) hasConfiguredNetworks() bool {
 	cnt := 0
-	svcCtx.configuredNetworks.Range(func(key any, value any) bool {
+	svcCtx.configuredNetworks.Range(func(_ any, _ any) bool {
 		cnt++
 		return cnt < 1
 	})
