@@ -176,10 +176,13 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if svc.Annotations[egress] == "true" && len(serviceIPs) > 0 {
 		log.Debug("[service] enabling egress", "service", svc.Name, "namespace", svc.Namespace)
-		// We will need to modify the iptables rules
-		err = sm.iptablesCheck()
-		if err != nil {
-			log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+		// If we'er not using NFtables, then ensure that the correct iptables modules are loaded
+		if !sm.config.EgressWithNftables {
+			// Ensure that kernel modules are loaded and report back missing modules.
+			err = sm.iptablesCheck()
+			if err != nil {
+				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			}
 		}
 		var podIP string
 		errList := []error{}
