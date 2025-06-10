@@ -48,6 +48,31 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
+func (sm *Manager) nftablesCheck() error {
+	file, err := os.Open("/proc/modules")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	var queue, ct bool
+	for scanner.Scan() {
+		line := strings.Fields(scanner.Text())
+		switch line[0] {
+		case "nft_queue":
+			queue = true
+		case "nft_ct":
+			ct = true
+		}
+	}
+
+	if !queue || !ct {
+		return fmt.Errorf("missing nftables modules -> nft_ct [%t] -> ntf_queue [%t] mangle -> [%t]", ct, queue)
+	}
+	return nil
+}
+
 func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how this ever worked
 	cidrs := strings.Split(sourceCidrs, ",")
 	isV6 := vip.IsIPv6(ip)
