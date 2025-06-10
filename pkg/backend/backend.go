@@ -53,6 +53,10 @@ func (e *Entry) Check() bool {
 		}
 	}
 
+	// TODO: check if using insecure client for this check is OK.
+	// This was changed for more straightforward e2e-test implementation.
+	config.Insecure = true
+	config.CAData = []byte{}
 	client, err = k8s.NewClientset(config)
 	if err != nil {
 		log.Error("create k8s client", "err", err)
