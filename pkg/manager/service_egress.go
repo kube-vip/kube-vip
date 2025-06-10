@@ -68,7 +68,7 @@ func (sm *Manager) nftablesCheck() error {
 	}
 
 	if !queue || !ct {
-		return fmt.Errorf("missing nftables modules -> nft_ct [%t] -> ntf_queue [%t] mangle -> [%t]", ct, queue)
+		return fmt.Errorf("missing nftables modules -> nft_ct [%t] -> ntf_queue [%t]", ct, queue)
 	}
 	return nil
 }
