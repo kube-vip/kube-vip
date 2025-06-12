@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	"github.com/vishvananda/netlink"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -28,8 +29,10 @@ import (
 )
 
 const (
-	IPv4Family = "IPv4"
-	IPv6Family = "IPv6"
+	IPv4Family          = "IPv4"
+	IPv6Family          = "IPv6"
+	DualstackFamily     = "DualStack"
+	DualstackFamilyIPv6 = "DualStackIPv6"
 )
 
 func EnsureKindNetwork() {
@@ -69,31 +72,37 @@ func EnsureKindNetwork() {
 }
 
 func GenerateVIP(family string, offset uint) string {
+	if family == DualstackFamily || family == DualstackFamilyIPv6 {
+		return fmt.Sprintf("%s,%s", GenerateVIP(IPv4Family, offset), GenerateVIP(IPv6Family, offset))
+	}
+
 	cidrs := getKindNetworkSubnetCIDRs()
 
 	for _, cidr := range cidrs {
-		ip, ipNet, parseErr := net.ParseCIDR(cidr)
-		Expect(parseErr).NotTo(HaveOccurred())
+		if cidr != "" {
+			ip, ipNet, parseErr := net.ParseCIDR(cidr)
+			Expect(parseErr).NotTo(HaveOccurred())
 
-		if ip.To4() == nil && family == IPv6Family {
-			lowerMask := binary.BigEndian.Uint64(ipNet.Mask[8:])
-			lowerStart := binary.BigEndian.Uint64(ipNet.IP[8:])
-			lowerEnd := (lowerStart & lowerMask) | (^lowerMask)
+			if ip.To4() == nil && family == IPv6Family {
+				lowerMask := binary.BigEndian.Uint64(ipNet.Mask[8:])
+				lowerStart := binary.BigEndian.Uint64(ipNet.IP[8:])
+				lowerEnd := (lowerStart & lowerMask) | (^lowerMask)
 
-			chosenVIP := make([]byte, 16)
-			// Copy upper half into chosenVIP
-			copy(chosenVIP, ipNet.IP[0:8])
-			// Copy lower half into chosenVIP
-			binary.BigEndian.PutUint64(chosenVIP[8:], lowerEnd-uint64(offset))
-			return net.IP(chosenVIP).String()
-		} else if ip.To4() != nil && family == IPv4Family {
-			mask := binary.BigEndian.Uint32(ipNet.Mask)
-			start := binary.BigEndian.Uint32(ipNet.IP)
-			end := (start & mask) | (^mask)
+				chosenVIP := make([]byte, 16)
+				// Copy upper half into chosenVIP
+				copy(chosenVIP, ipNet.IP[0:8])
+				// Copy lower half into chosenVIP
+				binary.BigEndian.PutUint64(chosenVIP[8:], lowerEnd-uint64(offset))
+				return net.IP(chosenVIP).String()
+			} else if ip.To4() != nil && family == IPv4Family {
+				mask := binary.BigEndian.Uint32(ipNet.Mask)
+				start := binary.BigEndian.Uint32(ipNet.IP)
+				end := (start & mask) | (^mask)
 
-			chosenVIP := make([]byte, 4)
-			binary.BigEndian.PutUint32(chosenVIP, end-uint32(offset))
-			return net.IP(chosenVIP).String()
+				chosenVIP := make([]byte, 4)
+				binary.BigEndian.PutUint32(chosenVIP, end-uint32(offset))
+				return net.IP(chosenVIP).String()
+			}
 		}
 	}
 
@@ -215,4 +224,24 @@ func (so *SecureOffset) Get() uint {
 	defer so.mu.Unlock()
 	so.value++
 	return uint(so.value - 1)
+}
+
+func getNetwork(link netlink.Link, family int) (*net.IP, *net.IPNet, error) {
+	addrs, err := netlink.AddrList(link, family)
+	if err != nil {
+		return nil, nil, fmt.Errorf("netlink: failed to get addresses for link %q: %w", link.Attrs().Name, err)
+	}
+	if len(addrs) > 0 {
+		for _, a := range addrs {
+			if a.Scope == int(netlink.SCOPE_UNIVERSE) {
+				ip, cidr, err := net.ParseCIDR(a.IPNet.String())
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to parse CIDR: %w", err)
+				}
+				return &ip, cidr, nil
+			}
+		}
+	}
+
+	return nil, nil, nil
 }

@@ -48,7 +48,7 @@ jobs:
     name: E2E tests
     strategy:
       matrix:
-        mode: ["arp", "rt"]
+        mode: ["arp", "rt", "bgp"]
     steps:
       - name: Ensure fs wont cause issues
         run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
@@ -68,6 +68,12 @@ jobs:
       - name: Run RT mode tests v1.29.0 onwards
         run: make e2e-tests129-rt
         if: matrix.mode== 'rt'
+      - name: Get GoBGP binaries
+        run: make get-gobgp
+        if: matrix.mode== 'bgp'
+      - name: Run BGP mode tests v1.29.0 onwards
+        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 make e2e-tests129-bgp
+        if: matrix.mode== 'bgp'
   service-e2e-tests:
     runs-on: ubuntu-latest
     name: E2E service tests
