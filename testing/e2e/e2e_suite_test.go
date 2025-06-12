@@ -18,6 +18,7 @@ const (
 	ModeEnv = "TEST_MODE"
 	ModeARP = "arp"
 	ModeRT  = "rt"
+	ModeBGP = "bgp"
 )
 
 var (
@@ -30,7 +31,7 @@ func TestE2E(t *testing.T) {
 	mode := os.Getenv(ModeEnv)
 	if mode == "" {
 		Mode = ModeARP
-	} else if mode != ModeARP && mode != ModeRT {
+	} else if mode != ModeARP && mode != ModeRT && mode != ModeBGP {
 		log.Fatal("invalid", "mode", mode)
 		os.Exit(1)
 	} else {
