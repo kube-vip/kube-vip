@@ -300,7 +300,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		}
 		for i := range serviceInstance.VIPConfigs {
 			if serviceInstance.VIPConfigs[i].EnableBGP {
-				sm.clearBGPHosts(serviceInstance.ServiceSnapshot)
+				sm.clearBGPHostsByInstance(serviceInstance)
 			}
 		}
 

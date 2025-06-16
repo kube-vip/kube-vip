@@ -9,6 +9,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -501,16 +502,20 @@ func (sm *Manager) clearRoutes(service *v1.Service) []error {
 
 func (sm *Manager) clearBGPHosts(service *v1.Service) {
 	if instance := sm.findServiceInstance(service); instance != nil {
-		for _, cluster := range instance.Clusters {
-			for i := range cluster.Network {
-				network := cluster.Network[i]
-				err := sm.bgpServer.DelHost(network.CIDR())
-				if err != nil {
-					log.Error("[endpoint] error deleting BGP host", "err", err)
-				} else {
-					log.Debug("[endpoint] deleted BGP host", "ip",
-						network.CIDR(), "service name", service.Name, "namespace", service.Namespace)
-				}
+		sm.clearBGPHostsByInstance(instance)
+	}
+}
+
+func (sm *Manager) clearBGPHostsByInstance(instance *cluster.Instance) {
+	for _, cluster := range instance.Clusters {
+		for i := range cluster.Network {
+			network := cluster.Network[i]
+			err := sm.bgpServer.DelHost(network.CIDR())
+			if err != nil {
+				log.Error("[endpoint] error deleting BGP host", "err", err)
+			} else {
+				log.Debug("[endpoint] deleted BGP host", "ip",
+					network.CIDR(), "service name", instance.ServiceSnapshot.Name, "namespace", instance.ServiceSnapshot.Namespace)
 			}
 		}
 	}
