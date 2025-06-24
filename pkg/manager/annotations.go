@@ -23,6 +23,9 @@ const (
 	// Networks that we wont Egress for
 	egressDeniedNetworks = "kube-vip.io/egress-denied-networks"
 
+	// Use internal implementation of egress
+	egressInternal = "kube-vip.io/egress-internal"
+
 	// The current active endpoint(pod) for the Egress VIP
 	activeEndpoint = "kube-vip.io/active-endpoint"
 

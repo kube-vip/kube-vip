@@ -11,6 +11,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -116,6 +117,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	destinationPorts := annotations[egressDestinationPorts]
 	deniedNetworks := annotations[egressDeniedNetworks]
 	allowedNetworks := annotations[egressAllowedNetworks]
+	internalEgress := annotations[egressInternal]
 
 	if sm.config.EgressPodCidr == "" || sm.config.EgressServiceCidr == "" {
 		autoServiceCIDR, autoPodCIDR, discoverErr = sm.AutoDiscoverCIDRs()
@@ -157,7 +159,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		serviceCidr = defaultServiceCIDR
 	}
 
-	log.Info("[Egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
+	log.Info("[egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
 
 	// checking if all addresses are of the same IP family
 	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {
@@ -178,6 +180,31 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	protocol := iptables.ProtocolIPv4
 	if vip.IsIPv6(vipIP) {
 		protocol = iptables.ProtocolIPv6
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Ad anny specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(deniedNetworks, ",")
+			for x := range networks {
+				ignoreCIDRs = append(ignoreCIDRs, networks[x])
+			}
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		} else {
+			return nil
+		}
 	}
 
 	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)

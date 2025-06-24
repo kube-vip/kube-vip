@@ -33,6 +33,7 @@ type TestConfig struct {
 	LocalDeploy        bool
 	DualStack          bool
 	Egress             bool
+	EgressInternal     bool
 	EgressIPv6         bool
 	RetainCluster      bool
 	SkipHostnameChange bool
@@ -305,7 +306,7 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 	return nil
 }
 
-func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
+func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kubernetes.Clientset, internal bool) error {
 	// pod Failover tests
 
 	var err error
@@ -322,7 +323,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 		return nil
 	}() //nolint
 
-	slog.Infof("🧪 ---> egress IP re-write (local policy) <---")
+	slog.Infof("🧪 ---> egress IP re-write (local policy, internal: %t) <---", internal)
 	var egress string
 	var found bool
 	timeout := 30
@@ -356,6 +357,10 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 		egress:      true,
 		testHTTP:    false,
 		timeout:     30,
+	}
+
+	if internal {
+		svc.egressInternal = true
 	}
 
 	_, lbAddresses, err := svc.CreateService(ctx, clientset)
