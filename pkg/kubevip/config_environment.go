@@ -500,6 +500,34 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.KeepaliveInterval = u64
 	}
 
+	env = os.Getenv(zebraEnable)
+	if env != "" {
+		result, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.Zebra.Enabled = result
+	}
+
+	env = os.Getenv(zebraUrl)
+	if env != "" {
+		c.BGPConfig.Zebra.Url = env
+	}
+
+	env = os.Getenv(zebraVersion)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		c.BGPConfig.Zebra.Version = uint32(u64)
+	}
+
+	env = os.Getenv(zebraSoftwareName)
+	if env != "" {
+		c.BGPConfig.Zebra.SoftwareName = env
+	}
+
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
