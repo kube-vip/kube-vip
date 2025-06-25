@@ -110,6 +110,15 @@ const (
 	// bgpKeepaliveInterval defines bgp timers keepalive interval
 	bgpKeepaliveInterval = "bgp_keepalive_interval"
 
+	// zebraEnable defines if Zebra integraton should be enabled
+	zebraEnable = "zebra_enable"
+	// zebraUrl specifies path to the unix domain socket for connecting to Zebra daemon
+	zebraUrl = "zebra_url"
+	// zebraVersion specifies Zebra API Version
+	zebraVersion = "zebra_version"
+	// zebraSoftwareName specifies Software Name for Zebra
+	zebraSoftwareName = "zebra_software_name"
+
 	// mpbgpNexthop defines MPBGP mode
 	mpbgpNexthop = "mpbgp_nexthop"
 	// mpbgpIPv4 defines fixed IPv4 to be used with MPBGP

@@ -58,6 +58,17 @@ func NewBGPServer(c *Config, peerStateChangeCallback func(*api.WatchEventRespons
 		}
 	}
 
+	if c.Zebra.Enabled {
+		if err = b.s.EnableZebra(context.Background(), &api.EnableZebraRequest{
+			Url:          c.Zebra.Url,
+			Version:      c.Zebra.Version,
+			SoftwareName: c.Zebra.SoftwareName,
+		}); err != nil {
+			log.Error("failed to enable zebra:", err)
+			return
+		}
+	}
+
 	return
 }
 

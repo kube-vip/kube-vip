@@ -121,6 +121,16 @@ type Config struct {
 	KeepaliveInterval uint64
 
 	Peers []Peer
+
+	Zebra ZebraConfig
+}
+
+// Defines Zebra connection configuration. More on the topic - https://github.com/osrg/gobgp/blob/master/docs/sources/zebra.md#configuration
+type ZebraConfig struct {
+	Enabled      bool
+	Url          string
+	Version      uint32
+	SoftwareName string
 }
 
 // Server manages a server object
