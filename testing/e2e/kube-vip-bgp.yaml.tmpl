@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-vip
+  namespace: kube-system
+spec:
+  containers:
+  - name: kube-vip
+    args:
+    - manager
+    - --prometheusHTTPServer
+    - ""
+    env:
+    - name: vip_loglevel
+      value: "-4"
+    - name: lb_class_legacy_handling
+      value: "false"
+    - name: lb_class_name
+    - name: prometheus_server
+      value: :2112
+    - name: disable_service_updates
+      value: "false"
+    - name: vip_arp
+      value: "false"
+    - name: port
+      value: "6443"
+    - name: vip_cidr
+      value: "32"
+    - name: vip_leaderelection
+      value: "false"
+    - name: vip_interface
+      value: lo
+    - name: bgp_enable
+      value: "true"
+    - name: bgp_hold_time
+      value: "3"
+    - name: bgp_keepalive_interval
+      value: "1"
+    - name: bgp_sourceif
+      value: "eth0"
+    - name: bgp_routerid
+      value: "2.2.2.2"
+    - name: bgp_as
+      value: "{{ .BGPAS }}"
+    - name: bgp_peers
+      value: "{{ .BGPPeers }}"
+    - name: mpbgp_nexthop
+      value: "{{ .MPBGPNexthop }}"
+    - name: mpbgp_ipv4
+      value: "{{ .MPBGPNexthopIPv4 }}"
+    - name: mpbgp_ipv6
+      value: "{{ .MPBGPNexthopIPv6 }}"
+    - name: address
+      value: "{{ .ControlPlaneVIP }}"
+    - name: cp_enable
+      value: "{{ .ControlPlaneEnable }}"
+    - name: svc_enable
+      value: "{{ .SvcEnable }}"
+    - name: svc_election
+      value: "{{ .SvcElectionEnable }}"
+    - name: enable_endpointslices
+      value: "{{ .EnableEndpointslices }}"
+    image: "{{ .ImagePath }}"
+    imagePullPolicy: Never
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+        - NET_RAW
+    volumeMounts:
+    - mountPath: /etc/kubernetes/admin.conf
+      name: kubeconfig
+  hostAliases:
+    - hostnames:
+      - kubernetes
+      ip: 127.0.0.1
+  hostNetwork: true
+  volumes:
+  - hostPath:
+      path: "{{ .ConfigPath }}"
+    name: kubeconfig

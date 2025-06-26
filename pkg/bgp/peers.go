@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	//nolint
-	"github.com/golang/protobuf/ptypes/any"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/osrg/gobgp/v3/pkg/server"
@@ -142,7 +141,7 @@ func (b *Server) getPath(ip net.IP) (path *api.Path) {
 				Safi: api.Family_SAFI_UNICAST,
 			},
 			Nlri:   nlri,
-			Pattrs: []*any.Any{originAttr, nhAttr},
+			Pattrs: []*anypb.Any{originAttr, nhAttr},
 		}
 	} else {
 		//nolint
@@ -160,13 +159,13 @@ func (b *Server) getPath(ip net.IP) (path *api.Path) {
 		mpAttr, _ := anypb.New(&api.MpReachNLRIAttribute{
 			Family:   v6Family,
 			NextHops: []string{"::"}, // gobgp will fill this
-			Nlris:    []*any.Any{nlri},
+			Nlris:    []*anypb.Any{nlri},
 		})
 
 		path = &api.Path{
 			Family: v6Family,
 			Nlri:   nlri,
-			Pattrs: []*any.Any{originAttr, mpAttr},
+			Pattrs: []*anypb.Any{originAttr, mpAttr},
 		}
 	}
 	return
