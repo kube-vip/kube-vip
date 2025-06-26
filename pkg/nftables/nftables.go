@@ -11,12 +11,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var Accept = nftables.ChainPolicyAccept
-
 const (
 	NatTable  = "kube_vip"
 	SNatChain = "kube_vip_snat"
-	DNatChain = "kube_vip_dnat"
+	Accept    = nftables.ChainPolicyAccept
 )
 
 func ApplySNAT(podIP, vipIP string, ignoreCIDR []string, IPv6 bool) error {
@@ -53,7 +51,7 @@ func GetTable(IPv6 bool) *nftables.Table {
 	}
 
 	// Move to IPv6 if needed
-	if IPv6 == true {
+	if IPv6 {
 		table.Family = nftables.TableFamilyIPv6
 	}
 	return table
@@ -91,7 +89,7 @@ func Flush(conn *nftables.Conn, IPv6 bool) error {
 		conn.DelTable(t)
 	}
 
-	// These don't return errors, so not 100% sure how to guarentee things were created
+	// These don't return errors, so not 100% sure how to guarantee things were created
 	conn.AddTable(GetTable(IPv6))
 	conn.AddChain(GetSNatChain(IPv6))
 	return conn.Flush()
@@ -130,7 +128,10 @@ func CreateRule(podIP, vipIP string, ignoreCIDR []string, conn *nftables.Conn, I
 	}
 
 	// Add the set
-	conn.AddSet(set, elements)
+	err := conn.AddSet(set, elements)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create the expression using the set
 	expression := []expr.Any{
