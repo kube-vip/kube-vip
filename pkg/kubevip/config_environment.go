@@ -509,9 +509,9 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Zebra.Enabled = result
 	}
 
-	env = os.Getenv(zebraUrl)
+	env = os.Getenv(zebraURL)
 	if env != "" {
-		c.BGPConfig.Zebra.Url = env
+		c.BGPConfig.Zebra.URL = env
 	}
 
 	env = os.Getenv(zebraVersion)

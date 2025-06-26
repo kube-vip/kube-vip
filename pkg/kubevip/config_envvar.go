@@ -113,7 +113,7 @@ const (
 	// zebraEnable defines if Zebra integraton should be enabled
 	zebraEnable = "zebra_enable"
 	// zebraUrl specifies path to the unix domain socket for connecting to Zebra daemon
-	zebraUrl = "zebra_url"
+	zebraURL = "zebra_url"
 	// zebraVersion specifies Zebra API Version
 	zebraVersion = "zebra_version"
 	// zebraSoftwareName specifies Software Name for Zebra

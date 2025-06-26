@@ -94,7 +94,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Annotations, "annotations", "", "Set Node annotations prefix for parsing")
 
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.BGPConfig.Zebra.Enabled, "zebra", false, "This will enable Zebra support within kube-vip")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.Zebra.Url, "zebraUrl", "unix:/var/run/frr/zserv.api", "Path to the unix domain socket for connecting to Zebra daemon")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.Zebra.URL, "zebraUrl", "unix:/var/run/frr/zserv.api", "Path to the unix domain socket for connecting to Zebra daemon")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.Zebra.Version, "zebraVersion", 6, "Zebra API Version")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.Zebra.SoftwareName, "zebraSoftwareName", "frr8.3", "Software Name for Zebra")
 
