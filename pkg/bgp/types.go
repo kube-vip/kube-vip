@@ -128,7 +128,7 @@ type Config struct {
 // Defines Zebra connection configuration. More on the topic - https://github.com/osrg/gobgp/blob/master/docs/sources/zebra.md#configuration
 type ZebraConfig struct {
 	Enabled      bool
-	Url          string
+	URL          string
 	Version      uint32
 	SoftwareName string
 }
