@@ -30,7 +30,7 @@ type epProvider interface {
 	getAllEndpoints() ([]string, error)
 	getLocalEndpoints(string, *kubevip.Config) ([]string, error)
 	getLabel() string
-	updateServiceAnnotation(string, string, *v1.Service, *Manager) error
+	updateServiceAnnotation(context.Context, string, string, *v1.Service, *Manager) error
 	loadObject(runtime.Object, context.CancelFunc) error
 	getProtocol() string
 }
@@ -105,11 +105,11 @@ func (ep *endpointsProvider) getLocalEndpoints(id string, _ *kubevip.Config) ([]
 	return localEndpoints, nil
 }
 
-func (ep *endpointsProvider) updateServiceAnnotation(endpoint string, _ string, service *v1.Service, sm *Manager) error {
+func (ep *endpointsProvider) updateServiceAnnotation(ctx context.Context, endpoint string, _ string, service *v1.Service, sm *Manager) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func (ep *endpointsProvider) updateServiceAnnotation(endpoint string, _ string, 
 
 		currentServiceCopy.Annotations[activeEndpoint] = endpoint
 
-		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(ctx, currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
 			log.Error("error updating Service Spec", "label", ep.getLabel(), "name", currentServiceCopy.Name, "err", err)
 			return err
@@ -359,7 +359,7 @@ func (sm *Manager) watchEndpoint(svcCtx *serviceContext, id string, service *v1.
 											log.Error("error formatting address with subnet mask", "err", err)
 										}
 										log.Debug("attempting to advertise BGP service", "provider", provider.getLabel(), "ip", network.CIDR())
-										err = sm.bgpServer.AddHost(network.CIDR())
+										err = sm.bgpServer.AddHost(svcCtx.ctx, network.CIDR())
 										if err != nil {
 											log.Error("error adding BGP host", "provider", provider.getLabel(), "err", err)
 										} else {
@@ -394,7 +394,7 @@ func (sm *Manager) watchEndpoint(svcCtx *serviceContext, id string, service *v1.
 							for _, cluster := range instance.Clusters {
 								for i := range cluster.Network {
 									network := cluster.Network[i]
-									err = sm.bgpServer.DelHost(network.CIDR())
+									err = sm.bgpServer.DelHost(svcCtx.ctx, network.CIDR())
 									if err != nil {
 										log.Error("[endpoint] deleting BGP host", "provider", provider.getLabel(), "ip", network.CIDR(), "err", err)
 									} else {
@@ -457,7 +457,7 @@ func (sm *Manager) watchEndpoint(svcCtx *serviceContext, id string, service *v1.
 
 					// Delete all hosts in BGP mode
 					if sm.config.EnableBGP {
-						sm.clearBGPHosts(service)
+						sm.clearBGPHosts(svcCtx.ctx, service)
 					}
 				}
 			}
@@ -500,17 +500,17 @@ func (sm *Manager) clearRoutes(service *v1.Service) []error {
 	return errs
 }
 
-func (sm *Manager) clearBGPHosts(service *v1.Service) {
+func (sm *Manager) clearBGPHosts(ctx context.Context, service *v1.Service) {
 	if instance := sm.findServiceInstance(service); instance != nil {
-		sm.clearBGPHostsByInstance(instance)
+		sm.clearBGPHostsByInstance(ctx, instance)
 	}
 }
 
-func (sm *Manager) clearBGPHostsByInstance(instance *cluster.Instance) {
+func (sm *Manager) clearBGPHostsByInstance(ctx context.Context, instance *cluster.Instance) {
 	for _, cluster := range instance.Clusters {
 		for i := range cluster.Network {
 			network := cluster.Network[i]
-			err := sm.bgpServer.DelHost(network.CIDR())
+			err := sm.bgpServer.DelHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error("[endpoint] error deleting BGP host", "err", err)
 			} else {

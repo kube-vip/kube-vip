@@ -18,14 +18,14 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startARP(id string) error {
+func (sm *Manager) startARP(ctx context.Context, id string) error {
 	var cpCluster *cluster.Cluster
 	var ns string
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	log.Info("Start ARP/NDP advertisement")
@@ -56,7 +56,7 @@ func (sm *Manager) startARP(id string) error {
 		}
 
 		go func() {
-			err := cpCluster.StartCluster(sm.config, clusterManager, nil)
+			err := cpCluster.StartCluster(ctx, sm.config, clusterManager, nil)
 			if err != nil {
 				log.Error("starting control plane", "err", err)
 				// Trigger the shutdown of this manager instance
@@ -149,7 +149,7 @@ func (sm *Manager) startARP(id string) error {
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
 					if sm.config.EnableNodeLabeling {
-						applyNodeLabel(sm.clientSet, sm.config.Address, id, identity)
+						applyNodeLabel(ctx, sm.clientSet, sm.config.Address, id, identity)
 					}
 					if identity == id {
 						// I just got the lock

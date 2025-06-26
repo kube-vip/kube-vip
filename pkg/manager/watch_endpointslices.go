@@ -91,11 +91,11 @@ func (ep *endpointslicesProvider) getLocalEndpoints(id string, _ *kubevip.Config
 	return localEndpoints, nil
 }
 
-func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6 string, service *v1.Service, sm *Manager) error {
+func (ep *endpointslicesProvider) updateServiceAnnotation(ctx context.Context, endpoint, endpointIPv6 string, service *v1.Service, sm *Manager) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+		currentService, err := sm.clientSet.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func (ep *endpointslicesProvider) updateServiceAnnotation(endpoint, endpointIPv6
 		currentServiceCopy.Annotations[activeEndpoint] = endpoint
 		currentServiceCopy.Annotations[activeEndpointIPv6] = endpointIPv6
 
-		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+		_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).Update(ctx, currentServiceCopy, metav1.UpdateOptions{})
 		if err != nil {
 			log.Error("error updating Service Spec", "provider", ep.label, "service name", currentServiceCopy.Name, "err", err)
 			return err

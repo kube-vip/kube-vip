@@ -105,7 +105,7 @@ func (sm *Manager) StartServicesLeaderElection(ctx context.Context, service *v1.
 				// we can do cleanup here
 				log.Info("leadership lost", "service", service.Name, "leader", sm.config.NodeName)
 				if svcCtx.isActive {
-					if err := sm.deleteService(service.UID); err != nil {
+					if err := sm.deleteService(ctx, service.UID); err != nil {
 						log.Error("service deletion", "err", err)
 					}
 				}

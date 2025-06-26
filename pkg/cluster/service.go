@@ -71,7 +71,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
-			err = bgpServer.AddHost(network.CIDR())
+			err = bgpServer.AddHost(ctxArp, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -84,7 +84,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			}
 
 			go func() {
-				err = sm.NodeWatcher(lb, c.Port)
+				err = sm.NodeWatcher(ctxArp, lb, c.Port)
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
 				}
@@ -257,11 +257,11 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server, name string, serviceInstances *[]*Instance) {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, serviceInstances *[]*Instance) {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
-	ctxArp, cancelArp := context.WithCancel(context.Background())
+	ctxArp, cancelArp := context.WithCancel(ctx)
 
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
@@ -298,7 +298,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(network.CIDR())
+			err = bgp.AddHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}

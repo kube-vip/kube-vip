@@ -13,13 +13,13 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startWireguard(id string) error {
+func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	var ns string
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	log.Info("reading wireguard peer configuration from Kubernetes secret")
 	s, err := sm.clientSet.CoreV1().Secrets(sm.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})

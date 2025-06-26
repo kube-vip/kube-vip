@@ -20,13 +20,13 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startTableMode(id string) error {
+func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 	var cpCluster *cluster.Cluster
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	log.Info("destination for routes", "table", sm.config.RoutingTableID, "protocol", sm.config.RoutingProtocol)
 
@@ -76,7 +76,7 @@ func (sm *Manager) startTableMode(id string) error {
 			return fmt.Errorf("cluster manager initialization error: %w", err)
 		}
 
-		if err := cpCluster.StartVipService(sm.config, clusterManager, nil); err != nil {
+		if err := cpCluster.StartVipService(ctx, sm.config, clusterManager, nil); err != nil {
 			log.Error("Control Plane", "err", err)
 			// Trigger the shutdown of this manager instance
 			sm.signalChan <- syscall.SIGINT
