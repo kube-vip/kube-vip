@@ -218,19 +218,17 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 
 		// Ad anny specifically denied networks
 		if deniedNetworks != "" {
-			networks := strings.Split(deniedNetworks, ",")
-			for x := range networks {
-				ignoreCIDRs = append(ignoreCIDRs, networks[x])
-			}
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
 		}
 
 		// Apply the SNAT rules
 		err := nftables.ApplySNAT(podIP, vipIP, ignoreCIDRs, vip.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
-		} else {
-			return nil
 		}
+		return nil
 	}
 
 	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
