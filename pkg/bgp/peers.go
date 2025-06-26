@@ -16,7 +16,7 @@ import (
 )
 
 // AddPeer will add peers to the BGP configuration
-func (b *Server) AddPeer(peer Peer) (err error) {
+func (b *Server) AddPeer(ctx context.Context, peer Peer) (err error) {
 	p := &api.Peer{
 		Conf: &api.PeerConf{
 			NeighborAddress: peer.Address,
@@ -83,7 +83,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 			family = api.Family_AFI_IP6
 		}
 
-		err = b.s.AddDefinedSet(context.Background(), &api.AddDefinedSetRequest{
+		err = b.s.AddDefinedSet(ctx, &api.AddDefinedSetRequest{
 			DefinedSet: &api.DefinedSet{
 				DefinedType: api.DefinedType_NEIGHBOR,
 				Name:        fmt.Sprintf("peer-%s", p.Conf.NeighborAddress),
@@ -95,7 +95,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		}
 
 		if address != "" {
-			if err := insertPolicy(b.s, address, p, family); err != nil {
+			if err := insertPolicy(ctx, b.s, address, p, family); err != nil {
 				return fmt.Errorf("failed to add policy: %w", err)
 			}
 		}
@@ -109,7 +109,7 @@ func (b *Server) AddPeer(peer Peer) (err error) {
 		}
 	}
 
-	if err := b.s.AddPeer(context.Background(), &api.AddPeerRequest{Peer: p}); err != nil {
+	if err := b.s.AddPeer(ctx, &api.AddPeerRequest{Peer: p}); err != nil {
 		return fmt.Errorf("failed to add peer: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 	return
 }
 
-func insertPolicy(s *server.BgpServer, address string, p *api.Peer, family api.Family_Afi) error {
+func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *api.Peer, family api.Family_Afi) error {
 	familyType := "v4"
 	if family == api.Family_AFI_IP6 {
 		familyType = "v6"
@@ -316,14 +316,14 @@ func insertPolicy(s *server.BgpServer, address string, p *api.Peer, family api.F
 		},
 	}
 
-	err := s.AddPolicy(context.Background(), &api.AddPolicyRequest{
+	err := s.AddPolicy(ctx, &api.AddPolicyRequest{
 		Policy: policy,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to add policy: %w", err)
 	}
 
-	err = s.AddPolicyAssignment(context.Background(), &api.AddPolicyAssignmentRequest{
+	err = s.AddPolicyAssignment(ctx, &api.AddPolicyAssignmentRequest{
 		Assignment: &api.PolicyAssignment{
 			Name:      "global",
 			Direction: api.PolicyDirection_EXPORT,

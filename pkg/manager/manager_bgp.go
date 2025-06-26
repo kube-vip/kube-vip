@@ -14,13 +14,13 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startBGP() error {
+func (sm *Manager) startBGP(ctx context.Context) error {
 	var cpCluster *cluster.Cluster
 	// var ns string
 	var err error
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
-	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
+	sm.bgpServer, err = bgp.NewBGPServer(ctx, &sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
 		ipaddr := p.GetPeer().GetState().GetNeighborAddress()
 		port := uint64(179)
 		peerDescription := fmt.Sprintf("%s:%d", ipaddr, port)
@@ -43,13 +43,13 @@ func (sm *Manager) startBGP() error {
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Defer a function to check if the bgpServer has been created and if so attempt to close it
 	defer func() {
 		if sm.bgpServer != nil {
-			sm.bgpServer.Close()
+			sm.bgpServer.Close(ctx)
 		}
 	}()
 
@@ -79,9 +79,9 @@ func (sm *Manager) startBGP() error {
 
 		go func() {
 			if sm.config.EnableLeaderElection {
-				err = cpCluster.StartCluster(sm.config, clusterManager, sm.bgpServer)
+				err = cpCluster.StartCluster(ctx, sm.config, clusterManager, sm.bgpServer)
 			} else {
-				err = cpCluster.StartVipService(sm.config, clusterManager, sm.bgpServer)
+				err = cpCluster.StartVipService(ctx, sm.config, clusterManager, sm.bgpServer)
 			}
 			if err != nil {
 				log.Error("Control Plane", "err", err)

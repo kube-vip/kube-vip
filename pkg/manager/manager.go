@@ -200,7 +200,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 }
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) Start() error {
+func (sm *Manager) Start(ctx context.Context) error {
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -238,13 +238,13 @@ func (sm *Manager) Start() error {
 	if sm.config.EnableBGP {
 
 		// If Annotations have been set then we will look them up
-		err := sm.parseAnnotations()
+		err := sm.parseAnnotations(ctx)
 		if err != nil {
 			return err
 		}
 
 		log.Info("Starting Kube-vip Manager with the BGP engine")
-		return sm.startBGP()
+		return sm.startBGP(ctx)
 	}
 
 	if sm.config.EnableARP || sm.config.EnableWireguard {
@@ -253,7 +253,7 @@ func (sm *Manager) Start() error {
 
 		if upnpEnabled {
 			sm.upnp = true
-			clients := upnp.GetConnectionClients(context.TODO())
+			clients := upnp.GetConnectionClients(ctx)
 			if len(clients) == 0 {
 				log.Error("Error Enabling UPNP. No Clients found")
 				// Set the struct to false so nothing should use it in future
@@ -270,23 +270,23 @@ func (sm *Manager) Start() error {
 			}
 		}
 		// TODO: It would be nice to run the UPNP refresh only on the leader.
-		go sm.refreshUPNPForwards()
+		go sm.refreshUPNPForwards(ctx)
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Info("Starting Kube-vip Manager with the ARP engine")
-		return sm.startARP(sm.config.NodeName)
+		return sm.startARP(ctx, sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
 		log.Info("Starting Kube-vip Manager with the Wireguard engine")
-		return sm.startWireguard(sm.config.NodeName)
+		return sm.startWireguard(ctx, sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
 		log.Info("Starting Kube-vip Manager with the Routing Table engine")
-		return sm.startTableMode(sm.config.NodeName)
+		return sm.startTableMode(ctx, sm.config.NodeName)
 	}
 
 	log.Error("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
@@ -303,13 +303,13 @@ func returnNameSpace() (string, error) {
 	return "", fmt.Errorf("unable to find Namespace")
 }
 
-func (sm *Manager) parseAnnotations() error {
+func (sm *Manager) parseAnnotations(ctx context.Context) error {
 	if sm.config.Annotations == "" {
 		log.Debug("No Node annotations to parse")
 		return nil
 	}
 
-	err := sm.annotationsWatcher()
+	err := sm.annotationsWatcher(ctx)
 	if err != nil {
 		return err
 	}
@@ -369,7 +369,7 @@ func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
 }
 
 // Refresh UPNP Port Forwards for all Service Instances registered in the SM
-func (sm *Manager) refreshUPNPForwards() {
+func (sm *Manager) refreshUPNPForwards(ctx context.Context) {
 	log.Info("Starting UPNP Port Refresher")
 	for {
 		time.Sleep(300 * time.Second)
@@ -380,8 +380,8 @@ func (sm *Manager) refreshUPNPForwards() {
 			defer sm.mutex.Unlock()
 
 			for i := range sm.serviceInstances {
-				sm.upnpMap(context.TODO(), sm.serviceInstances[i])
-				if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
+				sm.upnpMap(ctx, sm.serviceInstances[i])
+				if err := sm.updateStatus(ctx, sm.serviceInstances[i]); err != nil {
 					log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].ServiceSnapshot.Name, "err", err)
 				}
 			}
