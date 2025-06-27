@@ -12,42 +12,78 @@ import (
 )
 
 const (
-	NatTable  = "kube_vip"
-	SNatChain = "kube_vip_snat"
+	NatTable  = "kube_vip_%s"
+	SNatChain = "kube_vip_snat_%s_%s"
 	Accept    = nftables.ChainPolicyAccept
 )
 
-func ApplySNAT(podIP, vipIP string, ignoreCIDR []string, IPv6 bool) error {
+func ApplySNAT(podIP, vipIP, service string, ignoreCIDR []string, IPv6 bool) error {
 
 	conn, err := nftables.New()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	err = Flush(conn, IPv6) // TODO: pass in the type of table we need to concern ourselves with
+	err = Flush(conn, IPv6, service) // TODO: pass in the type of table we need to concern ourselves with
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	rule, err := CreateRule(podIP, vipIP, ignoreCIDR, conn, IPv6)
+	rule, err := CreateRule(podIP, vipIP, service, ignoreCIDR, conn, IPv6)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
 	conn.AddRule(rule) // Add the rule
-	conn.Flush()       // Commit the rule to nftables
-	err = conn.CloseLasting()
+
+	err = conn.Flush() // Commit the rule to nftables
 	if err != nil {
-		panic(err)
+		return err
 	}
-	return nil
+
+	return conn.CloseLasting() // Close out any remaining netlink communication
+}
+
+func DeleteSNAT(IPv6 bool, service string) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
+	var chainName string
+	if IPv6 {
+		chainName = fmt.Sprintf(SNatChain, "v6", service)
+	} else {
+		chainName = fmt.Sprintf(SNatChain, "v4", service)
+	}
+
+	chains, err := conn.ListChains()
+	if err != nil {
+		return err
+	}
+	slog.Info("[egress]", "Looking for", chainName)
+	for x := range chains {
+		slog.Debug("[egress]", "found chain", chains[x].Name)
+		// fmt.Printf("[egress] found chain [%s] looking for [%s]", chains[x].Name, chainName)
+		if chains[x].Name == chainName {
+			slog.Info("[egress]", "Deleting chain", chainName)
+			conn.DelChain(chains[x])
+			return conn.Flush()
+		}
+	}
+	return fmt.Errorf("Unable to find chain [%s]", chainName)
 }
 
 func GetTable(IPv6 bool) *nftables.Table {
+	var tableName string
+	if IPv6 {
+		tableName = fmt.Sprintf(NatTable, "v6")
+	} else {
+		tableName = fmt.Sprintf(NatTable, "v4")
+	}
 	// Default to IPv4
 	table := &nftables.Table{
 		Family: nftables.TableFamilyIPv4,
-		Name:   NatTable,
+		Name:   tableName,
 	}
 
 	// Move to IPv6 if needed
@@ -57,10 +93,16 @@ func GetTable(IPv6 bool) *nftables.Table {
 	return table
 }
 
-func GetSNatChain(IPv6 bool) *nftables.Chain {
+func GetSNatChain(IPv6 bool, service string) *nftables.Chain {
+	var chainName string
+	if IPv6 {
+		chainName = fmt.Sprintf(SNatChain, "v6", service)
+	} else {
+		chainName = fmt.Sprintf(SNatChain, "v4", service)
+	}
 	policy := nftables.ChainPolicyAccept
 	return &nftables.Chain{
-		Name:     SNatChain,
+		Name:     chainName,
 		Table:    GetTable(IPv6),
 		Type:     nftables.ChainTypeNAT,
 		Hooknum:  nftables.ChainHookPostrouting,
@@ -82,8 +124,14 @@ func FilterTable(conn *nftables.Conn, tableName string) (table *nftables.Table, 
 	return nil, nil
 }
 
-func Flush(conn *nftables.Conn, IPv6 bool) error {
-	if t, err := FilterTable(conn, NatTable); err != nil {
+func Flush(conn *nftables.Conn, IPv6 bool, service string) error {
+	var tableName string
+	if IPv6 {
+		tableName = fmt.Sprintf(NatTable, "v6")
+	} else {
+		tableName = fmt.Sprintf(NatTable, "v4")
+	}
+	if t, err := FilterTable(conn, tableName); err != nil {
 		return err
 	} else if t != nil {
 		conn.DelTable(t)
@@ -91,11 +139,11 @@ func Flush(conn *nftables.Conn, IPv6 bool) error {
 
 	// These don't return errors, so not 100% sure how to guarantee things were created
 	conn.AddTable(GetTable(IPv6))
-	conn.AddChain(GetSNatChain(IPv6))
+	conn.AddChain(GetSNatChain(IPv6, service))
 	return conn.Flush()
 }
 
-func CreateRule(podIP, vipIP string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
+func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
 
 	// Get the kube-vip table
 	table := GetTable(IPv6)
@@ -106,7 +154,7 @@ func CreateRule(podIP, vipIP string, ignoreCIDR []string, conn *nftables.Conn, I
 		Exprs: []expr.Any{},
 	}
 	// Set the correct chain
-	rule.Chain = GetSNatChain(IPv6)
+	rule.Chain = GetSNatChain(IPv6, service)
 
 	// original pod IP
 	if net.ParseIP(podIP) == nil {

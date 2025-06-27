@@ -134,7 +134,7 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
+func (sm *Manager) configureEgress(vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -224,7 +224,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		}
 
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, ignoreCIDRs, vip.IsIPv6(vipIP))
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, ignoreCIDRs, vip.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
