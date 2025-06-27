@@ -8,6 +8,7 @@ require (
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.7.0
+	github.com/google/nftables v0.2.0
 	github.com/gookit/slog v0.5.8
 	github.com/huin/goupnp v1.3.0
 	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d
