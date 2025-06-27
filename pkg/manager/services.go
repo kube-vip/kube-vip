@@ -196,7 +196,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 
 						podIP = svc.Annotations[activeEndpointIPv6]
 
-						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
+						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -210,7 +210,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[activeEndpointIPv6]
 				}
-				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
+				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
 					log.Error("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -308,7 +308,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		if serviceInstance.ServiceSnapshot.Annotations[egress] == "true" {
 			if serviceInstance.ServiceSnapshot.Annotations[activeEndpoint] != "" {
 				log.Info("egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
-				err := sm.TeardownEgress(serviceInstance.ServiceSnapshot.Annotations[activeEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, serviceInstance.ServiceSnapshot.Annotations)
+				err := sm.TeardownEgress(serviceInstance.ServiceSnapshot.Annotations[activeEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.ObjectMeta.UID), serviceInstance.ServiceSnapshot.Annotations)
 				if err != nil {
 					log.Error("egress teardown", "err", err)
 				}

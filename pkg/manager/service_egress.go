@@ -108,7 +108,7 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
+func (sm *Manager) configureEgress(vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -198,7 +198,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		}
 
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, ignoreCIDRs, vip.IsIPv6(vipIP))
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, ignoreCIDRs, vip.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
@@ -333,15 +333,22 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	return
 }
 
-func (sm *Manager) TeardownEgress(podIP, vipIP, namespace string, annotations map[string]string) error {
+func (sm *Manager) TeardownEgress(podIP, vipIP, namespace, service string, annotations map[string]string) error {
 	// Look up the destination ports from the annotations on the service
 	destinationPorts := annotations[egressDestinationPorts]
 	deniedNetworks := annotations[egressDeniedNetworks]
 	allowedNetworks := annotations[egressAllowedNetworks]
+	internalEgress := annotations[egressInternal]
 
 	protocol := iptables.ProtocolIPv4
+	IPv6 := false
 	if vip.IsIPv6(podIP) {
 		protocol = iptables.ProtocolIPv6
+		IPv6 = true
+	}
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		return nftables.DeleteSNAT(IPv6, service)
 	}
 
 	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
