@@ -162,17 +162,24 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftable
 	}
 
 	// Create an element using our pod IP
-	elements := []nftables.SetElement{
-		{
-			Key: net.ParseIP(podIP).To4(),
-		},
+	elements := []nftables.SetElement{}
+	if IPv6 {
+		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To16()})
+	} else {
+		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To4()})
 	}
+
 	set := &nftables.Set{
 		Table:     table,
 		Anonymous: true,
 		Constant:  true,
 		KeyType:   nftables.TypeIPAddr,
 		Interval:  false,
+	}
+	if IPv6 {
+		set.KeyType = nftables.TypeIP6Addr
+	} else {
+		set.KeyType = nftables.TypeIPAddr
 	}
 
 	// Add the set
@@ -182,21 +189,31 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftable
 	}
 
 	// Create the expression using the set
-	expression := []expr.Any{
-		&expr.Payload{
-			OperationType:  expr.PayloadLoad,
-			Base:           expr.PayloadBaseNetworkHeader,
-			DestRegister:   1,
-			SourceRegister: 0,
-			Offset:         12,
-			Len:            4,
-		},
-		&expr.Lookup{
-			SourceRegister: 1,
-			DestRegister:   0,
-			SetID:          set.ID,
-		},
+	expression := []expr.Any{}
+
+	payload := &expr.Payload{
+		OperationType:  expr.PayloadLoad,
+		Base:           expr.PayloadBaseNetworkHeader,
+		DestRegister:   1,
+		SourceRegister: 0,
 	}
+
+	// Set the length of the data based upon the type of IP being used
+	if IPv6 {
+		payload.Offset = 8
+		payload.Len = 16
+	} else {
+		payload.Offset = 12
+		payload.Len = 4
+	}
+	lookup := &expr.Lookup{
+		SourceRegister: 1,
+		DestRegister:   0,
+		SetID:          set.ID,
+	}
+	// Add expressions
+	expression = append(expression, payload)
+	expression = append(expression, lookup)
 
 	// Add expression to the rule
 	rule.Exprs = append(rule.Exprs, expression...)
@@ -206,20 +223,32 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftable
 		if err != nil {
 			return nil, err
 		}
-		expression = []expr.Any{
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseNetworkHeader,
-				Offset:       16,
-				Len:          4,
-			},
-			&expr.Range{
-				Op:       expr.CmpOpNeq,
-				Register: 1,
-				FromData: start.To4(),
-				ToData:   end.To4(),
-			},
+		expression = []expr.Any{}
+
+		payload := &expr.Payload{
+			DestRegister: 1,
+			Base:         expr.PayloadBaseNetworkHeader,
 		}
+		notEqualRange := &expr.Range{
+			Op:       expr.CmpOpNeq,
+			Register: 1,
+		}
+
+		if IPv6 {
+			payload.Len = 16
+			payload.Offset = 24
+			notEqualRange.FromData = start.To16()
+			notEqualRange.ToData = end.To16()
+		} else {
+			payload.Offset = 16
+			payload.Len = 4
+			notEqualRange.FromData = start.To4()
+			notEqualRange.ToData = end.To4()
+		}
+		// Add expressions
+		expression = append(expression, payload)
+		expression = append(expression, notEqualRange)
+
 		// // Add expression to the rule
 		rule.Exprs = append(rule.Exprs, expression...)
 	}
@@ -229,24 +258,31 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftable
 		return nil, errors.New("output_ip is not a valid ip")
 	}
 
-	expression = []expr.Any{
-		&expr.Immediate{
-			Register: 1,
-			Data:     net.ParseIP(vipIP).To4(),
-		},
-		&expr.NAT{
-			Type:        expr.NATTypeSourceNAT,
-			Family:      unix.NFPROTO_IPV4,
-			RegAddrMin:  1,
-			RegAddrMax:  1,
-			RegProtoMin: 0,
-			RegProtoMax: 0,
-			Random:      false, FullyRandom: false, Persistent: false, Prefix: false,
-		},
+	expression = []expr.Any{}
+
+	immediate := &expr.Immediate{
+		Register: 1,
+		//Data:     net.ParseIP(vipIP).To4(),
 	}
-
+	nat := &expr.NAT{
+		Type:        expr.NATTypeSourceNAT,
+		RegAddrMin:  1,
+		RegAddrMax:  1,
+		RegProtoMin: 0,
+		RegProtoMax: 0,
+		Random:      false, FullyRandom: false, Persistent: false, Prefix: false,
+	}
+	if IPv6 {
+		immediate.Data = net.ParseIP(vipIP).To16()
+		nat.Family = unix.NFPROTO_IPV6
+	} else {
+		immediate.Data = net.ParseIP(vipIP).To4()
+		nat.Family = unix.NFPROTO_IPV4
+	}
 	// https://github.com/google/nftables/blob/main/nftables_test.go#L5375
-
+	// Add expressions
+	expression = append(expression, immediate)
+	expression = append(expression, nat)
 	rule.Exprs = append(rule.Exprs, expression...)
 
 	return rule, nil
