@@ -62,6 +62,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			errs = append(errs, err)
 		}
 	}
+
 	if config.LocalDeploy {
 		// Failover tests
 		err = config.LocalDeployment(ctx, clientset)
@@ -72,7 +73,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 	}
 
 	if config.Egress {
-		// Failover tests
+		// Egress test
 		err = config.EgressDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
@@ -81,7 +82,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 	}
 
 	if config.EgressIPv6 {
-		// Failover tests
+		// Egress v6 tests
 		err = config.Egressv6Deployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
@@ -90,7 +91,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 	}
 
 	if config.DualStack {
-		// Failover tests
+		// Dualstack tests
 		err = config.DualStackDeployment(ctx, clientset)
 		if err != nil {
 			slog.Error(err)

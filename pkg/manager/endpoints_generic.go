@@ -9,12 +9,12 @@ import (
 )
 
 type EndpointWorker interface {
-	ProcessInstance(ctx context.Context, service *v1.Service, leaderElectionActive *bool) error
-	Clear(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool)
+	ProcessInstance(svcCtx *serviceContext, service *v1.Service, leaderElectionActive *bool) error
+	Clear(svcCtx *serviceContext, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool)
 	GetEndpoints(service *v1.Service, id string) ([]string, error)
 	RemoveEgress(service *v1.Service, lastKnownGoodEndpoint *string)
 	Delete(service *v1.Service, id string) error
-	SetInstanceEndpointsStatus(service *v1.Service, state bool) error
+	SetInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
 }
 
 func NewEndpointWorker(sm *Manager, provider epProvider) EndpointWorker {
@@ -35,11 +35,11 @@ type Generic struct {
 	provider epProvider
 }
 
-func (g *Generic) ProcessInstance(_ context.Context, _ *v1.Service, _ *bool) error {
+func (g *Generic) ProcessInstance(_ *serviceContext, _ *v1.Service, _ *bool) error {
 	return nil
 }
 
-func (g *Generic) Clear(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
+func (g *Generic) Clear(_ *serviceContext, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
 	g.clearEgress(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
 }
 
@@ -98,6 +98,6 @@ func (g *Generic) Delete(_ *v1.Service, _ string) error {
 	return nil
 }
 
-func (g *Generic) SetInstanceEndpointsStatus(_ *v1.Service, _ bool) error {
+func (g *Generic) SetInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
 	return nil
 }

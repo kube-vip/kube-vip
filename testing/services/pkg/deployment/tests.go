@@ -308,7 +308,7 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 }
 
 func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
-	// pod Failover tests
+	// egress test
 
 	var err error
 	defer func() error {
@@ -382,7 +382,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 }
 
 func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kubernetes.Clientset) error {
-	// pod Failover tests
+	// egress v6 test
 
 	var err error
 	defer func() error {

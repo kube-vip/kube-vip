@@ -144,7 +144,7 @@ e2e-tests129-rt:
 e2e-tests129-bgp:
 	GOMAXPROCS=4 TEST_MODE=bgp V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
-e2e-tests129: e2e-tests129-arp e2e-tests129-rt
+e2e-tests129: e2e-tests129-arp e2e-tests129-rt e2e-tests129-bgp
 
 service-tests:
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
