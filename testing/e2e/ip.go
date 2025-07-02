@@ -20,7 +20,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
-	"github.com/vishvananda/netlink"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -224,24 +223,4 @@ func (so *SecureOffset) Get() uint {
 	defer so.mu.Unlock()
 	so.value++
 	return uint(so.value - 1)
-}
-
-func getNetwork(link netlink.Link, family int) (*net.IP, *net.IPNet, error) {
-	addrs, err := netlink.AddrList(link, family)
-	if err != nil {
-		return nil, nil, fmt.Errorf("netlink: failed to get addresses for link %q: %w", link.Attrs().Name, err)
-	}
-	if len(addrs) > 0 {
-		for _, a := range addrs {
-			if a.Scope == int(netlink.SCOPE_UNIVERSE) {
-				ip, cidr, err := net.ParseCIDR(a.IPNet.String())
-				if err != nil {
-					return nil, nil, fmt.Errorf("failed to parse CIDR: %w", err)
-				}
-				return &ip, cidr, nil
-			}
-		}
-	}
-
-	return nil, nil, nil
 }

@@ -25,11 +25,12 @@ func NewEndpointProcessor(sm *Manager, provider epProvider) *Processor {
 	}
 }
 
-func (p *Processor) AddModify(ctx context.Context, event watch.Event, cancel context.CancelFunc,
-	lastKnownGoodEndpoint *string, service *v1.Service, id string, leaderElectionActive *bool) (bool, error) {
+func (p *Processor) AddModify(svcCtx *serviceContext, event watch.Event,
+	lastKnownGoodEndpoint *string, service *v1.Service, id string, leaderElectionActive *bool,
+	leaderCtx *context.Context, cancel *context.CancelFunc) (bool, error) {
 
 	var err error
-	if err = p.provider.loadObject(event.Object, cancel); err != nil {
+	if err = p.provider.loadObject(event.Object, *cancel); err != nil {
 		return false, fmt.Errorf("[%s] error loading k8s object: %w", p.provider.getLabel(), err)
 	}
 
@@ -40,7 +41,7 @@ func (p *Processor) AddModify(ctx context.Context, event watch.Event, cancel con
 		return false, err
 	}
 
-	if err := p.worker.SetInstanceEndpointsStatus(service, len(endpoints) > 0); err != nil {
+	if err := p.worker.SetInstanceEndpointsStatus(service, endpoints); err != nil {
 		log.Error("updating instance", "err", err)
 	}
 
@@ -57,34 +58,31 @@ func (p *Processor) AddModify(ctx context.Context, event watch.Event, cancel con
 			return true, nil
 		}
 
-		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service, leaderElectionActive, cancel)
-
+		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service, leaderElectionActive, *cancel)
 		// start leader election if it's enabled and not already started
 		if !*leaderElectionActive && p.sm.config.EnableServicesElection {
-			go startLeaderElection(ctx, p.sm, leaderElectionActive, service)
-		}
-
-		isRouteConfigured, err := isRouteConfigured(service.UID)
-		if err != nil {
-			return false, fmt.Errorf("[%s] error while checking if route is configured: %w", p.provider.getLabel(), err)
+			go func() {
+				*leaderCtx, *cancel = context.WithCancel(svcCtx.ctx)
+				startLeaderElection(*leaderCtx, p.sm, leaderElectionActive, service)
+			}()
 		}
 
 		// There are local endpoints available on the node
-		if !p.sm.config.EnableServicesElection && !p.sm.config.EnableLeaderElection && !isRouteConfigured {
-			if err := p.worker.ProcessInstance(ctx, service, leaderElectionActive); err != nil {
+		if !p.sm.config.EnableServicesElection && !p.sm.config.EnableLeaderElection { // && !isRouteConfigured {
+			if err := p.worker.ProcessInstance(svcCtx, service, leaderElectionActive); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
 		}
 	} else {
 		// There are no local endpoints
-		p.worker.Clear(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
+		p.worker.Clear(svcCtx, lastKnownGoodEndpoint, service, *cancel, leaderElectionActive)
 	}
 
 	// Set the service accordingly
 	p.updateAnnotations(service, lastKnownGoodEndpoint)
 
 	log.Debug("watcher", "provider",
-		p.provider.getLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", lastKnownGoodEndpoint, "active leader election", leaderElectionActive)
+		p.provider.getLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", *leaderElectionActive)
 
 	return false, nil
 }
@@ -107,6 +105,7 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 	stillExists := false
 
 	for x := range endpoints {
+		log.Info("endpoint", "address", endpoints[x])
 		if endpoints[x] == *lastKnownGoodEndpoint {
 			stillExists = true
 		}
@@ -115,7 +114,7 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 	if !stillExists {
 		p.worker.RemoveEgress(service, lastKnownGoodEndpoint)
 		if *leaderElectionActive && (p.sm.config.EnableServicesElection || p.sm.config.EnableLeaderElection) {
-			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.getLabel(), "endpoint", lastKnownGoodEndpoint)
+			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.getLabel(), "endpoint", *lastKnownGoodEndpoint)
 			// Stop the existing leaderElection
 			cancel()
 			// disable last leaderElection flag

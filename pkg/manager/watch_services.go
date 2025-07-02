@@ -326,7 +326,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			if sm.config.EnableLeaderElection && !sm.config.EnableServicesElection {
 				if sm.config.EnableBGP {
-					sm.clearBGPHosts(svc)
+					sm.ClearBGPHosts(svc)
 				} else if sm.config.EnableRoutingTable {
 					sm.clearRoutes(svc)
 				}
