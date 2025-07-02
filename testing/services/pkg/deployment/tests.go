@@ -385,7 +385,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	return err
 }
 
-func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kubernetes.Clientset) error {
+func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kubernetes.Clientset, internal bool) error {
 	// pod Failover tests
 
 	var err error
@@ -402,7 +402,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		return nil
 	}() //nolint
 
-	slog.Infof("🧪 ---> egress IP re-write IPv6 (local policy) <---")
+	slog.Infof("🧪 ---> egress IP re-write IPv6 (local policy, internal: %t) <---", internal)
 	var egress string
 	var found bool
 	timeout := 60
@@ -438,6 +438,10 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		testHTTP:      false,
 		timeout:       timeout,
 		testDualstack: true,
+	}
+
+	if internal {
+		svc.egressInternal = true
 	}
 
 	_, lbAddresses, err := svc.CreateService(ctx, clientset)
