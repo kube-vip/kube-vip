@@ -246,7 +246,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 	var serviceInstance *cluster.Instance
 	found := false
 	for x := range sm.serviceInstances {
-		log.Debug("service lookup", "target UID", uid, "found UID ", sm.serviceInstances[x].ServiceSnapshot.UID, "name", sm.serviceInstances[x].ServiceSnapshot.Name, "namespace", sm.serviceInstances[x].ServiceSnapshot.Namespace)
+		log.Debug("service lookup", "target UID", uid, "found UID", sm.serviceInstances[x].ServiceSnapshot.UID, "name", sm.serviceInstances[x].ServiceSnapshot.Name, "namespace", sm.serviceInstances[x].ServiceSnapshot.Namespace)
 		// Add the running services to the new array
 		if sm.serviceInstances[x].ServiceSnapshot.UID != uid {
 			updatedInstances = append(updatedInstances, sm.serviceInstances[x])
@@ -306,7 +306,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 
 		// We will need to tear down the egress
 		if serviceInstance.ServiceSnapshot.Annotations[egress] == "true" {
-			if serviceInstance.ServiceSnapshot.Annotations[activeEndpoint] != "" {
+			if serviceInstance.ServiceSnapshot.Annotations[activeEndpoint] != "" || serviceInstance.ServiceSnapshot.Annotations[activeEndpointIPv6] != "" {
 				log.Info("egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
 				err := sm.TeardownEgress(serviceInstance.ServiceSnapshot.Annotations[activeEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.ObjectMeta.UID), serviceInstance.ServiceSnapshot.Annotations)
 				if err != nil {
