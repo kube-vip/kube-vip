@@ -169,7 +169,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 								<-svcCtx.ctx.Done()
 							}
 
-							err = sm.deleteService(svc.UID)
+							err = sm.deleteService(svcCtx.ctx, svc.UID)
 							if err != nil {
 								log.Error("(svc) unable to remove", "service", svc.UID)
 							}
@@ -311,7 +311,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 				}
 
 				// If this is an active service then and additional leaderElection will handle stopping
-				err = sm.deleteService(svc.UID)
+				err = sm.deleteService(svcCtx.ctx, svc.UID)
 				if err != nil {
 					log.Error(err.Error())
 				}
@@ -326,7 +326,7 @@ func (sm *Manager) servicesWatcher(ctx context.Context, serviceFunc func(context
 
 			if sm.config.EnableLeaderElection && !sm.config.EnableServicesElection {
 				if sm.config.EnableBGP {
-					sm.clearBGPHosts(svc)
+					sm.clearBGPHosts(svcCtx.ctx, svc)
 				} else if sm.config.EnableRoutingTable {
 					sm.clearRoutes(svc)
 				}

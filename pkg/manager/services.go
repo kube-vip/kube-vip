@@ -39,7 +39,7 @@ func (sm *Manager) syncServices(ctx context.Context, svc *v1.Service) error {
 	switch action {
 	case ActionDelete:
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name)
-		if err := sm.deleteService(svc.UID); err != nil {
+		if err := sm.deleteService(ctx, svc.UID); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionAdd:
@@ -119,14 +119,14 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 
 	startTime := time.Now()
 
-	newService, err := cluster.NewInstance(svc, sm.config, sm.intfMgr, sm.arpMgr)
+	newService, err := cluster.NewInstance(ctx, svc, sm.config, sm.intfMgr, sm.arpMgr)
 	if err != nil {
 		return err
 	}
 
 	for x := range newService.VIPConfigs {
 		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace)
-		newService.Clusters[x].StartLoadBalancerService(newService.VIPConfigs[x], sm.bgpServer, svc.Name, &sm.serviceInstances)
+		newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], sm.bgpServer, svc.Name, &sm.serviceInstances)
 	}
 
 	sm.upnpMap(ctx, newService)
@@ -138,7 +138,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				newService.VIPConfigs[0].VIP = ip
 				newService.DHCPInterfaceIP = ip
 				if !sm.config.DisableServiceUpdates {
-					if err := sm.updateStatus(newService); err != nil {
+					if err := sm.updateStatus(ctx, newService); err != nil {
 						log.Warn("updating svc", "err", err)
 					}
 				}
@@ -151,7 +151,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 
 	if !sm.config.DisableServiceUpdates {
 		log.Debug("[service] update", "namespace", newService.ServiceSnapshot.Namespace, "name", newService.ServiceSnapshot.Name)
-		if err := sm.updateStatus(newService); err != nil {
+		if err := sm.updateStatus(ctx, newService); err != nil {
 			log.Error("[service] updating status", "namespace", newService.ServiceSnapshot.Namespace, "name", newService.ServiceSnapshot.Name, "err", err)
 		}
 	}
@@ -202,7 +202,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 
 						podIP = svc.Annotations[activeEndpointIPv6]
 
-						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
+						err = sm.configureEgress(ctx, serviceIP, podIP, svc.Namespace, svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -216,7 +216,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 				if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[activeEndpointIPv6]
 				}
-				err = sm.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
+				err = sm.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
 					log.Error("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -230,7 +230,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 			} else {
 				provider = &endpointslicesProvider{label: "endpointslices"}
 			}
-			err = provider.updateServiceAnnotation(svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
+			err = provider.updateServiceAnnotation(ctx, svc.Annotations[activeEndpoint], svc.Annotations[activeEndpointIPv6], svc, sm)
 			if err != nil {
 				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
@@ -243,7 +243,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 	return nil
 }
 
-func (sm *Manager) deleteService(uid types.UID) error {
+func (sm *Manager) deleteService(ctx context.Context, uid types.UID) error {
 	// protect multiple calls
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
@@ -306,7 +306,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		}
 		for i := range serviceInstance.VIPConfigs {
 			if serviceInstance.VIPConfigs[i].EnableBGP {
-				sm.clearBGPHostsByInstance(serviceInstance)
+				sm.clearBGPHostsByInstance(ctx, serviceInstance)
 			}
 		}
 
@@ -391,7 +391,7 @@ func (sm *Manager) upnpMap(ctx context.Context, s *cluster.Instance) {
 	s.UPNPGatewayIPs = slices.Compact(s.UPNPGatewayIPs)
 }
 
-func (sm *Manager) updateStatus(i *cluster.Instance) error {
+func (sm *Manager) updateStatus(ctx context.Context, i *cluster.Instance) error {
 	// let's retry status update every 10ms for 30s
 	retryConfig := wait.Backoff{
 		Steps:    3000,
@@ -403,7 +403,7 @@ func (sm *Manager) updateStatus(i *cluster.Instance) error {
 	err := retry.OnError(retryConfig, func(error) bool { return true }, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		currentService, err := sm.clientSet.CoreV1().Services(i.ServiceSnapshot.Namespace).Get(context.TODO(), i.ServiceSnapshot.Name, metav1.GetOptions{})
+		currentService, err := sm.clientSet.CoreV1().Services(i.ServiceSnapshot.Namespace).Get(ctx, i.ServiceSnapshot.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -429,7 +429,7 @@ func (sm *Manager) updateStatus(i *cluster.Instance) error {
 		}
 
 		if !cmp.Equal(currentService, currentServiceCopy) {
-			currentService, err = sm.clientSet.CoreV1().Services(currentServiceCopy.Namespace).Update(context.TODO(), currentServiceCopy, metav1.UpdateOptions{})
+			currentService, err = sm.clientSet.CoreV1().Services(currentServiceCopy.Namespace).Update(ctx, currentServiceCopy, metav1.UpdateOptions{})
 			if err != nil {
 				log.Error("updating Spec", "service", i.ServiceSnapshot.Name, "err", err)
 				return err
@@ -478,7 +478,7 @@ func (sm *Manager) updateStatus(i *cluster.Instance) error {
 		}
 		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
-			_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
+			_, err = sm.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(ctx, currentService, metav1.UpdateOptions{})
 			if err != nil {
 				log.Error("updating Service", "namespace", i.ServiceSnapshot.Namespace, "name", i.ServiceSnapshot.Name, "err", err)
 				return err
