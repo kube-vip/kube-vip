@@ -2,6 +2,7 @@ package vip
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -117,6 +118,12 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			return networks, errors.Wrapf(err, "could not parse address '%s'", address)
 		}
 
+		// set address as deprecated so it isn't used as source address according to RFC 3484
+		result.address.PreferedLft = 0
+
+		// Also set ValidLft so the netlink library actually sets them
+		result.address.ValidLft = math.MaxInt
+
 		if iface == "lo" && !loGlobalScope {
 			// set host scope on loopback, otherwise global scope will be used by default
 			result.address.Scope = unix.RT_SCOPE_HOST
@@ -166,6 +173,9 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			}
 			// set ValidLft so that the VIP expires if the DNS entry is updated, otherwise it'll be refreshed by the DNS prober
 			result.address.ValidLft = defaultValidLft
+
+			// set address as deprecated so it isn't used as source address according to RFC 3484
+			result.address.PreferedLft = 0
 
 			networks = append(networks, result)
 		}
@@ -633,7 +643,13 @@ func (configurator *network) SetIP(ip string) error {
 	}
 	if configurator.address != nil && configurator.IsDNS() {
 		addr.ValidLft = defaultValidLft
+	} else {
+		addr.ValidLft = math.MaxInt
 	}
+
+	// set address as deprecated so it isn't used as source address according to RFC 3484
+	addr.PreferedLft = 0
+
 	configurator.address = addr
 	return nil
 }
