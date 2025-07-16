@@ -198,7 +198,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace, serviceUUID string, 
 		}
 
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, ignoreCIDRs, vip.IsIPv6(vipIP))
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
