@@ -17,14 +17,15 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -43,7 +44,7 @@ type Manager struct {
 	// service bool
 
 	// Keeps track of all running instances
-	serviceInstances []*cluster.Instance
+	serviceInstances []*services.Instance
 
 	// UPNP functionality
 	upnp bool
@@ -350,7 +351,7 @@ func (sm *Manager) stopTrafficMirroringIfEnabled() error {
 	return nil
 }
 
-func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
+func (sm *Manager) findServiceInstance(svc *v1.Service) *services.Instance {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 	if svc == nil {
@@ -387,4 +388,23 @@ func (sm *Manager) refreshUPNPForwards() {
 			}
 		}()
 	}
+}
+
+func (sm *Manager) countRouteReferences(route *netlink.Route) int {
+	// Count how many service instances have the same route
+	// This function is not thread-safe, it should be called only from the main thread with a lock held
+	cnt := 0
+	for _, instance := range sm.serviceInstances {
+		for _, cluster := range instance.Clusters {
+			for n := range cluster.Network {
+				if cluster.Network[n].HasEndpoints() {
+					r := cluster.Network[n].PrepareRoute()
+					if r.Dst.String() == route.Dst.String() {
+						cnt++
+					}
+				}
+			}
+		}
+	}
+	return cnt
 }

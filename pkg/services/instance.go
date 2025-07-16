@@ -1,4 +1,4 @@
-package cluster
+package services
 
 import (
 	"fmt"
@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -35,7 +36,7 @@ type Instance struct {
 	VIPConfigs []*kubevip.Config
 
 	// cluster instances
-	Clusters []*Cluster
+	Clusters []*cluster.Cluster
 
 	// Service uses DHCP
 	IsDHCP              bool
@@ -68,7 +69,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
 		var svcInterface string
-		svcInterface = svc.Annotations[ServiceInterface] // If the service has a specific interface defined, then use it
+		svcInterface = svc.Annotations[kubevip.ServiceInterface] // If the service has a specific interface defined, then use it
 		if svcInterface == kubevip.Auto {
 			link, err = autoFindInterface(address)
 			if err != nil {
@@ -157,8 +158,6 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 			}
 		}
 
-		//log.Info("new instance", "svc", *svc, "interface", svcInterface)
-
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
 			VIP:                    address,
@@ -196,9 +195,9 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	// }
 
 	if svc.Annotations != nil {
-		instance.DHCPInterfaceHwaddr = svc.Annotations[HWAddrKey]
-		instance.DHCPInterfaceIP = svc.Annotations[RequestedIP]
-		instance.DHCPHostname = svc.Annotations[LoadbalancerHostname]
+		instance.DHCPInterfaceHwaddr = svc.Annotations[kubevip.HwAddrKey]
+		instance.DHCPInterfaceIP = svc.Annotations[kubevip.RequestedIP]
+		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -241,7 +240,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	}
 
 	for _, vipConfig := range instance.VIPConfigs {
-		c, err := InitCluster(vipConfig, false, intfMgr, arpMgr)
+		c, err := cluster.InitCluster(vipConfig, false, intfMgr, arpMgr)
 		if err != nil {
 			log.Error("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 			return nil, err
@@ -253,7 +252,6 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 
 		instance.Clusters = append(instance.Clusters, c)
 		log.Info("(svcs) adding VIP", "ip", vipConfig.VIP, "interface", vipConfig.Interface, "namespace", svc.Namespace, "name", svc.Name)
-
 	}
 
 	return instance, nil
@@ -421,7 +419,8 @@ func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
 func FetchServiceAddresses(s *v1.Service) []string {
 	annotationAvailable := false
 	if s.Annotations != nil {
-		if v, annotationAvailable := s.Annotations[LoadbalancerIPAnnotation]; annotationAvailable {
+
+		if v, annotationAvailable := s.Annotations[kubevip.LoadbalancerIPAnnotation]; annotationAvailable {
 			ips := strings.Split(v, ",")
 			var trimmedIPs []string
 			for _, ip := range ips {
@@ -457,4 +456,15 @@ func FetchServiceAddresses(s *v1.Service) []string {
 	}
 
 	return []string{}
+}
+
+func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
+	log.Debug("finding service", "UID", svc.UID)
+	for i := range instances {
+		log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
+		if instances[i].ServiceSnapshot.UID == svc.UID {
+			return instances[i]
+		}
+	}
+	return nil
 }
