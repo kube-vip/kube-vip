@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 )
@@ -16,7 +19,7 @@ const (
 	SNatChain = "kube_vip_snat_%s"
 )
 
-func ApplySNAT(podIP, vipIP, service string, ignoreCIDR []string, IPv6 bool) error {
+func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, IPv6 bool) error {
 
 	conn, err := nftables.New()
 	if err != nil {
@@ -42,7 +45,7 @@ func ApplySNAT(podIP, vipIP, service string, ignoreCIDR []string, IPv6 bool) err
 	conn.AddChain(GetSNatChain(IPv6, service))
 	conn.Flush()
 	// Create our nftables rule
-	rule, err := CreateRule(podIP, vipIP, service, ignoreCIDR, conn, IPv6)
+	rule, err := CreateRule(podIP, vipIP, service, destinationPorts, ignoreCIDR, conn, IPv6)
 	if err != nil {
 		return err
 	}
@@ -77,14 +80,7 @@ func DeleteSNAT(IPv6 bool, service string) error {
 
 	}
 
-	// for x := range chains {
-	// 	if chains[x].Name == chainName {
-	// 		slog.Info("[egress]", "Deleting chain", chainName)
-	// 		conn.DelChain(chains[x])
-	// 		return conn.Flush()
-	// 	}
-	// }
-	return fmt.Errorf("Unable to find chain [%s]", chainName)
+	return fmt.Errorf("unable to find chain [%s]", chainName)
 }
 
 func GetTable(IPv6 bool) *nftables.Table {
@@ -153,7 +149,7 @@ func ClearTable(conn *nftables.Conn) error {
 }
 
 // Create our nftables rule
-func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
+func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
 
 	// Get the kube-vip table
 	table := GetTable(IPv6)
@@ -227,6 +223,108 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, conn *nftable
 
 	// Add expression to the rule
 	rule.Exprs = append(rule.Exprs, expression...)
+
+	if destinationPorts != "" {
+		fixedPorts := strings.Split(destinationPorts, ",")
+
+		// Create an element using our pod IP
+		tcpElements := []nftables.SetElement{}
+		udpElements := []nftables.SetElement{}
+
+		tcpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+		udpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+		for _, fixedPort := range fixedPorts {
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			} else if len(data) == 2 { // Ensure we have two elements { proto:port }
+				// parse the port to a number
+				port, err := strconv.Atoi(data[1])
+				if err != nil {
+					slog.Error("[egress]", "unable to process port", data[1])
+					continue
+				}
+				switch data[0] {
+				case "tcp":
+					tcpElements = append(tcpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				case "udp":
+					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				default:
+					slog.Error("[egress]", "unknown protocol", data[0])
+				}
+			}
+		}
+		if len(tcpElements) != 0 {
+			err = conn.AddSet(tcpSet, tcpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_TCP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        tcpSet.Name,
+					SetID:          tcpSet.ID,
+				},
+			}
+			rule.Exprs = append(rule.Exprs, expression...)
+		}
+		if len(udpElements) != 0 {
+			err = conn.AddSet(udpSet, udpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_UDP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        udpSet.Name,
+					SetID:          udpSet.ID,
+				},
+			}
+			rule.Exprs = append(rule.Exprs, expression...)
+		}
+	}
 
 	for _, cidr := range ignoreCIDR {
 		start, end, err := nftables.NetFirstAndLastIP(cidr)
