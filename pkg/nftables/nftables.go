@@ -119,10 +119,8 @@ func GetSNatChain(IPv6 bool, service string) *nftables.Chain {
 func FilterTable(conn *nftables.Conn, tableName string, IPv6 bool) (*nftables.Table, error) {
 	if IPv6 {
 		return conn.ListTableOfFamily(tableName, nftables.TableFamilyIPv6)
-	} else {
-		return conn.ListTableOfFamily(tableName, nftables.TableFamilyIPv4)
 	}
-
+	return conn.ListTableOfFamily(tableName, nftables.TableFamilyIPv4)
 }
 
 // ClearTable will remove the original tables and create new empty ones
@@ -256,8 +254,10 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 				}
 				switch data[0] {
 				case "tcp":
+					//nolint:gosec
 					tcpElements = append(tcpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
 				case "udp":
+					//nolint:gosec
 					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
 				default:
 					slog.Error("[egress]", "unknown protocol", data[0])
