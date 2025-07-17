@@ -149,6 +149,16 @@ func ClearTable(conn *nftables.Conn) error {
 // Create our nftables rule
 func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
 
+	// Validate pod IP
+	if net.ParseIP(podIP) == nil {
+		return nil, errors.New("ip is invalid")
+	}
+
+	// Validate vip IP
+	if net.ParseIP(vipIP) == nil {
+		return nil, errors.New("output_ip is not a valid ip")
+	}
+
 	// Get the kube-vip table
 	table := GetTable(IPv6)
 
@@ -160,19 +170,7 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 	// Set the correct chain
 	rule.Chain = GetSNatChain(IPv6, service)
 
-	// original pod IP
-	if net.ParseIP(podIP) == nil {
-		return nil, errors.New("ip is invalid")
-	}
-
-	// Create an element using our pod IP
-	elements := []nftables.SetElement{}
-	if IPv6 {
-		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To16()})
-	} else {
-		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To4()})
-	}
-
+	// Create a set for our original/source address
 	set := &nftables.Set{
 		Table:     table,
 		Anonymous: true,
@@ -186,7 +184,15 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		set.KeyType = nftables.TypeIPAddr
 	}
 
-	// Add the set
+	// Create an element using our pod IP
+	elements := []nftables.SetElement{}
+	if IPv6 {
+		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To16()})
+	} else {
+		elements = append(elements, nftables.SetElement{Key: net.ParseIP(podIP).To4()})
+	}
+
+	// Add the elements to the set
 	err := conn.AddSet(set, elements)
 	if err != nil {
 		return nil, err
@@ -215,6 +221,7 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		DestRegister:   0,
 		SetID:          set.ID,
 	}
+
 	// Add expressions
 	expression = append(expression, payload)
 	expression = append(expression, lookup)
@@ -222,6 +229,7 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 	// Add expression to the rule
 	rule.Exprs = append(rule.Exprs, expression...)
 
+	// If we filter on ports protocols then parse them
 	if destinationPorts != "" {
 		fixedPorts := strings.Split(destinationPorts, ",")
 
@@ -326,6 +334,7 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		}
 	}
 
+	// Parse which CIDRs we will not SNAT for
 	for _, cidr := range ignoreCIDR {
 		start, end, err := nftables.NetFirstAndLastIP(cidr)
 		if err != nil {
@@ -361,25 +370,25 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		rule.Exprs = append(rule.Exprs, expression...)
 	}
 
-	// Create SNAT rule
-	if net.ParseIP(vipIP) == nil {
-		return nil, errors.New("output_ip is not a valid ip")
-	}
-
+	// Final expression to the rule is the SNAT to the VIP address
 	expression = []expr.Any{}
 
 	immediate := &expr.Immediate{
 		Register: 1,
-		//Data:     net.ParseIP(vipIP).To4(),
 	}
+
 	nat := &expr.NAT{
 		Type:        expr.NATTypeSourceNAT,
 		RegAddrMin:  1,
 		RegAddrMax:  1,
 		RegProtoMin: 0,
 		RegProtoMax: 0,
-		Random:      false, FullyRandom: false, Persistent: false, Prefix: false,
+		Random:      false,
+		FullyRandom: false,
+		Persistent:  false,
+		Prefix:      false,
 	}
+
 	if IPv6 {
 		immediate.Data = net.ParseIP(vipIP).To16()
 		nat.Family = unix.NFPROTO_IPV6
