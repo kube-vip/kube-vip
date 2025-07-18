@@ -257,11 +257,11 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Server, name string, serviceInstances *[]*Instance) {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int) {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
-	ctxArp, cancelArp := context.WithCancel(context.Background())
+	ctxArp, cancelArp := context.WithCancel(ctx)
 
 	cluster.stop = make(chan bool, 1)
 	cluster.completed = make(chan bool, 1)
@@ -318,7 +318,7 @@ func (cluster *Cluster) StartLoadBalancerService(c *kubevip.Config, bgp *bgp.Ser
 			for i := range cluster.Network {
 				// chek if route is not  referenced by another service
 				r := cluster.Network[i].PrepareRoute()
-				if CountRouteReferences(serviceInstances, r) < 1 {
+				if CountRouteReferences(r) < 1 {
 					log.Info("[VIP] Deleting Route for VIP", "IP", cluster.Network[i].IP())
 					if err := cluster.Network[i].DeleteRoute(); err != nil {
 						log.Warn(err.Error())
@@ -378,23 +378,4 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 	cluster.arpMgr.Remove(arpInstance)
-}
-
-func CountRouteReferences(serviceInstances *[]*Instance, route *netlink.Route) int {
-	// Count how many service instances have the same route
-	// This function is not thread-safe, it should be called only from the main thread with a lock held
-	cnt := 0
-	for _, instance := range *serviceInstances {
-		for _, cluster := range instance.Clusters {
-			for n := range cluster.Network {
-				if cluster.Network[n].HasEndpoints() {
-					r := cluster.Network[n].PrepareRoute()
-					if r.Dst.String() == route.Dst.String() {
-						cnt++
-					}
-				}
-			}
-		}
-	}
-	return cnt
 }
