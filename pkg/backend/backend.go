@@ -2,6 +2,8 @@ package backend
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	log "log/slog"
@@ -40,7 +42,6 @@ func (e *Entry) Check() bool {
 	switch {
 	case utils.FileExists(adminConfigPath):
 		config, err = k8s.NewRestConfig(adminConfigPath, false, k8sAddr)
-		// client, err = k8s.NewClientset(adminConfigPath, false, k8sAddr)
 		if err != nil {
 			log.Error("create k8s REST config", "path", adminConfigPath, "err", err)
 			return false
@@ -53,10 +54,22 @@ func (e *Entry) Check() bool {
 		}
 	}
 
-	// TODO: check if using insecure client for this check is OK.
-	// This was changed for more straightforward e2e-test implementation.
-	config.Insecure = true
-	config.CAData = []byte{}
+	// This insecure client was introduced for more straightforward e2e-test implementation.
+	// Should be only used for test purposes.
+	useInescure := false
+	if value, isSet := os.LookupEnv("E2E_INSECURE_CLIENT"); isSet {
+		useInescure, err = strconv.ParseBool(value)
+		if err != nil {
+			log.Error("failed to parse E2E_INSECURE_CLIENT env value, setting value to 'false' explicitly", "err", err)
+			useInescure = false
+		}
+	}
+
+	if useInescure {
+		config.Insecure = true
+		config.CAData = []byte{}
+	}
+
 	client, err = k8s.NewClientset(config)
 	if err != nil {
 		log.Error("create k8s client", "err", err)
