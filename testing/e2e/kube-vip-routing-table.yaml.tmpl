@@ -46,6 +46,8 @@ spec:
       value: "{{ .SvcElectionEnable }}"
     - name: enable_endpointslices
       value: "{{ .EnableEndpointslices }}"
+    - name: E2E_INSECURE_CLIENT
+      value: "true"
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
