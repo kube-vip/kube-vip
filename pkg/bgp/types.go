@@ -14,6 +14,7 @@ import (
 type Peer struct {
 	Address      string
 	Port         uint16
+	Interface    string
 	AS           uint32
 	Password     string
 	MultiHop     bool

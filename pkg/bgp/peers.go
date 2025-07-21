@@ -186,6 +186,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 			continue
 		}
 		isV6Peer := peerStr[0] == '['
+		isUnnumberedPeer := strings.HasPrefix(peerStr, "unnumbered:")
 
 		address := ""
 		if isV6Peer {
@@ -195,20 +196,29 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 			}
 			address = peerStr[1:addressEndPos]
 			peerStr = peerStr[addressEndPos+1:]
+		} else if isUnnumberedPeer {
+			unnumberedEndPos := strings.IndexByte(peerStr, ':')
+			peerStr = peerStr[unnumberedEndPos+1:]
 		}
 
 		peer := strings.Split(peerStr, ":")
-		if len(peer) < 2 {
+		if len(peer) < 2 && !isUnnumberedPeer {
 			return nil, fmt.Errorf("mandatory peering params <host>:<AS> incomplete")
 		}
 
-		if !isV6Peer {
+		iface := ""
+		if isUnnumberedPeer {
+			iface = peer[0]
+		} else if !isV6Peer {
 			address = peer[0]
 		}
 
-		ASNumber, err := strconv.ParseUint(peer[1], 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
+		var ASNumber uint64
+		if len(peer) >= 2 {
+			ASNumber, err = strconv.ParseUint(peer[1], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
+			}
 		}
 
 		password := ""
@@ -230,7 +240,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 			if err != nil {
 				return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
 			}
-		} else {
+		} else if !isUnnumberedPeer {
 			port = 179
 		}
 
@@ -254,9 +264,11 @@ func ParseBGPPeerConfig(config string) (bgpPeers []Peer, err error) {
 		}
 
 		peerConfig := Peer{
-			Address:      address,
+			Address: address,
+			//nolint:gosec // previously parsed into uint32
 			AS:           uint32(ASNumber),
 			Port:         uint16(port),
+			Interface:    iface,
 			Password:     password,
 			MultiHop:     multiHop,
 			MpbgpNexthop: mpbgpNexthop,
