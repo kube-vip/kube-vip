@@ -377,32 +377,32 @@ func handleRequest(conn net.Conn) {
 	conn.Close()
 }
 
-func GetLocalIP(ifName string, family int) (string, error) {
+func GetLocalIP(ifName string, family int) (*net.IP, *net.IPNet, error) {
 	links, err := netlink.LinkList()
 	if err != nil {
-		return "", fmt.Errorf("netlink: failed to list links: %w", err)
+		return nil, nil, fmt.Errorf("netlink: failed to list links: %w", err)
 	}
 
 	for _, link := range links {
 		if strings.Contains(link.Attrs().Name, ifName) {
-			ip, _, err := getNetwork(link, family)
+			ip, ipnet, err := getNetwork(link, family)
 			if err != nil {
-				return "", fmt.Errorf("failed to get IPv4 address: %w", err)
+				return nil, nil, fmt.Errorf("failed to get IPv4 address: %w", err)
 			}
 			if ip == nil {
-				return "", fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
+				return nil, nil, fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
 			}
-			return ip.String(), nil
+			return ip, ipnet, nil
 		}
 	}
 
-	return "", nil
+	return nil, nil, nil
 }
 
-func GetLocalIPv4(ifName string) (string, error) {
+func GetLocalIPv4(ifName string) (*net.IP, *net.IPNet, error) {
 	return GetLocalIP(ifName, netlink.FAMILY_V4)
 }
 
-func GetLocalIPv6(ifName string) (string, error) {
+func GetLocalIPv6(ifName string) (*net.IP, *net.IPNet, error) {
 	return GetLocalIP(ifName, netlink.FAMILY_V6)
 }

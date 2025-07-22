@@ -91,10 +91,13 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			tempDirPath, err = os.MkdirTemp("", "kube-vip-test")
 			Expect(err).NotTo(HaveOccurred())
-			localIPv4, err = deployment.GetLocalIPv4(networkInterface)
+			v4addr, _, err := deployment.GetLocalIPv4(networkInterface)
 			Expect(err).ToNot(HaveOccurred())
-			localIPv6, err = deployment.GetLocalIPv6(networkInterface)
+			localIPv4 = v4addr.String()
+
+			v6addr, _, err := deployment.GetLocalIPv6(networkInterface)
 			Expect(err).ToNot(HaveOccurred())
+			localIPv6 = v6addr.String()
 
 			goBGPConfig := &e2e.BGPPeerValues{
 				AS: goBGPAS,
@@ -478,7 +481,7 @@ func setupEnv(tempDirPath, cpVIP, clusterName *string, manifestValues *e2e.Kubev
 
 	By(manifestValues.BGPPeers)
 
-	*clusterName, *client = prepareCluster(*tempDirPath, clusterNameSuffix, k8sImagePath, v129, kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber)
+	*clusterName, *client = prepareCluster(*tempDirPath, clusterNameSuffix, k8sImagePath, v129, kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
 
 	container := fmt.Sprintf("%s-control-plane", *clusterName)
 
