@@ -38,6 +38,7 @@ func main() {
 	flag.BoolVar(&t.LeaderActive, "leaderActive", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.LocalDeploy, "localDeploy", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.Egress, "egress", false, "Perform an egress test")
+	flag.BoolVar(&t.EgressInternal, "egressInternal", false, "Perform an egress test, using the internal functionality")
 	flag.BoolVar(&t.EgressIPv6, "egressIPv6", false, "Perform an egress test")
 	flag.BoolVar(&t.DualStack, "dualStack", false, "Perform an dual stack test")
 	flag.BoolVar(&t.RetainCluster, "retain", false, "Retain the cluster")

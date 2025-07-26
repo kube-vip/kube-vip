@@ -59,7 +59,7 @@ func (g *generic) clear(_ *services.Context, lastKnownGoodEndpoint *string, serv
 func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
 	if *lastKnownGoodEndpoint != "" {
 		log.Warn("existing  endpoint has been removed, no remaining endpoints for leaderElection", "provider", g.provider.GetLabel(), "endpoint", lastKnownGoodEndpoint)
-		if err := services.TeardownEgress(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, service.Annotations, g.config.EgressWithNftables); err != nil {
+		if err := services.TeardownEgress(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, string(service.UID), service.Annotations, g.config.EgressWithNftables); err != nil {
 			log.Error("error removing redundant egress rules", "err", err)
 		}
 
