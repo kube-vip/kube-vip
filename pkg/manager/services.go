@@ -204,8 +204,6 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 					if sm.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
-
-						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
 						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
@@ -318,7 +316,7 @@ func (sm *Manager) deleteService(uid types.UID) error {
 		if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" {
 			if serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint] != "" {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
-				err := services.TeardownEgress(serviceInstance.ServiceSnapshot.Annotations[activeEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.ObjectMeta.UID), serviceInstance.ServiceSnapshot.Annotations, sm.config.EgressWithNftables)
+				err := services.TeardownEgress(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.ObjectMeta.UID), serviceInstance.ServiceSnapshot.Annotations, sm.config.EgressWithNftables)
 				if err != nil {
 					log.Error("[service] egress teardown", "err", err)
 				}

@@ -260,6 +260,12 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 					slog.Error("[egress]", "unable to process port", data[1])
 					continue
 				}
+				// Ensure the port is within the valid range for uint16
+				if port < 0 || port > 65535 {
+					slog.Error("[egress]", "port out of range for uint16", data[1])
+					continue
+				}
+
 				switch data[0] {
 				case "tcp":
 					//nolint:gosec
