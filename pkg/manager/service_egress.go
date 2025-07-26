@@ -186,6 +186,7 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace, serviceUUID string, 
 	}
 
 	log.Info("[egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
+	log.Info("[egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
 
 	// checking if all addresses are of the same IP family
 	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {

@@ -206,6 +206,7 @@ func (sm *Manager) addService(ctx context.Context, svc *v1.Service) error {
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
 
 						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
+						err = sm.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.ObjectMeta.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)

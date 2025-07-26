@@ -33,6 +33,7 @@ type TestConfig struct {
 	DualStack          bool
 	Egress             bool
 	EgressInternal     bool
+	EgressInternal     bool
 	EgressIPv6         bool
 	RetainCluster      bool
 	SkipHostnameChange bool
