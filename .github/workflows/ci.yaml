@@ -1,4 +1,4 @@
-name: For each commit and PR
+name: For each commit
 on:
   push:
   pull_request:
@@ -43,53 +43,6 @@ jobs:
           go-version-file: go.mod
       - name: Run tests
         run: make integration-tests
-  e2e-tests:
-    runs-on: ubuntu-latest
-    name: E2E tests
-    strategy:
-      matrix:
-        mode: ["arp", "rt", "bgp"]
-      fail-fast: true
-      max-parallel: 1
-    steps:
-      - name: Ensure fs wont cause issues
-        run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build image locally
-        run: make dockerx86Local
-      - name: Run Manifest generation tests
-        run: make manifest-test
-      - name: Run ARP mode tests v1.29.0 onwards
-        run: make e2e-tests129-arp
-        if: matrix.mode== 'arp'
-      - name: Run RT mode tests v1.29.0 onwards
-        run: make e2e-tests129-rt
-        if: matrix.mode== 'rt'
-      - name: Get GoBGP binaries
-        run: make get-gobgp
-        if: matrix.mode== 'bgp'
-      - name: Run BGP mode tests v1.29.0 onwards
-        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 make e2e-tests129-bgp
-        if: matrix.mode== 'bgp'
-  service-e2e-tests:
-    runs-on: ubuntu-latest
-    name: E2E service tests
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build image with iptables
-        run: make dockerx86ActionIPTables
-      - name: Run tests
-        run: DOCKERTAG=action make service-tests
   image-vul-check:
     runs-on: ubuntu-latest
     name: Image vulnerability scan
