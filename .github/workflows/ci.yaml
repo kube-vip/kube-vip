@@ -49,6 +49,8 @@ jobs:
     strategy:
       matrix:
         mode: ["arp", "rt", "bgp"]
+      fail-fast: true
+      max-parallel: 1
     steps:
       - name: Ensure fs wont cause issues
         run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
