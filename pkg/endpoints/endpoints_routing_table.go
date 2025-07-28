@@ -89,7 +89,7 @@ func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, 
 
 func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint *string) {
 	if err := egress.Teardown(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP,
-		service.Namespace, service.Annotations, rt.config.EgressWithNftables); err != nil {
+		service.Namespace, string(service.UID), service.Annotations, rt.config.EgressWithNftables); err != nil {
 		log.Warn("removing redundant egress rules", "err", err)
 	}
 }
