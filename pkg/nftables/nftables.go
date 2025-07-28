@@ -281,8 +281,8 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 					//nolint:gosec
 					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
 				case "sctp":
+					//nolint:gosec
 					sctpElements = append(sctpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
-
 				default:
 					slog.Error("[egress]", "unknown protocol", data[0])
 				}
