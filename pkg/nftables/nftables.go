@@ -236,6 +236,7 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		// Create an element using our pod IP
 		tcpElements := []nftables.SetElement{}
 		udpElements := []nftables.SetElement{}
+		sctpElements := []nftables.SetElement{}
 
 		tcpSet := &nftables.Set{
 			Anonymous: true,
@@ -244,6 +245,12 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 			KeyType:   nftables.TypeInetService,
 		}
 		udpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+		sctpSet := &nftables.Set{
 			Anonymous: true,
 			Constant:  true,
 			Table:     table,
@@ -273,11 +280,16 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 				case "udp":
 					//nolint:gosec
 					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				case "sctp":
+					sctpElements = append(sctpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+
 				default:
 					slog.Error("[egress]", "unknown protocol", data[0])
 				}
 			}
 		}
+
+		// Add TCP Ports
 		if len(tcpElements) != 0 {
 			err = conn.AddSet(tcpSet, tcpElements)
 			if err != nil {
@@ -308,6 +320,8 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 			}
 			rule.Exprs = append(rule.Exprs, expression...)
 		}
+
+		// Add UDP ports
 		if len(udpElements) != 0 {
 			err = conn.AddSet(udpSet, udpElements)
 			if err != nil {
@@ -334,6 +348,38 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 					SourceRegister: 1,
 					SetName:        udpSet.Name,
 					SetID:          udpSet.ID,
+				},
+			}
+			rule.Exprs = append(rule.Exprs, expression...)
+		}
+
+		// Add SCTP Ports
+		if len(sctpElements) != 0 {
+			err = conn.AddSet(sctpSet, sctpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_SCTP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        sctpSet.Name,
+					SetID:          sctpSet.ID,
 				},
 			}
 			rule.Exprs = append(rule.Exprs, expression...)

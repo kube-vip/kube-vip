@@ -216,7 +216,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 			serviceCidr,
 		}
 
-		// Ad anny specifically denied networks
+		// Add any specifically denied networks
 		if deniedNetworks != "" {
 			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
 			ignoreCIDRs = append(ignoreCIDRs, networks...)
