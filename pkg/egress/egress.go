@@ -7,7 +7,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
-	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
