@@ -8,6 +8,7 @@ require (
 	github.com/docker/docker v28.3.0+incompatible
 	github.com/florianl/go-conntrack v0.4.0
 	github.com/google/go-cmp v0.7.0
+	github.com/google/nftables v0.3.0
 	github.com/gookit/slog v0.5.8
 	github.com/huin/goupnp v1.3.0
 	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d
@@ -90,7 +91,7 @@ require (
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/genetlink v1.3.2 // indirect
-	github.com/mdlayher/netlink v1.7.2 // indirect
+	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
