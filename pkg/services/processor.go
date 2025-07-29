@@ -194,7 +194,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 						if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 							// Add Endpoint or EndpointSlices watcher
 							var provider providers.Provider
-							if !p.config.EnableEndpointSlices {
+							if p.config.EnableEndpoints {
 								provider = providers.NewEndpoints()
 							} else {
 								provider = providers.NewEndpointslices()
@@ -218,7 +218,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 						// Add Endpoint watcher
 						var provider providers.Provider
-						if !p.config.EnableEndpointSlices {
+						if p.config.EnableEndpoints {
 							provider = providers.NewEndpoints()
 						} else {
 							provider = providers.NewEndpointslices()

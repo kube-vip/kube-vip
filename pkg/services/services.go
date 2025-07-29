@@ -202,7 +202,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 			// Does the service have an active IPv6 endpoint
 			if svc.Annotations[kubevip.ActiveEndpointIPv6] != "" {
 				for _, serviceIP := range serviceIPs {
-					if p.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
+					if !p.config.EnableEndpoints && vip.IsIPv6(serviceIP) {
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
 
@@ -217,7 +217,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 		} else if svc.Annotations[kubevip.ActiveEndpoint] != "" { // Not expected to be IPv6, so should be an IPv4 address
 			for _, serviceIP := range serviceIPs {
 				podIPs := svc.Annotations[kubevip.ActiveEndpoint]
-				if p.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
+				if !p.config.EnableEndpoints && vip.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
 				}
 				err = p.configureEgress(serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
@@ -229,7 +229,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 		}
 		if len(errList) == 0 {
 			var provider providers.Provider
-			if !p.config.EnableEndpointSlices {
+			if p.config.EnableEndpoints {
 				provider = providers.NewEndpoints()
 			} else {
 				provider = providers.NewEndpointslices()

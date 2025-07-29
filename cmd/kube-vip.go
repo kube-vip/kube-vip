@@ -128,7 +128,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesLeaseName, "servicesLeaseName", "plndr-svcs-lock", "Name of the lease that is used for leader election for services (in arp mode)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DNSMode, "dnsMode", "first", "Name of the mode that DNS lookup will be performed (first, ipv4, ipv6, dual)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpointSlices, "enableEndpointSlices", false, "If enabled, kube-vip will only advertise services, but will use EndpointSlices instead of endpoints to get IPs of Pods")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpoints, "enableEndpoints", false, "If enabled, kube-vip will only advertise services, but will use the (deprecated since v1.33) endpoints for IP addresses")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.HealthCheckPort, "healthCheckPort", 0, "If set to non-zero (> 1024), then this is the port that the healthcheck will listen on")
 

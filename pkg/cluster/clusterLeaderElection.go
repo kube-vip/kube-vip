@@ -284,7 +284,7 @@ func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *run
 	})
 }
 
-func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
+func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
@@ -292,7 +292,7 @@ func (sm *Manager) NodeWatcher(lb *loadbalancer.IPVSLoadBalancer, port uint16) e
 		LabelSelector: "node-role.kubernetes.io/control-plane",
 	}
 
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctxArp, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},

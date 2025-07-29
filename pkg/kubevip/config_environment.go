@@ -607,13 +607,13 @@ func ParseEnvironment(c *Config) error {
 		c.K8sConfigFile = env
 	}
 
-	env = os.Getenv(enableEndpointSlices)
+	env = os.Getenv(enableEndpoints)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
 		if err != nil {
 			return err
 		}
-		c.EnableEndpointSlices = b
+		c.EnableEndpoints = b
 	}
 
 	env = os.Getenv(mirrorDestInterface)

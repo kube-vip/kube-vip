@@ -38,7 +38,7 @@ func (ep *Endpointslices) CreateRetryWatcher(ctx context.Context, clientSet *kub
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	}
 
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
 		},
