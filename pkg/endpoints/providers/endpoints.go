@@ -20,7 +20,8 @@ import (
 )
 
 type Endpoints struct {
-	label     string
+	label string
+	//nolint:staticcheck // SA1019 endpoints are moving to an opt-in only
 	endpoints *v1.Endpoints
 }
 
@@ -36,7 +37,7 @@ func (ep *Endpoints) CreateRetryWatcher(ctx context.Context, clientSet *kubernet
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", service.Name).String(),
 	}
 
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
@@ -50,6 +51,7 @@ func (ep *Endpoints) CreateRetryWatcher(ctx context.Context, clientSet *kubernet
 }
 
 func (ep *Endpoints) LoadObject(endpoints runtime.Object, cancel context.CancelFunc) error {
+	//nolint:staticcheck // SA1019 endpoints have to be explicitly requested now
 	eps, ok := endpoints.(*v1.Endpoints)
 	if !ok {
 		cancel()

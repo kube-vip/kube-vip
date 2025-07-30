@@ -139,7 +139,7 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 	if service.Annotations[kubevip.Egress] == "true" {
 		activeEndpointAnnotation := kubevip.ActiveEndpoint
 
-		if p.config.EnableEndpointSlices && p.provider.GetProtocol() == string(discoveryv1.AddressTypeIPv6) {
+		if !p.config.EnableEndpoints && p.provider.GetProtocol() == string(discoveryv1.AddressTypeIPv6) {
 			activeEndpointAnnotation = kubevip.ActiveEndpointIPv6
 		}
 		service.Annotations[activeEndpointAnnotation] = *lastKnownGoodEndpoint

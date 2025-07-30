@@ -282,7 +282,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		slog.Fatal(err)
 	}
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
 		},

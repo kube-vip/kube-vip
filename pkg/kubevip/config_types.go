@@ -161,8 +161,8 @@ type Config struct {
 	// DisableServiceUpdates, if true, kube-vip will only advertise service, but it will not update service's Status.LoadBalancer.Ingress slice
 	DisableServiceUpdates bool `yaml:"disableServiceUpdates"`
 
-	// EnableEndpointSlices, if enabled, EndpointSlices will be used instead of Endpoints
-	EnableEndpointSlices bool `yaml:"enableEndpointSlices"`
+	// EnableEndpoints, if enabled, Endpoints will be used instead of EndpointSlices
+	EnableEndpoints bool `yaml:"enableEndpoints"`
 
 	// MirrorDestInterface is the network interface where all traffics that go through service interface
 	// will be mirrored to. If ServicesInterface is not set, fall back to Interface.
