@@ -12,6 +12,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -133,7 +134,7 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (p *Processor) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
+func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -142,6 +143,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace string, annotations 
 	destinationPorts := annotations[kubevip.EgressDestinationPorts]
 	deniedNetworks := annotations[kubevip.EgressDeniedNetworks]
 	allowedNetworks := annotations[kubevip.EgressAllowedNetworks]
+	internalEgress := annotations[kubevip.EgressInternal]
 
 	if p.config.EgressPodCidr == "" || p.config.EgressServiceCidr == "" {
 		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs()
@@ -204,6 +206,75 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace string, annotations 
 	protocol := iptables.ProtocolIPv4
 	if vip.IsIPv6(vipIP) {
 		protocol = iptables.ProtocolIPv6
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Add any specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Ad anny specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Ad anny specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
 	}
 
 	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)

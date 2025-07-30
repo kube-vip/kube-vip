@@ -13,6 +13,9 @@ const (
 	// Enable Egress on a service
 	Egress = "kube-vip.io/egress"
 
+	// Enable internal Egress
+	EgressInternal = "kube-vip.io/egress-internal"
+
 	// Egress should be IPv6
 	EgressIPv6 = "kube-vip.io/egress-ipv6"
 

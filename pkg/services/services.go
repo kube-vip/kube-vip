@@ -206,7 +206,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
 
-						err = p.configureEgress(serviceIP, podIP, svc.Namespace, svc.Annotations)
+						err = p.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -220,7 +220,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 				if p.config.EnableEndpointSlices && vip.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
 				}
-				err = p.configureEgress(serviceIP, podIPs, svc.Namespace, svc.Annotations)
+				err = p.configureEgress(serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
 					log.Error("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -318,7 +318,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 		if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" {
 			if serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint] != "" {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
-				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
+				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
 				if err != nil {
 					log.Error("[service] egress teardown", "err", err)
 				}
