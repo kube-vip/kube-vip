@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"time"
 
 	"github.com/gookit/slog"
+	"github.com/kube-vip/kube-vip/testing/e2e"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -48,25 +52,40 @@ type TestConfig struct {
 
 	// Docker config
 	DockerNIC string
+
+	// temp dir root
+	TempDirPath string
 }
 
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
+
 	// Simple Deployment test
-	var err error
 	defer func() error { //nolint
+		slog.Infof("🧪 ---> simple deployment defer <---")
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "simple-deployment")
+		if err != nil {
+			slog.Infof("🧪 ---> simple deployment mkdir err <---: %w", err)
+			return err
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
-		if err != nil {
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
 
+	var err error
 	slog.Infof("🧪 ---> simple deployment <---")
 	deploy := Deployment{
 		name:         config.DeploymentName,
@@ -90,6 +109,8 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 		config.SuccessCounter++
 	}
 
+	slog.Infof("🧪 ---> simple deployment end <---")
+
 	return err
 }
 
@@ -98,6 +119,16 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 	var err error
 
 	defer func() error { //nolint
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "multiple-deployments")
+		if err != nil {
+			return err
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
+
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
 			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
@@ -105,9 +136,8 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 				slog.Fatal(err)
 			}
 		}
-		slog.Infof("🧹 deleting deployment [%s]", config.DeploymentName)
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.LeaderName, metav1.DeleteOptions{})
-		if err != nil {
+
+		if err = deleteDeployment(ctx, clientset, config.LeaderName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -146,15 +176,24 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 
 	var err error
 	defer func() error {
-		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "failover")
 		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
 		}
 
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
+		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
+		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			return err
+			slog.Fatal(err)
+		}
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
@@ -208,14 +247,24 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 
 	var err error
 	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "active-failover")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
+
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			return err
+			slog.Fatal(err)
 		}
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
-		if err != nil {
-			return err
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
@@ -254,17 +303,26 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 	// Multiple deployment tests
 	var err error
 	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "local-deployment")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
+
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
 			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
 			if err != nil {
-				return err
+				slog.Fatal(err)
 			}
 		}
-		slog.Infof("🧹 deleting deployment [%s]", config.DeploymentName)
-		err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.LeaderName, metav1.DeleteOptions{})
-		if err != nil {
-			return err
+
+		if err = deleteDeployment(ctx, clientset, config.LeaderName); err != nil {
+			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
@@ -310,17 +368,26 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 
 func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kubernetes.Clientset, internal bool) error {
 	// egress test
-
 	var err error
 	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-deployment")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
+
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			return err
+			slog.Fatal(err)
 		}
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
-		if err != nil {
-			return err
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
@@ -392,14 +459,24 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 
 	var err error
 	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-v6-deployment")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+			return err
+		}
+
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			return err
+			slog.Fatal(err)
 		}
-		err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
-		if err != nil {
-			return err
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
 		}
 		return nil
 	}() //nolint
@@ -503,14 +580,59 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 
 	config.SuccessCounter++
 
+	tempDirPath, err := os.MkdirTemp(config.TempDirPath, "dualstack-deployment")
+	if err != nil {
+		slog.Fatal(err)
+	}
+
+	if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
+		return err
+	}
+
 	slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 	err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 	if err != nil {
-		return err
+		slog.Fatal(err)
 	}
-	err = clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, config.DeploymentName, metav1.DeleteOptions{})
-	if err != nil {
-		return err
+
+	if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		slog.Fatal(err)
 	}
 	return err
+}
+
+func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+	fgPropagation := metav1.DeletePropagationForeground
+	delOpts := metav1.DeleteOptions{
+		PropagationPolicy: &fgPropagation,
+	}
+
+	slog.Infof("🧹 deleting deployment [%s]", name)
+	if err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, name, delOpts); err != nil {
+		return fmt.Errorf("failed to delete deployment %q: %w", name, err)
+	}
+
+	slog.Infof("🧹 waiting for the deployment [%s] deletion", name)
+
+	t := time.NewTicker(time.Millisecond * 200)
+
+	checkCtx, checkCancel := context.WithTimeout(ctx, time.Second*30)
+	defer checkCancel()
+
+	for {
+		select {
+		case <-checkCtx.Done():
+			t.Stop()
+			return fmt.Errorf("failed to check deployment's %q deletion: %w", name, ctx.Err())
+		case <-t.C:
+			_, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+			if err != nil && apierrors.IsNotFound(err) {
+				slog.Infof("🧹 deployment [%s] was deleted", name)
+				return nil
+			} else if err != nil {
+				return fmt.Errorf("failed to wait for the deployment %q to be deleted: %w", name, err)
+			}
+		}
+	}
 }

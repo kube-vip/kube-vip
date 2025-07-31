@@ -44,18 +44,21 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 			Namespace: "kube-system",
 			Labels: map[string]string{
 				"app.kubernetes.io/name": "kube-vip-ds",
+				"app":                    "kube-vip",
 			},
 		},
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app.kubernetes.io/name": "kube-vip-ds",
+					"app":                    "kube-vip",
 				},
 			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"app.kubernetes.io/name": "kube-vip-ds",
+						"app":                    "kube-vip",
 					},
 				},
 				Spec: v1.PodSpec{

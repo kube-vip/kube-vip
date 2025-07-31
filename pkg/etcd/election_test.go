@@ -32,7 +32,7 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 			Client: cli,
 		},
 		Name:                 electionName,
-		MemberID:             "my-host",
+		MemberID:             randomElectionNameForTest("my-host"),
 		LeaseDurationSeconds: 1,
 		Callbacks: etcd.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
@@ -90,19 +90,21 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 
 	config1 := configBase
 	config1.EtcdConfig.Client = cliMember1
-	config1.MemberID = "my-host"
+	config1.MemberID = randomElectionNameForTest("my-host")
 	uniqueID := rand.Uint64()
 	config1.MemberUniqueID = &uniqueID
 	config1.Callbacks = baseCallbacksForName(config1.MemberID)
+	syncMembers := make(chan (any))
 	config1.Callbacks.OnStartedLeading = func(_ context.Context) {
 		log.Println("I'm my-host, the new leader!!!!")
+		close(syncMembers)
 		log.Println("Losing the leadership on purpose by stopping renewing the lease")
 		g.Expect(cliMember1.Lease.Close()).To(Succeed())
 		log.Println("Member1 leases closed")
 	}
 
 	config2 := configBase
-	config2.MemberID = "my-other-host"
+	config2.MemberID = randomElectionNameForTest("my-other-host")
 	config2.Callbacks = baseCallbacksForName(config2.MemberID)
 	config2.Callbacks.OnStartedLeading = func(_ context.Context) {
 		log.Println("I'm my-other-host, the new leader!!!!")
@@ -116,14 +118,14 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		g.Expect(etcd.RunElection(member1Ctx, &config1)).To(Succeed())
-		log.Println("Member1 routine done")
+		log.Printf("%s routine done\n", config1.MemberID)
 	}()
 
 	go func() {
 		defer wg.Done()
-		time.Sleep(time.Millisecond * 50) // Make sure member1 becomes leader
+		<-syncMembers
 		g.Expect(etcd.RunElection(member2Ctx, &config2)).To(Succeed())
-		log.Println("Member2 routine done")
+		log.Printf("%s routine done\n", config2.MemberID)
 	}()
 
 	wg.Wait()
