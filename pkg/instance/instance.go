@@ -360,19 +360,19 @@ func (i *Instance) startDHCP() error {
 	}
 
 	// Check if we need to set a specific rp_filter value for the interface
-	if i.ServiceSnapshot.Annotations[kubevip.RP_Filter] != "" {
+	if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
 		// Check the rp_filter value
-		rp_filter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RP_Filter])
+		rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
 		if err != nil {
-			slog.Error("[DHCP]", "unable to process rp_filter value", rp_filter)
+			slog.Error("[DHCP]", "unable to process rp_filter value", rpFilter)
 		} else {
-			if rp_filter >= 0 && rp_filter < 3 { // Ensure the value is 0,1,2
-				err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", i.ServiceSnapshot.Annotations[kubevip.RP_Filter])
+			if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
+				err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", i.ServiceSnapshot.Annotations[kubevip.RPFilter])
 				if err != nil {
-					slog.Error("[DHCP]", "unable to write rp_filter value", rp_filter)
+					slog.Error("[DHCP]", "unable to write rp_filter value", rpFilter)
 				}
 			} else {
-				slog.Error("[DHCP]", "rp_filter value not within range 0-2", rp_filter)
+				slog.Error("[DHCP]", "rp_filter value not within range 0-2", rpFilter)
 			}
 		}
 	}
