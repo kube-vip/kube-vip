@@ -4,6 +4,8 @@ kind: Pod
 metadata:
   name: kube-vip
   namespace: kube-system
+  labels:
+    app: kube-vip
 spec:
   containers:
   - name: kube-vip

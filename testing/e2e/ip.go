@@ -154,14 +154,18 @@ func CheckIPAddressPresence(ip string, container string, expected bool) bool {
 	cmd.Stdout = cmdOut
 	cmd.Stderr = cmdErr
 	if err := cmd.Run(); err != nil {
+		By(fmt.Sprintf("contianer %q interfaces error: %s", container, cmdErr.String()))
 		return false
 	}
+
+	By(fmt.Sprintf("contianer %q interfaces:\n %s", container, cmdOut.String()))
 
 	return strings.Contains(cmdOut.String(), ip) == expected
 }
 
 func CheckIPAddressPresenceByLease(name, namespace, ip string, client kubernetes.Interface, expected bool) bool {
 	container := GetLeaseHolder(name, namespace, client)
+	By("Lease: " + container)
 	if container == "" {
 		return false
 	}
@@ -201,7 +205,7 @@ func GetLeaseHolder(name, namespace string, client kubernetes.Interface) string 
 		var err error
 		lease, err = client.CoordinationV1().Leases(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		return err
-	}, "300s").ShouldNot(HaveOccurred())
+	}, "120s", "1s").ShouldNot(HaveOccurred())
 
 	Expect(lease).ToNot(BeNil())
 	return *lease.Spec.HolderIdentity

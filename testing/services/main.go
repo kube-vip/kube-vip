@@ -59,6 +59,12 @@ func main() {
 	t.ServiceName = "kube-vip-service"
 	t.LeaderName = "kube-vip-deploy-leader"
 
+	var err error
+	t.TempDirPath, err = os.MkdirTemp("", "kube-vip-services")
+	if err != nil {
+		slog.Fatal(err)
+	}
+
 	if t.ControlPlane {
 		err := t.CreateKind()
 		if !t.RetainCluster {

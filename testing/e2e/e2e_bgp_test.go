@@ -56,12 +56,12 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			configPath                 string
 			kubeVIPBGPManifestTemplate *template.Template
 			goBGPConfigTemplate        *template.Template
-			tempDirPath                string
 			v129                       bool
 			localIPv4                  string
 			localIPv6                  string
 			curDir                     string
 			networkInterface           string
+			tempDirPathRoot            string
 
 			bgpKill chan any
 		)
@@ -89,7 +89,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			kubeVIPBGPManifestTemplate, err = template.New("kube-vip-bgp.yaml.tmpl").ParseFiles(templateBGPPath)
 			Expect(err).NotTo(HaveOccurred())
 
-			tempDirPath, err = os.MkdirTemp("", "kube-vip-test")
+			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-bgp")
 			Expect(err).NotTo(HaveOccurred())
 			v4addr, _, err := deployment.GetLocalIPv4(networkInterface)
 			Expect(err).ToNot(HaveOccurred())
@@ -109,9 +109,9 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			goBGPConfigTemplate, err = template.New("config.toml.tmpl").ParseFiles(goBGPConfigPath)
 			Expect(err).ToNot(HaveOccurred())
 
-			goBGPConfigPath = filepath.Join(tempDirPath, "config.toml")
+			goBGPConfigPath = filepath.Join(tempDirPathRoot, "config.toml")
 
-			f, err := os.OpenFile(goBGPConfigPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+			f, err := os.OpenFile(goBGPConfigPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 			Expect(err).ToNot(HaveOccurred())
 			defer f.Close()
 
@@ -123,6 +123,9 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 		AfterAll(func() {
 			close(bgpKill)
+			if os.Getenv("E2E_KEEP_LOGS") != "true" {
+				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
+			}
 		})
 
 		Describe("kube-vip IPv4 services BGP mode functionality", Ordered, func() {
@@ -133,24 +136,32 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				manifestValues *e2e.KubevipManifestValues
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
 					k8sImagePath, e2e.IPv4Family, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
-					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
-						Address: p.IP,
-					})
-					Expect(err).ToNot(HaveOccurred())
+					Eventually(func() error {
+						_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
+							Address: p.IP,
+						})
+						return err
+					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -178,24 +189,30 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				manifestValues *e2e.KubevipManifestValues
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
 					k8sImagePath, e2e.IPv6Family, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
 						Address: p.IP,
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
@@ -223,24 +240,30 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				manifestValues *e2e.KubevipManifestValues
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
 					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv4")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
 						Address: p.IP,
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -268,24 +291,30 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				manifestValues *e2e.KubevipManifestValues
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
 					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv6")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
 						Address: n.IP,
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -314,24 +343,30 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
 				containerIP    string
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				_, containerIP = setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				_, containerIP = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
 					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
 						Address: p.IP,
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -360,24 +395,30 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				gobgpClient    api.GobgpApiClient
 				gobgpPeers     []*e2e.BGPPeerValues
 				containerIP    string
+				tempDirPath    string
 
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				containerIP, _ = setupEnv(&tempDirPath, &cpVIP, &clusterName, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+				containerIP, _ = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
 					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6")
 			})
 
 			AfterAll(func() {
+				err := e2e.GetLogs(context.Background(), client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(context.TODO(), &api.DeletePeerRequest{
 						Address: n.IP,
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, tempDirPath, ConfigMtx, logger)
+				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -409,13 +450,11 @@ func testBGP(offset uint, lbFamily string, afiFamily api.Family_Afi, svcFamily [
 	testServiceBGP(svcName, lbAddress, trafficPolicy, client, svcFamily, numberOfServices, gobgpClient, routeCheckFamily, expectedNexthop)
 }
 
-func setupEnv(tempDirPath, cpVIP, clusterName *string, manifestValues *e2e.KubevipManifestValues,
+func setupEnv(cpVIP, clusterName *string, tempDirPath string, manifestValues *e2e.KubevipManifestValues,
 	localIPv4, localIPv6, imagePath, configPath, k8sImagePath, clusterAddrFamily, bgpClientAddrFamily string, peerAddrFamily []string, client *kubernetes.Interface,
 	gobgpPeers *[]*e2e.BGPPeerValues, v129 bool, kubeVIPBGPManifestTemplate *template.Template, gobgpClient *api.GobgpApiClient,
 	logger log.Logger, nodesNumber int, mpbgpnexthop, clusterNameSuffix string) (string, string) {
 	var err error
-	*tempDirPath, err = os.MkdirTemp("", "kube-vip-test")
-	Expect(err).ToNot(HaveOccurred())
 
 	*cpVIP = e2e.GenerateVIP(clusterAddrFamily, SOffset.Get())
 
@@ -481,7 +520,7 @@ func setupEnv(tempDirPath, cpVIP, clusterName *string, manifestValues *e2e.Kubev
 
 	By(manifestValues.BGPPeers)
 
-	*clusterName, *client = prepareCluster(*tempDirPath, clusterNameSuffix, k8sImagePath, v129, kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+	*clusterName, *client, _ = prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath, v129, kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
 
 	container := fmt.Sprintf("%s-control-plane", *clusterName)
 

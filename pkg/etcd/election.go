@@ -221,7 +221,7 @@ func (m *member) tryToBeLeader(ctx context.Context) {
 
 func (m *member) resignOnCancel(ctx context.Context) {
 	<-ctx.Done()
-	if err := m.election.Resign(m.client.Ctx()); err != nil {
+	if err := m.election.Resign(m.client.Ctx()); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("Failed to resign after the context was canceled", "err", err)
 	}
 }
