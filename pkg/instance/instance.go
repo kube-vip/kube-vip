@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"log/slog"
 	log "log/slog"
 
 	"github.com/vishvananda/netlink"
@@ -15,19 +16,8 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-)
-
-const (
-	// Hardware address of the host that has the VIP
-	HWAddrKey = "kube-vip.io/hwaddr"
-
-	// The IP address that is requested
-	RequestedIP = "kube-vip.io/requestedIP"
-
-	LoadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
-	ServiceInterface         = "kube-vip.io/serviceInterface"
-	LoadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 )
 
 // Instance defines an instance of everything needed to manage vips
@@ -367,6 +357,24 @@ func (i *Instance) startDHCP() error {
 		}
 	} else {
 		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
+	}
+
+	// Check if we need to set a specific rp_filter value for the interface
+	if i.ServiceSnapshot.Annotations[kubevip.RP_Filter] != "" {
+		// Check the rp_filter value
+		rp_filter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RP_Filter])
+		if err != nil {
+			slog.Error("[DHCP]", "unable to process rp_filter value", rp_filter)
+		} else {
+			if rp_filter >= 0 && rp_filter < 3 { // Ensure the value is 0,1,2
+				err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", i.ServiceSnapshot.Annotations[kubevip.RP_Filter])
+				if err != nil {
+					slog.Error("[DHCP]", "unable to write rp_filter value", rp_filter)
+				}
+			} else {
+				slog.Error("[DHCP]", "rp_filter value not within range 0-2", rp_filter)
+			}
+		}
 	}
 
 	var initRebootFlag bool

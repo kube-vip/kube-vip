@@ -44,4 +44,6 @@ const (
 	LoadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
 	ServiceInterface         = "kube-vip.io/serviceInterface"
 	UpnpEnabled              = "kube-vip.io/forwardUPNP"
+
+	RP_Filter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
 )
