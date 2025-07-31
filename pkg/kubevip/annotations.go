@@ -45,5 +45,5 @@ const (
 	ServiceInterface         = "kube-vip.io/serviceInterface"
 	UpnpEnabled              = "kube-vip.io/forwardUPNP"
 
-	RP_Filter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
+	RPFilter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
 )
