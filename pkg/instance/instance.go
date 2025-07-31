@@ -359,24 +359,28 @@ func (i *Instance) startDHCP() error {
 		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
 	}
 
-	// Check if we need to set a specific rp_filter value for the interface
+	// Default rp_filter setting (https://github.com/kube-vip/kube-vip/issues/1170)
+	rpfilterSetting := "0"
+
+	// Check if we need to set an override rp_filter value for the interface
 	if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
 		// Check the rp_filter value
 		rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
 		if err != nil {
-			slog.Error("[DHCP]", "unable to process rp_filter value", rpFilter)
+			slog.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
 		} else {
 			if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
-				err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", i.ServiceSnapshot.Annotations[kubevip.RPFilter])
-				if err != nil {
-					slog.Error("[DHCP]", "unable to write rp_filter value", rpFilter)
-				}
+				rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
 			} else {
-				slog.Error("[DHCP]", "rp_filter value not within range 0-2", rpFilter)
+				slog.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
 			}
 		}
 	}
 
+	err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", rpfilterSetting)
+	if err != nil {
+		slog.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
+	}
 	var initRebootFlag bool
 	if i.DHCPInterfaceIP != "" {
 		initRebootFlag = true
