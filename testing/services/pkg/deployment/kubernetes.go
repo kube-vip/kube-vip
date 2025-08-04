@@ -18,13 +18,14 @@ import (
 
 // service defines the settings for a new service
 type Service struct {
-	name          string
-	egress        bool // enable egress
-	egressIPv6    bool // egress should be IPv6
-	policyLocal   bool // set the policy to local pods
-	testHTTP      bool
-	testDualstack bool // test dualstack loadbalancer services
-	timeout       int  // how long to wait for the service to be created
+	name           string
+	egress         bool // enable egress
+	egressInternal bool // enable Internal egress
+	egressIPv6     bool // egress should be IPv6
+	policyLocal    bool // set the policy to local pods
+	testHTTP       bool
+	testDualstack  bool // test dualstack loadbalancer services
+	timeout        int  // how long to wait for the service to be created
 }
 
 type Deployment struct {
@@ -238,6 +239,11 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 			"kube-vip.io/egress": "true",
 		}
 	}
+
+	if s.egressInternal {
+		svc.Annotations["kube-vip.io/egress-internal"] = "true"
+	}
+
 	if s.egressIPv6 {
 		svc.Annotations["kube-vip.io/egress-ipv6"] = "true"
 	}
@@ -276,7 +282,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		slog.Fatal(err)
 	}
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
 		},

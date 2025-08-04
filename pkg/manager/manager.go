@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,15 +16,13 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
-	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -42,11 +39,6 @@ type Manager struct {
 	// Manager services
 	// service bool
 
-	// Keeps track of all running instances
-	serviceInstances []*cluster.Instance
-
-	// UPNP functionality
-	upnp bool
 	// BGP Manager, this is a singleton that manages all BGP advertisements
 	bgpServer *bgp.Server
 
@@ -55,6 +47,8 @@ type Manager struct {
 
 	// This channel is used to signal a shutdown
 	shutdownChan chan struct{}
+
+	svcProcessor *services.Processor
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -177,6 +171,32 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// 	}
 	// }
 
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
+	signalChan := make(chan os.Signal, 1)
+	// Add Notification for Userland interrupt
+	signal.Notify(signalChan, syscall.SIGINT)
+
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGTERM)
+
+	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
+	shutdownChan := make(chan struct{})
+
+	intfMgr := networkinterface.NewManager()
+	arpMgr := arp.NewManager(config)
+
+	var bgpServer *bgp.Server
+	if config.EnableBGP {
+		bgpServer, err = bgp.NewBGPServer(&config.BGPConfig)
+		if err != nil {
+			return nil, fmt.Errorf("creating BGP server: %w", err)
+		}
+	}
+
+	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan, intfMgr, arpMgr)
+
 	return &Manager{
 		clientSet:   clientset,
 		rwClientSet: rwClientSet,
@@ -194,8 +214,12 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			Name:      "bgp_session_info",
 			Help:      "Display state of session by setting metric for label value with current state to 1",
 		}, []string{"state", "peer"}),
-		intfMgr: networkinterface.NewManager(),
-		arpMgr:  arp.NewManager(config),
+		signalChan:   signalChan,
+		shutdownChan: shutdownChan,
+		svcProcessor: svcProcessor,
+		intfMgr:      intfMgr,
+		arpMgr:       arpMgr,
+		bgpServer:    bgpServer,
 	}, nil
 }
 
@@ -248,16 +272,12 @@ func (sm *Manager) Start() error {
 	}
 
 	if sm.config.EnableARP || sm.config.EnableWireguard {
-		// Before starting the leader Election enable any additional functionality
-		upnpEnabled, _ := strconv.ParseBool(os.Getenv("enableUPNP"))
-
-		if upnpEnabled {
-			sm.upnp = true
+		if sm.config.EnableUPNP {
 			clients := upnp.GetConnectionClients(context.TODO())
 			if len(clients) == 0 {
 				log.Error("Error Enabling UPNP. No Clients found")
 				// Set the struct to false so nothing should use it in future
-				sm.upnp = false
+				sm.config.EnableUPNP = false
 			} else {
 				for _, c := range clients {
 					ip, err := c.GetExternalIPAddress()
@@ -265,12 +285,11 @@ func (sm *Manager) Start() error {
 						log.Error("unable to find IGD2 Gateway address", "err", err)
 					}
 					log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
-
 				}
 			}
 		}
 		// TODO: It would be nice to run the UPNP refresh only on the leader.
-		go sm.refreshUPNPForwards()
+		go sm.svcProcessor.RefreshUPNPForwards()
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
@@ -314,77 +333,4 @@ func (sm *Manager) parseAnnotations() error {
 		return err
 	}
 	return nil
-}
-
-func (sm *Manager) serviceInterface() string {
-	svcIf := sm.config.Interface
-	if sm.config.ServicesInterface != "" {
-		svcIf = sm.config.ServicesInterface
-	}
-	return svcIf
-}
-
-func (sm *Manager) startTrafficMirroringIfEnabled() error {
-	if sm.config.MirrorDestInterface != "" {
-		svcIf := sm.serviceInterface()
-		log.Info("mirroring traffic", "src", svcIf, "dest", sm.config.MirrorDestInterface)
-		if err := trafficmirror.MirrorTrafficFromNIC(svcIf, sm.config.MirrorDestInterface); err != nil {
-			return err
-		}
-	} else {
-		log.Debug("skip starting traffic mirroring since it's not enabled.")
-	}
-	return nil
-}
-
-func (sm *Manager) stopTrafficMirroringIfEnabled() error {
-	if sm.config.MirrorDestInterface != "" {
-		svcIf := sm.serviceInterface()
-		log.Info("clean up qdisc config", "interface", svcIf)
-		if err := trafficmirror.CleanupQDSICFromNIC(svcIf); err != nil {
-			return err
-		}
-	} else {
-		log.Debug("skip stopping traffic mirroring since it's not enabled.")
-	}
-	return nil
-}
-
-func (sm *Manager) findServiceInstance(svc *v1.Service) *cluster.Instance {
-	sm.mutex.Lock()
-	defer sm.mutex.Unlock()
-	if svc == nil {
-		return nil // If the service is nil then we cannot find it
-	}
-	log.Debug("finding service", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
-	for i := range sm.serviceInstances {
-		log.Debug("saved service", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
-		if sm.serviceInstances[i].ServiceSnapshot.UID == svc.UID {
-			log.Debug("found service instance", "UID", svc.UID, "name", svc.Name, "namespace", svc.Namespace)
-			return sm.serviceInstances[i]
-		}
-	}
-	log.Debug("service instance not found", "UID", svc.UID)
-	return nil
-}
-
-// Refresh UPNP Port Forwards for all Service Instances registered in the SM
-func (sm *Manager) refreshUPNPForwards() {
-	log.Info("Starting UPNP Port Refresher")
-	for {
-		time.Sleep(300 * time.Second)
-
-		log.Info("[UPNP] Refreshing Instances", "number of instances", len(sm.serviceInstances))
-		func() {
-			sm.mutex.Lock()
-			defer sm.mutex.Unlock()
-
-			for i := range sm.serviceInstances {
-				sm.upnpMap(context.TODO(), sm.serviceInstances[i])
-				if err := sm.updateStatus(sm.serviceInstances[i]); err != nil {
-					log.Warn("[UPNP] Error updating service", "ip", sm.serviceInstances[i].ServiceSnapshot.Name, "err", err)
-				}
-			}
-		}()
-	}
 }

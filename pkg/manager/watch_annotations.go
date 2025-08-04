@@ -57,7 +57,8 @@ func (sm *Manager) annotationsWatcher() error {
 	// they're as needed
 	log.Warn(err.Error())
 
-	rw, err := watchtools.NewRetryWatcher(node.ResourceVersion, &cache.ListWatch{
+	// TODO, will need refactoring as part of rikatz work
+	rw, err := watchtools.NewRetryWatcherWithContext(context.TODO(), node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return sm.rwClientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
 		},

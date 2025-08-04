@@ -74,7 +74,16 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 
 	if config.Egress {
 		// Egress test
-		err = config.EgressDeployment(ctx, clientset)
+		err = config.EgressDeployment(ctx, clientset, false)
+		if err != nil {
+			slog.Error(err)
+			errs = append(errs, err)
+		}
+	}
+
+	if config.Egress && config.EgressInternal {
+		// Egress test
+		err = config.EgressDeployment(ctx, clientset, true)
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
@@ -83,7 +92,16 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 
 	if config.EgressIPv6 {
 		// Egress v6 tests
-		err = config.Egressv6Deployment(ctx, clientset)
+		err = config.Egressv6Deployment(ctx, clientset, false)
+		if err != nil {
+			slog.Error(err)
+			errs = append(errs, err)
+		}
+	}
+
+	if config.EgressIPv6 && config.EgressInternal {
+		// Egress v6 tests
+		err = config.Egressv6Deployment(ctx, clientset, true)
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
@@ -166,7 +184,7 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 	slog.Infof("👀 service [%s] for updates", *name)
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
 		},
@@ -249,7 +267,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 	slog.Infof("👀 service [%s] for updates", *name)
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	rw, err := watchtools.NewRetryWatcher("1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
 			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
 		},
@@ -377,32 +395,32 @@ func handleRequest(conn net.Conn) {
 	conn.Close()
 }
 
-func GetLocalIP(ifName string, family int) (string, error) {
+func GetLocalIP(ifName string, family int) (*net.IP, *net.IPNet, error) {
 	links, err := netlink.LinkList()
 	if err != nil {
-		return "", fmt.Errorf("netlink: failed to list links: %w", err)
+		return nil, nil, fmt.Errorf("netlink: failed to list links: %w", err)
 	}
 
 	for _, link := range links {
 		if strings.Contains(link.Attrs().Name, ifName) {
-			ip, _, err := getNetwork(link, family)
+			ip, ipnet, err := getNetwork(link, family)
 			if err != nil {
-				return "", fmt.Errorf("failed to get IPv4 address: %w", err)
+				return nil, nil, fmt.Errorf("failed to get IPv4 address: %w", err)
 			}
 			if ip == nil {
-				return "", fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
+				return nil, nil, fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
 			}
-			return ip.String(), nil
+			return ip, ipnet, nil
 		}
 	}
 
-	return "", nil
+	return nil, nil, nil
 }
 
-func GetLocalIPv4(ifName string) (string, error) {
+func GetLocalIPv4(ifName string) (*net.IP, *net.IPNet, error) {
 	return GetLocalIP(ifName, netlink.FAMILY_V4)
 }
 
-func GetLocalIPv6(ifName string) (string, error) {
+func GetLocalIPv6(ifName string) (*net.IP, *net.IPNet, error) {
 	return GetLocalIP(ifName, netlink.FAMILY_V6)
 }

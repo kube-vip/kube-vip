@@ -7,6 +7,7 @@ import (
 	"math/bits"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/detector"
@@ -606,13 +607,13 @@ func ParseEnvironment(c *Config) error {
 		c.K8sConfigFile = env
 	}
 
-	env = os.Getenv(enableEndpointSlices)
+	env = os.Getenv(enableEndpoints)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
 		if err != nil {
 			return err
 		}
-		c.EnableEndpointSlices = b
+		c.EnableEndpoints = b
 	}
 
 	env = os.Getenv(mirrorDestInterface)
@@ -644,6 +645,26 @@ func ParseEnvironment(c *Config) error {
 			return fmt.Errorf("health check port should be > 1024")
 		}
 		c.HealthCheckPort = int(i)
+	}
+
+	env = os.Getenv(enableUPNP)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableUPNP = b
+	}
+
+	if env = os.Getenv(egressClean); env == "" {
+		env = os.Getenv(strings.ToUpper(egressClean))
+	}
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EgressClean = b
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-package cluster
+package instance
 
 import (
 	"fmt"
@@ -6,27 +6,18 @@ import (
 	"strconv"
 	"strings"
 
+	"log/slog"
 	log "log/slog"
 
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-)
-
-const (
-	// Hardware address of the host that has the VIP
-	HWAddrKey = "kube-vip.io/hwaddr"
-
-	// The IP address that is requested
-	RequestedIP = "kube-vip.io/requestedIP"
-
-	LoadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
-	ServiceInterface         = "kube-vip.io/serviceInterface"
-	LoadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
 )
 
 // Instance defines an instance of everything needed to manage vips
@@ -35,7 +26,7 @@ type Instance struct {
 	VIPConfigs []*kubevip.Config
 
 	// cluster instances
-	Clusters []*Cluster
+	Clusters []*cluster.Cluster
 
 	// Service uses DHCP
 	IsDHCP              bool
@@ -68,7 +59,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
 		var svcInterface string
-		svcInterface = svc.Annotations[ServiceInterface] // If the service has a specific interface defined, then use it
+		svcInterface = svc.Annotations[kubevip.ServiceInterface] // If the service has a specific interface defined, then use it
 		if svcInterface == kubevip.Auto {
 			link, err = autoFindInterface(address)
 			if err != nil {
@@ -157,8 +148,6 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 			}
 		}
 
-		//log.Info("new instance", "svc", *svc, "interface", svcInterface)
-
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
 			VIP:                    address,
@@ -196,9 +185,9 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	// }
 
 	if svc.Annotations != nil {
-		instance.DHCPInterfaceHwaddr = svc.Annotations[HWAddrKey]
-		instance.DHCPInterfaceIP = svc.Annotations[RequestedIP]
-		instance.DHCPHostname = svc.Annotations[LoadbalancerHostname]
+		instance.DHCPInterfaceHwaddr = svc.Annotations[kubevip.HwAddrKey]
+		instance.DHCPInterfaceIP = svc.Annotations[kubevip.RequestedIP]
+		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -241,7 +230,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	}
 
 	for _, vipConfig := range instance.VIPConfigs {
-		c, err := InitCluster(vipConfig, false, intfMgr, arpMgr)
+		c, err := cluster.InitCluster(vipConfig, false, intfMgr, arpMgr)
 		if err != nil {
 			log.Error("Failed to add Service %s/%s", svc.Namespace, svc.Name)
 			return nil, err
@@ -253,7 +242,6 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 
 		instance.Clusters = append(instance.Clusters, c)
 		log.Info("(svcs) adding VIP", "ip", vipConfig.VIP, "interface", vipConfig.Interface, "namespace", svc.Namespace, "name", svc.Name)
-
 	}
 
 	return instance, nil
@@ -371,6 +359,28 @@ func (i *Instance) startDHCP() error {
 		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
 	}
 
+	// Default rp_filter setting (https://github.com/kube-vip/kube-vip/issues/1170)
+	rpfilterSetting := "0"
+
+	// Check if we need to set an override rp_filter value for the interface
+	if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
+		// Check the rp_filter value
+		rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
+		if err != nil {
+			slog.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
+		} else {
+			if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
+				rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
+			} else {
+				slog.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
+			}
+		}
+	}
+
+	err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", rpfilterSetting)
+	if err != nil {
+		slog.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
+	}
 	var initRebootFlag bool
 	if i.DHCPInterfaceIP != "" {
 		initRebootFlag = true
@@ -421,7 +431,8 @@ func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
 func FetchServiceAddresses(s *v1.Service) []string {
 	annotationAvailable := false
 	if s.Annotations != nil {
-		if v, annotationAvailable := s.Annotations[LoadbalancerIPAnnotation]; annotationAvailable {
+
+		if v, annotationAvailable := s.Annotations[kubevip.LoadbalancerIPAnnotation]; annotationAvailable {
 			ips := strings.Split(v, ",")
 			var trimmedIPs []string
 			for _, ip := range ips {
@@ -457,4 +468,15 @@ func FetchServiceAddresses(s *v1.Service) []string {
 	}
 
 	return []string{}
+}
+
+func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
+	log.Debug("finding service", "UID", svc.UID)
+	for i := range instances {
+		log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
+		if instances[i].ServiceSnapshot.UID == svc.UID {
+			return instances[i]
+		}
+	}
+	return nil
 }

@@ -2,8 +2,6 @@ package backend
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
 	log "log/slog"
@@ -52,22 +50,6 @@ func (e *Entry) Check() bool {
 			log.Error("create k8s REST config", "err", err)
 			return false
 		}
-	}
-
-	// This insecure client was introduced for more straightforward e2e-test implementation.
-	// Should be only used for test purposes.
-	useInescure := false
-	if value, isSet := os.LookupEnv("E2E_INSECURE_CLIENT"); isSet {
-		useInescure, err = strconv.ParseBool(value)
-		if err != nil {
-			log.Error("failed to parse E2E_INSECURE_CLIENT env value, setting value to 'false' explicitly", "err", err)
-			useInescure = false
-		}
-	}
-
-	if useInescure {
-		config.Insecure = true
-		config.CAData = []byte{}
 	}
 
 	client, err = k8s.NewClientset(config)

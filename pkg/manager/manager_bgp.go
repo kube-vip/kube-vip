@@ -19,8 +19,15 @@ func (sm *Manager) startBGP() error {
 	// var ns string
 	var err error
 
+	if sm.bgpServer == nil {
+		sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
+		if err != nil {
+			return fmt.Errorf("creating BGP server: %w", err)
+		}
+	}
+
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
-	sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig, func(p *api.WatchEventResponse_PeerEvent) {
+	if err := sm.bgpServer.Start(func(p *api.WatchEventResponse_PeerEvent) {
 		ipaddr := p.GetPeer().GetState().GetNeighborAddress()
 		port := uint64(179)
 		peerDescription := fmt.Sprintf("%s:%d", ipaddr, port)
@@ -36,9 +43,8 @@ func (sm *Manager) startBGP() error {
 				"peer":  peerDescription,
 			}).Set(metricValue)
 		}
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return fmt.Errorf("starting BGP server: %w", err)
 	}
 
 	// use a Go context so we can tell the leaderelection code when we
@@ -99,7 +105,7 @@ func (sm *Manager) startBGP() error {
 		}
 	}
 
-	err = sm.servicesWatcher(ctx, sm.syncServices)
+	err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 	if err != nil {
 		return err
 	}

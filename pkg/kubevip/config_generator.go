@@ -521,10 +521,10 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 	}
 	newEnvironment = append(newEnvironment, prometheus...)
 
-	if c.EnableEndpointSlices {
+	if c.EnableEndpoints {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{
-			Name:  enableEndpointSlices,
-			Value: strconv.FormatBool(c.EnableEndpointSlices),
+			Name:  enableEndpoints,
+			Value: strconv.FormatBool(c.EnableEndpoints),
 		})
 	}
 

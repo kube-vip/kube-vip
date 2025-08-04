@@ -212,8 +212,8 @@ const (
 	// disableServiceUpdates disables service updating
 	disableServiceUpdates = "disable_service_updates"
 
-	// enableEndpointSlices enables use of EndpointSlices instead of Endpoints
-	enableEndpointSlices = "enable_endpointslices"
+	// enableEndpoints enables use of Endpoints instead of EndpointSlices
+	enableEndpoints = "enable_endpoints"
 
 	// mirrorDestInterface is the network interface where all traffics that go through service interface
 	// will be mirrored to. The source interface is ServicesInterface by default, fall back to Interface if not set.
@@ -228,4 +228,10 @@ const (
 
 	// healthCheckPort, if set to non-zero will be the port the health check will listen on
 	healthCheckPort = "health_check_port"
+
+	// enableUPNP enables UPNP functions
+	enableUPNP = "enable_upnp"
+
+	// egressClean enables egress cleaning on kube-vip's start
+	egressClean = "egress_clean"
 )

@@ -161,8 +161,8 @@ type Config struct {
 	// DisableServiceUpdates, if true, kube-vip will only advertise service, but it will not update service's Status.LoadBalancer.Ingress slice
 	DisableServiceUpdates bool `yaml:"disableServiceUpdates"`
 
-	// EnableEndpointSlices, if enabled, EndpointSlices will be used instead of Endpoints
-	EnableEndpointSlices bool `yaml:"enableEndpointSlices"`
+	// EnableEndpoints, if enabled, Endpoints will be used instead of EndpointSlices
+	EnableEndpoints bool `yaml:"enableEndpoints"`
 
 	// MirrorDestInterface is the network interface where all traffics that go through service interface
 	// will be mirrored to. If ServicesInterface is not set, fall back to Interface.
@@ -180,6 +180,12 @@ type Config struct {
 
 	// HealthCheckPort, if non-zero then will enable the healthcheck to return ok on this port
 	HealthCheckPort int `yaml:"healthCheckPort"`
+
+	// EnableUPNP, enables UPNP functions
+	EnableUPNP bool `yaml:"enableUPNP"`
+
+	// EgressClean, enables egress cleaning on Kube-vip's start
+	EgressClean bool `yaml:"egressClean"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

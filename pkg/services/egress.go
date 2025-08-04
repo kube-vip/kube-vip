@@ -1,4 +1,4 @@
-package manager
+package services
 
 import (
 	"bufio"
@@ -11,6 +11,8 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -21,7 +23,7 @@ const (
 	defaultServiceCIDR = "10.96.0.0/12"
 )
 
-func (sm *Manager) iptablesCheck() error {
+func (p *Processor) iptablesCheck() error {
 	file, err := os.Open("/proc/modules")
 	if err != nil {
 		return err
@@ -48,7 +50,7 @@ func (sm *Manager) iptablesCheck() error {
 	return nil
 }
 
-func (sm *Manager) nftablesCheck() error {
+func (p *Processor) nftablesCheck() error {
 	file, err := os.Open("/proc/modules")
 	if err != nil {
 		return err
@@ -132,26 +134,27 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations map[string]string) error {
+func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
 
 	// Look up the destination ports from the annotations on the service
-	destinationPorts := annotations[egressDestinationPorts]
-	deniedNetworks := annotations[egressDeniedNetworks]
-	allowedNetworks := annotations[egressAllowedNetworks]
+	destinationPorts := annotations[kubevip.EgressDestinationPorts]
+	deniedNetworks := annotations[kubevip.EgressDeniedNetworks]
+	allowedNetworks := annotations[kubevip.EgressAllowedNetworks]
+	internalEgress := annotations[kubevip.EgressInternal]
 
-	if sm.config.EgressPodCidr == "" || sm.config.EgressServiceCidr == "" {
-		autoServiceCIDR, autoPodCIDR, discoverErr = sm.AutoDiscoverCIDRs()
+	if p.config.EgressPodCidr == "" || p.config.EgressServiceCidr == "" {
+		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs()
 	}
 
 	if discoverErr != nil {
 		log.Warn("autodiscover CIDR", "err", discoverErr)
 	}
 
-	if sm.config.EgressPodCidr != "" {
-		podCidr = getSameFamilyCidr(sm.config.EgressPodCidr, podIP)
+	if p.config.EgressPodCidr != "" {
+		podCidr = getSameFamilyCidr(p.config.EgressPodCidr, podIP)
 	} else {
 		if discoverErr == nil {
 			podCidr = getSameFamilyCidr(autoPodCIDR, podIP)
@@ -166,8 +169,8 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		podCidr = defaultPodCIDR
 	}
 
-	if sm.config.EgressServiceCidr != "" {
-		serviceCidr = getSameFamilyCidr(sm.config.EgressServiceCidr, vipIP)
+	if p.config.EgressServiceCidr != "" {
+		serviceCidr = getSameFamilyCidr(p.config.EgressServiceCidr, vipIP)
 	} else {
 		if discoverErr == nil {
 			serviceCidr = getSameFamilyCidr(autoServiceCIDR, vipIP)
@@ -205,7 +208,76 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 		protocol = iptables.ProtocolIPv6
 	}
 
-	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Add any specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Ad anny specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
+	}
+
+	// Use the internal egress implementation
+	if internalEgress != "" {
+		// Create an array of CIDRs that we wont SNAT to.
+		ignoreCIDRs := []string{
+			podCidr,
+			serviceCidr,
+		}
+
+		// Ad anny specifically denied networks
+		if deniedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			ignoreCIDRs = append(ignoreCIDRs, networks...)
+
+		}
+
+		// Apply the SNAT rules
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		if err != nil {
+			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		return nil
+	}
+
+	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
 	}
@@ -304,12 +376,12 @@ func (sm *Manager) configureEgress(vipIP, podIP, namespace string, annotations m
 	return nil
 }
 
-func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
+func (p *Processor) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
 	options := v1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
-	podList, err := sm.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
+	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
 	if err != nil {
 		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
 	}
@@ -331,84 +403,4 @@ func (sm *Manager) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) 
 	}
 
 	return
-}
-
-func (sm *Manager) TeardownEgress(podIP, vipIP, namespace string, annotations map[string]string) error {
-	// Look up the destination ports from the annotations on the service
-	destinationPorts := annotations[egressDestinationPorts]
-	deniedNetworks := annotations[egressDeniedNetworks]
-	allowedNetworks := annotations[egressAllowedNetworks]
-
-	protocol := iptables.ProtocolIPv4
-	if vip.IsIPv6(podIP) {
-		protocol = iptables.ProtocolIPv6
-	}
-
-	i, err := vip.CreateIptablesClient(sm.config.EgressWithNftables, namespace, protocol)
-	if err != nil {
-		return fmt.Errorf("error Creating iptables client [%s]", err)
-	}
-
-	if deniedNetworks != "" {
-		networks := strings.Split(deniedNetworks, ",")
-		for x := range networks {
-			err = i.DeleteMangleReturnForNetwork(vip.MangleChainName, networks[x])
-			if err != nil {
-				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
-			}
-		}
-	}
-
-	if allowedNetworks != "" {
-		networks := strings.Split(allowedNetworks, ",")
-		for x := range networks {
-			err = i.DeleteMangleMarkingForNetwork(podIP, vip.MangleChainName, networks[x])
-			if err != nil {
-				return fmt.Errorf("error deleting rules in mangle chain [%s], error [%s]", vip.MangleChainName, err)
-			}
-		}
-	} else {
-		// Remove the marking of egress packets
-		err = i.DeleteMangleMarking(podIP, vip.MangleChainName)
-		if err != nil {
-			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
-		}
-	}
-
-	// Clear up SNAT rules
-	if destinationPorts != "" {
-		fixedPorts := strings.Split(destinationPorts, ",")
-
-		for _, fixedPort := range fixedPorts {
-			var proto, port string
-
-			data := strings.Split(fixedPort, ":")
-			if len(data) == 0 {
-				continue
-			} else if len(data) == 1 {
-				proto = "tcp"
-				port = data[0]
-			} else {
-				proto = data[0]
-				port = data[1]
-			}
-
-			err = i.DeleteSourceNatForDestinationPort(podIP, vipIP, port, proto)
-			if err != nil {
-				return fmt.Errorf("error changing iptables rules for egress [%s]", err)
-			}
-
-		}
-	} else {
-		err = i.DeleteSourceNat(podIP, vipIP)
-		if err != nil {
-			return fmt.Errorf("error changing iptables rules for egress [%s]", err)
-		}
-	}
-
-	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
-	if err != nil {
-		return fmt.Errorf("error changing iptables rules for egress [%s]", err)
-	}
-	return nil
 }

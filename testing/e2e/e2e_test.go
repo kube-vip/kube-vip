@@ -34,7 +34,7 @@ import (
 	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gexec"
 
-	kvcluster "github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
@@ -43,6 +43,11 @@ const (
 	dsName      = "traefik-whoami"
 	dsNamespace = "default"
 )
+
+const testJSON = `
+- op: add
+  path: "/apiServer/certSANs/-"
+  value: `
 
 var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 	if Mode == ModeARP {
@@ -105,7 +110,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3)
+				clusterName, _ = prepareCluster(tempDirPath, "ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil)
 			})
 
 			AfterAll(func() {
@@ -140,7 +145,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "svc-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "svc-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -159,7 +164,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
-
 					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -190,7 +194,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "svc-el-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "svc-el-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -229,7 +233,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3)
+				clusterName, _ = prepareCluster(tempDirPath, "ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil)
 			})
 
 			AfterAll(func() {
@@ -264,7 +268,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "svc-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "svc-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -313,7 +317,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "svc-el-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "svc-el-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -352,7 +356,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "ds-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3)
+				clusterName, _ = prepareCluster(tempDirPath, "ds-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil)
 			})
 
 			AfterAll(func() {
@@ -387,7 +391,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "ds-svc-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "ds-svc-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -436,7 +440,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "ds-svc-el-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "ds-svc-el-ipv4", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -477,7 +481,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "ds-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3)
+				clusterName, _ = prepareCluster(tempDirPath, "ds-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil)
 			})
 
 			AfterAll(func() {
@@ -514,7 +518,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "ds-svc-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "ds-svc-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -565,7 +569,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "true",
 				}
 
-				clusterName, client = prepareCluster(tempDirPath, "ds-svc-el-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1)
+				clusterName, client = prepareCluster(tempDirPath, "ds-svc-el-ipv6", k8sImagePath, v129, kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil)
 			})
 
 			AfterAll(func() {
@@ -604,7 +608,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpointslices: "false",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "ipv4-hostname", k8sImagePath, v129, kubeVIPHostnameManifestTemplate, logger, manifestValues, networking, 3)
+				clusterName, _ = prepareCluster(tempDirPath, "ipv4-hostname", k8sImagePath, v129, kubeVIPHostnameManifestTemplate, logger, manifestValues, networking, 3, nil)
 			})
 
 			AfterAll(func() {
@@ -792,7 +796,7 @@ func createTestDS(name, namespace string, client kubernetes.Interface) {
 
 func createTestService(name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy, ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy) {
 	svcAnnotations := make(map[string]string)
-	svcAnnotations[kvcluster.LoadbalancerIPAnnotation] = lbAddress
+	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
 
 	labels := make(map[string]string)
 	labels["app"] = target
@@ -835,7 +839,8 @@ func checkIPAddressByLease(name, namespace, lbAddress string, expected bool, cli
 
 func prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath string,
 	v129 bool, kubeVIPManifestTemplate *template.Template, logger log.Logger,
-	manifestValues *e2e.KubevipManifestValues, networking *kindconfigv1alpha4.Networking, nodesNum int) (string, kubernetes.Interface) {
+	manifestValues *e2e.KubevipManifestValues, networking *kindconfigv1alpha4.Networking, nodesNum int,
+	addSAN *san) (string, kubernetes.Interface) {
 
 	manifestPath := filepath.Join(tempDirPath, fmt.Sprintf("kube-vip-%s.yaml", clusterNameSuffix))
 
@@ -848,6 +853,24 @@ func prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath string,
 		Networking: *networking,
 		Nodes:      []kindconfigv1alpha4.Node{},
 	}
+
+	kubeadmPatches := []kindconfigv1alpha4.PatchJSON6902{}
+
+	if addSAN != nil {
+		for i := 0; i < 64; i++ {
+			(*addSAN.ip)[len(*addSAN.ip)-1]++
+			if addSAN.ipnet.Contains(*addSAN.ip) {
+				kubeadmPatches = append(kubeadmPatches, kindconfigv1alpha4.PatchJSON6902{
+					Group:   "kubeadm.k8s.io",
+					Version: "v1beta3",
+					Kind:    "ClusterConfiguration",
+					Patch:   testJSON + addSAN.ip.String(),
+				})
+			}
+		}
+	}
+
+	clusterConfig.KubeadmConfigPatchesJSON6902 = kubeadmPatches
 
 	for range nodesNum {
 		nodeConfig := kindconfigv1alpha4.Node{
