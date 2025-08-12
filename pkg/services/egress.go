@@ -231,52 +231,6 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 		return nil
 	}
 
-	// Use the internal egress implementation
-	if internalEgress != "" {
-		// Create an array of CIDRs that we wont SNAT to.
-		ignoreCIDRs := []string{
-			podCidr,
-			serviceCidr,
-		}
-
-		// Ad anny specifically denied networks
-		if deniedNetworks != "" {
-			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
-			ignoreCIDRs = append(ignoreCIDRs, networks...)
-
-		}
-
-		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
-		if err != nil {
-			return fmt.Errorf("error performing netlink nftables [%s]", err)
-		}
-		return nil
-	}
-
-	// Use the internal egress implementation
-	if internalEgress != "" {
-		// Create an array of CIDRs that we wont SNAT to.
-		ignoreCIDRs := []string{
-			podCidr,
-			serviceCidr,
-		}
-
-		// Ad anny specifically denied networks
-		if deniedNetworks != "" {
-			networks := strings.Split(strings.TrimSpace(deniedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
-			ignoreCIDRs = append(ignoreCIDRs, networks...)
-
-		}
-
-		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
-		if err != nil {
-			return fmt.Errorf("error performing netlink nftables [%s]", err)
-		}
-		return nil
-	}
-
 	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
 		return fmt.Errorf("error Creating iptables client [%s]", err)
