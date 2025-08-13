@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -46,6 +47,8 @@ type Processor struct {
 
 	intfMgr *networkinterface.Manager
 	arpMgr  *arp.Manager
+
+	leaseMgr *lease.Manager
 }
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
@@ -71,8 +74,9 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
 
-		intfMgr: intfMgr,
-		arpMgr:  arpMgr,
+		intfMgr:  intfMgr,
+		arpMgr:   arpMgr,
+		leaseMgr: lease.NewManager(),
 	}
 }
 
@@ -104,6 +108,12 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	// We only care about LoadBalancer services that have been allocated an address
 	if len(svcAddresses) <= 0 {
 		return true, nil
+	}
+
+	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
+	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+		return false, fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q",
+			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
@@ -306,12 +316,10 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 		p.svcMap.Delete(svc.UID)
 	}
 
-	if p.config.EnableLeaderElection && !p.config.EnableServicesElection {
-		if p.config.EnableBGP {
-			endpoints.ClearBGPHosts(svc, &p.ServiceInstances, p.bgpServer)
-		} else if p.config.EnableRoutingTable {
-			endpoints.ClearRoutes(svc, &p.ServiceInstances)
-		}
+	if p.config.EnableBGP && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+		endpoints.ClearBGPHosts(svc, &p.ServiceInstances, p.bgpServer)
+	} else if p.config.EnableLeaderElection && !p.config.EnableServicesElection && p.config.EnableRoutingTable {
+		endpoints.ClearRoutes(svc, &p.ServiceInstances)
 	}
 
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)

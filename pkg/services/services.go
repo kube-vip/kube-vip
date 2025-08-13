@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -85,7 +86,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 						return ActionDelete
 					}
 				}
-				if !comparePortsAndPortStatuses(svc) {
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
 					return ActionDelete
 				}
 			}
@@ -329,7 +330,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	// Update the service array
 	p.ServiceInstances = updatedInstances
 
-	log.Info("Removed instance from manager", "uid", uid, "remaining advertised services", len(p.ServiceInstances))
+	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
 	return nil
 }
@@ -484,7 +485,7 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
 			_, err = p.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
-			if err != nil {
+			if err != nil && !apierrors.IsInvalid(err) {
 				log.Error("updating Service", "namespace", i.ServiceSnapshot.Namespace, "name", i.ServiceSnapshot.Name, "err", err)
 				return err
 			}
