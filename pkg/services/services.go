@@ -85,7 +85,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 						return ActionDelete
 					}
 				}
-				if !comparePortsAndPortStatuses(svc) {
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
 					return ActionDelete
 				}
 			}
@@ -329,7 +329,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	// Update the service array
 	p.ServiceInstances = updatedInstances
 
-	log.Info("Removed instance from manager", "uid", uid, "remaining advertised services", len(p.ServiceInstances))
+	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
 	return nil
 }

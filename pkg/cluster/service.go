@@ -330,7 +330,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			return
 		}
 		for i := range cluster.Network {
-			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 0 {
+			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
 				continue
 			}
 			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())

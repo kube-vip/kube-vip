@@ -481,7 +481,8 @@ func setupEnv(tempDirPath, cpVIP, clusterName *string, manifestValues *e2e.Kubev
 
 	By(manifestValues.BGPPeers)
 
-	*clusterName, *client = prepareCluster(*tempDirPath, clusterNameSuffix, k8sImagePath, v129, kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+	*clusterName, *client = prepareCluster(*tempDirPath, clusterNameSuffix, k8sImagePath, v129,
+		kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 
 	container := fmt.Sprintf("%s-control-plane", *clusterName)
 
@@ -563,7 +564,7 @@ func testServiceBGP(svcName, lbAddress string, trafficPolicy corev1.ServiceExter
 
 	for _, svc := range services {
 		createTestService(svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy)
+			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, "", 80)
 	}
 
 	for _, addr := range lbAddresses {
