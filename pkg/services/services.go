@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -42,19 +43,19 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 	action := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
-		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.deleteService(svc.UID); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionAdd:
-		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.addService(ctx, svc); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionNone:
-		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	}
-	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name)
+	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	return nil
 }
 
@@ -85,7 +86,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 						return ActionDelete
 					}
 				}
-				if !comparePortsAndPortStatuses(svc) {
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
 					return ActionDelete
 				}
 			}
@@ -94,7 +95,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 		}
 	}
 	if len(addresses) > 0 {
-		log.Debug("No matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
+		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
 		return ActionAdd // If no matching instance is found, we need to add a new service instance
 	}
 	return ActionNone
@@ -266,10 +267,12 @@ func (p *Processor) deleteService(uid types.UID) error {
 			serviceInstance = p.ServiceInstances[x]
 		}
 	}
+
 	// If we've been through all services and not found the correct one then error
 	if !found {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
+		log.Error("unable to find/stop service", "uid", uid)
 		return nil
 	}
 
@@ -287,6 +290,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 			vipSet[vip] = nil
 		}
 	}
+
 	for _, vip := range instance.FetchServiceAddresses(serviceInstance.ServiceSnapshot) {
 		if _, found := vipSet[vip]; found {
 			shared = true
@@ -308,9 +312,15 @@ func (p *Processor) deleteService(uid types.UID) error {
 				return fmt.Errorf("[service] error deleting DHCP Link : %v", err)
 			}
 		}
-		for i := range serviceInstance.VIPConfigs {
-			if serviceInstance.VIPConfigs[i].EnableBGP {
-				endpoints.ClearBGPHostsByInstance(serviceInstance, p.bgpServer)
+
+		if p.config.EnableBGP {
+			endpoints.ClearBGPHostsByInstance(serviceInstance, p.bgpServer)
+		}
+		if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+			if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances); len(errs) > 0 {
+				for _, err := range errs {
+					log.Error("unable to clear routes", "err", err)
+				}
 			}
 		}
 
@@ -329,7 +339,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	// Update the service array
 	p.ServiceInstances = updatedInstances
 
-	log.Info("Removed instance from manager", "uid", uid, "remaining advertised services", len(p.ServiceInstances))
+	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
 	return nil
 }
@@ -484,7 +494,7 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
 			_, err = p.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
-			if err != nil {
+			if err != nil && !apierrors.IsInvalid(err) {
 				log.Error("updating Service", "namespace", i.ServiceSnapshot.Namespace, "name", i.ServiceSnapshot.Name, "err", err)
 				return err
 			}

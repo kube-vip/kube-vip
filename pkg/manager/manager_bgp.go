@@ -105,9 +105,18 @@ func (sm *Manager) startBGP() error {
 		}
 	}
 
-	err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
-	if err != nil {
-		return err
+	if sm.config.EnableServicesElection {
+		log.Info("beginning watching services, leaderelection will happen for every service")
+		err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Info("beginning watching services without leader election")
+		err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
+		if err != nil {
+			return err
+		}
 	}
 
 	log.Info("Shutting down Kube-Vip")

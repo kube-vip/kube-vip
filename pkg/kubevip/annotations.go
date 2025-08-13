@@ -46,4 +46,6 @@ const (
 	UpnpEnabled              = "kube-vip.io/forwardUPNP"
 
 	RPFilter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
+
+	ServiceLease = "kube-vip.io/leaseName"
 )
