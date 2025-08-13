@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -46,6 +47,8 @@ type Processor struct {
 
 	intfMgr *networkinterface.Manager
 	arpMgr  *arp.Manager
+
+	leaseMgr *lease.Manager
 }
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
@@ -71,8 +74,9 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
 
-		intfMgr: intfMgr,
-		arpMgr:  arpMgr,
+		intfMgr:  intfMgr,
+		arpMgr:   arpMgr,
+		leaseMgr: lease.NewManager(),
 	}
 }
 
@@ -104,6 +108,12 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	// We only care about LoadBalancer services that have been allocated an address
 	if len(svcAddresses) <= 0 {
 		return true, nil
+	}
+
+	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
+	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+		return false, fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q",
+			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
@@ -138,7 +148,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				originalService := instance.FetchServiceAddresses(i.ServiceSnapshot)
 				newService := instance.FetchServiceAddresses(svc)
 				if !reflect.DeepEqual(originalService, newService) {
-
 					// Calls the cancel function of the context
 					if svcCtx != nil {
 						log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
@@ -147,8 +156,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 						<-svcCtx.Ctx.Done()
 					}
 
-					err = p.deleteService(svc.UID)
-					if err != nil {
+					if err := p.deleteService(svc.UID); err != nil {
 						log.Error("(svc) unable to remove", "service", svc.UID)
 					}
 
@@ -266,13 +274,14 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 func (p *Processor) Delete(event watch.Event) (bool, error) {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
-		return false, fmt.Errorf("unable to parse Kubernetes services from API watcher")
+		return false, fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
 	}
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return false, fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
-	if svcCtx != nil && svcCtx.IsActive {
+
+	if svcCtx != nil {
 		// We only care about LoadBalancer services
 		if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
 			return true, nil
@@ -280,7 +289,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 		// We can ignore this service
 		if svc.Annotations["kube-vip.io/ignore"] == "true" {
-			log.Info("(svcs)ignore annotation for kube-vip", "service name", svc.Name)
+			log.Info("(svcs) ignore annotation for kube-vip", "service name", svc.Name)
 			return true, nil
 		}
 
@@ -304,14 +313,6 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 		log.Warn("(svcs) waiting for load balancer to finish")
 		<-svcCtx.Ctx.Done()
 		p.svcMap.Delete(svc.UID)
-	}
-
-	if p.config.EnableLeaderElection && !p.config.EnableServicesElection {
-		if p.config.EnableBGP {
-			endpoints.ClearBGPHosts(svc, &p.ServiceInstances, p.bgpServer)
-		} else if p.config.EnableRoutingTable {
-			endpoints.ClearRoutes(svc, &p.ServiceInstances)
-		}
 	}
 
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)

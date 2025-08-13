@@ -117,9 +117,9 @@ func (rt *RoutingTable) deleteAction(service *v1.Service) {
 }
 
 func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error {
-	instance := instance.FindServiceInstance(service, *rt.instances)
+	instance := instance.FindServiceInstanceWithTimeout(service, *rt.instances)
 	if instance == nil {
-		log.Error("failed to find the instance", "service", service.UID, "provider", rt.provider.GetLabel())
+		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {
 		for _, c := range instance.Clusters {
 			for n := range c.Network {
@@ -140,23 +140,34 @@ func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoint
 
 func ClearRoutes(service *v1.Service, instances *[]*instance.Instance) []error {
 	errs := []error{}
-	if instance := instance.FindServiceInstance(service, *instances); instance != nil {
-		for _, cluster := range instance.Clusters {
-			for i := range cluster.Network {
-				route := cluster.Network[i].PrepareRoute()
-				// check if route we are about to delete is not referenced by more than one service
-				if CountRouteReferences(route, instances) <= 1 {
-					err := cluster.Network[i].DeleteRoute()
-					if err != nil && !errors.Is(err, syscall.ESRCH) {
-						log.Error("failed to delete route", "ip", cluster.Network[i].IP(), "err", err)
-						errs = append(errs, err)
-					}
-					log.Debug("deleted route", "ip",
-						cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface())
+	if svcInst := instance.FindServiceInstance(service, *instances); svcInst != nil {
+		clearErrs := ClearRoutesByInstance(service, svcInst, instances)
+		errs = append(errs, clearErrs...)
+	}
+	return errs
+}
+
+func ClearRoutesByInstance(service *v1.Service, svcInst *instance.Instance, instances *[]*instance.Instance) []error {
+	if svcInst == nil {
+		return []error{fmt.Errorf("failed to remove routes for nil instance of service %s/%s, uid: %s", service.Namespace, service.Name, service.UID)}
+	}
+	errs := []error{}
+	for _, cluster := range svcInst.Clusters {
+		for i := range cluster.Network {
+			route := cluster.Network[i].PrepareRoute()
+			// check if route we are about to delete is not referenced by more than one service
+			if CountRouteReferences(route, instances) <= 1 {
+				err := cluster.Network[i].DeleteRoute()
+				if err != nil && !errors.Is(err, syscall.ESRCH) {
+					log.Error("failed to delete route", "ip", cluster.Network[i].IP(), "err", err)
+					errs = append(errs, err)
 				}
+				log.Debug("deleted route", "ip",
+					cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace, "interface", cluster.Network[i].Interface())
 			}
 		}
 	}
+
 	return errs
 }
 

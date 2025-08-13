@@ -3,24 +3,16 @@ package services
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
-
-var (
-	svcLocks map[string]*sync.Mutex
-)
-
-func init() {
-	svcLocks = make(map[string]*sync.Mutex)
-}
 
 // The StartServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) error {
@@ -29,12 +21,14 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 		return err
 	}
 
-	for _, instance := range p.ServiceInstances {
-		for _, cluster := range instance.Clusters {
-			for i := range cluster.Network {
-				_ = cluster.Network[i].DeleteRoute()
+	if p.config.EnableRoutingTable {
+		for _, instance := range p.ServiceInstances {
+			for _, cluster := range instance.Clusters {
+				for i := range cluster.Network {
+					_ = cluster.Network[i].DeleteRoute()
+				}
+				cluster.Stop()
 			}
-			cluster.Stop()
 		}
 	}
 
@@ -45,8 +39,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1.Service) error {
-	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	serviceLeaseID := fmt.Sprintf("%s/%s", serviceLease, service.Namespace)
+	serviceLease, _ := lease.GetName(service)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
@@ -60,15 +53,12 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 			Identity: p.config.NodeName,
 		},
 	}
-	childCtx, childCancel := context.WithCancel(ctx)
-	defer childCancel()
 
-	if _, ok := svcLocks[serviceLeaseID]; !ok {
-		svcLocks[serviceLeaseID] = new(sync.Mutex)
-	}
-
-	svcLocks[serviceLeaseID].Lock()
-	defer svcLocks[serviceLeaseID].Unlock()
+	go func() {
+		// wait for the service context to end and delete the lease then
+		<-ctx.Done()
+		p.leaseMgr.Delete(service)
+	}()
 
 	svcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
@@ -80,8 +70,40 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 
 	svcCtx.IsActive = true
 
+	svcLease, isNew := p.leaseMgr.Add(service)
+	// this service is sharing lease
+	if !isNew {
+		// wait for leader election to start or context to be done
+		select {
+		case <-svcLease.Started:
+		case <-svcLease.Ctx.Done():
+			svcCtx.IsActive = false
+			return nil
+		}
+		<-svcLease.Started
+
+		if lease.UsesCommon(service) {
+			if err := p.SyncServices(ctx, service); err != nil {
+				log.Error("service sync", "err", err)
+				svcLease.Cancel()
+			}
+			// just block until context is cancelled
+			<-ctx.Done()
+			if svcCtx.IsActive {
+				if err := p.deleteService(service.UID); err != nil {
+					log.Error("service deletion", "err", err)
+				}
+			}
+		}
+
+		// wait for leaderelection to be finished
+		<-svcLease.Ctx.Done()
+		// Mark this service is inactive
+		svcCtx.IsActive = false
+		return nil
+	}
 	// start the leader election code loop
-	leaderelection.RunOrDie(childCtx, leaderelection.LeaderElectionConfig{
+	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
 		// IMPORTANT: you MUST ensure that any code you have that
 		// is protected by the lease must terminate **before**
@@ -99,8 +121,9 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 				// we run this in background as it's blocking
 				if err := p.SyncServices(ctx, service); err != nil {
 					log.Error("service sync", "err", err)
-					childCancel()
+					svcLease.Cancel()
 				}
+				close(svcLease.Started)
 			},
 			OnStoppedLeading: func() {
 				// we can do cleanup here
