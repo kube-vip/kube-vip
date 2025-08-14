@@ -86,7 +86,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 					SvcElectionEnable:  "false",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "rt-ipv4", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, _ = prepareCluster(tempDirPath, "rt-ipv4", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -136,7 +137,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 					SvcElectionEnable:  "false",
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "rt-ipv6", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, _ = prepareCluster(tempDirPath, "rt-ipv6", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -198,7 +200,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 					ipnet: localIPv6Net,
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "rt-ds-ipv4", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN)
+				clusterName, _ = prepareCluster(tempDirPath, "rt-ds-ipv4", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN, 1)
 			})
 
 			AfterAll(func() {
@@ -266,7 +269,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 					ipnet: localIPv4Net,
 				}
 
-				clusterName, _ = prepareCluster(tempDirPath, "rt-ds-ipv6", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN)
+				clusterName, _ = prepareCluster(tempDirPath, "rt-ds-ipv6", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN, 1)
 			})
 
 			AfterAll(func() {
@@ -329,7 +333,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				clusterName, client = prepareCluster(tempDirPath, "rt-svc-ipv4", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, client = prepareCluster(tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -389,7 +394,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				clusterName, client = prepareCluster(tempDirPath, "rt-svc-ipv6", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, client = prepareCluster(tempDirPath, "rt-svc-ipv6", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -450,7 +456,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				clusterName, client = prepareCluster(tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, client = prepareCluster(tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -513,7 +520,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				clusterName, client = prepareCluster(tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129, kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil)
+				clusterName, client = prepareCluster(tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
 			})
 
 			AfterAll(func() {
@@ -552,7 +560,7 @@ func testServiceRT(svcName, lbAddress, leaseName, leaseNamespace, clusterName st
 
 	for _, svc := range services {
 		createTestService(svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 1)
 	}
 
 	var container string

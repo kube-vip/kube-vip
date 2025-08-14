@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -46,6 +47,8 @@ type Processor struct {
 
 	intfMgr *networkinterface.Manager
 	arpMgr  *arp.Manager
+
+	leaseMgr *lease.Manager
 }
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
@@ -71,8 +74,9 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
 
-		intfMgr: intfMgr,
-		arpMgr:  arpMgr,
+		intfMgr:  intfMgr,
+		arpMgr:   arpMgr,
+		leaseMgr: lease.NewManager(),
 	}
 }
 

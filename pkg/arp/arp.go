@@ -12,6 +12,7 @@ import (
 
 type Manager struct {
 	instances map[string]*Instance
+	mu        sync.Mutex
 	config    *kubevip.Config
 }
 
@@ -61,6 +62,8 @@ func (m *Manager) Remove(instance *Instance) {
 			i.counter--
 		} else {
 			log.Info("removing ARP/NDP instance", "name", instance.Name())
+			m.mu.Lock()
+			defer m.mu.Unlock()
 			delete(m.instances, instance.Name())
 		}
 	}
