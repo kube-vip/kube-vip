@@ -20,7 +20,6 @@ const (
 )
 
 func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, IPv6 bool) error {
-
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -41,9 +40,11 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 		}
 	}
 	slog.Debug("[egress]", "Creating Chain for service", service, "IPv6", IPv6)
-	// These don't return errors, so not 100% sure how to guarantee things were created
 	conn.AddChain(GetSNatChain(IPv6, service))
-	conn.Flush()
+	err = conn.Flush()
+	if err != nil {
+		return err
+	}
 	// Create our nftables rule
 	rule, err := CreateRule(podIP, vipIP, service, destinationPorts, ignoreCIDR, conn, IPv6)
 	if err != nil {
