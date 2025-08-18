@@ -26,6 +26,6 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
       - name: Anchore SBOM Action
-        uses: anchore/sbom-action@v0.20.4
+        uses: anchore/sbom-action@v0.20.5
         with:
           format: cyclonedx-json
