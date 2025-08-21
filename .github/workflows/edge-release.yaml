@@ -1,0 +1,44 @@
+
+name: Edge Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        fips: [yes, no]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@master
+        with:
+          platforms: all
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@master
+      - run: echo "${{ secrets.ARTIFACT_IMG_PUSH_EDGE }}" | base64 -d | docker login -u _json_key --password-stdin us-docker.pkg.dev
+      - name: Build artifacts
+        env:
+          FIPS_ENABLE: ${{ matrix.fips }}
+        run: |
+          if [ ${{ matrix.fips }} = "yes" ]; then
+            export REPOSITORY=us-docker.pkg.dev/palette-images-fips/edge
+          else
+            export REPOSITORY=us-docker.pkg.dev/palette-images/edge
+          fi
+          make docker
+
