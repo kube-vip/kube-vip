@@ -46,7 +46,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1.Service) error {
 	serviceLease := fmt.Sprintf("kubevip-%s", service.Name)
-	serviceLeaseId := fmt.Sprintf("%s/%s", serviceLease, service.Namespace)
+	serviceLeaseID := fmt.Sprintf("%s/%s", serviceLease, service.Namespace)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
@@ -63,12 +63,12 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
 
-	if _, ok := svcLocks[serviceLeaseId]; !ok {
-		svcLocks[serviceLeaseId] = new(sync.Mutex)
+	if _, ok := svcLocks[serviceLeaseID]; !ok {
+		svcLocks[serviceLeaseID] = new(sync.Mutex)
 	}
 
-	svcLocks[serviceLeaseId].Lock()
-	defer svcLocks[serviceLeaseId].Unlock()
+	svcLocks[serviceLeaseID].Lock()
+	defer svcLocks[serviceLeaseID].Unlock()
 
 	svcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
