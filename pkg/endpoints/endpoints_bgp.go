@@ -57,7 +57,7 @@ func (b *BGP) clear(ctx *servicecontext.Context, lastKnownGoodEndpoint *string, 
 					} else {
 						log.Info("deleted BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace)
-						ctx.ConfiguredNetworks.Delete(cluster.Network[i])
+						ctx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
 						*leaderElectionActive = false
 					}
 				}
