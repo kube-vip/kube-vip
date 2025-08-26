@@ -13,13 +13,15 @@ type IPUpdater interface {
 }
 
 type ipUpdater struct {
-	vip Network
+	vip       Network
+	vipSubnet string
 }
 
 // NewIPUpdater creates a DNSUpdater
-func NewIPUpdater(vip Network) IPUpdater {
+func NewIPUpdater(vip Network, vipSubnet string) IPUpdater {
 	return &ipUpdater{
-		vip: vip,
+		vip:       vip,
+		vipSubnet: vipSubnet,
 	}
 }
 
@@ -53,6 +55,9 @@ func (d *ipUpdater) Run(ctx context.Context) {
 					log.Error("error adding virtual IP", "err", err)
 				}
 
+				if err := d.vip.SetMask(d.vipSubnet); err != nil {
+					log.Error("setting mask", "err", err)
+				}
 			}
 			time.Sleep(3 * time.Second)
 		}
