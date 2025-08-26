@@ -57,23 +57,8 @@ func (sm *Manager) startTableMode(id string) error {
 		cancel()
 	}()
 
-	if sm.config.EnableControlPlane {
-		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
-		if err != nil {
-			return fmt.Errorf("cluster initialization error: %w", err)
-		}
-
-		clusterManager, err := initClusterManager(sm)
-		if err != nil {
-			return fmt.Errorf("cluster manager initialization error: %w", err)
-		}
-
-		if err := cpCluster.StartVipService(sm.config, clusterManager, nil); err != nil {
-			log.Error("Control Plane", "err", err)
-			// Trigger the shutdown of this manager instance
-			sm.signalChan <- syscall.SIGINT
-		}
-	} else {
+	if sm.config.EnableServices {
+		log.Debug("starting Services")
 		ns, err := returnNameSpace()
 		if err != nil {
 			log.Warn("unable to auto-detect namespace", "dropping to", sm.config.Namespace)
@@ -149,7 +134,35 @@ func (sm *Manager) startTableMode(id string) error {
 			err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 			if err != nil {
 				log.Error("Cannot watch services", "err", err)
+			} else {
+				log.Debug("watching services")
 			}
+		}
+	}
+	if sm.config.EnableControlPlane {
+		log.Debug("initCluster for ControlPlane")
+		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
+		if err != nil {
+			log.Debug("init of ControlPlane NOT successful")
+			return fmt.Errorf("cluster initialization error: %w", err)
+		} else {
+			log.Debug("init of ControlPlane successful")
+		}
+		log.Debug("init ClusterManager")
+		clusterManager, err := initClusterManager(sm)
+		if err != nil {
+			log.Debug("init cluster manager NOT successful")
+			return fmt.Errorf("cluster manager initialization error: %w", err)
+		} else {
+			log.Debug("init ClusterManager successful")
+		}
+
+		if err := cpCluster.StartVipService(sm.config, clusterManager, nil); err != nil {
+			log.Error("Control Plane", "err", err)
+			// Trigger the shutdown of this manager instance
+			sm.signalChan <- syscall.SIGINT
+		} else {
+			log.Debug("start VipServer for cluster manager successful")
 		}
 	}
 
