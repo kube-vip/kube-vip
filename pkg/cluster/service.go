@@ -173,6 +173,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					log.Error("failed to check IP type", "IP", networkIP, "error", err)
 					continue
 				}
+				log.Debug("current ip to process", "ip", networkIP)
 
 				backendMap := &backendMapV4
 				if isNetworkV6 {
@@ -180,7 +181,9 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				}
 
 				for entry := range *backendMap {
+					log.Debug("entry.Check() for entry:",entry)
 					if entry.Check() {
+						log.Debug("entry.Check() true")
 						_, err = network.AddIP(true)
 						if err != nil {
 							log.Error("error adding address", "err", err)
@@ -268,8 +271,10 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 	var arpWG sync.WaitGroup
 
+	log.Debug("StartLoadBalancerService")
 	for i := range cluster.Network {
 		network := cluster.Network[i]
+		log.Debug("current ip to process", "ip", network.IP())
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			panic("")
@@ -278,15 +283,21 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if err != nil {
 			log.Warn("attempted to clean existing VIP", "err", err)
 		}
+		log.Debug("c.EnableRoutingTable:",c.EnableRoutingTable," c.EnableLeaderElection ",c.EnableLeaderElection, " c.EnableServicesElection ",c.EnableServicesElection)
 
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
 			err = network.AddRoute(false)
 			if err != nil {
 				log.Warn(err.Error())
+			} else {
+				log.Info("successful add Route")
 			}
-		} else if !c.EnableRoutingTable {
+		}
+		if c.EnableRoutingTable {
 			if _, err = network.AddIP(false); err != nil {
 				log.Warn(err.Error())
+			} else {
+				log.Info("successful add IP")
 			}
 		}
 
