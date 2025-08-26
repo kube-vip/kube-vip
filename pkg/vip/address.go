@@ -757,6 +757,10 @@ func GarbageCollect(adapter, address string, intfMgr *networkinterface.Manager) 
 }
 
 func (configurator *network) SetMask(mask string) error {
+	if configurator.IsDNS() {
+		return nil
+	}
+
 	selectedMask, err := SelectSubnet(configurator.IP(), mask)
 	if err != nil {
 		return fmt.Errorf("failed to select mask %q: %w", mask, err)
