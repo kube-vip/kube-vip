@@ -12,7 +12,7 @@ import (
 // during runtime if IP changes, startDDNS don't have to do reconfigure because
 // dnsUpdater already have the functionality to keep trying resolve the IP
 // and update the VIP configuration if it changes
-func (cluster *Cluster) StartDDNS(ctx context.Context) error {
+func (cluster *Cluster) StartDDNS(ctx context.Context, vipSubnet string) error {
 	for i := range cluster.Network {
 		ddnsMgr := vip.NewDDNSManager(ctx, cluster.Network[i])
 		ip, err := ddnsMgr.Start()
@@ -20,6 +20,10 @@ func (cluster *Cluster) StartDDNS(ctx context.Context) error {
 			return err
 		}
 		if err = cluster.Network[i].SetIP(ip); err != nil {
+			return err
+		}
+
+		if err := cluster.Network[i].SetMask(vipSubnet); err != nil {
 			return err
 		}
 	}
