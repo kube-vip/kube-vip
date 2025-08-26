@@ -61,7 +61,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		// start the dns updater if address is dns
 		if network.IsDNS() {
 			log.Info("starting the DNS updater", "address", network.DNSName())
-			ipUpdater := vip.NewIPUpdater(network, c.VIPSubnet)
+			ipUpdater := vip.NewIPUpdater(network)
 			ipUpdater.Run(ctxDNS)
 		}
 
