@@ -6,11 +6,13 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/detector"
+	"sigs.k8s.io/yaml"
 )
 
 // ParseEnvironment - will popultate the configuration from environment variables
@@ -667,5 +669,282 @@ func ParseEnvironment(c *Config) error {
 		c.EgressClean = b
 	}
 
+	// check for configuration file path
+	env = os.Getenv(configFile)
+	if env != "" {
+		c.ConfigFile = env
+	}
+
 	return nil
+}
+
+// LoadConfigFromFile loads configuration from a JSON or YAML file
+func LoadConfigFromFile(configFilePath string) (*Config, error) {
+	if configFilePath == "" {
+		return nil, fmt.Errorf("config file path is empty")
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("config file does not exist: %s", configFilePath)
+	}
+
+	// Read file content
+	data, err := os.ReadFile(configFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %v", configFilePath, err)
+	}
+
+	var config Config
+	ext := strings.ToLower(filepath.Ext(configFilePath))
+
+	switch ext {
+	case ".json":
+		err = json.Unmarshal(data, &config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JSON config file %s: %v", configFilePath, err)
+		}
+	case ".yaml", ".yml":
+		err = yaml.Unmarshal(data, &config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse YAML config file %s: %v", configFilePath, err)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported config file format %s. Supported formats: .json, .yaml, .yml", ext)
+	}
+
+	return &config, nil
+}
+
+// MergeConfigFromFile merges configuration loaded from file with existing config
+// Priority: command line flags > environment variables > config file
+func MergeConfigFromFile(c *Config, configFilePath string) error {
+	if configFilePath == "" {
+		return nil // No config file specified, nothing to merge
+	}
+
+	fileConfig, err := LoadConfigFromFile(configFilePath)
+	if err != nil {
+		return err
+	}
+
+	// Merge file config with existing config
+	// Only set values from file if they haven't been set by flags or env vars
+	mergeConfigValues(c, fileConfig)
+
+	return nil
+}
+
+// mergeConfigValues merges values from fileConfig into baseConfig
+// Only overwrites zero values in baseConfig
+func mergeConfigValues(baseConfig, fileConfig *Config) {
+	// Basic configuration
+	if baseConfig.Logging == 0 && fileConfig.Logging != 0 {
+		baseConfig.Logging = fileConfig.Logging
+	}
+
+	// Network configuration
+	if baseConfig.Interface == "" && fileConfig.Interface != "" {
+		baseConfig.Interface = fileConfig.Interface
+	}
+	if baseConfig.ServicesInterface == "" && fileConfig.ServicesInterface != "" {
+		baseConfig.ServicesInterface = fileConfig.ServicesInterface
+	}
+	if baseConfig.VIP == "" && fileConfig.VIP != "" {
+		baseConfig.VIP = fileConfig.VIP
+	}
+	if baseConfig.VIPSubnet == "" && fileConfig.VIPSubnet != "" {
+		baseConfig.VIPSubnet = fileConfig.VIPSubnet
+	}
+	if baseConfig.Address == "" && fileConfig.Address != "" {
+		baseConfig.Address = fileConfig.Address
+	}
+	if baseConfig.Port == 0 && fileConfig.Port != 0 {
+		baseConfig.Port = fileConfig.Port
+	}
+	if baseConfig.NodeName == "" && fileConfig.NodeName != "" {
+		baseConfig.NodeName = fileConfig.NodeName
+	}
+
+	// Boolean flags - only merge if not explicitly set
+	if !baseConfig.EnableARP && fileConfig.EnableARP {
+		baseConfig.EnableARP = fileConfig.EnableARP
+	}
+	if !baseConfig.EnableBGP && fileConfig.EnableBGP {
+		baseConfig.EnableBGP = fileConfig.EnableBGP
+	}
+	if !baseConfig.EnableWireguard && fileConfig.EnableWireguard {
+		baseConfig.EnableWireguard = fileConfig.EnableWireguard
+	}
+	if !baseConfig.EnableRoutingTable && fileConfig.EnableRoutingTable {
+		baseConfig.EnableRoutingTable = fileConfig.EnableRoutingTable
+	}
+	if !baseConfig.EnableControlPlane && fileConfig.EnableControlPlane {
+		baseConfig.EnableControlPlane = fileConfig.EnableControlPlane
+	}
+	if !baseConfig.DetectControlPlane && fileConfig.DetectControlPlane {
+		baseConfig.DetectControlPlane = fileConfig.DetectControlPlane
+	}
+	if !baseConfig.EnableServices && fileConfig.EnableServices {
+		baseConfig.EnableServices = fileConfig.EnableServices
+	}
+	if !baseConfig.EnableServicesElection && fileConfig.EnableServicesElection {
+		baseConfig.EnableServicesElection = fileConfig.EnableServicesElection
+	}
+	if !baseConfig.EnableNodeLabeling && fileConfig.EnableNodeLabeling {
+		baseConfig.EnableNodeLabeling = fileConfig.EnableNodeLabeling
+	}
+	if !baseConfig.EnableLoadBalancer && fileConfig.EnableLoadBalancer {
+		baseConfig.EnableLoadBalancer = fileConfig.EnableLoadBalancer
+	}
+	if !baseConfig.DDNS && fileConfig.DDNS {
+		baseConfig.DDNS = fileConfig.DDNS
+	}
+	if !baseConfig.SingleNode && fileConfig.SingleNode {
+		baseConfig.SingleNode = fileConfig.SingleNode
+	}
+	if !baseConfig.StartAsLeader && fileConfig.StartAsLeader {
+		baseConfig.StartAsLeader = fileConfig.StartAsLeader
+	}
+
+	// Service configuration
+	if baseConfig.Namespace == "" && fileConfig.Namespace != "" {
+		baseConfig.Namespace = fileConfig.Namespace
+	}
+	if baseConfig.ServiceNamespace == "" && fileConfig.ServiceNamespace != "" {
+		baseConfig.ServiceNamespace = fileConfig.ServiceNamespace
+	}
+	if baseConfig.ServicesLeaseName == "" && fileConfig.ServicesLeaseName != "" {
+		baseConfig.ServicesLeaseName = fileConfig.ServicesLeaseName
+	}
+
+	// LoadBalancer configuration
+	if baseConfig.LoadBalancerPort == 0 && fileConfig.LoadBalancerPort != 0 {
+		baseConfig.LoadBalancerPort = fileConfig.LoadBalancerPort
+	}
+	if baseConfig.LoadBalancerForwardingMethod == "" && fileConfig.LoadBalancerForwardingMethod != "" {
+		baseConfig.LoadBalancerForwardingMethod = fileConfig.LoadBalancerForwardingMethod
+	}
+	if baseConfig.LoadBalancerClassName == "" && fileConfig.LoadBalancerClassName != "" {
+		baseConfig.LoadBalancerClassName = fileConfig.LoadBalancerClassName
+	}
+
+	// Routing Table configuration
+	if baseConfig.RoutingTableID == 0 && fileConfig.RoutingTableID != 0 {
+		baseConfig.RoutingTableID = fileConfig.RoutingTableID
+	}
+	if baseConfig.RoutingTableType == 0 && fileConfig.RoutingTableType != 0 {
+		baseConfig.RoutingTableType = fileConfig.RoutingTableType
+	}
+	if baseConfig.RoutingProtocol == 0 && fileConfig.RoutingProtocol != 0 {
+		baseConfig.RoutingProtocol = fileConfig.RoutingProtocol
+	}
+
+	// BGP configuration
+	mergeBGPConfig(&baseConfig.BGPConfig, &fileConfig.BGPConfig)
+
+	// Kubernetes configuration
+	if baseConfig.K8sConfigFile == "" && fileConfig.K8sConfigFile != "" {
+		baseConfig.K8sConfigFile = fileConfig.K8sConfigFile
+	}
+
+	// Leader Election configuration
+	mergeLeaderElectionConfig(&baseConfig.KubernetesLeaderElection, &fileConfig.KubernetesLeaderElection)
+
+	// Prometheus configuration
+	if baseConfig.PrometheusHTTPServer == "" && fileConfig.PrometheusHTTPServer != "" {
+		baseConfig.PrometheusHTTPServer = fileConfig.PrometheusHTTPServer
+	}
+
+	// DNS configuration
+	if baseConfig.DNSMode == "" && fileConfig.DNSMode != "" {
+		baseConfig.DNSMode = fileConfig.DNSMode
+	}
+
+	// Health check configuration
+	if baseConfig.HealthCheckPort == 0 && fileConfig.HealthCheckPort != 0 {
+		baseConfig.HealthCheckPort = fileConfig.HealthCheckPort
+	}
+
+	// Egress configuration
+	if baseConfig.EgressPodCidr == "" && fileConfig.EgressPodCidr != "" {
+		baseConfig.EgressPodCidr = fileConfig.EgressPodCidr
+	}
+	if baseConfig.EgressServiceCidr == "" && fileConfig.EgressServiceCidr != "" {
+		baseConfig.EgressServiceCidr = fileConfig.EgressServiceCidr
+	}
+
+	// Mirror configuration
+	if baseConfig.MirrorDestInterface == "" && fileConfig.MirrorDestInterface != "" {
+		baseConfig.MirrorDestInterface = fileConfig.MirrorDestInterface
+	}
+
+	// Iptables configuration
+	if baseConfig.IptablesBackend == "" && fileConfig.IptablesBackend != "" {
+		baseConfig.IptablesBackend = fileConfig.IptablesBackend
+	}
+
+	// Backend health check interval
+	if baseConfig.BackendHealthCheckInterval == 0 && fileConfig.BackendHealthCheckInterval != 0 {
+		baseConfig.BackendHealthCheckInterval = fileConfig.BackendHealthCheckInterval
+	}
+
+	// ARP broadcast rate
+	if baseConfig.ArpBroadcastRate == 0 && fileConfig.ArpBroadcastRate != 0 {
+		baseConfig.ArpBroadcastRate = fileConfig.ArpBroadcastRate
+	}
+
+	// Annotations
+	if baseConfig.Annotations == "" && fileConfig.Annotations != "" {
+		baseConfig.Annotations = fileConfig.Annotations
+	}
+
+	// Load balancers slice
+	if len(baseConfig.LoadBalancers) == 0 && len(fileConfig.LoadBalancers) > 0 {
+		baseConfig.LoadBalancers = fileConfig.LoadBalancers
+	}
+}
+
+// mergeBGPConfig merges BGP configuration
+func mergeBGPConfig(base, file *bgp.Config) {
+	if base.RouterID == "" && file.RouterID != "" {
+		base.RouterID = file.RouterID
+	}
+	if base.AS == 0 && file.AS != 0 {
+		base.AS = file.AS
+	}
+	if base.SourceIF == "" && file.SourceIF != "" {
+		base.SourceIF = file.SourceIF
+	}
+	if base.SourceIP == "" && file.SourceIP != "" {
+		base.SourceIP = file.SourceIP
+	}
+	if base.HoldTime == 0 && file.HoldTime != 0 {
+		base.HoldTime = file.HoldTime
+	}
+	if base.KeepaliveInterval == 0 && file.KeepaliveInterval != 0 {
+		base.KeepaliveInterval = file.KeepaliveInterval
+	}
+	if len(base.Peers) == 0 && len(file.Peers) > 0 {
+		base.Peers = file.Peers
+	}
+}
+
+// mergeLeaderElectionConfig merges leader election configuration
+func mergeLeaderElectionConfig(base, file *KubernetesLeaderElection) {
+	if base.LeaseName == "" && file.LeaseName != "" {
+		base.LeaseName = file.LeaseName
+	}
+	if base.LeaseDuration == 0 && file.LeaseDuration != 0 {
+		base.LeaseDuration = file.LeaseDuration
+	}
+	if base.RenewDeadline == 0 && file.RenewDeadline != 0 {
+		base.RenewDeadline = file.RenewDeadline
+	}
+	if base.RetryPeriod == 0 && file.RetryPeriod != 0 {
+		base.RetryPeriod = file.RetryPeriod
+	}
+	if len(base.LeaseAnnotations) == 0 && len(file.LeaseAnnotations) > 0 {
+		base.LeaseAnnotations = file.LeaseAnnotations
+	}
 }

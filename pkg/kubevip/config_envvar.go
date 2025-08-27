@@ -234,4 +234,7 @@ const (
 
 	// egressClean enables egress cleaning on kube-vip's start
 	egressClean = "egress_clean"
+
+	// configFile defines the path to a JSON/YAML configuration file
+	configFile = "config_file"
 )

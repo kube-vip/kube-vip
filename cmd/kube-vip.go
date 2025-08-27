@@ -144,6 +144,9 @@ func init() {
 	// Kubernetes client specific flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.K8sConfigFile, "k8sConfigPath", "/etc/kubernetes/admin.conf", "Path to the configuration file used with the Kubernetes client")
 
+	// Configuration file flag
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ConfigFile, "config-file", "", "Path to a JSON/YAML configuration file to load settings from")
+
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
 	kubeVipCmd.AddCommand(kubeVipManager)
@@ -186,7 +189,16 @@ var kubeVipService = &cobra.Command{
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
 
-		// parse environment variables, these will overwrite anything loaded or flags
+		// Load configuration from file if specified (lowest priority)
+		if initConfig.ConfigFile != "" {
+			err := kubevip.MergeConfigFromFile(&initConfig, initConfig.ConfigFile)
+			if err != nil {
+				log.Error("loading config file", "err", err)
+				return
+			}
+		}
+
+		// parse environment variables, these will overwrite anything loaded from config file
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing env", "err", err)
@@ -241,7 +253,16 @@ var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
 	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
-		// parse environment variables, these will overwrite anything loaded or flags
+		// Load configuration from file if specified (lowest priority)
+		if initConfig.ConfigFile != "" {
+			err := kubevip.MergeConfigFromFile(&initConfig, initConfig.ConfigFile)
+			if err != nil {
+				log.Error("loading config file", "err", err)
+				return
+			}
+		}
+
+		// parse environment variables, these will overwrite anything loaded from config file
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing environment", "err", err)

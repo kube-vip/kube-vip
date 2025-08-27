@@ -186,6 +186,9 @@ type Config struct {
 
 	// EgressClean, enables egress cleaning on Kube-vip's start
 	EgressClean bool `yaml:"egressClean"`
+
+	// ConfigFile defines the path to a JSON/YAML configuration file
+	ConfigFile string `yaml:"configFile"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection
