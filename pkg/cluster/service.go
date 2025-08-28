@@ -181,7 +181,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 				}
 
 				for entry := range *backendMap {
-					log.Debug("entry.Check() for entry:",entry)
+					log.Debug("entry.Check() for entry:", entry)
 					if entry.Check() {
 						log.Debug("entry.Check() true")
 						_, err = network.AddIP(true)
@@ -283,7 +283,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if err != nil {
 			log.Warn("attempted to clean existing VIP", "err", err)
 		}
-		log.Debug("c.EnableRoutingTable:",c.EnableRoutingTable," c.EnableLeaderElection ",c.EnableLeaderElection, " c.EnableServicesElection ",c.EnableServicesElection)
+		log.Debug("c.EnableRoutingTable:", c.EnableRoutingTable, " c.EnableLeaderElection ", c.EnableLeaderElection, " c.EnableServicesElection ", c.EnableServicesElection)
 
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
 			err = network.AddRoute(false)
