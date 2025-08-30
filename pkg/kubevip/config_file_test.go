@@ -194,7 +194,7 @@ bgpConfig:
 			var filePath string
 			if tt.filename != "" {
 				filePath = filepath.Join(tmpDir, tt.filename)
-				if err := os.WriteFile(filePath, []byte(tt.content), 0644); err != nil {
+				if err := os.WriteFile(filePath, []byte(tt.content), 0600); err != nil {
 					t.Fatalf("Failed to write test file: %v", err)
 				}
 			}
@@ -287,7 +287,7 @@ leaseName: "file-lease"
 leaseDuration: 20
 prometheusHTTPServer: ":3000"
 `
-	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFile, []byte(configContent), 0600); err != nil {
 		t.Fatalf("Failed to write test config file: %v", err)
 	}
 
