@@ -71,7 +71,7 @@ func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
 	for _, endpoint := range ep.endpoints.Endpoints {
-		if !*endpoint.Conditions.Serving {
+		if endpoint.Conditions.Serving == nil || !*endpoint.Conditions.Serving {
 			continue
 		}
 		for _, address := range endpoint.Addresses {
