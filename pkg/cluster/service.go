@@ -293,12 +293,11 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 				log.Info("successful add Route")
 			}
 		}
-		if c.EnableRoutingTable {
-			if _, err = network.AddIP(false); err != nil {
-				log.Warn(err.Error())
-			} else {
-				log.Info("successful add IP")
-			}
+		
+		if _, err = network.AddIP(false); err != nil {
+			log.Warn(err.Error())
+		} else {
+			log.Info("successful add IP")
 		}
 
 		if c.EnableARP {
