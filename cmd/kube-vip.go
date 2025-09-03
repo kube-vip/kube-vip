@@ -22,6 +22,9 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
+// Is an option to set the image
+var image string
+
 // Is kube-vip running within cluster
 var inCluster bool
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,7 +14,6 @@ import (
 	applyCoreV1 "k8s.io/client-go/applyconfigurations/core/v1"
 	applyMetaV1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
-
 	"sigs.k8s.io/yaml"
 )
 
@@ -167,7 +167,11 @@ func GenerateRoleBinding(rolebinding bool, saCfg *applyCoreV1.ServiceAccountAppl
 }
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
-func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod {
+func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *corev1.Pod {
+	imageRef, err := name.NewTag(image, name.WeakValidation, name.WithDefaultTag(imageVersion))
+	if err != nil {
+		panic(fmt.Errorf("Cannot parse %q: %w", image, err))
+	}
 	command := "manager"
 
 	// Determine where the pods should be living (for multi-tenancy)
@@ -592,7 +596,7 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 			Containers: []corev1.Container{
 				{
 					Name:            "kube-vip",
-					Image:           fmt.Sprintf("ghcr.io/kube-vip/kube-vip:%s", imageVersion),
+					Image:           imageRef.Name(),
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					SecurityContext: securityContext,
 					Args: []string{
@@ -637,14 +641,14 @@ func generatePodSpec(c *Config, imageVersion string, inCluster bool) *corev1.Pod
 }
 
 // GeneratePodManifestFromConfig will take a kube-vip config and generate a manifest
-func GeneratePodManifestFromConfig(c *Config, imageVersion string, inCluster bool) string {
-	newManifest := generatePodSpec(c, imageVersion, inCluster)
+func GeneratePodManifestFromConfig(c *Config, image, imageVersion string, inCluster bool) string {
+	newManifest := generatePodSpec(c, image, imageVersion, inCluster)
 	b, _ := yaml.Marshal(newManifest)
 	return string(b)
 }
 
 // GenerateDaemonsetManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inCluster, taint bool) string {
+func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, inCluster, taint bool) string {
 	// Determine where the pod should be deployed
 	var namespace string
 	if c.ServiceNamespace != "" {
@@ -653,7 +657,7 @@ func GenerateDaemonsetManifestFromConfig(c *Config, imageVersion string, inClust
 		namespace = metav1.NamespaceSystem
 	}
 
-	podSpec := generatePodSpec(c, imageVersion, inCluster).Spec
+	podSpec := generatePodSpec(c, image, imageVersion, inCluster).Spec
 	newManifest := &appv1.DaemonSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "DaemonSet",

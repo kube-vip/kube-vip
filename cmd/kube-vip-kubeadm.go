@@ -65,7 +65,7 @@ var kubeKubeadmInit = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
@@ -110,7 +110,7 @@ var kubeKubeadmJoin = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
