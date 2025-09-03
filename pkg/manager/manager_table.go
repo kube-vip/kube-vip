@@ -145,18 +145,15 @@ func (sm *Manager) startTableMode(id string) error {
 		if err != nil {
 			log.Debug("init of ControlPlane NOT successful")
 			return fmt.Errorf("cluster initialization error: %w", err)
-		} else {
-			log.Debug("init of ControlPlane successful")
 		}
+		log.Debug("init of ControlPlane successful")
 		log.Debug("init ClusterManager")
 		clusterManager, err := initClusterManager(sm)
 		if err != nil {
 			log.Debug("init cluster manager NOT successful")
 			return fmt.Errorf("cluster manager initialization error: %w", err)
-		} else {
-			log.Debug("init ClusterManager successful")
 		}
-
+		log.Debug("init ClusterManager successful")
 		if err := cpCluster.StartVipService(sm.config, clusterManager, nil); err != nil {
 			log.Error("Control Plane", "err", err)
 			// Trigger the shutdown of this manager instance
