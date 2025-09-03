@@ -15,7 +15,7 @@ TARGETOS=linux
 # Use linker flags to provide version/build settings to the target
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
-REPOSITORY ?= plndr
+REPOSITORY ?= docker.io/plndr
 
 .PHONY: all build clean install uninstall simplify check run e2e-tests
 
@@ -109,22 +109,22 @@ run: install
 manifests:
 	@make build
 	@mkdir -p ./docs/manifests/$(VERSION)/
-	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services > ./docs/manifests/$(VERSION)/kube-vip-arp.yaml
-	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --enableLoadBalancer > ./docs/manifests/$(VERSION)/kube-vip-arp-lb.yaml
-	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --bgp --controlplane --services > ./docs/manifests/$(VERSION)/kube-vip-bgp.yaml
-	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-arp-ds.yaml
-	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --inCluster --enableLoadBalancer > ./docs/manifests/$(VERSION)/kube-vip-arp-ds-lb.yaml
-	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --bgp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-bgp-ds.yaml
-	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --bgp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-bgp-em-ds.yaml
+	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services > ./docs/manifests/$(VERSION)/kube-vip-arp.yaml
+	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --enableLoadBalancer > ./docs/manifests/$(VERSION)/kube-vip-arp-lb.yaml
+	@./kube-vip manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --controlplane --services > ./docs/manifests/$(VERSION)/kube-vip-bgp.yaml
+	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-arp-ds.yaml
+	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --inCluster --enableLoadBalancer > ./docs/manifests/$(VERSION)/kube-vip-arp-ds-lb.yaml
+	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-bgp-ds.yaml
+	@./kube-vip manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster > ./docs/manifests/$(VERSION)/kube-vip-bgp-em-ds.yaml
 	@-rm ./kube-vip
 
 manifest-test: 
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --enableLoadBalancer
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --bgp --controlplane --services 
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --inCluster
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --arp --leaderElection --controlplane --services --inCluster --enableLoadBalancer
-	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --bgp --leaderElection --controlplane --services --inCluster
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --enableLoadBalancer
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest pod --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --controlplane --services
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --inCluster
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --leaderElection --controlplane --services --inCluster --enableLoadBalancer
+	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster
 
 unit-tests:
 	go test ./...
@@ -166,7 +166,7 @@ kind-quick:
 	kubectl create configmap --namespace kube-system kubevip --from-literal range-global=172.18.100.10-172.18.100.30
 	kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
 	kind load docker-image --name kube-vip $(REPOSITORY)/$(TARGET):$(DOCKERTAG)
-	docker run --network host --rm $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --services --inCluster --arp --servicesElection --interface  eth0 | sed 's|image:.*$ |image: $(REPOSITORY)/$(TARGET):$(DOCKERTAG)|'| kubectl apply -f -
+	docker run --network host --rm $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --services --inCluster --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --servicesElection --interface  eth0 | kubectl apply -f -
 
 kind-reload:
 	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) --name kube-vip

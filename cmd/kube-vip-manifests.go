@@ -19,6 +19,7 @@ var taint, role, rolebinding bool
 
 func init() {
 	kubeManifest.PersistentFlags().BoolVar(&inCluster, "inCluster", false, "Use the incluster token to authenticate to Kubernetes")
+	kubeManifest.PersistentFlags().StringVar(&image, "image", "ghcr.io/kube-vip/kube-vip", "Define a hardcoded image with or without tag for the manifest")
 	kubeManifestDaemon.PersistentFlags().BoolVar(&taint, "taint", false, "Taint the manifest for only running on control planes")
 	kubeManifestRbac.PersistentFlags().BoolVar(&role, "role", false, "Generate only a Role inside the serviceNamespace access")
 	kubeManifestRbac.PersistentFlags().BoolVar(&rolebinding, "rolebinding", false, "Generate only a RoleBinding for namespaced access")
@@ -66,7 +67,7 @@ var kubeManifestPod = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, Release.Version, inCluster)
+		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
@@ -99,7 +100,7 @@ var kubeManifestDaemon = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, Release.Version, inCluster, taint)
+		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, image, Release.Version, inCluster, taint)
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
