@@ -193,7 +193,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// Start an endpoint watcher if we're not watching it already
 				if !svcCtx.IsWatched {
 					// background the endpoint watcher
-					if (p.config.EnableRoutingTable || p.config.EnableBGP) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
+					if (p.config.EnableRoutingTable || p.config.EnableBGP) && (!p.config.EnableLeaderElection || p.config.EnableServicesElection) {
 						err = serviceFunc(svcCtx.Ctx, svc)
 						if err != nil {
 							log.Error(err.Error())
@@ -218,7 +218,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					// We're now watching this service
 					svcCtx.IsWatched = true
 				}
-			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
+			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && (!p.config.EnableLeaderElection || p.config.EnableServicesElection) {
 				err = serviceFunc(svcCtx.Ctx, svc)
 				if err != nil {
 					log.Error(err.Error())
