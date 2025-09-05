@@ -96,6 +96,7 @@ func (b *BGP) deleteAction(service *v1.Service) {
 }
 
 func (b *BGP) clearBGPHosts(service *v1.Service) {
+	log.Debug("clearBGPHosts")
 	ClearBGPHosts(service, b.instances, b.bgpServer)
 }
 
@@ -104,8 +105,11 @@ func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
 }
 
 func ClearBGPHosts(service *v1.Service, instances *[]*instance.Instance, bgpServer *bgp.Server) {
+	log.Debug("clearBGPHosts")
 	if instance := instance.FindServiceInstance(service, *instances); instance != nil {
 		ClearBGPHostsByInstance(instance, bgpServer)
+	} else {
+		log.Debug("Instance is nil")
 	}
 }
 

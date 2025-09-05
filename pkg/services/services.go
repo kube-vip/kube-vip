@@ -61,6 +61,7 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 
 func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
 	// protect against multiple calls
+	log.Debug("Getting action for service", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	addresses := instance.FetchServiceAddresses(svc)
 	ingressIPs := instance.FetchLoadBalancerIngressAddresses(svc)
 	p.mutex.Lock()
@@ -249,6 +250,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 }
 
 func (p *Processor) deleteService(uid types.UID) error {
+	log.Debug("Deleting service", "uid", uid)
 	// protect multiple calls
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -267,13 +269,16 @@ func (p *Processor) deleteService(uid types.UID) error {
 			serviceInstance = p.ServiceInstances[x]
 		}
 	}
+	log.Debug("INSTANCES", "old", p.ServiceInstances, "new", updatedInstances)
 	// If we've been through all services and not found the correct one then error
 	if !found {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
+		log.Error("unable to find/stop service", "uid", uid)
 		return nil
 	}
 
+	log.Error("set endpoints", "uid", uid)
 	for _, c := range serviceInstance.Clusters {
 		for n := range c.Network {
 			c.Network[n].SetHasEndpoints(false)
@@ -288,12 +293,15 @@ func (p *Processor) deleteService(uid types.UID) error {
 			vipSet[vip] = nil
 		}
 	}
+	log.Debug("vipSet", "map", vipSet)
 	for _, vip := range instance.FetchServiceAddresses(serviceInstance.ServiceSnapshot) {
+		log.Debug("vip", "vip", vip)
 		if _, found := vipSet[vip]; found {
 			shared = true
 		}
 	}
 	if !shared {
+		log.Debug("service is shared", "uid", uid)
 		for x := range serviceInstance.Clusters {
 			serviceInstance.Clusters[x].Stop()
 		}
@@ -325,6 +333,8 @@ func (p *Processor) deleteService(uid types.UID) error {
 				}
 			}
 		}
+	} else {
+		log.Debug("service is NOT shared", "uid", uid)
 	}
 
 	// Update the service array

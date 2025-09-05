@@ -314,6 +314,8 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 		log.Warn("(svcs) waiting for load balancer to finish")
 		<-svcCtx.Ctx.Done()
 		p.svcMap.Delete(svc.UID)
+	} else {
+		log.Debug("not processing service here", "name", svc.Name, "uid", svc.UID)
 	}
 
 	if p.config.EnableBGP && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {

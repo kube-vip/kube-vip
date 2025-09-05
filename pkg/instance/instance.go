@@ -478,5 +478,6 @@ func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 			return instances[i]
 		}
 	}
+	log.Debug("insance not found", "UID", svc.UID)
 	return nil
 }
