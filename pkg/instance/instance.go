@@ -483,7 +483,7 @@ func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	return nil
 }
 
-func FindServiceInstanceWithTiemout(svc *v1.Service, instances []*Instance) *Instance {
+func FindServiceInstanceWithTimeout(svc *v1.Service, instances []*Instance) *Instance {
 	log.Debug("finding service with timeout", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	ticker := time.NewTicker(time.Millisecond * 200)
 	defer ticker.Stop()

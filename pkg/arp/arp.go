@@ -101,6 +101,9 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 				if i, ok := instance.(*Instance); ok {
 					if i.counter > 0 {
 						ensureIPAndSendGratuitous(i)
+					} else {
+						// remove IP just in case...
+						_, _ = i.network.DeleteIP()
 					}
 				}
 				return true
@@ -118,6 +121,7 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 // either a gratuitous ARP or gratuitous NDP. Re-adds the interface if it is IPv6
 // and in a dadfailed state.
 func ensureIPAndSendGratuitous(instance *Instance) {
+	log.Debug("ensureIPAndSendGratuitous", "addr", instance.network.IP())
 	iface := instance.network.Interface()
 	ipString := instance.network.IP()
 

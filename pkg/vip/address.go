@@ -309,6 +309,7 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 
 // AddIP - Add an IP address to the interface
 func (configurator *network) AddIP(precheck bool) (bool, error) {
+	log.Debug("ADDING IP", "addr", configurator.IP())
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 	exists := false
@@ -481,6 +482,7 @@ func (configurator *network) removeIptablesRuleToLimitTrafficPorts() error {
 
 // DeleteIP - Remove an IP address from the interface
 func (configurator *network) DeleteIP() (bool, error) {
+	log.Debug("DELETING IP", "addr", configurator.IP())
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 
