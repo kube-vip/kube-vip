@@ -102,8 +102,10 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 					if i.counter > 0 {
 						ensureIPAndSendGratuitous(i)
 					} else {
-						// remove IP just in case...
-						_, _ = i.network.DeleteIP()
+						// this instance should not be advertised - delete the IP just in case...
+						if _, err := i.network.DeleteIP(); err != nil {
+							log.Error("failed to delete IP", "address", i.network.IP(), "err", err)
+						}
 					}
 				}
 				return true
