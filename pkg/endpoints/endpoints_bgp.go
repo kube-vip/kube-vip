@@ -110,7 +110,9 @@ func ClearBGPHosts(service *v1.Service, instances *[]*instance.Instance, bgpServ
 }
 
 func ClearBGPHostsByInstance(instance *instance.Instance, bgpServer *bgp.Server) {
+	log.Debug("number of clusters", "len", len(instance.Clusters))
 	for _, cluster := range instance.Clusters {
+		log.Debug("number of networks", "len", len(cluster.Network))
 		for i := range cluster.Network {
 			network := cluster.Network[i]
 			err := bgpServer.DelHost(network.CIDR())

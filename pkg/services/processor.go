@@ -276,7 +276,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 func (p *Processor) Delete(event watch.Event) (bool, error) {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
-		return false, fmt.Errorf("unable to parse Kubernetes services from API watcher")
+		return false, fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
 	}
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
@@ -290,7 +290,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 		// We can ignore this service
 		if svc.Annotations["kube-vip.io/ignore"] == "true" {
-			log.Info("(svcs)ignore annotation for kube-vip", "service name", svc.Name)
+			log.Info("(svcs) ignore annotation for kube-vip", "service name", svc.Name)
 			return true, nil
 		}
 
