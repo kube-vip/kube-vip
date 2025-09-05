@@ -9,64 +9,71 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// Manager is used to manage leases.
 type Manager struct {
 	leases map[string]*Lease
 	lock   sync.Mutex
 }
 
+// NewManager creates new lease manager.
 func NewManager() *Manager {
 	return &Manager{
 		leases: make(map[string]*Lease),
 	}
 }
 
+// Add adds lease or incerements counter if lease is alreay used.
 func (m *Manager) Add(service *v1.Service) (*Lease, bool) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	name := GetName(service)
-	if _, exist := m.leases[name]; !exist {
+	_, id := GetName(service)
+	if _, exist := m.leases[id]; !exist {
 		ctx, cancel := context.WithCancel(context.Background())
-		m.leases[name] = newLease(ctx, cancel)
-		return m.leases[name], true
+		m.leases[id] = newLease(ctx, cancel)
+		return m.leases[id], true
 	}
 
-	m.leases[name].increment()
-	return m.leases[name], false
+	m.leases[id].increment()
+	return m.leases[id], false
 }
 
+// Delete decrements lease counter and removes the lease if counter equals 0.
 func (m *Manager) Delete(service *v1.Service) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	name := GetName(service)
-	if _, exist := m.leases[name]; exist {
-		m.leases[name].decrement()
-		if m.leases[name].cnt < 1 {
-			delete(m.leases, name)
+	_, id := GetName(service)
+	if _, exist := m.leases[id]; exist {
+		m.leases[id].decrement()
+		if m.leases[id].cnt < 1 {
+			delete(m.leases, id)
 		}
 	}
 }
 
+// Get returns lease for the service.
 func (m *Manager) Get(service *v1.Service) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	name := GetName(service)
+	_, id := GetName(service)
 
-	if lease, exist := m.leases[name]; exist {
+	if lease, exist := m.leases[id]; exist {
 		return lease
 	}
 	return nil
 }
 
+// GetLeaderContext returns leder context for the service.
 func (m *Manager) GetLeaderContext(service *v1.Service) context.Context {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	name := GetName(service)
-	if _, ok := m.leases[name]; !ok {
+	_, id := GetName(service)
+	if _, ok := m.leases[id]; !ok {
 		return nil
 	}
-	return m.leases[name].Ctx
+	return m.leases[id].Ctx
 }
 
+// Lease holds lease data.
 type Lease struct {
 	cnt     uint
 	Lock    *sync.Mutex
@@ -103,14 +110,17 @@ func (l *Lease) decrement() {
 	}
 }
 
-func GetName(service *v1.Service) string {
+// GetName gets lease name and id for the service.
+func GetName(service *v1.Service) (string, string) {
 	serviceLease, exists := service.Annotations[kubevip.ServiceLease]
 	if !exists || serviceLease == "" {
-		serviceLease = fmt.Sprintf("%s/%s", fmt.Sprintf("kubevip-%s", service.Name), service.Namespace)
+		serviceLease = fmt.Sprintf("kubevip-%s", service.Name)
 	}
-	return serviceLease
+	serviceLeaseID := fmt.Sprintf("%s/%s", serviceLease, service.Namespace)
+	return serviceLease, serviceLeaseID
 }
 
+// UsesCommon checks if service uses common lease feature.
 func UsesCommon(service *v1.Service) bool {
 	_, common := service.Annotations[kubevip.ServiceLease]
 	return common

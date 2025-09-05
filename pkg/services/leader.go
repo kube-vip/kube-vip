@@ -37,7 +37,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1.Service) error {
-	serviceLease := lease.GetName(service)
+	serviceLease, _ := lease.GetName(service)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
