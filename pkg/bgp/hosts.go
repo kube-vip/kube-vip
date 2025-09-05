@@ -3,6 +3,7 @@ package bgp
 import (
 	"context"
 	"fmt"
+	log "log/slog"
 	"net"
 
 	api "github.com/osrg/gobgp/v3/api"
@@ -10,6 +11,7 @@ import (
 
 // AddHost will update peers of a host
 func (b *Server) AddHost(addr string) (err error) {
+	log.Info("[bgp] adding", "host", addr)
 	ip, _, err := net.ParseCIDR(addr)
 	if err != nil {
 		return err
@@ -33,6 +35,7 @@ func (b *Server) AddHost(addr string) (err error) {
 
 // DelHost will inform peers to remove a host
 func (b *Server) DelHost(addr string) (err error) {
+	log.Info("[bgp] deleting", "host", addr)
 	ip, _, err := net.ParseCIDR(addr)
 	if err != nil {
 		return err

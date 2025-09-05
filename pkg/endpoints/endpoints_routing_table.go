@@ -117,9 +117,9 @@ func (rt *RoutingTable) deleteAction(service *v1.Service) {
 }
 
 func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error {
-	instance := instance.FindServiceInstance(service, *rt.instances)
+	instance := instance.FindServiceInstanceWithTimeout(service, *rt.instances)
 	if instance == nil {
-		log.Error("failed to find the instance", "service", service.UID, "provider", rt.provider.GetLabel())
+		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {
 		for _, c := range instance.Clusters {
 			for n := range c.Network {
@@ -161,6 +161,7 @@ func ClearRoutes(service *v1.Service, instances *[]*instance.Instance) []error {
 }
 
 func CountRouteReferences(route *netlink.Route, instances *[]*instance.Instance) int {
+	log.Debug("counting references for ", "route", route.String())
 	cnt := 0
 	for _, instance := range *instances {
 		for _, cluster := range instance.Clusters {
@@ -174,5 +175,6 @@ func CountRouteReferences(route *netlink.Route, instances *[]*instance.Instance)
 			}
 		}
 	}
+	log.Debug("counting references for ", "route", route.String(), "cnt", cnt)
 	return cnt
 }
