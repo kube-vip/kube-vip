@@ -318,7 +318,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 	if p.config.EnableBGP && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
 		endpoints.ClearBGPHosts(svc, &p.ServiceInstances, p.bgpServer)
-	} else if p.config.EnableLeaderElection && !p.config.EnableServicesElection && p.config.EnableRoutingTable {
+	} else if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
 		endpoints.ClearRoutes(svc, &p.ServiceInstances)
 	}
 
