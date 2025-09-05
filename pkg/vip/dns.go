@@ -52,7 +52,6 @@ func (d *ipUpdater) Run(ctx context.Context) {
 				if _, err := d.vip.AddIP(false); err != nil {
 					log.Error("error adding virtual IP", "err", err)
 				}
-
 			}
 			time.Sleep(3 * time.Second)
 		}
