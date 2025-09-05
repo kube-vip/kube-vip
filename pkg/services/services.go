@@ -43,25 +43,25 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 	action := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
-		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.deleteService(svc.UID); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionAdd:
-		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.addService(ctx, svc); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionNone:
-		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name)
+		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	}
-	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name)
+	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	return nil
 }
 
 func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
 	// protect against multiple calls
-	log.Debug("Getting action for service", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+	log.Debug("getting action for service", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	addresses := instance.FetchServiceAddresses(svc)
 	ingressIPs := instance.FetchLoadBalancerIngressAddresses(svc)
 	p.mutex.Lock()
@@ -96,7 +96,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 		}
 	}
 	if len(addresses) > 0 {
-		log.Debug("No matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
+		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
 		return ActionAdd // If no matching instance is found, we need to add a new service instance
 	}
 	return ActionNone

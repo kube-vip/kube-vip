@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"log/slog"
 	log "log/slog"
@@ -480,4 +481,25 @@ func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	}
 	log.Debug("insance not found", "UID", svc.UID)
 	return nil
+}
+
+func FindServiceInstanceWithTiemout(svc *v1.Service, instances []*Instance) *Instance {
+	log.Debug("finding service with timeout", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
+	ticker := time.NewTicker(time.Millisecond * 200)
+	defer ticker.Stop()
+	to := time.NewTimer(time.Second * 60)
+	defer to.Stop()
+	for {
+		select {
+		case <-to.C:
+			return nil
+		case <-ticker.C:
+			for i := range instances {
+				log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
+				if instances[i].ServiceSnapshot.UID == svc.UID {
+					return instances[i]
+				}
+			}
+		}
+	}
 }
