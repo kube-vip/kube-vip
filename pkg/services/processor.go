@@ -49,11 +49,20 @@ type Processor struct {
 	arpMgr  *arp.Manager
 
 	leaseMgr *lease.Manager
+
+	// nodeLabelManager is the manager for the node labels
+	nodeLabelManager labelManager
+}
+
+// labelManager is the interface for the node label manager to add/remove labels
+type labelManager interface {
+	AddLabel(ctx context.Context, svc *v1.Service) error
+	RemoveLabel(ctx context.Context, svc *v1.Service) error
 }
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset, shutdownChan chan struct{},
-	intfMgr *networkinterface.Manager, arpMgr *arp.Manager) *Processor {
+	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
@@ -74,9 +83,10 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
 
-		intfMgr:  intfMgr,
-		arpMgr:   arpMgr,
-		leaseMgr: lease.NewManager(),
+		intfMgr:          intfMgr,
+		arpMgr:           arpMgr,
+		leaseMgr:         lease.NewManager(),
+		nodeLabelManager: nodeLabelManager,
 	}
 }
 

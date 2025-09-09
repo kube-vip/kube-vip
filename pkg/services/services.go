@@ -43,6 +43,15 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 	action := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
+		// remove the label from the node before deleting the service
+		if p.nodeLabelManager != nil {
+			log.Debug("[service] delete label", "namespace", svc.Namespace, "name", svc.Name)
+			// remove the label from the node
+			if err := p.nodeLabelManager.RemoveLabel(ctx, svc); err != nil {
+				return fmt.Errorf("error removing label from node: %w", err)
+			}
+		}
+
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.deleteService(svc.UID); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
@@ -51,6 +60,15 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.addService(ctx, svc); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
+		}
+
+		// add the label to the node after adding the service
+		if p.nodeLabelManager != nil {
+			log.Debug("[service] add label", "namespace", svc.Namespace, "name", svc.Name)
+			// add the label to the node
+			if err := p.nodeLabelManager.AddLabel(ctx, svc); err != nil {
+				return fmt.Errorf("error adding label to node: %w", err)
+			}
 		}
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
