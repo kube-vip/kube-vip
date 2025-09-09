@@ -19,6 +19,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -66,6 +67,9 @@ type Manager struct {
 
 	// This tracks VIPs and performs ARP/NDP advertisement.
 	arpMgr *arp.Manager
+
+	// This tracks node labels and performs label management
+	nodeLabelManager *node.Manager
 }
 
 // New will create a new managing object
@@ -187,6 +191,12 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	intfMgr := networkinterface.NewManager()
 	arpMgr := arp.NewManager(config)
 
+	// if node labeling is enabled, then we need to create a node label manager
+	var nodeLabelManager *node.Manager
+	if config.EnableNodeLabeling {
+		nodeLabelManager = node.NewManager(config, clientset)
+	}
+
 	var bgpServer *bgp.Server
 	if config.EnableBGP {
 		bgpServer, err = bgp.NewBGPServer(&config.BGPConfig)
@@ -195,7 +205,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		}
 	}
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan, intfMgr, arpMgr)
+	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan, intfMgr, arpMgr, nodeLabelManager)
 
 	return &Manager{
 		clientSet:   clientset,
@@ -214,12 +224,13 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 			Name:      "bgp_session_info",
 			Help:      "Display state of session by setting metric for label value with current state to 1",
 		}, []string{"state", "peer"}),
-		signalChan:   signalChan,
-		shutdownChan: shutdownChan,
-		svcProcessor: svcProcessor,
-		intfMgr:      intfMgr,
-		arpMgr:       arpMgr,
-		bgpServer:    bgpServer,
+		signalChan:       signalChan,
+		shutdownChan:     shutdownChan,
+		svcProcessor:     svcProcessor,
+		intfMgr:          intfMgr,
+		arpMgr:           arpMgr,
+		bgpServer:        bgpServer,
+		nodeLabelManager: nodeLabelManager,
 	}, nil
 }
 
@@ -254,6 +265,15 @@ func (sm *Manager) Start() error {
 			err := server.ListenAndServe()
 			if err != nil {
 				log.Error("healthcheck", "unable to start", err)
+			}
+		}()
+	}
+
+	if sm.nodeLabelManager != nil {
+		// on exit, clean up the node labels
+		defer func() {
+			if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
+				log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
 			}
 		}()
 	}
