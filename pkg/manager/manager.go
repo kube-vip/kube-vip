@@ -194,7 +194,11 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// if node labeling is enabled, then we need to create a node label manager
 	var nodeLabelManager *node.Manager
 	if config.EnableNodeLabeling {
-		nodeLabelManager = node.NewManager(config, clientset)
+		if clientset != nil {
+			nodeLabelManager = node.NewManager(config, clientset)
+		} else {
+			log.Debug("Skip node labeling, client is not ready")
+		}
 	}
 
 	var bgpServer *bgp.Server
