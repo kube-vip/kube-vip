@@ -193,7 +193,9 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	// if node labeling is enabled, then we need to create a node label manager
 	var nodeLabelManager *node.Manager
-	if config.EnableNodeLabeling {
+	if config.EnableControlPlane {
+		log.Debug("Skip node labeling, control plane mode enabled")
+	} else if config.EnableNodeLabeling {
 		if clientset != nil {
 			nodeLabelManager = node.NewManager(config, clientset)
 		} else {
