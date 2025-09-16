@@ -503,7 +503,7 @@ func GenerateCidrRange(address string, dnsMode string) (string, error) {
 	}
 	// compact as DNS could have a lot of addresses
 	slices.Sort(cidrs)
-	slices.Compact(cidrs)
+	cidrs = slices.Compact(cidrs)
 	slices.Reverse(cidrs)
 	return strings.Join(cidrs, ","), nil
 }
