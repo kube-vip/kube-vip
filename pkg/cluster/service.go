@@ -45,12 +45,15 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
-		if err := network.SetMask(c.VIPSubnet); err != nil {
-			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
-			panic("")
+		if !network.IsDNS() && !network.IsDDNS() {
+			if err := network.SetMask(c.VIPSubnet); err != nil {
+				log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
+				panic("")
+			}
 		}
+
 		if network.IsDDNS() {
-			if err := cluster.StartDDNS(ctxDNS); err != nil {
+			if err := cluster.StartDDNS(ctxDNS, c.VIPSubnet); err != nil {
 				log.Error(err.Error())
 			}
 		}
