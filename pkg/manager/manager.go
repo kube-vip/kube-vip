@@ -69,7 +69,9 @@ type Manager struct {
 	arpMgr *arp.Manager
 
 	// This tracks node labels and performs label management
-	nodeLabelManager *node.Manager
+	// implementation will be decided in constructor
+	// based on config.EnableNodeLabeling
+	nodeLabelManager node.LabelManager
 }
 
 // New will create a new managing object
@@ -191,17 +193,9 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	intfMgr := networkinterface.NewManager()
 	arpMgr := arp.NewManager(config)
 
-	// if node labeling is enabled, then we need to create a node label manager
-	var nodeLabelManager *node.Manager
-	if config.EnableControlPlane {
-		log.Debug("Skip node labeling, control plane mode enabled")
-	} else if config.EnableNodeLabeling {
-		if clientset != nil {
-			nodeLabelManager = node.NewManager(config, clientset)
-		} else {
-			log.Debug("Skip node labeling, client is not ready")
-		}
-	}
+	// create the node label manager
+	// constructor will decide if it should be a noop or not
+	nodeLabelManager := node.NewManager(config, clientset)
 
 	var bgpServer *bgp.Server
 	if config.EnableBGP {
@@ -275,14 +269,12 @@ func (sm *Manager) Start() error {
 		}()
 	}
 
-	if sm.nodeLabelManager != nil {
-		// on exit, clean up the node labels
-		defer func() {
-			if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
-				log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
-			}
-		}()
-	}
+	// on exit, clean up the node labels
+	defer func() {
+		if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
+			log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
+		}
+	}()
 
 	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if sm.config.EnableBGP {

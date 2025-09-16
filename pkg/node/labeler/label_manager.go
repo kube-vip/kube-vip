@@ -1,4 +1,4 @@
-package node
+package labeler
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
-	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,7 +32,15 @@ const (
 	labelOperationAdd    labelOperation = "add"
 )
 
-// Manager is the label manager for the node
+// NewManager creates a new Label Manager for the given node
+func NewManager(nodeName string, clientSet *kubernetes.Clientset) *Manager {
+	return &Manager{
+		nodeName:  nodeName,
+		clientSet: clientSet,
+	}
+}
+
+// Manager is the label Manager for the node
 type Manager struct {
 	// nodeName is the name of the node to manage
 	nodeName string
@@ -42,22 +49,16 @@ type Manager struct {
 	clientSet *kubernetes.Clientset
 }
 
-// NewManager creates a new Label Manager for the given node
-func NewManager(config *kubevip.Config, clientSet *kubernetes.Clientset) *Manager {
-	return &Manager{
-		nodeName:  config.NodeName,
-		clientSet: clientSet,
-	}
-}
-
 // AddLabel a new label to the node
 func (m *Manager) AddLabel(ctx context.Context, svc *corev1.Service) error {
+	log.Debug("[service] add label to node", "namespace", svc.Namespace, "name", svc.Name)
 	labelKey, labelValue := generateNodeLabelKeyValue(svc)
 	return m.patchNode(ctx, labelOperationAdd, map[string]string{labelKey: labelValue})
 }
 
 // RemoveLabel a label from the node
 func (m *Manager) RemoveLabel(ctx context.Context, svc *corev1.Service) error {
+	log.Debug("[service] delete label from node", "namespace", svc.Namespace, "name", svc.Name)
 	labelKey, _ := generateNodeLabelKeyValue(svc)
 	return m.patchNode(ctx, labelOperationRemove, map[string]string{labelKey: ""})
 }
@@ -123,9 +124,18 @@ func (m *Manager) patchNode(ctx context.Context, operation labelOperation, label
 		return errors.Wrapf(err, "node patch marshaling failed for labels %v", labels)
 	}
 
+	log.Debug("patching node",
+		"node", m.nodeName,
+		"patch", string(patchData),
+		"operation", operation,
+		"labels", labels,
+		"clientSetNil", m.clientSet == nil)
+	if m.clientSet == nil {
+		return errors.New("kubernetes client is not initialized")
+	}
+
 	// patch node
-	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx,
-		m.nodeName, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx, m.nodeName, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		log.Debug("node patching failed", "err", err, "patchData", patchData)
 		return errors.Wrapf(err, "node patching failed with patch %s", string(patchData))
