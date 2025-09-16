@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -229,7 +230,7 @@ var kubeVipService = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
-			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
 				log.Error("generating CIDR", "err", err)
 				return
@@ -282,7 +283,7 @@ var kubeVipManager = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
-			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
 				log.Error("No interface is specified for kube-vip to bind to")
 				return
@@ -472,26 +473,37 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	}
 }
 
-func GenerateCidrRange(address string) (string, error) {
+func GenerateCidrRange(address string, dnsMode string) (string, error) {
 	var cidrs []string
 
 	addresses := strings.Split(address, ",")
 	for _, a := range addresses {
 		ip := net.ParseIP(a)
 		if ip == nil {
-			ips, err := net.LookupIP(a)
+			// we probably are a DNS name
+			ips, err := vip.LookupHost(a, dnsMode)
 			if len(ips) == 0 || err != nil {
 				return "", fmt.Errorf("invalid IP address: %s from [%s], %v", a, address, err)
 			}
-			ip = ips[0]
-		}
-
-		if ip.To4() != nil {
-			cidrs = append(cidrs, "32")
+			for _, addr := range ips {
+				ip = net.ParseIP(addr)
+				if ip.To4() != nil {
+					cidrs = append(cidrs, "32")
+				} else {
+					cidrs = append(cidrs, "128")
+				}
+			}
 		} else {
-			cidrs = append(cidrs, "128")
+			if ip.To4() != nil {
+				cidrs = append(cidrs, "32")
+			} else {
+				cidrs = append(cidrs, "128")
+			}
 		}
 	}
-
+	// compact as DNS could have a lot of addresses
+	slices.Sort(cidrs)
+	slices.Compact(cidrs)
+	slices.Reverse(cidrs)
 	return strings.Join(cidrs, ","), nil
 }
