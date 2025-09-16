@@ -58,7 +58,7 @@ var kubeKubeadmInit = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
-			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
 				log.Error("generating VIPSubnet", "err", err)
 				return
@@ -103,7 +103,7 @@ var kubeKubeadmJoin = &cobra.Command{
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
-			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address)
+			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
 				log.Error("generating VIPSubnet", "err", err)
 				return
