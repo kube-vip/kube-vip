@@ -95,6 +95,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ControlPlaneEnable: "true",
 					SvcEnable:          "false",
 					SvcElectionEnable:  "false",
+					EnableNodeLabeling: "false",
 				}
 
 				var err error
@@ -155,6 +156,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ControlPlaneEnable: "true",
 					SvcEnable:          "false",
 					SvcElectionEnable:  "false",
+					EnableNodeLabeling: "false",
 				}
 
 				var err error

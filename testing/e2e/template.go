@@ -15,6 +15,7 @@ type KubevipManifestValues struct {
 	SvcEnable            string
 	SvcElectionEnable    string
 	EnableEndpointslices string
+	EnableNodeLabeling   string
 	ControlPlaneEnable   string
 	BGPAS                uint32
 	BGPPeers             string
