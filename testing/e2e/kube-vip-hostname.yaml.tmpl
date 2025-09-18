@@ -30,6 +30,8 @@ spec:
       value: "1"
     - name: cp_enable
       value: "true"
+    - name: enable_node_labeling
+      value: "{{ .EnableNodeLabeling }}"
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:

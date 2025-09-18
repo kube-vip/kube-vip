@@ -906,6 +906,7 @@ func setupEnv(cpVIP, clusterName *string, tempDirPath string, manifestValues *e2
 		ControlPlaneEnable: "false",
 		SvcEnable:          "true",
 		SvcElectionEnable:  fmt.Sprintf("%t", serviceElection),
+		EnableNodeLabeling: "false",
 		BGPAS:              kubevipAS,
 		BGPPeers:           strings.Join(kvPeersStr, ","),
 		MPBGPNexthop:       mpbgpnexthop,

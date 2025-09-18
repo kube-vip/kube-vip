@@ -122,6 +122,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "false",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -166,6 +167,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -224,6 +226,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -274,6 +277,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "false",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -320,6 +324,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -378,6 +383,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -427,6 +433,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "false",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -471,6 +478,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -530,6 +538,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -582,6 +591,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -629,6 +639,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -696,6 +707,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -746,6 +758,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "false",
 					SvcElectionEnable:    "false",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -791,6 +804,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error
@@ -844,6 +858,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					SvcEnable:            "true",
 					SvcElectionEnable:    "true",
 					EnableEndpointslices: "false",
+					EnableNodeLabeling:   "false",
 				}
 
 				var err error

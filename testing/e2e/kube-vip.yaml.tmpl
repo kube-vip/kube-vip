@@ -40,6 +40,8 @@ spec:
       value: "{{ .SvcEnable }}"
     - name: svc_election
       value: "{{ .SvcElectionEnable }}"
+    - name: enable_node_labeling
+      value: "{{ .EnableNodeLabeling }}"
     - name: enable_endpointslices
       value: "{{ .EnableEndpointslices }}"
     image: "{{ .ImagePath }}"
