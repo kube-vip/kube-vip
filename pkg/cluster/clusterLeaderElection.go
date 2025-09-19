@@ -14,6 +14,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/leaderelection"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 
 	log "log/slog"
@@ -25,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/leaderelection"
+	k8sleaderelection "k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	watchtools "k8s.io/client-go/tools/watch"
 )
@@ -249,8 +250,8 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 		},
 	}
 
-	// start the leader election code loop
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+	// start the leader election code loop with retry logic
+	leaderelection.RunOrDieWithRetry(ctx, k8sleaderelection.LeaderElectionConfig{
 		Lock: lock,
 		// IMPORTANT: you MUST ensure that any code you have that
 		// is protected by the lease must terminate **before**
@@ -262,7 +263,7 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 		LeaseDuration:   time.Duration(run.config.LeaseDuration) * time.Second,
 		RenewDeadline:   time.Duration(run.config.RenewDeadline) * time.Second,
 		RetryPeriod:     time.Duration(run.config.RetryPeriod) * time.Second,
-		Callbacks: leaderelection.LeaderCallbacks{
+		Callbacks: k8sleaderelection.LeaderCallbacks{
 			OnStartedLeading: run.onStartedLeading,
 			OnStoppedLeading: run.onStoppedLeading,
 			OnNewLeader:      run.onNewLeader,
