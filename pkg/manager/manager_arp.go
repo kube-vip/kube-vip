@@ -7,8 +7,9 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/leaderelection"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/leaderelection"
+	k8sleaderelection "k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
@@ -110,8 +111,8 @@ func (sm *Manager) startARP(id string) error {
 			},
 		}
 
-		// start the leader election code loop
-		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		// start the leader election code loop with retry logic
+		leaderelection.RunOrDieWithRetry(ctx, k8sleaderelection.LeaderElectionConfig{
 			Lock: lock,
 			// IMPORTANT: you MUST ensure that any code you have that
 			// is protected by the lease must terminate **before**
@@ -123,7 +124,7 @@ func (sm *Manager) startARP(id string) error {
 			LeaseDuration:   time.Duration(sm.config.LeaseDuration) * time.Second,
 			RenewDeadline:   time.Duration(sm.config.RenewDeadline) * time.Second,
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
-			Callbacks: leaderelection.LeaderCallbacks{
+			Callbacks: k8sleaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 					if err != nil {

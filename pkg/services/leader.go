@@ -7,10 +7,11 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/leaderelection"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/leaderelection"
+	k8sleaderelection "k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
@@ -102,8 +103,8 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 		svcCtx.IsActive = false
 		return nil
 	}
-	// start the leader election code loop
-	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
+	// start the leader election code loop with retry logic
+	leaderelection.RunOrDieWithRetry(svcLease.Ctx, k8sleaderelection.LeaderElectionConfig{
 		Lock: lock,
 		// IMPORTANT: you MUST ensure that any code you have that
 		// is protected by the lease must terminate **before**
@@ -115,7 +116,7 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 		LeaseDuration:   time.Duration(p.config.LeaseDuration) * time.Second,
 		RenewDeadline:   time.Duration(p.config.RenewDeadline) * time.Second,
 		RetryPeriod:     time.Duration(p.config.RetryPeriod) * time.Second,
-		Callbacks: leaderelection.LeaderCallbacks{
+		Callbacks: k8sleaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				// Mark this service as active (as we've started leading)
 				// we run this in background as it's blocking
