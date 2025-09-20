@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/kube-vip/kube-vip/pkg/bgp"
 )
 
 func TestLoadConfigFromFile(t *testing.T) {
@@ -135,13 +133,13 @@ bgpConfig:
 `,
 			expectedConfig: &Config{
 				EnableBGP: true,
-				BGPConfig: bgp.Config{
+				BGPConfig: BGPConfig{
 					RouterID:          "192.168.1.1",
 					AS:                65000,
 					SourceIF:          "eth0",
 					HoldTime:          60,
 					KeepaliveInterval: 20,
-					Peers: []bgp.Peer{
+					Peers: []BGPPeer{
 						{
 							Address:  "192.168.1.2",
 							AS:       65001,
@@ -455,12 +453,12 @@ func TestMergeConfigValues(t *testing.T) {
 		{
 			name: "Merge BGP configuration",
 			baseConfig: &Config{
-				BGPConfig: bgp.Config{
+				BGPConfig: BGPConfig{
 					RouterID: "1.1.1.1", // Should not be overridden
 				},
 			},
 			fileConfig: &Config{
-				BGPConfig: bgp.Config{
+				BGPConfig: BGPConfig{
 					RouterID:          "2.2.2.2", // Should not override
 					AS:                65000,     // Should be set
 					SourceIF:          "eth0",    // Should be set
@@ -469,7 +467,7 @@ func TestMergeConfigValues(t *testing.T) {
 				},
 			},
 			expectedBase: &Config{
-				BGPConfig: bgp.Config{
+				BGPConfig: BGPConfig{
 					RouterID:          "1.1.1.1", // From base (non-empty)
 					AS:                65000,     // From file (base was zero)
 					SourceIF:          "eth0",    // From file (base was empty)

@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/detector"
 	"sigs.k8s.io/yaml"
 )
@@ -424,7 +423,7 @@ func ParseEnvironment(c *Config) error {
 	// Peer AS
 	env = os.Getenv(bgpPeers)
 	if env != "" {
-		peers, err := bgp.ParseBGPPeerConfig(env)
+		peers, err := ParseBGPPeerConfig(env)
 		if err != nil {
 			return err
 		}
@@ -906,7 +905,7 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 }
 
 // mergeBGPConfig merges BGP configuration
-func mergeBGPConfig(base, file *bgp.Config) {
+func mergeBGPConfig(base, file *BGPConfig) {
 	if base.RouterID == "" && file.RouterID != "" {
 		base.RouterID = file.RouterID
 	}
