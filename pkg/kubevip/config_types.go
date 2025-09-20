@@ -1,9 +1,5 @@
 package kubevip
 
-import (
-	"github.com/kube-vip/kube-vip/pkg/bgp"
-)
-
 // Config defines all of the settings for the Kube-Vip Pod
 type Config struct {
 	// Logging, settings
@@ -128,8 +124,8 @@ type Config struct {
 	CleanRoutingTable bool `yaml:"cleanRoutingTable"`
 
 	// BGP Configuration
-	BGPConfig     bgp.Config
-	BGPPeerConfig bgp.Peer
+	BGPConfig     BGPConfig
+	BGPPeerConfig BGPPeer
 	BGPPeers      []string
 
 	// LoadBalancers are the various services we can load balance over

@@ -40,10 +40,22 @@ const (
 	// Flush the conntrack rules (remove existing sessions) once Egress is configured
 	FlushContrack = "kube-vip.io/flush-conntrack"
 
+	// Configure LoadBalancer IPs instead of relying on a controller
 	LoadbalancerIPAnnotation = "kube-vip.io/loadbalancerIPs"
-	LoadbalancerHostname     = "kube-vip.io/loadbalancerHostname"
-	ServiceInterface         = "kube-vip.io/serviceInterface"
-	UpnpEnabled              = "kube-vip.io/forwardUPNP"
+
+	// Ignore the LoadBalancer Service
+	LoadbalancerIgnore = "kube-vip.io/ignore"
+
+	// Used to configure DHCP with a Hostname
+	LoadbalancerHostname = "kube-vip.io/loadbalancerHostname"
+
+	// Define an interface name to bind the address of the LoadBalancer to
+	ServiceInterface = "kube-vip.io/serviceInterface"
+
+	ServiceSecurityIgnore = "kube-vip.io/ignore-service-security"
+
+	// Enable UPNP on a Service
+	UpnpEnabled = "kube-vip.io/forwardUPNP"
 
 	RPFilter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
 
