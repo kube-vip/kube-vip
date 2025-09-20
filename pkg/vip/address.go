@@ -18,15 +18,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/kube-vip/kube-vip/pkg/iptables"
-	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+
+	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 )
 
 const (
-	defaultValidLft                 = 60
-	iptablesComment                 = "%s kube-vip load balancer IP"
-	iptablesCommentMarkRule         = "kube-vip load balancer IP set mark for masquerade"
-	ignoreServiceSecurityAnnotation = "kube-vip.io/ignore-service-security"
+	defaultValidLft         = 60
+	iptablesComment         = "%s kube-vip load balancer IP"
+	iptablesCommentMarkRule = "kube-vip load balancer IP set mark for masquerade"
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -94,7 +95,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 
 	networkLink := intfMgr.Get(link)
 
-	if IsIP(address) {
+	if utils.IsIP(address) {
 		result := &network{
 			link:             networkLink,
 			routeTable:       tableID,
@@ -134,7 +135,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 		networks = append(networks, result)
 	} else {
 		// try to resolve the address
-		ips, err := LookupHost(address, dnsMode)
+		ips, err := utils.LookupHost(address, dnsMode)
 		if err != nil {
 			// return early for ddns if no IP is allocated for the domain
 			// when leader starts, should do get IP from DHCP for the domain
@@ -580,7 +581,7 @@ func (configurator *network) IsDADFAIL() bool {
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 
-	if configurator.address == nil || !IsIPv6(configurator.address.IP.String()) {
+	if configurator.address == nil || !utils.IsIPv6(configurator.address.IP.String()) {
 		return false
 	}
 
@@ -669,7 +670,7 @@ func (configurator *network) SetServicePorts(service *v1.Service) {
 
 	configurator.ports = service.Spec.Ports
 	configurator.serviceName = service.Namespace + "/" + service.Name
-	configurator.ignoreSecurity = service.Annotations[ignoreServiceSecurityAnnotation] == "true"
+	configurator.ignoreSecurity = service.Annotations[kubevip.ServiceSecurityIgnore] == "true"
 }
 
 // IP - return the IP Address
@@ -770,7 +771,7 @@ func (configurator *network) SetMask(mask string) error {
 	size := 32
 	family := "IPv4"
 
-	if IsIPv6(configurator.IP()) {
+	if utils.IsIPv6(configurator.IP()) {
 		size = 128
 		family = "IPv6"
 	}
