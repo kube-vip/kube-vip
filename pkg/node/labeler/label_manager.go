@@ -95,7 +95,7 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 
 // generateNodeLabelKeyValue generates a label key and value for the given service
 func generateNodeLabelKeyValue(svc *corev1.Service) (string, string) {
-	addresses := instance.FetchServiceAddresses(svc)
+	addresses, _ := instance.FetchServiceAddresses(svc)
 	return fmt.Sprintf("%s/%s.%s", labelName, svc.Name, svc.Namespace), strings.Join(addresses, ",")
 }
 

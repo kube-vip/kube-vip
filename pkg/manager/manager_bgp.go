@@ -20,7 +20,7 @@ func (sm *Manager) startBGP() error {
 	var err error
 
 	if sm.bgpServer == nil {
-		sm.bgpServer, err = bgp.NewBGPServer(&sm.config.BGPConfig)
+		sm.bgpServer, err = bgp.NewBGPServer(sm.config.BGPConfig)
 		if err != nil {
 			return fmt.Errorf("creating BGP server: %w", err)
 		}
