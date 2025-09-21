@@ -24,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -472,8 +473,8 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 		ingresses := []v1.LoadBalancerIngress{}
 
 		for _, c := range i.VIPConfigs {
-			if !vip.IsIP(c.VIP) {
-				ips, err := vip.LookupHost(c.VIP, p.config.DNSMode)
+			if !utils.IsIP(c.VIP) {
+				ips, err := utils.LookupHost(c.VIP, p.config.DNSMode)
 				if err != nil {
 					return err
 				}

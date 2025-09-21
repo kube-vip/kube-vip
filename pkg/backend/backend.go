@@ -8,7 +8,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -31,7 +30,7 @@ func (e *Entry) Check() bool {
 	// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	var k8sAddr string
-	if vip.IsIPv4(e.Addr) {
+	if utils.IsIPv4(e.Addr) {
 		k8sAddr = fmt.Sprintf("%s:%v", e.Addr, e.Port)
 	} else {
 		k8sAddr = fmt.Sprintf("[%s]:%v", e.Addr, e.Port)

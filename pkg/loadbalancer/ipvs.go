@@ -16,7 +16,7 @@ import (
 	"github.com/cloudflare/ipvs/netmask"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
-	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/vishvananda/netlink"
 )
 
@@ -358,7 +358,7 @@ func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
 	}
 
 	family := netlink.FAMILY_V6
-	if vip.IsIPv4(address) {
+	if utils.IsIPv4(address) {
 		family = netlink.FAMILY_V4
 	}
 

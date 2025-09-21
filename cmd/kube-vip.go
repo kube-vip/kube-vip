@@ -20,6 +20,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -481,7 +482,7 @@ func GenerateCidrRange(address string, dnsMode string) (string, error) {
 		ip := net.ParseIP(a)
 		if ip == nil {
 			// we probably are a DNS name
-			ips, err := vip.LookupHost(a, dnsMode)
+			ips, err := utils.LookupHost(a, dnsMode)
 			if len(ips) == 0 || err != nil {
 				return "", fmt.Errorf("invalid IP address: %s from [%s], %v", a, address, err)
 			}
