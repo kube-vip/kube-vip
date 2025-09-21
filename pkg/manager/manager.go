@@ -199,7 +199,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 	var bgpServer *bgp.Server
 	if config.EnableBGP {
-		bgpServer, err = bgp.NewBGPServer(&config.BGPConfig)
+		bgpServer, err = bgp.NewBGPServer(config.BGPConfig)
 		if err != nil {
 			return nil, fmt.Errorf("creating BGP server: %w", err)
 		}
