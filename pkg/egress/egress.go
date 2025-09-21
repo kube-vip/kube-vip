@@ -7,6 +7,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -19,7 +20,7 @@ func Teardown(podIP, vipIP, namespace, serviceUUID string, annotations map[strin
 
 	protocol := iptables.ProtocolIPv4
 	IPv6 := false
-	if vip.IsIPv6(podIP) {
+	if utils.IsIPv6(podIP) {
 		protocol = iptables.ProtocolIPv6
 		IPv6 = true
 	}

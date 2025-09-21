@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
@@ -364,7 +365,7 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	var ndp *vip.NdpResponder
 	var err error
 	ipString := network.IP()
-	if vip.IsIPv6(ipString) {
+	if utils.IsIPv6(ipString) {
 		if network.IPisLinkLocal() {
 			log.Error("layer2 is link-local can't use NDP", "address", ipString)
 

@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -121,7 +122,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 
 		subnet := ""
 		var err error
-		if vip.IsIPv4(address) {
+		if utils.IsIPv4(address) {
 			if ipv4AutoSubnet {
 				subnet, err = autoFindSubnet(link, address)
 				if err != nil {
