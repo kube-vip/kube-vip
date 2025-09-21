@@ -137,10 +137,13 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		shouldGarbageCollect := true
 		if i != nil {
 			originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
-			// check if we need to update the LB because something crucial changed
-			shouldGarbageCollect = !reflect.DeepEqual(originalServiceAddresses, svcAddresses)
-			shouldGarbageCollect = !reflect.DeepEqual(originalServiceHostnames, svcHostnames)
-			shouldGarbageCollect = !(svc.Spec.ExternalTrafficPolicy == i.ServiceSnapshot.Spec.ExternalTrafficPolicy)
+			shouldGarbageCollect =
+				// Service addresses changed
+				!reflect.DeepEqual(originalServiceAddresses, svcAddresses) ||
+					// Service hostnames changed
+					!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
+					// ExternalTrafficPolicy changed
+					svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy
 		}
 		if shouldGarbageCollect {
 			for _, addr := range svcAddresses {
