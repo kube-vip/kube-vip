@@ -14,69 +14,6 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// LookupHost resolves dnsName and return an IP or an error
-func LookupHost(dnsName, dnsMode string) ([]string, error) {
-	result, err := net.LookupHost(dnsName)
-	if err != nil {
-		return nil, err
-	}
-	if len(result) == 0 {
-		return nil, errors.Errorf("empty address for %s", dnsName)
-	}
-	addrs := []string{}
-	switch dnsMode {
-	case "ipv4", "ipv6", "dual":
-		a, err := getIPbyFamily(result, dnsMode)
-		if err != nil {
-			return nil, err
-		}
-		addrs = append(addrs, a...)
-	default:
-		addrs = append(addrs, result[0])
-	}
-
-	return addrs, nil
-}
-
-func getIPbyFamily(addresses []string, family string) ([]string, error) {
-	var checkers []func(string) bool
-	families := []string{}
-	if family == "dual" || family == "ipv4" {
-		checkers = append(checkers, IsIPv4)
-		families = append(families, "IPv4")
-	}
-	if family == "dual" || family == "ipv6" {
-		checkers = append(checkers, IsIPv6)
-		families = append(families, "IPv6")
-	}
-
-	addrs := []string{}
-	for i, c := range checkers {
-		addr, err := getIPbyChecker(addresses, c)
-		if err != nil {
-			return nil, fmt.Errorf("error getting %s address: %w", families[i], err)
-		}
-		addrs = append(addrs, addr)
-	}
-
-	return addrs, nil
-}
-
-func getIPbyChecker(addresses []string, checker func(string) bool) (string, error) {
-	for _, addr := range addresses {
-		if checker(addr) {
-			return addr, nil
-		}
-	}
-	return "", fmt.Errorf("address not found")
-}
-
-// IsIP returns if address is an IP or not
-func IsIP(address string) bool {
-	ip := net.ParseIP(address)
-	return ip != nil
-}
-
 // getHostName return the hostname from the fqdn
 func getHostName(dnsName string) string {
 	if dnsName == "" {
@@ -85,40 +22,6 @@ func getHostName(dnsName string) string {
 
 	fields := strings.Split(dnsName, ".")
 	return fields[0]
-}
-
-// IsIPv4 returns true only if address is a valid IPv4 address
-func IsIPv4(address string) bool {
-	ip := net.ParseIP(address)
-	if ip == nil {
-		return false
-	}
-	return ip.To4() != nil
-}
-
-// IsIPv6 returns true only if address is a valid IPv6 address
-func IsIPv6(address string) bool {
-	ip := net.ParseIP(address)
-	if ip == nil {
-		return false
-	}
-	return ip.To4() == nil
-}
-
-func IsIPv4CIDR(cidr string) bool {
-	ip, _, _ := net.ParseCIDR(cidr)
-	if ip == nil {
-		return false
-	}
-	return ip.To4() != nil
-}
-
-func IsIPv6CIDR(cidr string) bool {
-	ip, _, _ := net.ParseCIDR(cidr)
-	if ip == nil {
-		return false
-	}
-	return ip.To4() == nil
 }
 
 // GetDefaultGatewayInterface return default gateway interface link

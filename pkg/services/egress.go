@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -77,12 +78,12 @@ func (p *Processor) nftablesCheck() error {
 
 func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how this ever worked
 	cidrs := strings.Split(sourceCidrs, ",")
-	isV6 := vip.IsIPv6(ip)
+	isV6 := utils.IsIPv6(ip)
 	matchingFamily := []string{}
 	for _, cidr := range cidrs {
 		// Is the ip an IPv6 address
 		if isV6 {
-			if vip.IsIPv6CIDR(cidr) {
+			if utils.IsIPv6CIDR(cidr) {
 				matchingFamily = append(matchingFamily, cidr)
 				selectedCIDR, err := checkCIDR(ip, cidr)
 				if err != nil {
@@ -94,7 +95,7 @@ func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how thi
 				}
 			}
 		} else {
-			if vip.IsIPv4CIDR(cidr) {
+			if utils.IsIPv4CIDR(cidr) {
 				matchingFamily = append(matchingFamily, cidr)
 				selectedCidr, err := checkCIDR(ip, cidr)
 				if err != nil {
@@ -163,7 +164,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 
 	if podCidr == "" {
 		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
-		if !vip.IsIPv4(podIP) {
+		if !utils.IsIPv4(podIP) {
 			return fmt.Errorf("error with the CIDR [%s]", podIP)
 		}
 		podCidr = defaultPodCIDR
@@ -179,7 +180,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 
 	if serviceCidr == "" {
 		// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
-		if !vip.IsIPv4(vipIP) {
+		if !utils.IsIPv4(vipIP) {
 			return nil
 		}
 		serviceCidr = defaultServiceCIDR
@@ -188,23 +189,23 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 	log.Info("[Egress]", "podCIDR", podCidr, "serviceCIDR", serviceCidr, "vip", serviceCidr, "pod", podIP)
 
 	// checking if all addresses are of the same IP family
-	if vip.IsIPv4(podIP) != vip.IsIPv4CIDR(podCidr) {
+	if utils.IsIPv4(podIP) != utils.IsIPv4CIDR(podCidr) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "podCIDR", podCidr)
 		return nil
 	}
 
-	if vip.IsIPv4(vipIP) != vip.IsIPv4CIDR(serviceCidr) {
+	if utils.IsIPv4(vipIP) != utils.IsIPv4CIDR(serviceCidr) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "serviceCIDR", serviceCidr)
 		return nil
 	}
 
-	if vip.IsIPv4(vipIP) != vip.IsIPv4(podIP) {
+	if utils.IsIPv4(vipIP) != utils.IsIPv4(podIP) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "vipIP", vipIP)
 		return nil
 	}
 
 	protocol := iptables.ProtocolIPv4
-	if vip.IsIPv6(vipIP) {
+	if utils.IsIPv6(vipIP) {
 		protocol = iptables.ProtocolIPv6
 	}
 
@@ -224,7 +225,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 		}
 
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, vip.IsIPv6(vipIP))
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, utils.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
@@ -269,7 +270,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 	}
 
 	mask := "/32"
-	if !vip.IsIPv4(podIP) {
+	if !utils.IsIPv4(podIP) {
 		mask = "/128"
 	}
 

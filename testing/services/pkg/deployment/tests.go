@@ -539,7 +539,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	}
 
 	if egress == "" {
-		return fmt.Errorf("no loadbalancer address found")
+		return fmt.Errorf("no loadbalancer egress address found")
 	}
 
 	found = tcpServer(&egress, timeout, "tcp6")

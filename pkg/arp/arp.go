@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -160,7 +161,7 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 		log.Warn("Re-applied the VIP configuration", "ip", ipString, "interface", iface)
 	}
 
-	if vip.IsIPv6(ipString) {
+	if utils.IsIPv6(ipString) {
 		// Gratuitous NDP, will broadcast new MAC <-> IPv6 address
 		if instance.ndp == nil {
 			log.Error("NDP responder was not created")
