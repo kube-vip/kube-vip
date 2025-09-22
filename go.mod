@@ -24,9 +24,9 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
-	go.etcd.io/etcd/api/v3 v3.6.4
-	go.etcd.io/etcd/client/pkg/v3 v3.6.4
-	go.etcd.io/etcd/client/v3 v3.6.4
+	go.etcd.io/etcd/api/v3 v3.6.5
+	go.etcd.io/etcd/client/pkg/v3 v3.6.5
+	go.etcd.io/etcd/client/v3 v3.6.5
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329
 	golang.org/x/sync v0.17.0
