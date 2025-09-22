@@ -10,7 +10,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/nftables v0.3.0
-	github.com/gookit/slog v0.5.8
+	github.com/gookit/slog v0.6.0
 	github.com/huin/goupnp v1.3.0
 	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d
 	github.com/jpillora/backoff v1.0.0
@@ -76,9 +76,9 @@ require (
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gookit/color v1.5.4 // indirect
-	github.com/gookit/goutil v0.6.18 // indirect
-	github.com/gookit/gsr v0.1.0 // indirect
+	github.com/gookit/color v1.6.0 // indirect
+	github.com/gookit/goutil v0.7.1 // indirect
+	github.com/gookit/gsr v0.1.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
