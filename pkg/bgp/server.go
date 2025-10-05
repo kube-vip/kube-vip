@@ -7,13 +7,24 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Server manages a server object
+type Server struct {
+	s *gobgp.BgpServer
+	c *kubevip.BGPConfig
+
+	// This is a prometheus gauge indicating the state of the sessions.
+	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
+	BGPSessionInfoGauge *prometheus.GaugeVec
+}
+
 // NewBGPServer takes a configuration and returns a running BGP server instance
-func NewBGPServer(c *Config) (b *Server, err error) {
+func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 	if c.AS == 0 {
 		return nil, fmt.Errorf("you need to provide AS")
 	}
@@ -28,7 +39,7 @@ func NewBGPServer(c *Config) (b *Server, err error) {
 
 	b = &Server{
 		s: gobgp.NewBgpServer(),
-		c: c,
+		c: &c,
 
 		BGPSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "kube_vip",

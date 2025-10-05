@@ -5,6 +5,8 @@ import (
 	"time"
 
 	log "log/slog"
+
+	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
 // IPUpdater is the interface to plug dns updaters
@@ -33,11 +35,11 @@ func (d *ipUpdater) Run(ctx context.Context) {
 				return
 			default:
 				mode := "ipv4"
-				if IsIPv6(d.vip.IP()) {
+				if utils.IsIPv6(d.vip.IP()) {
 					mode = "ipv6"
 				}
 
-				ip, err := LookupHost(d.vip.DNSName(), mode)
+				ip, err := utils.LookupHost(d.vip.DNSName(), mode)
 				if err != nil {
 					log.Warn("cannot lookup", "name", d.vip.DNSName(), "err", err)
 					// fallback to renewing the existing IP

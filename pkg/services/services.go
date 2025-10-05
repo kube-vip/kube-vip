@@ -24,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -71,8 +72,10 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 
 func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
 	// protect against multiple calls
-	addresses := instance.FetchServiceAddresses(svc)
-	ingressIPs := instance.FetchLoadBalancerIngressAddresses(svc)
+	// get the annotations or legacy values from manual configuration
+	addresses, hostnames := instance.FetchServiceAddresses(svc)
+	// get the status information of the LB Service
+	statusAddresses, _ := instance.FetchLoadBalancerIngress(svc)
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
@@ -81,18 +84,18 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 			for _, address := range addresses {
 				// handle the case where the service instance needs to be deleted
 				if instance.IsDHCP {
-					if address != "0.0.0.0" {
+					if address != "0.0.0.0" && address != "::" {
 						return ActionDelete
 					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, instance.DHCPInterfaceIP) {
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIP) {
 						return ActionDelete
 					}
 				}
 				if !instance.IsDHCP {
-					if address == "0.0.0.0" {
+					if address == "0.0.0.0" || address == "::" {
 						return ActionDelete
 					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(ingressIPs, address) {
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
 						return ActionDelete
 					}
 				}
@@ -104,8 +107,8 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 			return ActionNone
 		}
 	}
-	if len(addresses) > 0 {
-		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses)
+	if len(addresses) > 0 || len(hostnames) > 0 {
+		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses, "hostnames", hostnames)
 		return ActionAdd // If no matching instance is found, we need to add a new service instance
 	}
 	return ActionNone
@@ -171,7 +174,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 		}
 	}
 
-	serviceIPs := instance.FetchServiceAddresses(svc)
+	serviceIPs, _ := instance.FetchServiceAddresses(svc)
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
 	if svc.Annotations[kubevip.FlushContrack] == "true" {
 
@@ -213,7 +216,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 			// Does the service have an active IPv6 endpoint
 			if svc.Annotations[kubevip.ActiveEndpointIPv6] != "" {
 				for _, serviceIP := range serviceIPs {
-					if !p.config.EnableEndpoints && vip.IsIPv6(serviceIP) {
+					if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
 
@@ -228,7 +231,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 		} else if svc.Annotations[kubevip.ActiveEndpoint] != "" { // Not expected to be IPv6, so should be an IPv4 address
 			for _, serviceIP := range serviceIPs {
 				podIPs := svc.Annotations[kubevip.ActiveEndpoint]
-				if !p.config.EnableEndpoints && vip.IsIPv6(serviceIP) {
+				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
 				}
 				err = p.configureEgress(serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
@@ -296,12 +299,13 @@ func (p *Processor) deleteService(uid types.UID) error {
 	shared := false
 	vipSet := make(map[string]interface{})
 	for x := range updatedInstances {
-		for _, vip := range instance.FetchServiceAddresses(updatedInstances[x].ServiceSnapshot) { //updatedInstances[x].ServiceSnapshot.Spec.LoadBalancerIP {
+		vips, _ := instance.FetchServiceAddresses(updatedInstances[x].ServiceSnapshot)
+		for _, vip := range vips { //updatedInstances[x].ServiceSnapshot.Spec.LoadBalancerIP {
 			vipSet[vip] = nil
 		}
 	}
-
-	for _, vip := range instance.FetchServiceAddresses(serviceInstance.ServiceSnapshot) {
+	vips, _ := instance.FetchServiceAddresses(serviceInstance.ServiceSnapshot)
+	for _, vip := range vips {
 		if _, found := vipSet[vip]; found {
 			shared = true
 		}
@@ -373,7 +377,8 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	// Reset Gateway IPs to remove stale addresses
 	s.UPNPGatewayIPs = make([]string, 0)
 
-	for _, vip := range instance.FetchServiceAddresses(s.ServiceSnapshot) {
+	vips, _ := instance.FetchServiceAddresses(s.ServiceSnapshot)
+	for _, vip := range vips {
 		for _, port := range s.ServiceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
 				log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
@@ -472,8 +477,8 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 		ingresses := []v1.LoadBalancerIngress{}
 
 		for _, c := range i.VIPConfigs {
-			if !vip.IsIP(c.VIP) {
-				ips, err := vip.LookupHost(c.VIP, p.config.DNSMode)
+			if !utils.IsIP(c.VIP) {
+				ips, err := utils.LookupHost(c.VIP, p.config.DNSMode)
 				if err != nil {
 					return err
 				}

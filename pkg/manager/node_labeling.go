@@ -7,14 +7,10 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-)
-
-const (
-	nodeLabelIndex    = "kube-vip.io/has-ip"
-	nodeLabelJSONPath = `kube-vip.io~1has-ip`
 )
 
 type patchStringLabel struct {
@@ -35,8 +31,8 @@ func applyNodeLabel(clientSet *kubernetes.Clientset, address, id, identity strin
 
 	log.Debug(fmt.Sprintf("node %s labels: %+v", id, node.Labels))
 
-	value, ok := node.Labels[nodeLabelIndex]
-	path := fmt.Sprintf("/metadata/labels/%s", nodeLabelJSONPath)
+	value, ok := node.Labels[kubevip.HasIP]
+	path := fmt.Sprintf("/metadata/labels/%s", kubevip.HasIPJSONPath)
 	log.Debug(fmt.Sprintf("Received identity: %s - id: %s", identity, id))
 	if ok && value == address {
 		log.Debug(fmt.Sprintf("removing node label `has-ip=%s` on %s", address, id))

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gookit/slog"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -76,7 +77,7 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 								},
 								{
 									Name:  "vip_subnet",
-									Value: "32",
+									Value: "auto,auto",
 								},
 								{
 									Name:  "svc_enable",
@@ -238,23 +239,23 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 	}
 
 	if s.egress {
-		svc.Annotations = map[string]string{ //kube-vip.io/egress: "true"
-			"kube-vip.io/egress": "true",
+		svc.Annotations = map[string]string{
+			kubevip.Egress: "true",
 		}
 	}
 
 	if s.egressInternal {
-		svc.Annotations["kube-vip.io/egress-internal"] = "true"
+		svc.Annotations[kubevip.EgressInternal] = "true"
 	}
 
 	if s.egressIPv6 {
-		svc.Annotations["kube-vip.io/egress-ipv6"] = "true"
+		svc.Annotations[kubevip.EgressIPv6] = "true"
 	}
 
-	//svc.Annotations["kube-vip.io/egress-denied-networks"] = "172.18.0.0/24"
-	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressDeniedNetworks] = "172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressAllowedNetworks] = "172.18.0.0/24"
 
-	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "192.168.0.0/24, 172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressAllowedNetworks] = "192.168.0.0/24, 172.18.0.0/24"
 
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
@@ -272,7 +273,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		if err != nil {
 			slog.Fatal(err)
 		}
-		svc.Annotations["kube-vip.io/loadbalancerIPs"] = fmt.Sprintf("%s,%s", ipv4VIP, ipv6VIP)
+		svc.Annotations[kubevip.LoadbalancerIPAnnotation] = fmt.Sprintf("%s,%s", ipv4VIP, ipv6VIP)
 		svc.Labels["implementation"] = "kube-vip"
 		svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol}
 		ipfPolicy := v1.IPFamilyPolicyRequireDualStack
@@ -315,9 +316,9 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 					for _, ingress := range svc.Status.LoadBalancer.Ingress {
 						loadBalancerAddresses = append(loadBalancerAddresses, ingress.IP)
 					}
-					slog.Infof("🔎 found load balancer addresses [%s] on node [%s]", loadBalancerAddresses, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔎 found load balancer addresses [%s] on node [%s]", loadBalancerAddresses, svc.Annotations[kubevip.VipHost])
 					ready = true
-					currentLeader = svc.Annotations["kube-vip.io/vipHost"]
+					currentLeader = svc.Annotations[kubevip.VipHost]
 				}
 			}
 		default:

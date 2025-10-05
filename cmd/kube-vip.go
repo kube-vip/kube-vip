@@ -20,6 +20,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -124,11 +125,11 @@ func init() {
 
 	// Extended behaviour flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServicesElection, "servicesElection", false, "Enable leader election per kubernetes service")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoadBalancerClassOnly, "lbClassOnly", false, "Enable load balancing only for services with LoadBalancerClass \"kube-vip.io/kube-vip-class\"")
-	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerClassName, "lbClassName", "kube-vip.io/kube-vip-class", "Name of load balancer class for kube-VIP, defaults to \"kube-vip.io/kube-vip-class\"")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoadBalancerClassOnly, "lbClassOnly", false, fmt.Sprintf("Enable load balancing only for services with LoadBalancerClass %q", kubevip.LBClassName))
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LoadBalancerClassName, "lbClassName", kubevip.LBClassName, fmt.Sprintf("Name of load balancer class for kube-VIP, defaults to %q", kubevip.LBClassName))
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoadBalancerClassLegacyHandling, "lbClassNameLegacyHandling", true, "Use legacy LoadBalancer class name handling (e.g. accepting services both with empty and non-empty class)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableServiceSecurity, "onlyAllowTrafficServicePorts", false, "Only allow traffic to service ports, others will be dropped, defaults to false")
-	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableNodeLabeling, "enableNodeLabeling", false, "Enable leader node labeling with \"kube-vip.io/has-ip=<VIP address>\", defaults to false")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableNodeLabeling, "enableNodeLabeling", false, fmt.Sprintf("Enable leader node labeling with %q, defaults to false", kubevip.HasIP))
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesLeaseName, "servicesLeaseName", "plndr-svcs-lock", "Name of the lease that is used for leader election for services (in arp mode)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DNSMode, "dnsMode", "first", "Name of the mode that DNS lookup will be performed (first, ipv4, ipv6, dual)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
@@ -481,7 +482,7 @@ func GenerateCidrRange(address string, dnsMode string) (string, error) {
 		ip := net.ParseIP(a)
 		if ip == nil {
 			// we probably are a DNS name
-			ips, err := vip.LookupHost(a, dnsMode)
+			ips, err := utils.LookupHost(a, dnsMode)
 			if len(ips) == 0 || err != nil {
 				return "", fmt.Errorf("invalid IP address: %s from [%s], %v", a, address, err)
 			}

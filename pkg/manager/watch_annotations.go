@@ -10,7 +10,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 
 	"github.com/davecgh/go-spew/spew"
 	v1 "k8s.io/api/core/v1"
@@ -151,8 +151,8 @@ func (sm *Manager) annotationsWatcher() error {
 // * `<info>` is the relevant information, such as `node-asn` or `peer-ip`
 // * `{{n}}` is the number of the peer, always starting with `0`
 // * kube-vip is only designed to manage one peer, just look for {{n}} == 0
-func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bgp.Config, bgp.Peer, error) {
-	bgpPeer := bgp.Peer{}
+func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix string) (kubevip.BGPConfig, kubevip.BGPPeer, error) {
+	bgpPeer := kubevip.BGPPeer{}
 
 	nodeASN := ""
 	for k, v := range node.Annotations {
@@ -216,7 +216,7 @@ func parseBgpAnnotations(bgpConfig bgp.Config, node *v1.Node, prefix string) (bg
 
 	peerIPs := strings.Split(peerIPString, ",")
 
-	bgpConfig.Peers = make([]bgp.Peer, 0, len(peerIPs))
+	bgpConfig.Peers = make([]kubevip.BGPPeer, 0, len(peerIPs))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 

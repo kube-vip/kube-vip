@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
@@ -141,7 +141,7 @@ func getKindNetworkSubnetCIDRs() []string {
 
 func CheckIPAddressPresence(ip string, container string, expected bool) bool {
 	family := "-4"
-	if vip.IsIPv6(ip) {
+	if utils.IsIPv6(ip) {
 		family = "-6"
 	}
 
@@ -174,7 +174,7 @@ func CheckIPAddressPresenceByLease(name, namespace, ip string, client kubernetes
 
 func CheckRoutePresence(ip string, container string, expected bool) bool {
 	family := "-4"
-	if vip.IsIPv6(ip) {
+	if utils.IsIPv6(ip) {
 		family = "-6"
 	}
 

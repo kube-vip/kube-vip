@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -50,8 +51,7 @@ type Port struct {
 }
 
 func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager) (*Instance, error) {
-	instanceAddresses := FetchServiceAddresses(svc)
-	//instanceUID := string(svc.UID)
+	instanceAddresses, _ := FetchServiceAddresses(svc)
 
 	var newVips []*kubevip.Config
 	var link netlink.Link
@@ -121,7 +121,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 
 		subnet := ""
 		var err error
-		if vip.IsIPv4(address) {
+		if utils.IsIPv4(address) {
 			if ipv4AutoSubnet {
 				subnet, err = autoFindSubnet(link, address)
 				if err != nil {
@@ -408,78 +408,88 @@ func (i *Instance) startDHCP() error {
 	return nil
 }
 
-// FetchIngressAddresses tries to get the addresses from status.loadBalancerIP
-func FetchLoadBalancerIngressAddresses(s *v1.Service) []string {
+// FetchLoadBalancerIngressAddresses tries to get the addresses from status.loadBalancerIP
+func FetchLoadBalancerIngress(s *v1.Service) ([]string, []string) {
 	// If the service has no status, return empty
 	lbStatusAddresses := []string{}
-
+	lbStatusHostnames := []string{}
 	if len(s.Status.LoadBalancer.Ingress) == 0 {
-		return lbStatusAddresses
+		return lbStatusAddresses, lbStatusHostnames
 	}
 
 	for _, ingress := range s.Status.LoadBalancer.Ingress {
 		if ingress.IP != "" {
 			lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
 		}
-		// TODO: Handle hostname if needed
+		if ingress.Hostname != "" {
+			lbStatusHostnames = append(lbStatusHostnames, ingress.Hostname)
+		}
 	}
-
-	return lbStatusAddresses
+	return lbStatusAddresses, lbStatusHostnames
 }
 
 // FetchServiceAddresses tries to get the addresses from annotations
 // kube-vip.io/loadbalancerIPs, then from spec.loadbalancerIP
-func FetchServiceAddresses(s *v1.Service) []string {
+func FetchServiceAddresses(s *v1.Service) ([]string, []string) {
 	annotationAvailable := false
 	if s.Annotations != nil {
 
 		if v, annotationAvailable := s.Annotations[kubevip.LoadbalancerIPAnnotation]; annotationAvailable {
 			ips := strings.Split(v, ",")
 			var trimmedIPs []string
-			for _, ip := range ips {
-				trimmedIPs = append(trimmedIPs, strings.TrimSpace(ip))
+			var trimmedHostnames []string
+			for _, a := range ips {
+				a = strings.TrimSpace(a)
+				ip := net.ParseIP(a)
+				if ip == nil {
+					// this is probably a DNS name
+					trimmedHostnames = append(trimmedHostnames, a)
+				} else {
+					trimmedIPs = append(trimmedIPs, ip.String())
+				}
 			}
-			return trimmedIPs
+			return trimmedIPs, trimmedHostnames
 		}
 	}
 
 	lbStatusAddresses := []string{}
+	lbStatusHostnames := []string{}
 	if !annotationAvailable {
-		if len(s.Status.LoadBalancer.Ingress) > 0 {
-			for _, ingress := range s.Status.LoadBalancer.Ingress {
-				lbStatusAddresses = append(lbStatusAddresses, ingress.IP)
+		lbStatusAddresses, lbStatusHostnames = FetchLoadBalancerIngress(s)
+	}
+
+	// Spec.LoadBalancerIP legacy handling
+	// if the loadBalancerIP is different from Status.LoadBalancer.Ingress IPs
+	// return the legacy LB as spec wins over status.
+	if lbIP := net.ParseIP(s.Spec.LoadBalancerIP); lbIP != nil && len(lbStatusAddresses) > 0 {
+		isLbIPv4 := utils.IsIPv4(s.Spec.LoadBalancerIP)
+		for _, a := range lbStatusAddresses {
+			if lbStatusIP := net.ParseIP(a); lbStatusIP != nil && lbIP != nil && utils.IsIPv4(a) == isLbIPv4 && !lbIP.Equal(lbStatusIP) {
+				return []string{s.Spec.LoadBalancerIP}, []string{}
 			}
 		}
 	}
 
-	lbIP := net.ParseIP(s.Spec.LoadBalancerIP)
-	isLbIPv4 := vip.IsIPv4(s.Spec.LoadBalancerIP)
-
-	if len(lbStatusAddresses) > 0 {
-		for _, a := range lbStatusAddresses {
-			if lbStatusIP := net.ParseIP(a); lbStatusIP != nil && lbIP != nil && vip.IsIPv4(a) == isLbIPv4 && !lbIP.Equal(lbStatusIP) {
-				return []string{s.Spec.LoadBalancerIP}
-			}
-		}
-		return lbStatusAddresses
+	if len(lbStatusAddresses) > 0 || len(lbStatusHostnames) > 0 {
+		return lbStatusAddresses, lbStatusHostnames
 	}
 
 	if s.Spec.LoadBalancerIP != "" {
-		return []string{s.Spec.LoadBalancerIP}
+		return []string{s.Spec.LoadBalancerIP}, []string{}
 	}
 
-	return []string{}
+	return []string{}, []string{}
 }
 
 func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
-	log.Debug("finding service", "UID", svc.UID)
+	log.Debug("finding service", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	for i := range instances {
 		log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
 		if instances[i].ServiceSnapshot.UID == svc.UID {
 			return instances[i]
 		}
 	}
-	log.Debug("insance not found", "UID", svc.UID)
+	log.Debug("instance not found", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	return nil
 }
 

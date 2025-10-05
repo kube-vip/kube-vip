@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gookit/slog"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/vishvananda/netlink"
 
@@ -317,7 +318,7 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 			}
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					slog.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 				}
 			}
 		case watch.Modified:
@@ -327,12 +328,12 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 			}
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
 						return err
 					}
-					*leaderNode = svc.Annotations["kube-vip.io/vipHost"]
+					*leaderNode = svc.Annotations[kubevip.VipHost]
 				}
 			}
 		default:
@@ -400,7 +401,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 			}
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					slog.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔎 found load balancer address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 				}
 			}
 		case watch.Modified:
@@ -410,12 +411,12 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 			}
 			if svc.Name == *name {
 				if len(svc.Status.LoadBalancer.Ingress) != 0 {
-					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations["kube-vip.io/vipHost"])
+					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
 						slog.Fatal(err)
 					}
-					*leaderNode = svc.Annotations["kube-vip.io/vipHost"]
+					*leaderNode = svc.Annotations[kubevip.VipHost]
 				}
 			}
 		default:
