@@ -87,7 +87,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 					if address != "0.0.0.0" && address != "::" {
 						return ActionDelete
 					}
-					if !slices.Contains(statusAddresses, instance.DHCPInterfaceIP) {
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIP) {
 						return ActionDelete
 					}
 				}
