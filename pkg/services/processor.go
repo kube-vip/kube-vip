@@ -170,6 +170,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 				// in theory this should never fail
 				p.svcMap.Delete(svc.UID)
+				// Reset the the svcCtx when it was garbage collected
+				// As the next function will create a new context when nil
+				svcCtx = nil
 			}
 		}
 	}
