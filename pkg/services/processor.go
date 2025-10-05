@@ -159,6 +159,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			// This service has been modified, but it was also active.
 			if svcCtx != nil && svcCtx.IsActive {
 				log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
+				//Set it to inactive
+				svcCtx.IsActive = false
 				svcCtx.Cancel()
 				log.Warn("(svcs) waiting for load balancer to finish")
 				<-svcCtx.Ctx.Done()
@@ -315,6 +317,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 		// Calls the cancel function of the context
 		log.Warn("(svcs) The load balancer was deleted, cancelling context")
+		svcCtx.IsActive = false
 		svcCtx.Cancel()
 		log.Warn("(svcs) waiting for load balancer to finish")
 		<-svcCtx.Ctx.Done()
