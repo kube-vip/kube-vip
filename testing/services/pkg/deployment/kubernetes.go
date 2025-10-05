@@ -239,7 +239,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 	}
 
 	if s.egress {
-		svc.Annotations = map[string]string{ //kube-vip.io/egress: "true"
+		svc.Annotations = map[string]string{
 			kubevip.Egress: "true",
 		}
 	}
@@ -252,10 +252,10 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		svc.Annotations[kubevip.EgressIPv6] = "true"
 	}
 
-	//svc.Annotations["kube-vip.io/egress-denied-networks"] = "172.18.0.0/24"
-	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressDeniedNetworks] = "172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressAllowedNetworks] = "172.18.0.0/24"
 
-	//svc.Annotations["kube-vip.io/egress-allowed-networks"] = "192.168.0.0/24, 172.18.0.0/24"
+	//svc.Annotations[kubevip.EgressAllowedNetworks] = "192.168.0.0/24, 172.18.0.0/24"
 
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
