@@ -165,6 +165,26 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		leaseID: c.NodeName,
 		sm:      sm,
 		onStartedLeading: func(ctx context.Context) { //nolint TODO: potential clean code
+			// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
+			if c.PreserveVIPOnLeadershipLoss {
+				log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
+				// Force add the VIPs (this will work even if they exist due to the precheck logic)
+				for i := range cluster.Network {
+					added, err := cluster.Network[i].AddIP(true)
+					if err != nil {
+						log.Error("failed to ensure VIP on leader takeover", "vip", cluster.Network[i].IP(), "err", err)
+					} else if added {
+						log.Info("took over VIP as new leader", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					} else {
+						log.Info("VIP already configured on interface", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
+				}
+			}
+
+			// Start ARP advertisements now that we have leadership
+			log.Info("Start ARP/NDP advertisement")
+			go cluster.arpMgr.StartAdvertisement(ctxArp)
+
 			// As we're leading lets start the vip service
 			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, cancel)
 			if err != nil {
@@ -188,13 +208,20 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 				}
 			}
 
-			for i := range cluster.Network {
-				deleted, err := cluster.Network[i].DeleteIP()
-				if err != nil {
-					log.Warn("delete VIP", "err", err)
-				}
-				if deleted {
-					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+			// Handle VIP cleanup based on configuration
+			if c.PreserveVIPOnLeadershipLoss {
+				log.Info("VIP addresses remain on interface, only stopped ARP/NDP broadcasting")
+			} else {
+				// Legacy behavior: delete VIP addresses on leadership loss
+				log.Info("Deleting VIP addresses on leadership loss (legacy behavior)")
+				for i := range cluster.Network {
+					deleted, err := cluster.Network[i].DeleteIP()
+					if err != nil {
+						log.Warn("delete VIP", "err", err)
+					}
+					if deleted {
+						log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
 				}
 			}
 
@@ -204,6 +231,23 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		onNewLeader: func(identity string) {
 			// we're notified when new leader elected
 			log.Info("New leader", "leader", identity)
+
+			// If we're not the new leader and we have VIPs preserved from previous leadership,
+			// we need to clean them up to avoid conflicts.
+			if identity != c.NodeName && c.PreserveVIPOnLeadershipLoss {
+				log.Info("Cleaning up preserved VIPs as another node became leader", "new_leader", identity)
+				for i := range cluster.Network {
+					deleted, err := cluster.Network[i].DeleteIP()
+					if err != nil {
+						log.Warn("failed to cleanup preserved VIP", "vip", cluster.Network[i].IP(), "err", err)
+					}
+					if deleted {
+						log.Info("cleaned up preserved VIP to avoid conflict", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface(), "new_leader", identity)
+					} else {
+						log.Debug("VIP was not present on this node", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
+				}
+			}
 		},
 	}
 
