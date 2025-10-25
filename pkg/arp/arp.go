@@ -59,6 +59,19 @@ func (m *Manager) Insert(instance *Instance) {
 }
 
 func (m *Manager) Remove(instance *Instance) {
+	m.RemoveWithIPDelete(instance, true)
+}
+
+// RemoveOnLeadershipLoss removes an ARP instance when leadership is lost
+func (m *Manager) RemoveOnLeadershipLoss(instance *Instance) {
+	// Use the inverse of PreserveVIPOnLeadershipLoss to decide whether to delete the IP
+	// If preserve is true, don't delete IP (deleteIP = false)
+	// If preserve is false, delete IP (deleteIP = true), This is the legacy behavior
+	deleteIP := !m.config.PreserveVIPOnLeadershipLoss
+	m.RemoveWithIPDelete(instance, deleteIP)
+}
+
+func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 	i, err := m.get(instance.Name())
 	if err != nil {
 		log.Error("[ARP manager] unable to remove the instance", "err", err)
@@ -71,8 +84,10 @@ func (m *Manager) Remove(instance *Instance) {
 			i.counter--
 		} else {
 			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name())
-			if _, err := instance.network.DeleteIP(); err != nil {
-				log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
+			if deleteIP {
+				if _, err := instance.network.DeleteIP(); err != nil {
+					log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
+				}
 			}
 			m.instances.Delete(instance.Name())
 		}
