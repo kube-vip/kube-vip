@@ -346,13 +346,20 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
 				continue
 			}
-			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
-			deleted, err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warn(err.Error())
-			}
-			if deleted {
-				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+
+			// Handle VIP cleanup based on configuration
+			if c.PreserveVIPOnLeadershipLoss {
+				log.Info("[VIP] Preserving VIP address on interface, only stopped ARP/NDP broadcasting", "ip", cluster.Network[i].IP())
+			} else {
+				// Legacy behavior: delete VIP addresses on leadership loss
+				log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
+				deleted, err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warn(err.Error())
+				}
+				if deleted {
+					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				}
 			}
 		}
 
@@ -390,5 +397,5 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
-	cluster.arpMgr.Remove(arpInstance)
+	cluster.arpMgr.RemoveOnLeadershipLoss(arpInstance)
 }

@@ -50,6 +50,10 @@ type Config struct {
 	// ArpBroadcastRate, defines how often kube-vip will update the network about updates to the network
 	ArpBroadcastRate int64 `yaml:"arpBroadcastRate"`
 
+	// PreserveVIPOnLeadershipLoss, if true, VIP addresses will remain on interface when leadership is lost (only ARP/NDP broadcasting stops)
+	// If false, VIP addresses are deleted on leadership loss (legacy behavior)
+	PreserveVIPOnLeadershipLoss bool `yaml:"preserveVipOnLeadershipLoss"`
+
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 

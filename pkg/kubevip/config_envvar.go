@@ -9,6 +9,9 @@ const (
 	// vip_arpRate - defines the rate of gARP broadcasts
 	vipArpRate = "vip_arpRate"
 
+	// vipPreserveOnLeadershipLoss - if true, VIP addresses will remain on interface when leadership is lost
+	vipPreserveOnLeadershipLoss = "vip_preserve_on_leadership_loss"
+
 	// vipLeaderElection - defines if the kubernetes algorithm should be used
 	vipLeaderElection = "vip_leaderelection"
 
