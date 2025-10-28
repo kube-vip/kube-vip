@@ -46,14 +46,16 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
+
+		if network.IsDDNS() {
+			if err := cluster.StartDDNS(ctxDNS, cluster.Network[i]); err != nil {
+				log.Error("failed to start DDNS", "err", err)
+			}
+		}
+
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			panic("")
-		}
-		if network.IsDDNS() {
-			if err := cluster.StartDDNS(ctxDNS); err != nil {
-				log.Error(err.Error())
-			}
 		}
 
 		// start the dns updater if address is dns
@@ -275,7 +277,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	log.Debug("StartLoadBalancerService")
 	for i := range cluster.Network {
 		network := cluster.Network[i]
-		log.Debug("current ip to process", "ip", network.IP())
+		log.Debug("current ip to process", "ip", network.IP(), "mask", c.VIPSubnet)
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			panic("")
