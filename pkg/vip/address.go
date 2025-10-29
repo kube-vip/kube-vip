@@ -135,6 +135,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 		networks = append(networks, result)
 	} else {
 		// try to resolve the address
+		log.Debug("looking up host", "address", address, "dnsMode", dnsMode)
 		ips, err := utils.LookupHost(address, dnsMode)
 		if err != nil {
 			// return early for ddns if no IP is allocated for the domain
@@ -151,7 +152,17 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 					dnsName:          address,
 					ipvsEnabled:      ipvsEnabled,
 					enableSecurity:   enableSecurity,
+					address: &netlink.Addr{ // create placeholder for the address
+						IPNet: &net.IPNet{}, // that will be added later in the process
+						Peer:  &net.IPNet{},
+					},
 				}
+
+				// set address as deprecated so it isn't used as source address according to RFC 3484
+				result.address.PreferedLft = 0
+
+				// Also set ValidLft so the netlink library actually sets them
+				result.address.ValidLft = math.MaxInt
 
 				networks = append(networks, result)
 				return networks, nil
@@ -175,7 +186,14 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 
 			// we're able to resolve store this as the initial IP
 
-			if result.address, err = netlink.ParseAddr(fmt.Sprintf("%s/%s", ip, subnet)); err != nil {
+			subnets := Split(subnet)
+
+			s := subnet
+			if len(subnets) > 1 {
+				s = selectSubnet(ip, subnets)
+			}
+
+			if result.address, err = netlink.ParseAddr(fmt.Sprintf("%s/%s", ip, s)); err != nil {
 				return networks, err
 			}
 			// set ValidLft so that the VIP expires if the DNS entry is updated, otherwise it'll be refreshed by the DNS prober
@@ -613,6 +631,10 @@ func (configurator *network) IsSet() (result bool, err error) {
 		return false, nil
 	}
 
+	if configurator.address.Mask == nil {
+		return false, nil
+	}
+
 	addresses, err = netlink.AddrList(configurator.link.Intf, 0)
 	if err != nil {
 		err = errors.Wrap(err, "could not list addresses")
@@ -678,12 +700,20 @@ func (configurator *network) IP() string {
 	configurator.mu.Lock()
 	defer configurator.mu.Unlock()
 
+	if configurator.address == nil || configurator.address.IP == nil {
+		return ""
+	}
+
 	return configurator.address.IP.String()
 }
 
 func (configurator *network) CIDR() string {
 	configurator.mu.Lock()
 	defer configurator.mu.Unlock()
+
+	if configurator.address == nil || configurator.address.IPNet == nil {
+		return ""
+	}
 
 	return configurator.address.IPNet.String()
 }
@@ -758,9 +788,14 @@ func GarbageCollect(adapter, address string, intfMgr *networkinterface.Manager) 
 }
 
 func (configurator *network) SetMask(mask string) error {
-	selectedMask, err := SelectSubnet(configurator.IP(), mask)
-	if err != nil {
-		return fmt.Errorf("failed to select mask %q: %w", mask, err)
+	selectedMask := mask
+	var err error
+
+	if configurator.IP() != "" {
+		selectedMask, err = SelectSubnet(configurator.IP(), mask)
+		if err != nil {
+			return fmt.Errorf("failed to select mask %q: %w", mask, err)
+		}
 	}
 
 	m, err := strconv.Atoi(selectedMask)
@@ -771,13 +806,16 @@ func (configurator *network) SetMask(mask string) error {
 	size := 32
 	family := "IPv4"
 
-	if utils.IsIPv6(configurator.IP()) {
-		size = 128
-		family = "IPv6"
-	}
+	if configurator.IP() != "" {
+		if utils.IsIPv6(configurator.IP()) {
+			size = 128
+			family = "IPv6"
+		}
 
-	if m > size {
-		return fmt.Errorf("provided CIDR mask '%d' is greater than the highest mask value for the %s family (%d)", m, family, size)
+		if m > size {
+			return fmt.Errorf("provided CIDR mask '%d' is greater than the highest mask value for the %s family (%d)", m, family, size)
+		}
+
 	}
 
 	toSet := net.CIDRMask(m, size)

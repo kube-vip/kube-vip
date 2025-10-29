@@ -10,6 +10,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -141,4 +142,23 @@ func GetNonLinkLocalIP(iface *netlink.Link, family int) (string, error) {
 	}
 
 	return "", fmt.Errorf("failed to find non-local IP on interface: %s", (*iface).Attrs().Name)
+}
+
+func selectSubnet(address string, subnets []string) string {
+	subnet := ""
+	if utils.IsIPv4(address) {
+		if subnets[0] != "" {
+			subnet = subnets[0]
+		} else {
+			subnet = "32"
+		}
+	} else {
+		if len(subnets) > 1 && subnets[1] != "" {
+			subnet = subnets[1]
+		} else {
+			subnet = "128"
+		}
+	}
+
+	return subnet
 }
