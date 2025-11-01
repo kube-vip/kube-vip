@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"syscall"
 	"time"
 
 	log "log/slog"
@@ -39,11 +40,19 @@ func (sm *Manager) startWireguard(id string) error {
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
+		for {
+			sig := <-sm.signalChan
+			switch sig {
+			case syscall.SIGUSR1:
+				log.Info("Received SIGUSR1, dumping configuration")
+				sm.dumpConfiguration()
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Info("Received termination, signaling shutdown")
+				// Cancel the context, which will in turn cancel the leadership
+				cancel()
+				return
+			}
+		}
 	}()
 
 	ns, err = returnNameSpace()
