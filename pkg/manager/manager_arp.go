@@ -32,15 +32,24 @@ func (sm *Manager) startARP(id string) error {
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
-		<-sm.signalChan
-		log.Info("Received kube-vip termination, signaling shutdown")
-		if sm.config.EnableControlPlane {
-			cpCluster.Stop()
+		for {
+			sig := <-sm.signalChan
+			switch sig {
+			case syscall.SIGUSR1:
+				log.Info("Received SIGUSR1, dumping configuration")
+				sm.dumpConfiguration()
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Info("Received kube-vip termination, signaling shutdown")
+				if sm.config.EnableControlPlane {
+					cpCluster.Stop()
+				}
+				// Close all go routines
+				close(sm.shutdownChan)
+				// Cancel the context, which will in turn cancel the leadership
+				cancel()
+				return
+			}
 		}
-		// Close all go routines
-		close(sm.shutdownChan)
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
 	}()
 
 	if sm.config.EnableControlPlane {

@@ -61,15 +61,24 @@ func (sm *Manager) startBGP() error {
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
-		<-sm.signalChan
-		log.Info("Received termination, signaling shutdown")
-		if sm.config.EnableControlPlane {
-			if cpCluster != nil {
-				cpCluster.Stop()
+		for {
+			sig := <-sm.signalChan
+			switch sig {
+			case syscall.SIGUSR1:
+				log.Info("Received SIGUSR1, dumping configuration")
+				sm.dumpConfiguration()
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Info("Received termination, signaling shutdown")
+				if sm.config.EnableControlPlane {
+					if cpCluster != nil {
+						cpCluster.Stop()
+					}
+				}
+				// Cancel the context, which will in turn cancel the leadership
+				cancel()
+				return
 			}
 		}
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
 	}()
 
 	if sm.config.EnableControlPlane {
