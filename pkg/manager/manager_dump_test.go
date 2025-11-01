@@ -42,7 +42,8 @@ func TestDumpConfiguration(t *testing.T) {
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, err := io.Copy(&buf, r)
+	assert.NoError(t, err, "io.Copy should not return error")
 	output := buf.String()
 
 	assert.Contains(t, output, "KUBE-VIP CONFIGURATION DUMP", "should contain header")
@@ -84,7 +85,8 @@ func TestDumpConfigSection(t *testing.T) {
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, err := io.Copy(&buf, r)
+	assert.NoError(t, err, "io.Copy should not return error")
 	output := buf.String()
 
 	assert.Contains(t, output, "--- BASIC CONFIGURATION ---")
@@ -114,7 +116,8 @@ func TestDumpBGPSection(t *testing.T) {
 		os.Stdout = old
 
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		_, err := io.Copy(&buf, r)
+		assert.NoError(t, err, "io.Copy should not return error")
 		output := buf.String()
 
 		assert.Contains(t, output, "BGP Enabled: false")
@@ -144,7 +147,8 @@ func TestDumpBGPSection(t *testing.T) {
 		os.Stdout = old
 
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		_, err := io.Copy(&buf, r)
+		assert.NoError(t, err, "io.Copy should not return error")
 		output := buf.String()
 
 		assert.Contains(t, output, "BGP Enabled: true")
@@ -171,7 +175,8 @@ func TestDumpARPSection(t *testing.T) {
 		os.Stdout = old
 
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		_, err := io.Copy(&buf, r)
+		assert.NoError(t, err, "io.Copy should not return error")
 		output := buf.String()
 
 		assert.Contains(t, output, "ARP Enabled: false")
@@ -194,7 +199,8 @@ func TestDumpARPSection(t *testing.T) {
 		os.Stdout = old
 
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		_, err := io.Copy(&buf, r)
+		assert.NoError(t, err, "io.Copy should not return error")
 		output := buf.String()
 
 		assert.Contains(t, output, "ARP Enabled: true")
@@ -222,7 +228,8 @@ func TestDumpRuntimeSection(t *testing.T) {
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, err := io.Copy(&buf, r)
+	assert.NoError(t, err, "io.Copy should not return error")
 	output := buf.String()
 
 	assert.Contains(t, output, "--- RUNTIME STATISTICS ---", "should contain runtime section header")
