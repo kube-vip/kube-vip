@@ -2,8 +2,10 @@ package labeler
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -96,7 +98,22 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 // generateNodeLabelKeyValue generates a label key and value for the given service
 func generateNodeLabelKeyValue(svc *corev1.Service) (string, string) {
 	addresses, _ := instance.FetchServiceAddresses(svc)
-	return fmt.Sprintf("%s/%s.%s", labelName, svc.Name, svc.Namespace), strings.Join(addresses, ",")
+
+	sanitized := make([]string, len(addresses))
+	for i, addr := range addresses {
+		sanitized[i] = sanitizeIPForLabel(addr)
+	}
+
+	return fmt.Sprintf("%s/%s.%s", labelName, svc.Name, svc.Namespace), strings.Join(sanitized, ",")
+}
+
+// Helper function to convert IPv6 hex address without colons
+func sanitizeIPForLabel(addr string) string {
+	ip := net.ParseIP(addr)
+	if ip == nil || ip.To4() != nil {
+		return addr
+	}
+	return hex.EncodeToString(ip.To16())
 }
 
 // patchNode patches the node with the given labels
