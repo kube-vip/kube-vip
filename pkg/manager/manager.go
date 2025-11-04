@@ -246,6 +246,9 @@ func (sm *Manager) Start() error {
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(sm.signalChan, syscall.SIGTERM)
 
+	// Add Notification for SIGUSR1 (for configuration dump)
+	signal.Notify(sm.signalChan, syscall.SIGUSR1)
+
 	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
 	sm.shutdownChan = make(chan struct{})
 
