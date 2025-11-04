@@ -1,6 +1,7 @@
 package networkinterface
 
 import (
+	log "log/slog"
 	"sync"
 
 	"github.com/vishvananda/netlink"
@@ -23,6 +24,12 @@ func NewManager() *Manager {
 
 func (m *Manager) Get(intf netlink.Link) *Link {
 	if l, ok := m.interfaces[intf.Attrs().Name]; ok {
+		updated, err := netlink.LinkByName(l.Intf.Attrs().Name)
+		if err != nil {
+			log.Error("failed to get interface %q: %w", l.Intf.Attrs().Name, err)
+			return nil
+		}
+		l.Intf = updated
 		return l
 	}
 	result := &Link{

@@ -116,7 +116,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
 
 	// We only care about LoadBalancer services that have been allocated an address
-	if len(svcAddresses) <= 0 {
+	if len(svcAddresses) <= 0 && len(svcHostnames) <= 0 {
 		return true, nil
 	}
 
@@ -143,7 +143,13 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					// Service hostnames changed
 					!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
 					// ExternalTrafficPolicy changed
-					svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy
+					svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy ||
+					// IP stack configuration changed
+					!reflect.DeepEqual(svc.Spec.IPFamilies, i.ServiceSnapshot.Spec.IPFamilies) ||
+					*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
+					// DDNS was disabled/enabled
+					svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS]
+
 		}
 		if shouldGarbageCollect {
 			for _, addr := range svcAddresses {

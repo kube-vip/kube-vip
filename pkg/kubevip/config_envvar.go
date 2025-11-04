@@ -212,6 +212,9 @@ const (
 	// dnsMode defines mode that DNS lookup will be performed with (first, ipv4, ipv6, dual)
 	dnsMode = "dns_mode"
 
+	// dhcpMode defines mode that DHCP lookup will be performed with (ipv4, ipv6, dual)
+	dhcpMode = "dhcp_mode"
+
 	// disableServiceUpdates disables service updating
 	disableServiceUpdates = "disable_service_updates"
 

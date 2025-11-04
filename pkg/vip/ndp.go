@@ -21,13 +21,13 @@ type NdpResponder struct {
 func NewNDPResponder(ifaceName string) (*NdpResponder, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface %q: %v", ifaceName, err)
+		return nil, fmt.Errorf("failed to get interface %q: %w", ifaceName, err)
 	}
 
 	// Use link-local address as the source IPv6 address for NDP communications.
 	conn, _, err := ndp.Listen(iface, ndp.LinkLocal)
 	if err != nil {
-		return nil, fmt.Errorf("creating NDP responder for %q: %s", iface.Name, err)
+		return nil, fmt.Errorf("creating NDP responder for %s: %w", iface.Name, err)
 	}
 
 	ret := &NdpResponder{

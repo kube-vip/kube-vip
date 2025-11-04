@@ -255,6 +255,17 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *cor
 		newEnvironment = append(newEnvironment, dnsModeSelector...)
 	}
 
+	if c.DHCPMode != "" {
+		// build environment variables
+		dhcpModeSelector := []corev1.EnvVar{
+			{
+				Name:  dhcpMode,
+				Value: c.DHCPMode,
+			},
+		}
+		newEnvironment = append(newEnvironment, dhcpModeSelector...)
+	}
+
 	// If we're doing the hybrid mode
 	if c.EnableControlPlane {
 		cp := []corev1.EnvVar{

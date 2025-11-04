@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/detector"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"sigs.k8s.io/yaml"
 )
 
@@ -377,6 +378,18 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(dnsMode)
 	if env != "" {
 		c.DNSMode = env
+	}
+
+	// DHCP mode
+	env = os.Getenv(dhcpMode)
+	if env != "" {
+		c.DHCPMode = env
+	} else {
+		if c.DNSMode != "first" {
+			c.DHCPMode = c.DNSMode
+		} else {
+			c.DHCPMode = strings.ToLower(utils.IPv4Family)
+		}
 	}
 
 	// Disable updates for services (status.LoadBalancer.Ingress will not be updated)
@@ -876,6 +889,11 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	// DNS configuration
 	if baseConfig.DNSMode == "" && fileConfig.DNSMode != "" {
 		baseConfig.DNSMode = fileConfig.DNSMode
+	}
+
+	// DHCP configuration
+	if baseConfig.DHCPMode == "" && fileConfig.DHCPMode != "" {
+		baseConfig.DHCPMode = fileConfig.DHCPMode
 	}
 
 	// Health check configuration

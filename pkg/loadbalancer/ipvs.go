@@ -17,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 )
 
@@ -90,9 +91,9 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		}
 	}
 
-	netMask := netmask.MaskFrom(31, 32) // For ipv4
+	netMask := netmask.MaskFrom(31, vip.DefaultMaskIPv4) // For ipv4
 	if family == ipvs.INET6 {
-		netMask = netmask.MaskFrom(128, 128) // For ipv6
+		netMask = netmask.MaskFrom(128, vip.DefaultMaskIPv6) // For ipv6
 	}
 
 	// Generate out API Server LoadBalancer instance

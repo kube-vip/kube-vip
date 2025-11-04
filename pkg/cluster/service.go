@@ -8,8 +8,10 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	log "log/slog"
 
@@ -276,9 +278,28 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 	var arpWG sync.WaitGroup
 
-	log.Debug("StartLoadBalancerService")
+	log.Debug("StartLoadBalancerService", "networks", len(cluster.Network))
 	for i := range cluster.Network {
 		network := cluster.Network[i]
+
+		if network.IsDDNS() {
+			ddnsReady := make(chan struct{})
+			go func() {
+				ctxDDNS, ddnsCancel := context.WithCancel(ctx)
+				defer ddnsCancel()
+
+				// start the DDNS if requested
+				log.Debug("(svcs) start DDNS", "name", network.DNSName())
+				if err := cluster.StartDDNS(ctxDDNS, cluster.Network[i]); err != nil {
+					log.Error("failed to start DDNS", "err", err)
+				}
+
+				close(ddnsReady)
+				<-cluster.stop
+			}()
+			<-ddnsReady
+		}
+
 		log.Debug("current ip to process", "ip", network.IP(), "mask", c.VIPSubnet)
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
@@ -322,6 +343,20 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	}
 
 	go func() {
+		for i := range cluster.Network {
+			network := cluster.Network[i]
+
+			ctxDNS, dnsCancel := context.WithCancel(ctx)
+			defer dnsCancel()
+
+			// start the dns updater if address is dns
+			if network.IsDNS() {
+				log.Info("(svcs) starting the DNS updater", "address", network.DNSName(), "ip", network.IP())
+				ipUpdater := vip.NewIPUpdater(network)
+				ipUpdater.Run(ctxDNS)
+			}
+		}
+
 		<-cluster.stop
 		// Stop the Arp context if it is running
 		cancelArp()
@@ -387,16 +422,14 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 // Layer2Update, handles the creation of the
 func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config, arpWG *sync.WaitGroup) {
 	defer arpWG.Done()
-	log.Info("layer 2 broadcaster starting")
 	var ndp *vip.NdpResponder
 	var err error
 	ipString := network.IP()
 	if utils.IsIPv6(ipString) {
 		if network.IPisLinkLocal() {
 			log.Error("layer2 is link-local can't use NDP", "address", ipString)
-
 		} else {
-			ndp, err = vip.NewNDPResponder(network.Interface())
+			ndp, err = waitNDPResponder(ctx, network.Interface())
 			if err != nil {
 				log.Error("failed to create new NDP Responder", "error", err)
 			} else {
@@ -407,6 +440,7 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 		}
 	}
 
+	log.Info("layer 2 broadcaster starting", "IP", network.IP(), "device", network.Interface())
 	log.Debug("layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 
 	arpInstance := arp.NewInstance(network, ndp)
@@ -415,4 +449,31 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
 	cluster.arpMgr.RemoveOnLeadershipLoss(arpInstance)
+}
+
+func waitNDPResponder(ctx context.Context, ifaceName string) (*vip.NdpResponder, error) {
+	ndp, err := vip.NewNDPResponder(ifaceName)
+	if err != nil && strings.Contains(err.Error(), "no such device") {
+		log.Warn("unable to create NDP responder at first try", "interface", ifaceName, "err", err)
+		ndpCreateCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		ticker := time.NewTicker(time.Second)
+
+		for {
+			select {
+			case <-ndpCreateCtx.Done():
+				return nil, fmt.Errorf("failed to create NDP responder for interface %q: %w", ifaceName, ndpCreateCtx.Err())
+			case <-ticker.C:
+				ndp, err = vip.NewNDPResponder(ifaceName)
+				if err != nil {
+					log.Warn("unable to create NDP responder on retry", "interface", ifaceName, "err", err)
+				} else {
+					return ndp, nil
+				}
+			}
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("unable to create NDP responder for interface %q: %w", ifaceName, err)
+	}
+	return ndp, nil
 }

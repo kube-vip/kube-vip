@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableNodeLabeling, "enableNodeLabeling", false, fmt.Sprintf("Enable leader node labeling with %q, defaults to false", kubevip.HasIP))
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesLeaseName, "servicesLeaseName", "plndr-svcs-lock", "Name of the lease that is used for leader election for services (in arp mode)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DNSMode, "dnsMode", "first", "Name of the mode that DNS lookup will be performed (first, ipv4, ipv6, dual)")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DHCPMode, "dhcpMode", "", "Mode DHCP resolving will use to obtain IP addresses (ipv4, ipv6, dual)")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpoints, "enableEndpoints", false, "If enabled, kube-vip will only advertise services, but will use the (deprecated since v1.33) endpoints for IP addresses")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")
@@ -483,23 +485,23 @@ func GenerateCidrRange(address string, dnsMode string) (string, error) {
 		ip := net.ParseIP(a)
 		if ip == nil {
 			// we probably are a DNS name
-			ips, err := utils.LookupHost(a, dnsMode)
+			ips, err := utils.LookupHost(a, dnsMode, true)
 			if len(ips) == 0 || err != nil {
 				return "", fmt.Errorf("invalid IP address: %s from [%s], %v", a, address, err)
 			}
 			for _, addr := range ips {
 				ip = net.ParseIP(addr)
 				if ip.To4() != nil {
-					cidrs = append(cidrs, "32")
+					cidrs = append(cidrs, strconv.Itoa(vip.DefaultMaskIPv4))
 				} else {
-					cidrs = append(cidrs, "128")
+					cidrs = append(cidrs, strconv.Itoa(vip.DefaultMaskIPv6))
 				}
 			}
 		} else {
 			if ip.To4() != nil {
-				cidrs = append(cidrs, "32")
+				cidrs = append(cidrs, strconv.Itoa(vip.DefaultMaskIPv4))
 			} else {
-				cidrs = append(cidrs, "128")
+				cidrs = append(cidrs, strconv.Itoa(vip.DefaultMaskIPv6))
 			}
 		}
 	}

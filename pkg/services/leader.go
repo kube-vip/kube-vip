@@ -54,12 +54,6 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 		},
 	}
 
-	go func() {
-		// wait for the service context to end and delete the lease then
-		<-ctx.Done()
-		p.leaseMgr.Delete(service)
-	}()
-
 	svcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
 		return fmt.Errorf("failed to get context for service %q with UID %q: %w", service.Name, service.UID, err)
@@ -70,6 +64,13 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 
 	svcCtx.IsActive = true
 
+	go func() {
+		// wait for the service context to end and delete the lease then
+		<-svcCtx.Ctx.Done()
+		svcCtx.IsActive = false
+		p.leaseMgr.Delete(service)
+	}()
+
 	svcLease, isNew := p.leaseMgr.Add(service)
 	// this service is sharing lease
 	if !isNew {
@@ -77,10 +78,8 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 		select {
 		case <-svcLease.Started:
 		case <-svcLease.Ctx.Done():
-			svcCtx.IsActive = false
 			return nil
 		}
-		<-svcLease.Started
 
 		if lease.UsesCommon(service) {
 			if err := p.SyncServices(ctx, service); err != nil {
@@ -88,18 +87,19 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 				svcLease.Cancel()
 			}
 			// just block until context is cancelled
-			<-ctx.Done()
+			<-svcCtx.Ctx.Done()
 			if svcCtx.IsActive {
 				if err := p.deleteService(service.UID); err != nil {
 					log.Error("service deletion", "err", err)
 				}
 			}
-		}
 
-		// wait for leaderelection to be finished
-		<-svcLease.Ctx.Done()
-		// Mark this service is inactive
-		svcCtx.IsActive = false
+			// Mark this service is inactive
+			svcCtx.IsActive = false
+
+			// wait for leaderelection to be finished
+			<-svcLease.Ctx.Done()
+		}
 		return nil
 	}
 	// start the leader election code loop
