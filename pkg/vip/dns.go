@@ -46,7 +46,7 @@ func (d *ipUpdater) Run(ctx context.Context) {
 					ip = []string{d.vip.IP()}
 				}
 
-				log.Info("setting IP", "address", ip)
+				log.Debug("setting IP", "address", ip)
 				if err := d.vip.SetIP(ip[0]); err != nil {
 					log.Error("setting IP", "address", ip, "err", err)
 				}

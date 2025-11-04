@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudflare/ipvs"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
 func Test_ipAndFamily(t *testing.T) {
@@ -19,7 +20,7 @@ func Test_ipAndFamily(t *testing.T) {
 		want1 ipvs.AddressFamily
 	}{
 		{
-			name: "IPv4",
+			name: utils.IPv4Family,
 			args: args{
 				address: "192.168.0.20",
 			},
@@ -27,7 +28,7 @@ func Test_ipAndFamily(t *testing.T) {
 			want1: ipvs.INET,
 		},
 		{
-			name: "IPv6",
+			name: utils.IPv6Family,
 			args: args{
 				address: "ff02::3",
 			},

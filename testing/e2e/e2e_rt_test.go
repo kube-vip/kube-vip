@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/kube-vip/kube-vip/testing/services/pkg/deployment"
@@ -82,7 +83,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				cpVIP = e2e.GenerateVIP(e2e.IPv4Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv4Family,
@@ -143,7 +144,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			BeforeAll(func() {
 
-				cpVIP = e2e.GenerateVIP(e2e.IPv6Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv6Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv6Family,
@@ -358,7 +359,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				cpVIP = e2e.GenerateVIP(e2e.IPv4Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv4Family,
@@ -395,7 +396,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("configures an IPv4 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
 					testServiceRT(svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false)
 				},
@@ -405,7 +406,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
 					testServiceRT(svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false)
 				},
@@ -428,7 +429,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				cpVIP = e2e.GenerateVIP(e2e.IPv6Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv6Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv6Family,
@@ -465,7 +466,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("configures an IPv6 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv6Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
 					testServiceRT(svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false)
 				},
@@ -475,7 +476,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv6Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
 					testServiceRT(svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false)
 				},
@@ -642,7 +643,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				cpVIP = e2e.GenerateVIP(e2e.IPv4Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv4Family,
@@ -679,7 +680,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("configures an IPv4 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false)
 				},
@@ -689,7 +690,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false)
 				},
@@ -699,7 +700,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted if common lease is used",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv4Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, true)
 				},
@@ -721,7 +722,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				cpVIP = e2e.GenerateVIP(e2e.IPv6Family, SOffset.Get())
+				cpVIP = e2e.GenerateVIP(utils.IPv6Family, SOffset.Get())
 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv6Family,
@@ -758,7 +759,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("configures an IPv6 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv6Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false)
 				},
@@ -768,7 +769,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv6Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false)
 				},
@@ -778,7 +779,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted when common lease is used",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(e2e.IPv6Family, offset)
+					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
 					testServiceRT(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, true)
 				},

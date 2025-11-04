@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/kube-vip/kube-vip/testing/services/pkg/deployment"
@@ -146,7 +147,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
-					k8sImagePath, e2e.IPv4Family, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129,
+					k8sImagePath, utils.IPv4Family, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false)
 			})
 
@@ -167,7 +168,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -176,7 +177,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -202,7 +203,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
-					k8sImagePath, e2e.IPv6Family, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129,
+					k8sImagePath, utils.IPv6Family, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false)
 			})
 
@@ -221,7 +222,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -230,7 +231,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -256,7 +257,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamily, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv4", false)
 			})
 
@@ -275,7 +276,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, defaultFixedNexthopv6, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -284,7 +285,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv6, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -310,7 +311,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamilyIPv6, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv6", false)
 			})
 
@@ -329,7 +330,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -338,7 +339,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -365,7 +366,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				_, containerIP = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamily, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", false)
 			})
 
@@ -384,7 +385,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -393,7 +394,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -420,7 +421,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				containerIP, _ = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamilyIPv6, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", false)
 			})
 
@@ -439,7 +440,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -448,7 +449,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -474,7 +475,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
-					k8sImagePath, e2e.IPv4Family, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129,
+					k8sImagePath, utils.IPv4Family, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true)
 			})
 
@@ -495,7 +496,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -504,7 +505,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -513,7 +514,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -538,7 +539,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath,
-					k8sImagePath, e2e.IPv6Family, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129,
+					k8sImagePath, utils.IPv6Family, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129,
 					kubeVIPBGPManifestTemplate, &gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true)
 			})
 
@@ -557,7 +558,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes for services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -566,7 +567,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -575,7 +576,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, "", "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -600,7 +601,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamily, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv4", true)
 			})
 
@@ -619,7 +620,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, defaultFixedNexthopv6, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -628,7 +629,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv6, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -637,7 +638,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were delete while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv6, "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -662,7 +663,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamilyIPv6, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "fixed", "mpbgp-ipv6", true)
 			})
 
@@ -681,7 +682,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -690,7 +691,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -699,7 +700,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv4, "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -725,7 +726,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				_, containerIP = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamily, e2e.IPv4Family, []string{e2e.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamily, utils.IPv4Family, []string{utils.IPv4Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", true)
 			})
 
@@ -744,7 +745,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -753,7 +754,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -762,7 +763,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -788,7 +789,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 				containerIP, _ = setupEnv(&cpVIP, &clusterName, tempDirPath, manifestValues, localIPv4, localIPv6, imagePath, configPath, k8sImagePath,
-					e2e.DualstackFamilyIPv6, e2e.IPv6Family, []string{e2e.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
+					e2e.DualstackFamilyIPv6, utils.IPv6Family, []string{utils.IPv6Family}, &client, &gobgpPeers, v129, kubeVIPBGPManifestTemplate, &gobgpClient,
 					logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", true)
 			})
 
@@ -807,7 +808,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 1, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -816,7 +817,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -825,7 +826,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(offset, e2e.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+					testBGP(offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, containerIP, "common-lease")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
@@ -856,7 +857,7 @@ func setupEnv(cpVIP, clusterName *string, tempDirPath string, manifestValues *e2
 	var clusterIPFamily kindconfigv1alpha4.ClusterIPFamily
 	var podSubnet, serviceSubnet string
 	switch clusterAddrFamily {
-	case e2e.IPv6Family:
+	case utils.IPv6Family:
 		clusterIPFamily = kindconfigv1alpha4.IPv6Family
 	case e2e.DualstackFamily:
 		clusterIPFamily = kindconfigv1alpha4.DualStackFamily
@@ -878,19 +879,19 @@ func setupEnv(cpVIP, clusterName *string, tempDirPath string, manifestValues *e2
 	}
 
 	kvPeers := []*e2e.BGPPeerValues{}
-	if slices.Contains(peerAddrFamily, e2e.IPv4Family) {
+	if slices.Contains(peerAddrFamily, utils.IPv4Family) {
 		kvPeers = append(kvPeers, &e2e.BGPPeerValues{
 			IP:       localIPv4,
 			AS:       goBGPAS,
-			IPFamily: e2e.IPv4Family,
+			IPFamily: utils.IPv4Family,
 		})
 	}
 
-	if slices.Contains(peerAddrFamily, e2e.IPv6Family) {
+	if slices.Contains(peerAddrFamily, utils.IPv6Family) {
 		kvPeers = append(kvPeers, &e2e.BGPPeerValues{
 			IP:       localIPv6,
 			AS:       goBGPAS,
-			IPFamily: e2e.IPv6Family,
+			IPFamily: utils.IPv6Family,
 		})
 	}
 
@@ -924,23 +925,23 @@ func setupEnv(cpVIP, clusterName *string, tempDirPath string, manifestValues *e2
 	containerIPv4, containerIPv6, err := GetContainerIPs(container)
 	Expect(err).ToNot(HaveOccurred())
 
-	if slices.Contains(peerAddrFamily, e2e.IPv4Family) {
+	if slices.Contains(peerAddrFamily, utils.IPv4Family) {
 		*gobgpPeers = append(*gobgpPeers, &e2e.BGPPeerValues{
 			IP:       containerIPv4,
 			AS:       kubevipAS,
-			IPFamily: e2e.IPv4Family,
+			IPFamily: utils.IPv4Family,
 		})
 	}
 
-	if slices.Contains(peerAddrFamily, e2e.IPv6Family) {
+	if slices.Contains(peerAddrFamily, utils.IPv6Family) {
 		*gobgpPeers = append(*gobgpPeers, &e2e.BGPPeerValues{
 			IP:       containerIPv6,
 			AS:       kubevipAS,
-			IPFamily: e2e.IPv6Family,
+			IPFamily: utils.IPv6Family,
 		})
 	}
 
-	if bgpClientAddrFamily == e2e.IPv6Family {
+	if bgpClientAddrFamily == utils.IPv6Family {
 		*gobgpClient, err = newGoBGPClient(localIPv6, goBGPPort)
 	} else {
 		*gobgpClient, err = newGoBGPClient(localIPv4, goBGPPort)

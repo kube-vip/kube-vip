@@ -15,6 +15,7 @@ import (
 	"github.com/onsi/gomega/format"
 	"k8s.io/klog/v2"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/kube-vip/kube-vip/testing/e2e/etcd"
 )
@@ -60,7 +61,7 @@ var _ = Describe("kube-vip with etcd leader election", func() {
 
 			test.kubeVipImage = os.Getenv("E2E_IMAGE_PATH")
 
-			test.vip = e2e.GenerateVIP(e2e.IPv4Family, 5)
+			test.vip = e2e.GenerateVIP(utils.IPv4Family, 5)
 			test.logger.Printf("Selected VIP %s", test.vip)
 
 			test.currentDir, err = os.Getwd()
