@@ -28,6 +28,8 @@ const (
 	defaultValidLft         = 60
 	iptablesComment         = "%s kube-vip load balancer IP"
 	iptablesCommentMarkRule = "kube-vip load balancer IP set mark for masquerade"
+	defaultMaskIPv6         = 128
+	defaultMaskIPv4         = 32
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -803,13 +805,13 @@ func (configurator *network) SetMask(mask string) error {
 		return err
 	}
 
-	size := 32
-	family := "IPv4"
+	size := defaultMaskIPv4
+	family := utils.IPv4Family
 
 	if configurator.IP() != "" {
 		if utils.IsIPv6(configurator.IP()) {
-			size = 128
-			family = "IPv6"
+			size = defaultMaskIPv6
+			family = utils.IPv6Family
 		}
 
 		if m > size {

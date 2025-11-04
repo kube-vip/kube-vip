@@ -28,8 +28,6 @@ import (
 )
 
 const (
-	IPv4Family          = "IPv4"
-	IPv6Family          = "IPv6"
 	DualstackFamily     = "DualStack"
 	DualstackFamilyIPv6 = "DualStackIPv6"
 )
@@ -72,7 +70,7 @@ func EnsureKindNetwork() {
 
 func GenerateVIP(family string, offset uint) string {
 	if family == DualstackFamily || family == DualstackFamilyIPv6 {
-		return fmt.Sprintf("%s,%s", GenerateVIP(IPv4Family, offset), GenerateVIP(IPv6Family, offset))
+		return fmt.Sprintf("%s,%s", GenerateVIP(utils.IPv4Family, offset), GenerateVIP(utils.IPv6Family, offset))
 	}
 
 	cidrs := getKindNetworkSubnetCIDRs()
@@ -82,7 +80,7 @@ func GenerateVIP(family string, offset uint) string {
 			ip, ipNet, parseErr := net.ParseCIDR(cidr)
 			Expect(parseErr).NotTo(HaveOccurred())
 
-			if ip.To4() == nil && family == IPv6Family {
+			if ip.To4() == nil && family == utils.IPv6Family {
 				lowerMask := binary.BigEndian.Uint64(ipNet.Mask[8:])
 				lowerStart := binary.BigEndian.Uint64(ipNet.IP[8:])
 				lowerEnd := (lowerStart & lowerMask) | (^lowerMask)
@@ -93,7 +91,7 @@ func GenerateVIP(family string, offset uint) string {
 				// Copy lower half into chosenVIP
 				binary.BigEndian.PutUint64(chosenVIP[8:], lowerEnd-uint64(offset))
 				return net.IP(chosenVIP).String()
-			} else if ip.To4() != nil && family == IPv4Family {
+			} else if ip.To4() != nil && family == utils.IPv4Family {
 				mask := binary.BigEndian.Uint32(ipNet.Mask)
 				start := binary.BigEndian.Uint32(ipNet.IP)
 				end := (start & mask) | (^mask)
@@ -110,7 +108,7 @@ func GenerateVIP(family string, offset uint) string {
 }
 
 func GenerateDualStackVIP(offset uint) string {
-	return GenerateVIP(IPv4Family, offset) + "," + GenerateVIP(IPv6Family, offset)
+	return GenerateVIP(utils.IPv4Family, offset) + "," + GenerateVIP(utils.IPv6Family, offset)
 }
 
 func getKindNetworkSubnetCIDRs() []string {

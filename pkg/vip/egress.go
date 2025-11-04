@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 
 	ct "github.com/florianl/go-conntrack"
 )
@@ -36,9 +37,9 @@ type Egress struct {
 }
 
 func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Protocol) (*Egress, error) {
-	proto := "IPv4"
+	proto := utils.IPv4Family
 	if protocol == iptables.ProtocolIPv6 {
-		proto = "IPv6"
+		proto = utils.IPv6Family
 	}
 	log.Info("[egress] Creating an iptables client", "nftables", nftables, "protocol", proto)
 	e := new(Egress)

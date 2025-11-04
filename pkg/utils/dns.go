@@ -3,8 +3,15 @@ package utils
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/pkg/errors"
+)
+
+const (
+	IPv4Family = "IPv4"
+	IPv6Family = "IPv6"
+	DualFamily = "dual"
 )
 
 // LookupHost resolves dnsName and return an IP or an error
@@ -18,7 +25,7 @@ func LookupHost(dnsName, dnsMode string) ([]string, error) {
 	}
 	addrs := []string{}
 	switch dnsMode {
-	case "ipv4", "ipv6", "dual":
+	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), DualFamily:
 		a, err := getIPbyFamily(result, dnsMode)
 		if err != nil {
 			return nil, err
@@ -34,13 +41,13 @@ func LookupHost(dnsName, dnsMode string) ([]string, error) {
 func getIPbyFamily(addresses []string, family string) ([]string, error) {
 	var checkers []func(string) bool
 	families := []string{}
-	if family == "dual" || family == "ipv4" {
+	if family == DualFamily || family == strings.ToLower(IPv4Family) {
 		checkers = append(checkers, IsIPv4)
-		families = append(families, "IPv4")
+		families = append(families, IPv4Family)
 	}
-	if family == "dual" || family == "ipv6" {
+	if family == DualFamily || family == strings.ToLower(IPv6Family) {
 		checkers = append(checkers, IsIPv6)
-		families = append(families, "IPv6")
+		families = append(families, IPv6Family)
 	}
 
 	addrs := []string{}

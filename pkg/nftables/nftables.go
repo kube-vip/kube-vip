@@ -11,6 +11,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"golang.org/x/sys/unix"
 )
 
@@ -39,7 +40,7 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 			conn.AddTable(GetTable(IPv6))
 		}
 	}
-	slog.Debug("[egress]", "Creating Chain for service", service, "IPv6", IPv6)
+	slog.Debug("[egress]", "Creating Chain for service", service, utils.IPv6Family, IPv6)
 	conn.AddChain(GetSNatChain(IPv6, service))
 	err = conn.Flush()
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -150,13 +151,13 @@ func selectSubnet(address string, subnets []string) string {
 		if subnets[0] != "" {
 			subnet = subnets[0]
 		} else {
-			subnet = "32"
+			subnet = strconv.Itoa(defaultMaskIPv4)
 		}
 	} else {
 		if len(subnets) > 1 && subnets[1] != "" {
 			subnet = subnets[1]
 		} else {
-			subnet = "128"
+			subnet = strconv.Itoa(defaultMaskIPv6)
 		}
 	}
 
