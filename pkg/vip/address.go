@@ -34,7 +34,7 @@ const (
 
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
-	AddIP(precheck bool) (bool, error)
+	AddIP(precheck bool, skipDAD bool) (bool, error)
 	AddRoute(precheck bool) error
 	DeleteIP() (bool, error)
 	DeleteRoute() error
@@ -329,7 +329,9 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 }
 
 // AddIP - Add an IP address to the interface
-func (configurator *network) AddIP(precheck bool) (bool, error) {
+// precheck: if true, check if the IP already exists before adding
+// skipDAD: if true, set IFA_F_NODAD flag for IPv6 addresses to skip Duplicate Address Detection
+func (configurator *network) AddIP(precheck bool, skipDAD bool) (bool, error) {
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 	exists := false
@@ -342,6 +344,15 @@ func (configurator *network) AddIP(precheck bool) (bool, error) {
 
 	if exists {
 		return false, nil
+	}
+
+	// For IPv6 addresses, optionally set NODAD flag to skip Duplicate Address Detection (DAD)
+	// This prevents DADFAILED loops when recovering from a previous DADFAILED state
+	// The flag tells the kernel to skip DAD, which is safe when we're re-adding
+	// an address that we know should be ours (e.g., after DADFAILED recovery)
+	if skipDAD && utils.IsIPv6(configurator.address.IP.String()) {
+		configurator.address.Flags |= unix.IFA_F_NODAD
+		log.Debug("Setting IFA_F_NODAD flag for IPv6 address to skip DAD", "ip", configurator.address.IP.String())
 	}
 
 	if err := netlink.AddrReplace(configurator.link.Intf, configurator.address); err != nil {

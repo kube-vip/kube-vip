@@ -59,6 +59,19 @@ func (m *Manager) Insert(instance *Instance) {
 }
 
 func (m *Manager) Remove(instance *Instance) {
+	m.RemoveWithIPDelete(instance, true)
+}
+
+// RemoveOnLeadershipLoss removes an ARP instance when leadership is lost
+func (m *Manager) RemoveOnLeadershipLoss(instance *Instance) {
+	// Use the inverse of PreserveVIPOnLeadershipLoss to decide whether to delete the IP
+	// If preserve is true, don't delete IP (deleteIP = false)
+	// If preserve is false, delete IP (deleteIP = true), This is the legacy behavior
+	deleteIP := !m.config.PreserveVIPOnLeadershipLoss
+	m.RemoveWithIPDelete(instance, deleteIP)
+}
+
+func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 	i, err := m.get(instance.Name())
 	if err != nil {
 		log.Error("[ARP manager] unable to remove the instance", "err", err)
@@ -71,8 +84,10 @@ func (m *Manager) Remove(instance *Instance) {
 			i.counter--
 		} else {
 			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name())
-			if _, err := instance.network.DeleteIP(); err != nil {
-				log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
+			if deleteIP {
+				if _, err := instance.network.DeleteIP(); err != nil {
+					log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
+				}
 			}
 			m.instances.Delete(instance.Name())
 		}
@@ -151,11 +166,21 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 			log.Warn(err.Error())
 		}
 		if deleted {
-			log.Info("deleted and recreating address", "IP", ipString, "interface", iface)
+			log.Info("deleted and recreating address with NODAD flag to skip DAD", "IP", ipString, "interface", iface)
+			// Re-add immediately without DAD check since we're recovering from DADFAILED
+			// The AddIP function will set IFA_F_NODAD flag for IPv6 addresses when skipDAD=true
+			if _, err := instance.network.AddIP(false, true); err != nil {
+				log.Error("failed to recreate address after DADFAILED", "IP", ipString, "interface", iface, "err", err)
+			} else {
+				log.Info("successfully recreated address after DADFAILED recovery", "IP", ipString, "interface", iface)
+			}
 		}
+		// Return early after DADFAILED recovery to avoid double IP addition
+		return
 	}
 
-	if added, err := instance.network.AddIP(true); err != nil {
+	// Normal case: add IP with precheck and normal DAD process
+	if added, err := instance.network.AddIP(true, false); err != nil {
 		log.Warn(err.Error())
 	} else if added {
 		log.Warn("Re-applied the VIP configuration", "ip", ipString, "interface", iface)
