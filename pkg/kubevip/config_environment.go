@@ -820,6 +820,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if !baseConfig.StartAsLeader && fileConfig.StartAsLeader {
 		baseConfig.StartAsLeader = fileConfig.StartAsLeader
 	}
+	if !baseConfig.PreserveVIPOnLeadershipLoss && fileConfig.PreserveVIPOnLeadershipLoss {
+		baseConfig.PreserveVIPOnLeadershipLoss = fileConfig.PreserveVIPOnLeadershipLoss
+	}
 
 	// Service configuration
 	if baseConfig.Namespace == "" && fileConfig.Namespace != "" {

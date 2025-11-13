@@ -65,11 +65,12 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			ipUpdater.Run(ctxDNS)
 		}
 
-		if !c.EnableRoutingTable {
-			if _, err = network.AddIP(false); err != nil {
-				log.Error(err.Error())
-			}
+	if !c.EnableRoutingTable {
+		// Normal VIP addition, use skipDAD=false for normal DAD process
+		if _, err = network.AddIP(false, false); err != nil {
+			log.Error(err.Error())
 		}
+	}
 
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
@@ -183,14 +184,15 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					backendMap = &backendMapV6
 				}
 
-				for entry := range *backendMap {
-					log.Debug("entry.Check() for entry", "entry", entry)
-					if entry.Check() {
-						log.Debug("entry.Check() true")
-						_, err = network.AddIP(true)
-						if err != nil {
-							log.Error("error adding address", "err", err)
-						}
+			for entry := range *backendMap {
+				log.Debug("entry.Check() for entry", "entry", entry)
+				if entry.Check() {
+					log.Debug("entry.Check() true")
+					// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
+					_, err = network.AddIP(true, false)
+					if err != nil {
+						log.Error("error adding address", "err", err)
+					}
 						if !(*backendMap)[entry] {
 							log.Info("added backend", "ip", network.IP())
 						}
@@ -297,11 +299,12 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		if _, err = network.AddIP(false); err != nil {
-			log.Warn(err.Error())
-		} else {
-			log.Info("successful add IP")
-		}
+	// Normal VIP addition, use skipDAD=false for normal DAD process
+	if _, err = network.AddIP(false, false); err != nil {
+		log.Warn(err.Error())
+	} else {
+		log.Info("successful add IP")
+	}
 
 		if c.EnableARP {
 			arpWG.Add(1)
@@ -349,7 +352,21 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 			// Handle VIP cleanup based on configuration
 			if c.PreserveVIPOnLeadershipLoss {
-				log.Info("[VIP] Preserving VIP address on interface, only stopped ARP/NDP broadcasting", "ip", cluster.Network[i].IP())
+				// For IPv6, we must remove VIPs immediately to avoid DAD failures on the new leader
+				// IPv6 Duplicate Address Detection will fail if the new leader tries to add an IP
+				// that is still present on this node's interface
+				if utils.IsIPv6(cluster.Network[i].IP()) {
+					log.Info("[VIP] Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
+					deleted, err := cluster.Network[i].DeleteIP()
+					if err != nil {
+						log.Warn(err.Error())
+					}
+					if deleted {
+						log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
+				} else {
+					log.Info("[VIP] Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
+				}
 			} else {
 				// Legacy behavior: delete VIP addresses on leadership loss
 				log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
