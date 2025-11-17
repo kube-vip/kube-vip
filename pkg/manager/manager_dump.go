@@ -169,7 +169,7 @@ func (sm *Manager) dumpNFTablesSection() {
 	fmt.Printf("--- NFTABLES CONFIGURATION ---\n")
 	chains, err := nftables.ListChains()
 	if err != nil {
-		fmt.Printf("Unable to retrieve NFTables chains, error=", err)
+		fmt.Printf("Unable to retrieve NFTables chains, error=%s", err)
 	}
 	for x := range chains {
 		fmt.Printf("Chain: %s\n", chains[x])

@@ -466,7 +466,6 @@ func ListChains() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer conn.CloseLasting()
 	ipv4, err := conn.ListChainsOfTableFamily(nftables.TableFamilyIPv4)
 	if err != nil {
 		return nil, err
@@ -481,5 +480,7 @@ func ListChains() ([]string, error) {
 	for x := range ipv6 {
 		chains = append(chains, fmt.Sprintf("Table=%s, Chain=%s", ipv6[x].Table.Name, ipv6[x].Name))
 	}
+
+	_ = conn.CloseLasting() // TODO: Should we ignore this error, we're not actually doing any actions with nftables
 	return chains, nil
 }
