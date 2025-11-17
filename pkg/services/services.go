@@ -199,13 +199,13 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 			// Ensure that kernel modules are loaded and report back missing modules.
 			err = p.nftablesCheck()
 			if err != nil {
-				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				log.Warn("[service] configuring nft egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		} else {
 			// Ensure that kernel modules are loaded and report back missing modules.
 			err = p.iptablesCheck()
 			if err != nil {
-				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
 		var podIP string
@@ -223,7 +223,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 						err = p.configureEgress(serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
-							log.Error("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+							log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 						}
 					}
 				}
@@ -237,7 +237,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 				err = p.configureEgress(serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
-					log.Error("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 				}
 			}
 		}
@@ -250,7 +250,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 			}
 			err = provider.UpdateServiceAnnotation(svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
 			if err != nil {
-				log.Error("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
 	}
