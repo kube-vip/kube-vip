@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 )
 
 // dumpConfiguration prints the current configuration to stdout when SIGUSR1 is received
@@ -28,7 +30,7 @@ func (sm *Manager) dumpConfiguration() {
 	sm.dumpNetworkInterfacesSection()
 	sm.dumpLeaderElectionSection()
 	sm.dumpRuntimeSection()
-
+	sm.dumpNFTablesSection()
 	fmt.Printf("================================================================================\n")
 	fmt.Printf("                   END OF CONFIGURATION DUMP\n")
 	fmt.Printf("================================================================================\n")
@@ -161,4 +163,16 @@ func (sm *Manager) dumpRuntimeSection() {
 		fmt.Printf("Egress Service CIDR: %s\n", sm.config.EgressServiceCidr)
 	}
 	fmt.Printf("\n")
+}
+
+func (sm *Manager) dumpNFTablesSection() {
+	fmt.Printf("--- NFTABLES CONFIGURATION ---\n")
+	chains, err := nftables.ListChains()
+	if err != nil {
+		fmt.Printf("Unable to retrieve NFTables chains, error=", err)
+	}
+	for x := range chains {
+		fmt.Printf("Chain: %s\n", chains[x])
+	}
+	fmt.Println()
 }
