@@ -1,11 +1,14 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // dumpConfiguration prints the current configuration to stdout when SIGUSR1 is received
@@ -99,19 +102,73 @@ func (sm *Manager) dumpServicesSection() {
 
 		if sm.svcProcessor != nil {
 			instances := sm.svcProcessor.ServiceInstances
-			fmt.Printf("Active Service Instances: %d\n", len(instances))
+			fmt.Printf("Kube-vip Active Service Instances: %d\n", len(instances))
 			for i, inst := range instances {
 				if inst.ServiceSnapshot != nil {
 					svc := inst.ServiceSnapshot
 					vipConfigs := ""
-					for j, cfg := range inst.VIPConfigs {
+					for j, cfg := range svc.Status.LoadBalancer.Ingress {
 						if j > 0 {
 							vipConfigs += ", "
 						}
-						vipConfigs += cfg.Address
+						vipConfigs += cfg.IP
 					}
 					fmt.Printf("  Service %d: %s/%s (Type: %s, VIPs: %s)\n",
 						i+1, svc.Namespace, svc.Name, svc.Spec.Type, vipConfigs)
+				}
+			}
+		}
+		if sm.clientSet != nil {
+			fmt.Println()
+			// Kubernetes configuration
+			fmt.Println("--- KUBERNETES CONFIGURATION (SERVICES/ENDPOINTSLICES) ---")
+
+			fmt.Println("Service Configuration:")
+			svcList, err := sm.clientSet.CoreV1().Services(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+			if err != nil {
+				fmt.Println("Unable to retrieve all Services")
+			} else {
+				for x := range svcList.Items {
+
+					// Build all addresses
+					vipConfigs := ""
+					for j, cfg := range svcList.Items[x].Status.LoadBalancer.Ingress {
+						if j > 0 {
+							vipConfigs += ", "
+						}
+						vipConfigs += cfg.IP
+					}
+					fmt.Printf("Name=%s, UUID=%s, Addresses=%s\n", svcList.Items[x].Name, string(svcList.Items[x].UID), vipConfigs)
+				}
+				fmt.Println()
+			}
+
+			fmt.Println("EndpointSlice Configuration (note endpoint names have -XXXXX prefixed):")
+			epList, err := sm.clientSet.DiscoveryV1().EndpointSlices(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+			if err != nil {
+				fmt.Println("Unable to retrieve all EndpointSlices")
+			} else {
+				for x := range epList.Items {
+					// Build all addresses
+					fmt.Printf("  Endpoint Slice Name: %s\n", epList.Items[x].Name)
+					for _, ep := range epList.Items[x].Endpoints {
+						endpoints := ""
+						for i, addresses := range ep.Addresses {
+							if i > 0 {
+								endpoints += ", "
+							}
+							endpoints += addresses
+						}
+						nodeName := "Unknown"
+						targetPod := "Unknown"
+						if ep.NodeName != nil {
+							nodeName = *ep.NodeName
+						}
+						if ep.TargetRef != nil {
+							targetPod = ep.TargetRef.Name
+						}
+						fmt.Printf("\tNode: %s, Target Pod:%s, Addresses: %s\n", nodeName, targetPod, endpoints)
+					}
 				}
 			}
 		}
