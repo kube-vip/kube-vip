@@ -41,7 +41,7 @@ jobs:
         run: sudo chmod -R 755 /tmp/kube-vip-test-${{ matrix.mode }}*
         if: matrix.mode== 'bgp' && always()
       - name: Save logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-test-logs-${{ matrix.mode }}-${{ steps.date.outputs.date }}
           path: /tmp/kube-vip-test-${{ matrix.mode }}*
@@ -64,7 +64,7 @@ jobs:
       - name: Run tests
         run: DOCKERTAG=action E2E_KEEP_LOGS=true make service-tests
       - name: Save logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: services-test-logs-${{ steps.date.outputs.date }}
           path: /tmp/kube-vip-service-tests*
