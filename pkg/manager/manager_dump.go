@@ -138,7 +138,7 @@ func (sm *Manager) dumpServicesSection() {
 						}
 						vipConfigs += cfg.IP
 					}
-					fmt.Printf("Name=%s, Addresses=%s\n", svcList.Items[x].Name, vipConfigs)
+					fmt.Printf("Name=%s, UUID=%s, Addresses=%s\n", svcList.Items[x].Name, string(svcList.Items[x].UID), vipConfigs)
 				}
 				fmt.Println()
 			}
