@@ -65,12 +65,12 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			ipUpdater.Run(ctxDNS)
 		}
 
-	if !c.EnableRoutingTable {
-		// Normal VIP addition, use skipDAD=false for normal DAD process
-		if _, err = network.AddIP(false, false); err != nil {
-			log.Error(err.Error())
+		if !c.EnableRoutingTable {
+			// Normal VIP addition, use skipDAD=false for normal DAD process
+			if _, err = network.AddIP(false, false); err != nil {
+				log.Error(err.Error())
+			}
 		}
-	}
 
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
@@ -184,15 +184,15 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					backendMap = &backendMapV6
 				}
 
-			for entry := range *backendMap {
-				log.Debug("entry.Check() for entry", "entry", entry)
-				if entry.Check() {
-					log.Debug("entry.Check() true")
-					// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
-					_, err = network.AddIP(true, false)
-					if err != nil {
-						log.Error("error adding address", "err", err)
-					}
+				for entry := range *backendMap {
+					log.Debug("entry.Check() for entry", "entry", entry)
+					if entry.Check() {
+						log.Debug("entry.Check() true")
+						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
+						_, err = network.AddIP(true, false)
+						if err != nil {
+							log.Error("error adding address", "err", err)
+						}
 						if !(*backendMap)[entry] {
 							log.Info("added backend", "ip", network.IP())
 						}
@@ -299,12 +299,12 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-	// Normal VIP addition, use skipDAD=false for normal DAD process
-	if _, err = network.AddIP(false, false); err != nil {
-		log.Warn(err.Error())
-	} else {
-		log.Info("successful add IP")
-	}
+		// Normal VIP addition, use skipDAD=false for normal DAD process
+		if _, err = network.AddIP(false, false); err != nil {
+			log.Warn(err.Error())
+		} else {
+			log.Info("successful add IP")
+		}
 
 		if c.EnableARP {
 			arpWG.Add(1)

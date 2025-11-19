@@ -24,19 +24,19 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 
 	for i := range cluster.Network {
 		if !disableVIP {
-		deleted, err := cluster.Network[i].DeleteIP()
-		if err != nil {
-			log.Warn("Attempted to clean existing VIP", "err", err)
-		}
-		if deleted {
-			log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-		}
+			deleted, err := cluster.Network[i].DeleteIP()
+			if err != nil {
+				log.Warn("Attempted to clean existing VIP", "err", err)
+			}
+			if deleted {
+				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+			}
 
-		// Normal VIP addition for single node, use skipDAD=false for normal DAD process
-		_, err = cluster.Network[i].AddIP(false, false)
-		if err != nil {
-			log.Warn(err.Error())
-		}
+			// Normal VIP addition for single node, use skipDAD=false for normal DAD process
+			_, err = cluster.Network[i].AddIP(false, false)
+			if err != nil {
+				log.Warn(err.Error())
+			}
 
 		}
 
