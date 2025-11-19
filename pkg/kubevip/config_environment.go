@@ -291,6 +291,21 @@ func ParseEnvironment(c *Config) error {
 		c.ArpBroadcastRate = 3000
 	}
 
+	// Determine if VIP should be preserved on leadership loss
+	// true: VIP addresses remain on interface, only ARP/NDP broadcasting stops
+	// false (default): VIP addresses are deleted on leadership loss (legacy behavior)
+	env = os.Getenv(vipPreserveOnLeadershipLoss)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.PreserveVIPOnLeadershipLoss = b
+	} else {
+		// Default to false for backward compatibility
+		c.PreserveVIPOnLeadershipLoss = false
+	}
+
 	// Wireguard Mode
 	env = os.Getenv(vipWireguard)
 	if env != "" {
@@ -804,6 +819,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	}
 	if !baseConfig.StartAsLeader && fileConfig.StartAsLeader {
 		baseConfig.StartAsLeader = fileConfig.StartAsLeader
+	}
+	if !baseConfig.PreserveVIPOnLeadershipLoss && fileConfig.PreserveVIPOnLeadershipLoss {
+		baseConfig.PreserveVIPOnLeadershipLoss = fileConfig.PreserveVIPOnLeadershipLoss
 	}
 
 	// Service configuration

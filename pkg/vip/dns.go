@@ -51,7 +51,8 @@ func (d *ipUpdater) Run(ctx context.Context) {
 					log.Error("setting IP", "address", ip, "err", err)
 				}
 
-				if _, err := d.vip.AddIP(false); err != nil {
+				// Normal VIP addition for DNS, use skipDAD=false for normal DAD process
+				if _, err := d.vip.AddIP(false, false); err != nil {
 					log.Error("error adding virtual IP", "err", err)
 				}
 

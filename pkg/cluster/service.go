@@ -66,7 +66,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		}
 
 		if !c.EnableRoutingTable {
-			if _, err = network.AddIP(false); err != nil {
+			// Normal VIP addition, use skipDAD=false for normal DAD process
+			if _, err = network.AddIP(false, false); err != nil {
 				log.Error(err.Error())
 			}
 		}
@@ -187,7 +188,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					log.Debug("entry.Check() for entry", "entry", entry)
 					if entry.Check() {
 						log.Debug("entry.Check() true")
-						_, err = network.AddIP(true)
+						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
+						_, err = network.AddIP(true, false)
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
@@ -297,7 +299,8 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		if _, err = network.AddIP(false); err != nil {
+		// Normal VIP addition, use skipDAD=false for normal DAD process
+		if _, err = network.AddIP(false, false); err != nil {
 			log.Warn(err.Error())
 		} else {
 			log.Info("successful add IP")
@@ -346,13 +349,34 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
 				continue
 			}
-			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
-			deleted, err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warn(err.Error())
-			}
-			if deleted {
-				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+
+			// Handle VIP cleanup based on configuration
+			if c.PreserveVIPOnLeadershipLoss {
+				// For IPv6, we must remove VIPs immediately to avoid DAD failures on the new leader
+				// IPv6 Duplicate Address Detection will fail if the new leader tries to add an IP
+				// that is still present on this node's interface
+				if utils.IsIPv6(cluster.Network[i].IP()) {
+					log.Info("[VIP] Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
+					deleted, err := cluster.Network[i].DeleteIP()
+					if err != nil {
+						log.Warn(err.Error())
+					}
+					if deleted {
+						log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
+				} else {
+					log.Info("[VIP] Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
+				}
+			} else {
+				// Legacy behavior: delete VIP addresses on leadership loss
+				log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
+				deleted, err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warn(err.Error())
+				}
+				if deleted {
+					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				}
 			}
 		}
 
@@ -390,5 +414,5 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
-	cluster.arpMgr.Remove(arpInstance)
+	cluster.arpMgr.RemoveOnLeadershipLoss(arpInstance)
 }

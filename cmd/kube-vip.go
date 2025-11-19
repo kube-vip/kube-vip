@@ -67,6 +67,7 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableARP, "arp", false, "Enable Arp for VIP changes")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableWireguard, "wireguard", false, "Enable Wireguard for services VIPs")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableRoutingTable, "table", false, "Enable Routing Table for services VIPs")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.PreserveVIPOnLeadershipLoss, "preserveVipOnLeadershipLoss", false, "Preserve ARP VIP addresses on interface when leadership is lost (default: false for backward compatibility)")
 
 	// LoadBalancer flags
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableLoadBalancer, "enableLoadBalancer", false, "enable loadbalancing on the VIP with IPVS")
