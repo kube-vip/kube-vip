@@ -458,3 +458,29 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 
 	return rule, nil
 }
+
+// Returns a list of all chains IPv4/IPv6 in nftables
+func ListChains() ([]string, error) {
+	chains := []string{}
+	conn, err := nftables.New()
+	if err != nil {
+		return nil, err
+	}
+	ipv4, err := conn.ListChainsOfTableFamily(nftables.TableFamilyIPv4)
+	if err != nil {
+		return nil, err
+	}
+	ipv6, err := conn.ListChainsOfTableFamily(nftables.TableFamilyIPv6)
+	if err != nil {
+		return nil, err
+	}
+	for x := range ipv4 {
+		chains = append(chains, fmt.Sprintf("Table=%s, Chain=%s", ipv4[x].Table.Name, ipv4[x].Name))
+	}
+	for x := range ipv6 {
+		chains = append(chains, fmt.Sprintf("Table=%s, Chain=%s", ipv6[x].Table.Name, ipv6[x].Name))
+	}
+
+	_ = conn.CloseLasting() // TODO: Should we ignore this error, we're not actually doing any actions with nftables
+	return chains, nil
+}

@@ -169,7 +169,7 @@ kind-quick:
 	docker run --network host --rm $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --services --inCluster --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --arp --servicesElection --interface  eth0 | kubectl apply -f -
 
 kind-reload:
-	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) --name kube-vip
+	kind load docker-image $(REPOSITORY)/$(TARGET):$(DOCKERTAG) --name services
 	kubectl rollout restart -n kube-system daemonset/kube-vip-ds
 
 get-gobgp:
