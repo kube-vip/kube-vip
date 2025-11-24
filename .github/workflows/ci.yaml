@@ -12,7 +12,7 @@ jobs:
       - name: Install golangci-lint
         run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Install Go
         uses: actions/setup-go@v6
         with:
@@ -24,7 +24,7 @@ jobs:
     name: Unit tests
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Install Go
         uses: actions/setup-go@v6
         with:
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Install Go
         uses: actions/setup-go@v6
         with:
@@ -48,7 +48,7 @@ jobs:
     name: Image vulnerability scan
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Build image with iptables
         run: make dockerx86ActionIPTables
       - name: Run Trivy vulnerability scanner
