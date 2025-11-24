@@ -381,10 +381,11 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	for _, vip := range vips {
 		for _, port := range s.ServiceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
-				log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
+					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
+
 					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(string(port.Protocol)), 3600) //nolint  TODO
 					if pinholeErr == nil {
 						forwardSucessful = true
@@ -396,9 +397,17 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
+					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name)
+
 					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.ServiceSnapshot.Name, 3600) //nolint  TODO
 					if portMappingErr == nil {
-						log.Info("[UPNP] Service should be accessible externally", "port", port.Port)
+						ip, err := gw.ConnectionClient.GetExternalIPAddress()
+						if err != nil {
+							// Log the error but continue on the off chance the mapping was successful
+							log.Error("[UPNP] Unable to get external IP address from gateway", "port", port.Port, "err", err)
+						} else {
+							log.Info("[UPNP] Service should be accessible externally", "port", port.Port, "externalip", ip)
+						}
 						forwardSucessful = true
 					} else {
 						//TODO: Cleanup
