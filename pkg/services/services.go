@@ -443,8 +443,8 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 			currentServiceCopy.Annotations = make(map[string]string)
 		}
 
-		// If we're using ARP then we can only broadcast the VIP from one place, add an annotation to the service
-		if p.config.EnableARP {
+		// If we're using ARP then we can only broadcast the VIP from one place, also useful for other software when running BGP, add an annotation to the service
+		if p.config.EnableARP || p.config.EnableBGP {
 			// Add the current host
 			currentServiceCopy.Annotations[kubevip.VipHost] = p.config.NodeName
 		}
