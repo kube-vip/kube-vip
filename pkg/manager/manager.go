@@ -308,9 +308,9 @@ func (sm *Manager) Start() error {
 					log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
 				}
 			}
+			// TODO: It would be nice to run the UPNP refresh only on the leader.
+			go sm.svcProcessor.RefreshUPNPForwards()
 		}
-		// TODO: It would be nice to run the UPNP refresh only on the leader.
-		go sm.svcProcessor.RefreshUPNPForwards()
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
