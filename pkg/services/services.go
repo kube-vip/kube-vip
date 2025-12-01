@@ -285,7 +285,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	if !found {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
-		log.Error("unable to find/stop service", "uid", uid)
+		log.Warn("unable to find/stop service", "uid", uid)
 		return nil
 	}
 
