@@ -57,6 +57,9 @@ const (
 	// Enable UPNP on a Service
 	UpnpEnabled = "kube-vip.io/forwardUPNP"
 
+	// Set the UPNP lease duration for a specific service using duration format (e.g., "30s", "1h")
+	UpnpLeaseDuration = "kube-vip.io/upnp-lease-duration"
+
 	RPFilter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
 
 	ServiceLease = "kube-vip.io/leaseName"

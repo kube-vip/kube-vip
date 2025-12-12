@@ -34,6 +34,9 @@ const (
 	ActionDelete ServiceInstanceAction = "delete"
 	ActionAdd    ServiceInstanceAction = "add"
 	ActionNone   ServiceInstanceAction = "none"
+
+	// Default UPNP lease requested is 3600 seconds.
+	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
 func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
@@ -358,6 +361,76 @@ func (p *Processor) deleteService(uid types.UID) error {
 	return nil
 }
 
+// upnpLeaseDurationForService determines the UPNP lease duration for a given service, based on its annotations.
+//
+// The default lease duration is set to 1 hour, maintaining the default of 3600 seconds that was previously passed. If
+// the service has an annotation of [kubevip.UpnpLeaseDuration], the function attempts to parse its value as a
+// [time.Duration] using [time.ParseDuration].
+//
+// If parsing is successful, the lease duration is updated accordingly; otherwise, a warning is logged and the default
+// duration is retained.
+//
+// Overriding the default lease duration can be useful for services that require longer or shorter UPNP port mappings,
+// or for buggy UPNP implementations that may not handle renewals correctly. At least one router's implementation
+// completely times out the mapping very shortly after creation if it is set to 3600 or 7200, but works fine if 0 is
+// used.
+//
+// This function must therefore explicitly permit duration of 0, and callers and the underlying library must pass that
+// value in XML correctly. A duration of 0 indicates to the UPNP gateway that the mapping should be permanent.
+//
+// It may be useful to update this function to read a global configuration option as well. This helper could also take
+// in v1.Service instead of [instance.Instance], but the latter is more convenient for callers.
+//
+// Example where 0 was observed to stay on the problematic router: miniupnpc's test client, upnpc v2.2.4.
+func upnpLeaseDurationForService(s *instance.Instance) time.Duration {
+	if s == nil || s.ServiceSnapshot == nil || s.ServiceSnapshot.Annotations == nil {
+		// No warning output. No annotation is unusual but perfectly ok.
+		return defaultUPNPLeaseDuration
+	}
+
+	// Constant is named `UpnpLeaseDuration` for consistency with `UpnpEnabled`. According to Go naming conventions
+	// regarding use of acronyms, `UPNPLeaseDuration` would be preferred. Cleanup of both of these is left for a future
+	// refactor as these are public symbols and might be used elsewhere in the ecosystem.
+	val, ok := s.ServiceSnapshot.Annotations[kubevip.UpnpLeaseDuration]
+	if !ok {
+		// No warning output. No annotation is common and perfectly ok.
+		return defaultUPNPLeaseDuration
+	}
+
+	if val == "" {
+		log.Warn("[UPNP] Lease duration annotation is empty, using default of 1 hour", "service", s.ServiceSnapshot.Name)
+		return defaultUPNPLeaseDuration
+	}
+
+	parsed, err := time.ParseDuration(val)
+	if err != nil {
+		log.Warn("[UPNP] Unable to parse lease duration from annotation, using default of 1 hour", "service", s.ServiceSnapshot.Name, "err", err)
+		return defaultUPNPLeaseDuration
+	}
+
+	if parsed < 0 {
+		log.Warn("[UPNP] Lease duration from annotation is negative, using default of 1 hour", "service", s.ServiceSnapshot.Name)
+		return defaultUPNPLeaseDuration
+	}
+
+	return parsed
+}
+
+// upnpLeaseDurationForServiceSec returns the UPNP lease duration for a service in uint32 seconds, as expected by the
+// helper library. This is a convenience wrapper around [upnpLeaseDurationForService], and in case
+// upnpLeaseDurationForService returns a duration that maps to a negative value of seconds or invalid float of seconds,
+// it will return the default lease duration in seconds instead. (Technically, it will check for a reasonable range of
+// seconds, e.g. ~10 years-ish.)
+func upnpLeaseDurationForServiceSec(s *instance.Instance) uint32 {
+	duration := upnpLeaseDurationForService(s)
+	seconds := duration.Seconds()
+	// Check if within range.
+	if seconds >= 0 && seconds <= float64(10*365*24*60*60) {
+		return uint32(seconds)
+	}
+	return uint32(defaultUPNPLeaseDuration.Seconds())
+}
+
 // Set up UPNP forwards for a service
 // We first try to use the more modern Pinhole API introduced in UPNPv2 and fall back to UPNPv2 Port Forwarding if no forward was successful
 func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
@@ -374,6 +447,10 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 
 	gateways := upnp.GetGatewayClients(ctx)
 
+	// Determine desired UPNP TTL / "lease duration". Passed into the library as integer seconds from now, as the
+	// underlying XML API wants integer seconds.
+	leaseDurationSec := upnpLeaseDurationForServiceSec(s)
+
 	// Reset Gateway IPs to remove stale addresses
 	s.UPNPGatewayIPs = make([]string, 0)
 
@@ -384,9 +461,9 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
-					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location)
+					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "gateway", gw.WANIPv6FirewallControlClient.Location, "leaseDurationSec", leaseDurationSec)
 
-					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(string(port.Protocol)), 3600) //nolint  TODO
+					pinholeID, pinholeErr := gw.WANIPv6FirewallControlClient.AddPinholeCtx(ctx, "0.0.0.0", uint16(port.Port), vip, uint16(port.Port), upnp.MapProtocolToIANA(string(port.Protocol)), leaseDurationSec) //nolint  TODO
 					if pinholeErr == nil {
 						forwardSucessful = true
 						log.Info("[UPNP] Service should be accessible externally", "port", port.Port, "pinhold ID", pinholeID)
@@ -397,16 +474,16 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				}
 				// Fallback to PortForward
 				if !forwardSucessful {
-					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name)
+					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "leaseDurationSec", leaseDurationSec)
 
-					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.ServiceSnapshot.Name, 3600) //nolint  TODO
+					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.ServiceSnapshot.Name, leaseDurationSec) //nolint  TODO
 					if portMappingErr == nil {
 						ip, err := gw.ConnectionClient.GetExternalIPAddress()
 						if err != nil {
 							// Log the error but continue on the off chance the mapping was successful
-							log.Error("[UPNP] Unable to get external IP address from gateway", "port", port.Port, "err", err)
+							log.Error("[UPNP] Unable to get external IP address from gateway", "service", s.ServiceSnapshot.Name, "port", port.Port, "err", err)
 						} else {
-							log.Info("[UPNP] Service should be accessible externally", "port", port.Port, "externalip", ip)
+							log.Info("[UPNP] Service should be accessible externally", "service", s.ServiceSnapshot.Name, "port", port.Port, "externalip", ip)
 						}
 						forwardSucessful = true
 					} else {
