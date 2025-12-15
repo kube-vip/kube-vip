@@ -1,13 +1,38 @@
-run:
-  timeout: 10m
-  
+version: "2"
 linters:
   enable:
-  - bodyclose
-  - gofmt
-  - goimports
-  - revive
-  - gosec
-  - misspell
-  - unconvert
-  - unparam
+    - bodyclose
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+  settings:
+    misspell:
+      ignore-rules:
+        - creater
+    staticcheck:
+      checks:
+        - all
+        # Disable QF1008 to retain embedded fields for better readability.
+        - "-QF1008"
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

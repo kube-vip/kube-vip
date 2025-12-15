@@ -37,5 +37,5 @@ func FindIPAddress(addrName string) (string, string, error) {
 		}
 
 	}
-	return "", "", fmt.Errorf("Unknown interface [%s]", addrName)
+	return "", "", fmt.Errorf("unknown interface [%s]", addrName)
 }
