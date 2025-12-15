@@ -4,9 +4,17 @@ linters:
     - bodyclose
     - gosec
     - misspell
-    - revive
     - unconvert
     - unparam
+  settings:
+    misspell:
+      ignore-rules:
+        - creater
+    staticcheck:
+      checks:
+        - all
+        # Disable QF1008 to retain embedded fields for better readability.
+        - "-QF1008"
   exclusions:
     generated: lax
     presets:

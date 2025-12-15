@@ -170,7 +170,7 @@ func GenerateRoleBinding(rolebinding bool, saCfg *applyCoreV1.ServiceAccountAppl
 func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *corev1.Pod {
 	imageRef, err := name.NewTag(image, name.WeakValidation, name.WithDefaultTag(imageVersion))
 	if err != nil {
-		panic(fmt.Errorf("Cannot parse %q: %w", image, err))
+		panic(fmt.Errorf("cannot parse %q: %w", image, err))
 	}
 	command := "manager"
 

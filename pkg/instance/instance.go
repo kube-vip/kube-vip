@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
 	log "log/slog"
 
 	"github.com/vishvananda/netlink"
@@ -369,19 +368,19 @@ func (i *Instance) startDHCP() error {
 		// Check the rp_filter value
 		rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
 		if err != nil {
-			slog.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
+			log.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
 		} else {
 			if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
 				rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
 			} else {
-				slog.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
+				log.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
 			}
 		}
 	}
 
 	err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", rpfilterSetting)
 	if err != nil {
-		slog.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
+		log.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
 	}
 	var initRebootFlag bool
 	if i.DHCPInterfaceIP != "" {
