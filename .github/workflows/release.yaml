@@ -28,7 +28,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate Metadata
-        uses: docker/metadata-action@v5.9.0
+        uses: docker/metadata-action@v5.10.0
         id: metadata
         with:
           labels: |
