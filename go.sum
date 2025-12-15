@@ -59,8 +59,8 @@ github.com/evanphx/json-patch/v5 v5.9.0 h1:kcBlZQbplgElYIlo/n1hJbls2z/1awpXxpRi0
 github.com/evanphx/json-patch/v5 v5.9.0/go.mod h1:VNkHZ/282BpEyt/tObQO8s5CMPmYYq14uClGH4abBuQ=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
-github.com/florianl/go-conntrack v0.4.0 h1:TlYkxytdwgVayfU0cKwkHurQA0Rd1ZSEBRckRYDUu18=
-github.com/florianl/go-conntrack v0.4.0/go.mod h1:iPDx4oIats2T7X7Jm3PFyRCJM1GfZhJaSHOWROYOrE8=
+github.com/florianl/go-conntrack v0.5.0 h1:1+749T6cgOgnqXyBtv42fcc1GZK1M9U5P6eCX6yZBGo=
+github.com/florianl/go-conntrack v0.5.0/go.mod h1:iPDx4oIats2T7X7Jm3PFyRCJM1GfZhJaSHOWROYOrE8=
 github.com/frankban/quicktest v1.11.3/go.mod h1:wRf/ReqHper53s+kmmSZizM8NamnL3IM0I9ntUbOk+k=
 github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
