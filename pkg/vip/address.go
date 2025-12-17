@@ -115,6 +115,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			forwardMethod:    forwardMethod,
 			iptablesBackend:  iptablesBackend,
 			ipvsEnabled:      ipvsEnabled,
+			enableSecurity:   enableSecurity,
 			possibleSubnets:  subnet,
 		}
 
@@ -394,13 +395,13 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool) (bool, error) {
 }
 
 func (configurator *network) configureIPTables() error {
-	if configurator.enableSecurity && !configurator.ignoreSecurity {
+	if configurator.enableSecurity && !configurator.ignoreSecurity && len(configurator.ports) > 0 {
 		if err := configurator.addIptablesRulesToLimitTrafficPorts(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules to limit traffic ports")
 		}
 	}
 
-	// It seems that masquerading is only reuired with IPv4 for IPVS to work.
+	// It seems that masquerading is only required with IPv4 for IPVS to work.
 	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules for masquerade")
@@ -411,12 +412,17 @@ func (configurator *network) configureIPTables() error {
 }
 
 func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
-	ipt, err := iptables.New()
+	vip := configurator.address.IP.String()
+
+	opt := iptables.IPFamily(iptables.ProtocolIPv4)
+	if utils.IsIPv6(vip) {
+		opt = iptables.IPFamily(iptables.ProtocolIPv6)
+	}
+
+	ipt, err := iptables.New(opt)
 	if err != nil {
 		return errors.Wrap(err, "could not create iptables client")
 	}
-
-	vip := configurator.address.IP.String()
 	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
 	if err := insertCommonIPTablesRules(ipt, vip, comment); err != nil {
 		return fmt.Errorf("could not add common iptables rules: %w", err)
