@@ -25,7 +25,7 @@ func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath strin
 		return nil
 	}
 
-	intCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+	intCtx, cancel := context.WithTimeout(ctx, time.Second*20)
 	defer cancel()
 
 	path := filepath.Join(tempDirPath, "pods.json")
@@ -93,7 +93,8 @@ func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath strin
 		LabelSelector: "app=kube-vip",
 	}
 
-	kvpods, err := client.CoreV1().Pods("").List(intCtx, listOptions)
+	var kvpods *corev1.PodList
+	kvpods, err = client.CoreV1().Pods("").List(intCtx, listOptions)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}

@@ -62,5 +62,9 @@ const (
 
 	RPFilter = "kube-vip.io/rp_filter" // Set the return path filter for a specific service interface
 
+	// Name of the service lease object
 	ServiceLease = "kube-vip.io/leaseName"
+
+	// Enable DDNS for the service
+	ServiceDDNS = "kube-vip.io/ddns"
 )

@@ -1,8 +1,10 @@
 package instance
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,18 +32,24 @@ type Instance struct {
 	Clusters []*cluster.Cluster
 
 	// Service uses DHCP
-	IsDHCP              bool
+	IsDHCPv4            bool
+	IsDHCPv6            bool
 	DHCPInterface       string
 	DHCPInterfaceHwaddr string
 	DHCPInterfaceIP     string
+	DHCPInterfaceIPv4   string
+	DHCPInterfaceIPv6   string
 	DHCPHostname        string
-	DHCPClient          *vip.DHCPClient
+	DHCPv4Client        vip.DHCPClient
+	DHCPv6Client        vip.DHCPClient
 
 	// External Gateway IP the service is forwarded from
 	UPNPGatewayIPs []string
 
 	// Kubernetes service mapping
 	ServiceSnapshot *v1.Service
+
+	dnsAddresses []string
 }
 
 type Port struct {
@@ -49,12 +57,14 @@ type Port struct {
 	Type string
 }
 
-func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager) (*Instance, error) {
-	instanceAddresses, _ := FetchServiceAddresses(svc)
+func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager) (*Instance, error) {
+	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
+	log.Info("NewInstance used", "instanceAddresses", instanceAddresses, "instanceHostnames", instanceHostnames)
 
 	var newVips []*kubevip.Config
 	var link netlink.Link
 	var err error
+	var dnsAddresses []string
 
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
@@ -130,7 +140,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 				if cidrs[0] != "" && cidrs[0] != kubevip.Auto {
 					subnet = cidrs[0]
 				} else {
-					subnet = "32"
+					subnet = strconv.Itoa(vip.DefaultMaskIPv4)
 				}
 			}
 		} else {
@@ -143,7 +153,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 				if len(cidrs) > 1 && cidrs[1] != "" && cidrs[1] != kubevip.Auto {
 					subnet = cidrs[1]
 				} else {
-					subnet = "128"
+					subnet = strconv.Itoa(vip.DefaultMaskIPv6)
 				}
 			}
 		}
@@ -163,6 +173,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 			ArpBroadcastRate:            config.ArpBroadcastRate,
 			EnableServiceSecurity:       config.EnableServiceSecurity,
 			DNSMode:                     config.DNSMode,
+			DHCPMode:                    config.DHCPMode,
 			DisableServiceUpdates:       config.DisableServiceUpdates,
 			EnableServicesElection:      config.EnableServicesElection,
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
@@ -172,22 +183,78 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 		})
 	}
 
+	for _, hostname := range instanceHostnames {
+		log.Info("hostname", "addr", hostname)
+		// Detect if we're using a specific interface for services
+		var svcInterface string
+		svcInterface = svc.Annotations[kubevip.ServiceInterface] // If the service has a specific interface defined, then use it
+
+		// If it is still blank then use the
+		if svcInterface == "" {
+			switch config.ServicesInterface {
+			case "":
+				svcInterface = config.Interface
+			default:
+				svcInterface = config.ServicesInterface
+			}
+		}
+
+		if link == nil {
+			if link, err = netlink.LinkByName(svcInterface); err != nil {
+				return nil, fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
+			}
+			if link == nil {
+				return nil, fmt.Errorf("failed to get interface %s", svcInterface)
+			}
+		}
+
+		// Generate new Virtual IP configuration
+		newVips = append(newVips, &kubevip.Config{
+			VIP:                    hostname,
+			Interface:              svcInterface,
+			SingleNode:             true,
+			EnableARP:              config.EnableARP,
+			EnableBGP:              config.EnableBGP,
+			VIPSubnet:              config.VIPSubnet,
+			EnableRoutingTable:     config.EnableRoutingTable,
+			RoutingTableID:         config.RoutingTableID,
+			RoutingTableType:       config.RoutingTableType,
+			RoutingProtocol:        config.RoutingProtocol,
+			ArpBroadcastRate:       config.ArpBroadcastRate,
+			EnableServiceSecurity:  config.EnableServiceSecurity,
+			DNSMode:                config.DNSMode,
+			DHCPMode:               config.DHCPMode,
+			DisableServiceUpdates:  config.DisableServiceUpdates,
+			EnableServicesElection: config.EnableServicesElection,
+			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
+				EnableLeaderElection: config.EnableLeaderElection,
+			},
+		})
+	}
+
 	// Create new service
 	instance := &Instance{
-		//UID:             instanceUID,
-		//VIPs:            instanceAddresses,
 		ServiceSnapshot: svc,
+		dnsAddresses:    dnsAddresses,
 	}
-	// for _, port := range svc.Spec.Ports {
-	// 	instance.ExternalPorts = append(instance.ExternalPorts, Port{
-	// 		Port: uint16(port.Port), //nolint
-	// 		Type: string(port.Protocol),
-	// 	})
-	// }
 
 	if svc.Annotations != nil {
 		instance.DHCPInterfaceHwaddr = svc.Annotations[kubevip.HwAddrKey]
-		instance.DHCPInterfaceIP = svc.Annotations[kubevip.RequestedIP]
+		requestedIP := svc.Annotations[kubevip.RequestedIP]
+		if requestedIP != "" {
+			requestedIPs := strings.Split(requestedIP, ",")
+			if len(requestedIPs) > 2 {
+				return nil, fmt.Errorf("annotation %q cannot request more than one IPv4 and one Ipv6 address", kubevip.RequestedIP)
+			}
+			for _, ip := range requestedIPs {
+				netip := net.ParseIP(ip)
+				if netip.To4() != nil {
+					instance.DHCPInterfaceIPv4 = ip
+				} else {
+					instance.DHCPInterfaceIPv6 = ip
+				}
+			}
+		}
 		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 	}
 
@@ -211,29 +278,82 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 	// Create Add configuration to the new service
 	instance.VIPConfigs = newVips
 
-	// If this was purposely created with the address 0.0.0.0,
+	// If this was purposely created with the address '0.0.0.0', or '::'
 	// we will create a macvlan on the main interface and a DHCP client
-	// TODO: Consider how best to handle DHCP with multiple addresses
-	if len(instanceAddresses) == 1 && instanceAddresses[0] == "0.0.0.0" {
-		err := instance.startDHCP()
-		if err != nil {
-			return nil, err
-		}
-		select {
-		case err := <-instance.DHCPClient.ErrorChannel():
-			return nil, fmt.Errorf("error starting DHCP for %s/%s: error: %s",
-				instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
-		case ip := <-instance.DHCPClient.IPChannel():
-			instance.VIPConfigs[0].Interface = instance.DHCPInterface
-			instance.VIPConfigs[0].VIP = ip
-			instance.DHCPInterfaceIP = ip
-		}
+	if len(instanceAddresses) > 2 && (slices.Contains(instanceAddresses, "0.0.0.0") || slices.Contains(instanceAddresses, "::")) {
+		return nil, fmt.Errorf("DHCP cannot be used if more than 2 addresses (one IPv4 and one IPv6) were specified")
 	}
+	for i := range instance.VIPConfigs {
+		if instance.VIPConfigs[i].VIP == "0.0.0.0" {
+			err := instance.startDHCP(ctx, i)
+			if err != nil {
+				return nil, err
+			}
+			select {
+			case err := <-instance.DHCPv4Client.ErrorChannel():
+				return nil, fmt.Errorf("error starting DHCPv4 for %s/%s: error: %s",
+					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
+			case ip := <-instance.DHCPv4Client.IPChannel():
+				instance.VIPConfigs[i].Interface = instance.DHCPInterface
+				instance.VIPConfigs[i].VIP = ip
+				instance.DHCPInterfaceIPv4 = ip
+			}
+		}
+		if instance.VIPConfigs[i].VIP == "::" {
+			err := instance.startDHCP(ctx, i)
+			if err != nil {
+				return nil, err
+			}
+			select {
+			case err := <-instance.DHCPv6Client.ErrorChannel():
+				return nil, fmt.Errorf("error starting DHCPv6 for %s/%s: error: %s",
+					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
+			case ip := <-instance.DHCPv6Client.IPChannel():
+				instance.VIPConfigs[i].Interface = instance.DHCPInterface
+				instance.VIPConfigs[i].VIP = ip
+				instance.DHCPInterfaceIPv6 = ip
+			}
+		}
 
-	for _, vipConfig := range instance.VIPConfigs {
-		c, err := cluster.InitCluster(vipConfig, false, intfMgr, arpMgr)
+		ddnsAnnotation, exists := svc.Annotations[kubevip.ServiceDDNS]
+
+		if exists {
+			instance.VIPConfigs[i].DDNS, err = strconv.ParseBool(ddnsAnnotation)
+			if err != nil {
+				log.Error("Failed to add service", "err", err)
+				return nil, err
+			}
+		}
+
+		if len(svc.Spec.IPFamilies) > 0 {
+			if len(svc.Spec.IPFamilies) > 1 {
+				instance.VIPConfigs[i].DHCPMode = utils.DualFamily
+				instance.VIPConfigs[i].DNSMode = utils.DualFamily
+				switch *svc.Spec.IPFamilyPolicy {
+				case v1.IPFamilyPolicyRequireDualStack:
+					instance.VIPConfigs[i].IsDualStack = true
+					instance.VIPConfigs[i].RequireDualStack = true
+				case v1.IPFamilyPolicyPreferDualStack:
+					instance.VIPConfigs[i].IsDualStack = true
+					instance.VIPConfigs[i].RequireDualStack = false
+				default:
+					instance.VIPConfigs[i].IsDualStack = false
+					instance.VIPConfigs[i].RequireDualStack = false
+				}
+			} else {
+				if strings.EqualFold(string(svc.Spec.IPFamilies[0]), utils.IPv4Family) {
+					instance.VIPConfigs[i].DHCPMode = strings.ToLower(utils.IPv4Family)
+					instance.VIPConfigs[i].DNSMode = strings.ToLower(utils.IPv4Family)
+				} else {
+					instance.VIPConfigs[i].DHCPMode = strings.ToLower(utils.IPv6Family)
+					instance.VIPConfigs[i].DNSMode = strings.ToLower(utils.IPv6Family)
+				}
+			}
+		}
+
+		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr)
 		if err != nil {
-			log.Error("Failed to add Service %s/%s", svc.Namespace, svc.Name)
+			log.Error("failed to add service", "err", err)
 			return nil, err
 		}
 
@@ -242,7 +362,7 @@ func NewInstance(svc *v1.Service, config *kubevip.Config, intfMgr *networkinterf
 		}
 
 		instance.Clusters = append(instance.Clusters, c)
-		log.Info("(svcs) adding VIP", "ip", vipConfig.VIP, "interface", vipConfig.Interface, "namespace", svc.Namespace, "name", svc.Name)
+		log.Info("(svcs) adding VIP", "ip", instance.VIPConfigs[i].VIP, "interface", instance.VIPConfigs[i].Interface, "namespace", svc.Namespace, "name", svc.Name)
 	}
 
 	return instance, nil
@@ -305,11 +425,11 @@ func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
 	return link.Attrs().Name
 }
 
-func (i *Instance) startDHCP() error {
-	if len(i.VIPConfigs) != 1 {
-		return fmt.Errorf("DHCP requires exactly 1 VIP config, got: %v", len(i.VIPConfigs))
+func (i *Instance) startDHCP(ctx context.Context, index int) error {
+	if len(i.VIPConfigs) > 2 {
+		return fmt.Errorf("DHCP can be used with 2 VIP config maximally, got: %v", len(i.VIPConfigs))
 	}
-	parent, err := netlink.LinkByName(i.VIPConfigs[0].Interface)
+	parent, err := netlink.LinkByName(i.VIPConfigs[index].Interface)
 	if err != nil {
 		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}
@@ -360,34 +480,61 @@ func (i *Instance) startDHCP() error {
 		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
 	}
 
-	// Default rp_filter setting (https://github.com/kube-vip/kube-vip/issues/1170)
-	rpfilterSetting := "0"
+	var initRebootFlag bool
+	ip := net.ParseIP(i.VIPConfigs[index].VIP)
 
-	// Check if we need to set an override rp_filter value for the interface
-	if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
-		// Check the rp_filter value
-		rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
-		if err != nil {
-			log.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
-		} else {
-			if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
-				rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
+	var client vip.DHCPClient
+	if ip.To4() != nil {
+		// Default rp_filter setting (https://github.com/kube-vip/kube-vip/issues/1170)
+		rpfilterSetting := "0"
+
+		// Check if we need to set an override rp_filter value for the interface
+		if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
+			// Check the rp_filter value
+			rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
+			if err != nil {
+				log.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
 			} else {
-				log.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
+				if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
+					rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
+				} else {
+					log.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
+				}
 			}
 		}
-	}
 
-	err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", rpfilterSetting)
-	if err != nil {
-		log.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
-	}
-	var initRebootFlag bool
-	if i.DHCPInterfaceIP != "" {
-		initRebootFlag = true
-	}
+		err = sysctl.WriteProcSys("/proc/sys/net/ipv4/conf/"+interfaceName+"/rp_filter", rpfilterSetting)
+		if err != nil {
+			log.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
+		}
 
-	client := vip.NewDHCPClient(iface, initRebootFlag, i.DHCPInterfaceIP)
+		if i.DHCPInterfaceIPv4 != "" {
+			initRebootFlag = true
+		}
+
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4)
+
+		// Add the client so that we can call it to stop function
+		i.DHCPv4Client = client
+
+		// Set that DHCPv4 is enabled
+		i.IsDHCPv4 = true
+	} else {
+		if i.DHCPInterfaceIPv6 != "" {
+			initRebootFlag = true
+		}
+
+		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, i.DHCPInterfaceIPv6)
+		if err != nil {
+			return fmt.Errorf("unable to create client: %w", err)
+		}
+
+		// Add the client so that we can call it to stop function
+		i.DHCPv6Client = client
+
+		// Set that DHCPv6 is enabled
+		i.IsDHCPv6 = true
+	}
 
 	// Add hostname to dhcp client if annotated
 	if i.DHCPHostname != "" {
@@ -395,15 +542,15 @@ func (i *Instance) startDHCP() error {
 		client.WithHostName(i.DHCPHostname)
 	}
 
-	go client.Start()
+	go func() {
+		if err := client.Start(ctx); err != nil {
+			log.Error("[instance] DHCP client error: %w")
+		}
+	}()
 
-	// Set that DHCP is enabled
-	i.IsDHCP = true
 	// Set the name of the interface so that it can be removed on Service deletion
 	i.DHCPInterface = interfaceName
 	i.DHCPInterfaceHwaddr = iface.HardwareAddr.String()
-	// Add the client so that we can call it to stop function
-	i.DHCPClient = client
 
 	return nil
 }

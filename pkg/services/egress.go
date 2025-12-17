@@ -269,9 +269,9 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 		}
 	}
 
-	mask := "/32"
+	mask := fmt.Sprintf("/%d", vip.DefaultMaskIPv4)
 	if !utils.IsIPv4(podIP) {
-		mask = "/128"
+		mask = fmt.Sprintf("/%d", vip.DefaultMaskIPv6)
 	}
 
 	if allowedNetworks != "" {

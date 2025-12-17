@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 
 	//nolint
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -74,11 +76,11 @@ func (b *Server) AddPeer(peer kubevip.BGPPeer) (err error) {
 			return fmt.Errorf("failed to get MP-BGP addresses: %w", err)
 		}
 
-		mask := "128"
+		mask := strconv.Itoa(vip.DefaultMaskIPv6)
 		address := ipv4Address
 		family := api.Family_AFI_IP
 		if utils.IsIPv4(p.Conf.NeighborAddress) {
-			mask = "32"
+			mask = strconv.Itoa(vip.DefaultMaskIPv4)
 			address = ipv6Address
 			family = api.Family_AFI_IP6
 		}
@@ -128,7 +130,7 @@ func (b *Server) getPath(ip net.IP) (path *api.Path) {
 		//nolint
 		nlri, _ := anypb.New(&api.IPAddressPrefix{
 			Prefix:    ip.String(),
-			PrefixLen: 32,
+			PrefixLen: vip.DefaultMaskIPv4,
 		})
 
 		//nolint
@@ -148,7 +150,7 @@ func (b *Server) getPath(ip net.IP) (path *api.Path) {
 		//nolint
 		nlri, _ := anypb.New(&api.IPAddressPrefix{
 			Prefix:    ip.String(),
-			PrefixLen: 128,
+			PrefixLen: vip.DefaultMaskIPv6,
 		})
 
 		v6Family := &api.Family{

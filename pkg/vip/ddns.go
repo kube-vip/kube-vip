@@ -2,7 +2,7 @@ package vip
 
 import (
 	"context"
-	"net"
+	"fmt"
 	"time"
 
 	log "log/slog"
@@ -14,42 +14,41 @@ import (
 // for the dDNSHostName
 // will return the IP allocated
 type DDNSManager interface {
-	Start() (string, error)
+	Start(ctx context.Context) (string, error)
 }
 
 type ddnsManager struct {
-	ctx     context.Context
 	network Network
 }
 
 // NewDDNSManager returns a newly created Dynamic DNS manager
-func NewDDNSManager(ctx context.Context, network Network) DDNSManager {
+func NewDDNSManager(network Network) DDNSManager {
 	return &ddnsManager{
-		ctx:     ctx,
 		network: network,
 	}
 }
 
 // Start will start the dhcpclient routine to keep the lease
 // and return the IP it got from DHCP
-func (ddns *ddnsManager) Start() (string, error) {
-	interfaceName := ddns.network.Interface()
-	iface, err := net.InterfaceByName(interfaceName)
+func (ddns *ddnsManager) Start(ctx context.Context) (string, error) {
+	client, err := NewDHCPClient(ddns.network)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("unable to create DHCP client: %w", err)
 	}
-
-	client := NewDHCPClient(iface, false, "")
 
 	client.WithHostName(ddns.network.DDNSHostName())
 
-	go client.Start()
+	go func() {
+		if err := client.Start(ctx); err != nil {
+			log.Error("[ddns] DHCP client error: %w")
+		}
+	}()
 
 	log.Info("waiting for ip from dhcp")
 	ip, timeout := "", time.After(1*time.Minute)
 
 	select {
-	case <-ddns.ctx.Done():
+	case <-ctx.Done():
 		client.Stop()
 		return "", errors.New("context cancelled")
 	case <-timeout:
@@ -78,7 +77,7 @@ func (ddns *ddnsManager) Start() (string, error) {
 				log.Info("got address from dhcp", "ip", ip)
 			}
 		}
-	}(ddns.ctx)
+	}(ctx)
 
 	return ip, nil
 }
