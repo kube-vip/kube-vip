@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/kube-vip/kube-vip/pkg/iptables"
+	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
@@ -28,8 +28,9 @@ const (
 	defaultValidLft         = 60
 	iptablesComment         = "%s kube-vip load balancer IP"
 	iptablesCommentMarkRule = "kube-vip load balancer IP set mark for masquerade"
-	defaultMaskIPv6         = 128
-	defaultMaskIPv4         = 32
+
+	DefaultMaskIPv4 = 32
+	DefaultMaskIPv6 = 128
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -56,6 +57,8 @@ type Network interface {
 	SetHasEndpoints(value bool)
 	HasEndpoints() bool
 	ARPName() string
+	GetPossibleSubnets() string
+	DHCPFamily() string
 }
 
 // network - This allows network configuration
@@ -82,12 +85,18 @@ type network struct {
 	ipvsEnabled bool
 
 	hasEndpoints bool
+
+	possibleSubnets string
+
+	// used by DHCP to get address of proper family
+	dhcpFamily string
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
-func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool, tableID int, tableType int,
-	routingProtocol int, dnsMode, forwardMethod, iptablesBackend string,
-	ipvsEnabled, enableSecurity bool, intfMgr *networkinterface.Manager) ([]Network, error) {
+func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool,
+	dhcpMode string, requireDualStack, isDualStack bool, tableID int, tableType int, routingProtocol int,
+	dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled, enableSecurity bool,
+	intfMgr *networkinterface.Manager) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -107,6 +116,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			iptablesBackend:  iptablesBackend,
 			ipvsEnabled:      ipvsEnabled,
 			enableSecurity:   enableSecurity,
+			possibleSubnets:  subnet,
 		}
 
 		subnet, err = SelectSubnet(address, subnet)
@@ -139,35 +149,50 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 	} else {
 		// try to resolve the address
 		log.Debug("looking up host", "address", address, "dnsMode", dnsMode)
-		ips, err := utils.LookupHost(address, dnsMode)
-		if err != nil {
+		ips, err := utils.LookupHost(address, dnsMode, requireDualStack)
+		if (dnsMode == utils.DualFamily && isDDNS && isDualStack) || err != nil {
 			// return early for ddns if no IP is allocated for the domain
 			// when leader starts, should do get IP from DHCP for the domain
 			if isDDNS {
-				result := &network{
-					link:             networkLink,
-					routeTable:       tableID,
-					routingTableType: tableType,
-					routingProtocol:  routingProtocol,
-					forwardMethod:    forwardMethod,
-					iptablesBackend:  iptablesBackend,
-					isDDNS:           isDDNS,
-					dnsName:          address,
-					ipvsEnabled:      ipvsEnabled,
-					enableSecurity:   enableSecurity,
-					address: &netlink.Addr{ // create placeholder for the address
-						IPNet: &net.IPNet{}, // that will be added later in the process
-						Peer:  &net.IPNet{},
-					},
+				log.Info("isDDNS true", "dhcpMode", dhcpMode)
+				if strings.EqualFold(dhcpMode, utils.IPv4Family) || strings.EqualFold(dhcpMode, utils.DualFamily) {
+					result := &network{
+						link:             networkLink,
+						routeTable:       tableID,
+						routingTableType: tableType,
+						routingProtocol:  routingProtocol,
+						forwardMethod:    forwardMethod,
+						iptablesBackend:  iptablesBackend,
+						isDDNS:           isDDNS,
+						dnsName:          address,
+						ipvsEnabled:      ipvsEnabled,
+						enableSecurity:   enableSecurity,
+						possibleSubnets:  subnet,
+						dhcpFamily:       utils.IPv4Family,
+					}
+
+					networks = append(networks, result)
 				}
 
-				// set address as deprecated so it isn't used as source address according to RFC 3484
-				result.address.PreferedLft = 0
+				if strings.EqualFold(dhcpMode, utils.IPv6Family) || strings.EqualFold(dhcpMode, utils.DualFamily) {
+					result := &network{
+						link:             networkLink,
+						routeTable:       tableID,
+						routingTableType: tableType,
+						routingProtocol:  routingProtocol,
+						forwardMethod:    forwardMethod,
+						iptablesBackend:  iptablesBackend,
+						isDDNS:           isDDNS,
+						dnsName:          address,
+						ipvsEnabled:      ipvsEnabled,
+						enableSecurity:   enableSecurity,
+						possibleSubnets:  subnet,
+						dhcpFamily:       utils.IPv6Family,
+					}
 
-				// Also set ValidLft so the netlink library actually sets them
-				result.address.ValidLft = math.MaxInt
+					networks = append(networks, result)
+				}
 
-				networks = append(networks, result)
 				return networks, nil
 			}
 			return nil, err
@@ -185,15 +210,12 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 				dnsName:          address,
 				ipvsEnabled:      ipvsEnabled,
 				enableSecurity:   enableSecurity,
+				possibleSubnets:  subnet,
 			}
 
-			// we're able to resolve store this as the initial IP
-
-			subnets := Split(subnet)
-
-			s := subnet
-			if len(subnets) > 1 {
-				s = selectSubnet(ip, subnets)
+			s, err := SelectSubnet(ip, subnet)
+			if err != nil {
+				return nil, fmt.Errorf("failed to select subnet: %w", err)
 			}
 
 			if result.address, err = netlink.ParseAddr(fmt.Sprintf("%s/%s", ip, s)); err != nil {
@@ -204,6 +226,11 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 
 			// set address as deprecated so it isn't used as source address according to RFC 3484
 			result.address.PreferedLft = 0
+
+			result.dhcpFamily = strings.ToLower(utils.IPv6Family)
+			if net.ParseIP(ip).To4() != nil {
+				result.dhcpFamily = strings.ToLower(utils.IPv4Family)
+			}
 
 			networks = append(networks, result)
 		}
@@ -357,7 +384,7 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool) (bool, error) {
 	}
 
 	if err := netlink.AddrReplace(configurator.link.Intf, configurator.address); err != nil {
-		return false, errors.Wrap(err, "could not add ip")
+		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", configurator.link.Intf.Attrs().Name))
 	}
 
 	if err := configurator.configureIPTables(); err != nil {
@@ -681,6 +708,25 @@ func (configurator *network) SetIP(ip string) error {
 	if strings.Contains("/", ip) {
 		return fmt.Errorf("ip should not contain CIDR notation got: %s", ip)
 	}
+
+	if configurator.address == nil {
+		log.Debug("possible", "subnets", configurator.possibleSubnets)
+		subnet, err := SelectSubnet(ip, configurator.possibleSubnets)
+		if err != nil {
+			return fmt.Errorf("unable to select subnet for IP %q from %q: %w", ip, subnet, err)
+		}
+
+		// Check if the subnet needs overriding
+		cidr, err := utils.FormatIPWithSubnetMask(ip, subnet)
+		if err != nil {
+			return errors.Wrapf(err, "2 could not format address %q with subnetMask %q", ip, subnet)
+		}
+		configurator.address, err = netlink.ParseAddr(cidr)
+		if err != nil {
+			return errors.Wrapf(err, "could not parse address %q", cidr)
+		}
+	}
+
 	ones, _ := configurator.address.Mask.Size()
 	cidr, err := utils.FormatIPWithSubnetMask(ip, strconv.Itoa(ones))
 	if err != nil {
@@ -810,11 +856,17 @@ func (configurator *network) SetMask(mask string) error {
 	selectedMask := mask
 	var err error
 
+	if mask == "" {
+		return fmt.Errorf("no mask provided")
+	}
+
 	if configurator.IP() != "" {
 		selectedMask, err = SelectSubnet(configurator.IP(), mask)
 		if err != nil {
 			return fmt.Errorf("failed to select mask %q: %w", mask, err)
 		}
+	} else if len(strings.Split(mask, ",")) > 1 {
+		return fmt.Errorf("cannot select mask from %q when IP address is unknown", mask)
 	}
 
 	m, err := strconv.Atoi(selectedMask)
@@ -822,19 +874,18 @@ func (configurator *network) SetMask(mask string) error {
 		return err
 	}
 
-	size := defaultMaskIPv4
+	size := DefaultMaskIPv4
 	family := utils.IPv4Family
 
 	if configurator.IP() != "" {
 		if utils.IsIPv6(configurator.IP()) {
-			size = defaultMaskIPv6
+			size = DefaultMaskIPv6
 			family = utils.IPv6Family
 		}
 
 		if m > size {
 			return fmt.Errorf("provided CIDR mask '%d' is greater than the highest mask value for the %s family (%d)", m, family, size)
 		}
-
 	}
 
 	toSet := net.CIDRMask(m, size)
@@ -861,6 +912,14 @@ func (configurator *network) HasEndpoints() bool {
 
 func (configurator *network) ARPName() string {
 	return fmt.Sprintf("%s-%s", configurator.CIDR(), configurator.Interface())
+}
+
+func (configurator *network) GetPossibleSubnets() string {
+	return configurator.possibleSubnets
+}
+
+func (configurator *network) DHCPFamily() string {
+	return configurator.dhcpFamily
 }
 
 // SelectSubnet formats an IP address with the appropriate CIDR based on the input.

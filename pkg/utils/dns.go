@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -15,7 +16,7 @@ const (
 )
 
 // LookupHost resolves dnsName and return an IP or an error
-func LookupHost(dnsName, dnsMode string) ([]string, error) {
+func LookupHost(dnsName, dnsMode string, requireDualStack bool) ([]string, error) {
 	result, err := net.LookupHost(dnsName)
 	if err != nil {
 		return nil, err
@@ -26,7 +27,7 @@ func LookupHost(dnsName, dnsMode string) ([]string, error) {
 	addrs := []string{}
 	switch dnsMode {
 	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), DualFamily:
-		a, err := getIPbyFamily(result, dnsMode)
+		a, err := getIPbyFamily(result, dnsMode, requireDualStack)
 		if err != nil {
 			return nil, err
 		}
@@ -38,7 +39,7 @@ func LookupHost(dnsName, dnsMode string) ([]string, error) {
 	return addrs, nil
 }
 
-func getIPbyFamily(addresses []string, family string) ([]string, error) {
+func getIPbyFamily(addresses []string, family string, requireDualStack bool) ([]string, error) {
 	var checkers []func(string) bool
 	families := []string{}
 	if family == DualFamily || family == strings.ToLower(IPv4Family) {
@@ -54,9 +55,17 @@ func getIPbyFamily(addresses []string, family string) ([]string, error) {
 	for i, c := range checkers {
 		addr, err := getIPbyChecker(addresses, c)
 		if err != nil {
+			if len(checkers) > 1 && !requireDualStack {
+				slog.Warn("no address found", "family", families[i])
+				continue
+			}
 			return nil, fmt.Errorf("error getting %s address: %w", families[i], err)
 		}
 		addrs = append(addrs, addr)
+	}
+
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no addresses found")
 	}
 
 	return addrs, nil

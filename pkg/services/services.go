@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -86,16 +87,30 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
 			for _, address := range addresses {
 				// handle the case where the service instance needs to be deleted
-				if instance.IsDHCP {
-					if address != "0.0.0.0" && address != "::" {
+				if instance.IsDHCPv4 {
+					if address != "0.0.0.0" {
 						return ActionDelete
 					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIP) {
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv4) {
+						return ActionDelete
+					}
+				} else {
+					if address == "0.0.0.0" {
+						return ActionDelete
+					}
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
 						return ActionDelete
 					}
 				}
-				if !instance.IsDHCP {
-					if address == "0.0.0.0" || address == "::" {
+				if instance.IsDHCPv6 {
+					if address != "::" {
+						return ActionDelete
+					}
+					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv6) {
+						return ActionDelete
+					}
+				} else {
+					if address == "::" {
 						return ActionDelete
 					}
 					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
@@ -140,7 +155,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 
 	startTime := time.Now()
 
-	newService, err := instance.NewInstance(svc, p.config, p.intfMgr, p.arpMgr)
+	newService, err := instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr)
 	if err != nil {
 		return err
 	}
@@ -152,19 +167,60 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 
 	p.upnpMap(ctx, newService)
 
-	if newService.IsDHCP && len(newService.VIPConfigs) == 1 {
+	if newService.IsDHCPv4 {
 		go func() {
-			for ip := range newService.DHCPClient.IPChannel() {
-				log.Debug("IP changed", "ip", ip)
-				newService.VIPConfigs[0].VIP = ip
-				newService.DHCPInterfaceIP = ip
-				if !p.config.DisableServiceUpdates {
-					if err := p.updateStatus(newService); err != nil {
-						log.Warn("updating svc", "err", err)
-					}
+			index := -1
+			for i := range newService.VIPConfigs {
+				ip := net.ParseIP(newService.VIPConfigs[i].VIP)
+				if ip.To4() != nil {
+					index = i
+					break
 				}
 			}
-			log.Debug("IP update channel closed, stopping")
+			if index == -1 {
+				log.Error("unable to find proper VIPConfig for the DHCPv4")
+			} else {
+				for ip := range newService.DHCPv4Client.IPChannel() {
+					log.Debug("IP changed", "ip", ip)
+					newService.VIPConfigs[index].VIP = ip
+					newService.DHCPInterfaceIPv4 = ip
+					if !p.config.DisableServiceUpdates {
+						if err := p.updateStatus(newService); err != nil {
+							log.Warn("updating svc", "err", err)
+						}
+					}
+				}
+				log.Debug("IPv4 update channel closed, stopping")
+			}
+
+		}()
+	}
+
+	if newService.IsDHCPv6 {
+		go func() {
+			index := -1
+			for i := range newService.VIPConfigs {
+				ip := net.ParseIP(newService.VIPConfigs[i].VIP)
+				if ip.To4() == nil {
+					index = i
+					break
+				}
+			}
+			if index == -1 {
+				log.Error("unable to find proper VIPConfig for the DHCPv6")
+			} else {
+				for ip := range newService.DHCPv4Client.IPChannel() {
+					log.Debug("IP changed", "ip", ip)
+					newService.VIPConfigs[index].VIP = ip
+					newService.DHCPInterfaceIPv6 = ip
+					if !p.config.DisableServiceUpdates {
+						if err := p.updateStatus(newService); err != nil {
+							log.Warn("updating svc", "err", err)
+						}
+					}
+				}
+				log.Debug("IPv6 update channel closed, stopping")
+			}
 		}()
 	}
 
@@ -288,7 +344,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	if !found {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
-		log.Warn("unable to find/stop service", "uid", uid)
+		log.Error("unable to find/stop service", "uid", uid)
 		return nil
 	}
 
@@ -317,8 +373,15 @@ func (p *Processor) deleteService(uid types.UID) error {
 		for x := range serviceInstance.Clusters {
 			serviceInstance.Clusters[x].Stop()
 		}
-		if serviceInstance.IsDHCP {
-			serviceInstance.DHCPClient.Stop()
+		if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
+			if serviceInstance.IsDHCPv4 {
+				serviceInstance.DHCPv4Client.Stop()
+			}
+
+			if serviceInstance.IsDHCPv6 {
+				serviceInstance.DHCPv6Client.Stop()
+			}
+
 			macvlan, err := netlink.LinkByName(serviceInstance.DHCPInterface)
 			if err != nil {
 				return fmt.Errorf("[service] error finding VIP Interface: %v", err)
@@ -508,6 +571,7 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 }
 
 func (p *Processor) updateStatus(i *instance.Instance) error {
+	log.Debug("updating status")
 	// let's retry status update every 10ms for 30s
 	retryConfig := wait.Backoff{
 		Steps:    3000,
@@ -534,9 +598,19 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 			// Add the current host
 			currentServiceCopy.Annotations[kubevip.VipHost] = p.config.NodeName
 		}
-		if i.DHCPInterfaceHwaddr != "" || i.DHCPInterfaceIP != "" {
+		if i.DHCPInterfaceHwaddr != "" || i.DHCPInterfaceIPv4 != "" || i.DHCPInterfaceIPv6 != "" {
 			currentServiceCopy.Annotations[kubevip.HwAddrKey] = i.DHCPInterfaceHwaddr
-			currentServiceCopy.Annotations[kubevip.RequestedIP] = i.DHCPInterfaceIP
+			dhcpInterfaceIP := ""
+			if i.DHCPInterfaceIPv4 != "" {
+				dhcpInterfaceIP = i.DHCPInterfaceIPv4
+				if i.DHCPInterfaceIPv6 != "" {
+					dhcpInterfaceIP += ","
+				}
+			}
+			if i.DHCPInterfaceIPv6 != "" {
+				dhcpInterfaceIP += i.DHCPInterfaceIPv6
+			}
+			currentServiceCopy.Annotations[kubevip.RequestedIP] = dhcpInterfaceIP
 		}
 
 		if currentService.Annotations["development.kube-vip.io/synthetic-api-server-error-on-update"] == "true" {
@@ -564,7 +638,7 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 
 		for _, c := range i.VIPConfigs {
 			if !utils.IsIP(c.VIP) {
-				ips, err := utils.LookupHost(c.VIP, p.config.DNSMode)
+				ips, err := utils.LookupHost(c.VIP, c.DNSMode, *i.ServiceSnapshot.Spec.IPFamilyPolicy == v1.IPFamilyPolicyRequireDualStack)
 				if err != nil {
 					return err
 				}

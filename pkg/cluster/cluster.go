@@ -54,9 +54,9 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 
 	networks := []vip.Network{}
 	for _, addr := range addresses {
-		network, err := vip.NewConfig(addr, c.Interface, c.LoInterfaceGlobalScope, c.VIPSubnet, c.DDNS, c.RoutingTableID,
-			c.RoutingTableType, c.RoutingProtocol, c.DNSMode, c.LoadBalancerForwardingMethod, c.IptablesBackend,
-			c.EnableLoadBalancer, c.EnableServiceSecurity, intfMgr)
+		network, err := vip.NewConfig(addr, c.Interface, c.LoInterfaceGlobalScope, c.VIPSubnet, c.DDNS, c.DHCPMode,
+			c.RequireDualStack, c.IsDualStack, c.RoutingTableID, c.RoutingTableType, c.RoutingProtocol, c.DNSMode,
+			c.LoadBalancerForwardingMethod, c.IptablesBackend, c.EnableLoadBalancer, c.EnableServiceSecurity, intfMgr)
 		if err != nil {
 			return nil, err
 		}
