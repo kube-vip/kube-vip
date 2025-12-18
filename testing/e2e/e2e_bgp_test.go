@@ -402,7 +402,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - fixed nexthop", Ordered, func() {
+		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - auto_sourceif nexthop, auto source interface", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -457,7 +457,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip IPv4 services BGP mode functionality", Ordered, func() {
+		Describe("kube-vip IPv4 services BGP mode functionality, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -521,7 +521,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip IPv6 services BGP mode functionality", Ordered, func() {
+		Describe("kube-vip IPv6 services BGP mode functionality, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -583,7 +583,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv6 over IPv4 - fixed nexthop", Ordered, func() {
+		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv6 over IPv4 - fixed nexthop, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -645,7 +645,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - fixed nexthop", Ordered, func() {
+		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - fixed nexthop, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -707,7 +707,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv6 over IPv4 - auto_sourceif nexthop", Ordered, func() {
+		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv6 over IPv4 - auto_sourceif nexthop, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string
@@ -770,7 +770,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
-		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - fixed nexthop", Ordered, func() {
+		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - auto_sourceif nexthop, with service election", Ordered, func() {
 			var (
 				cpVIP          string
 				clusterName    string

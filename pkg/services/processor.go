@@ -134,7 +134,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
 		i := instance.FindServiceInstance(svc, p.ServiceInstances)
-		shouldGarbageCollect := true
+		shouldGarbageCollect := false
 		if i != nil {
 			originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
 			shouldGarbageCollect =
@@ -282,7 +282,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				log.Error(err.Error())
 			}
 		}
-		svcCtx.IsActive = true
+		if !p.config.EnableServicesElection {
+			log.Debug("Service now active", "name", svc.Name, "uid", svc.UID)
+			svcCtx.IsActive = true
+		}
 	}
 
 	return false, nil
@@ -318,15 +321,17 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 			}
 		}
 
-		// If this is an active service then and additional leaderElection will handle stopping
-		err = p.deleteService(svc.UID)
-		if err != nil {
-			log.Error(err.Error())
+		if svcCtx.IsActive && !p.config.EnableServicesElection {
+			// If this is an active service then and additional leaderElection will handle stopping
+			err = p.deleteService(svc.UID)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			svcCtx.IsActive = false
 		}
 
 		// Calls the cancel function of the context
 		log.Warn("(svcs) The load balancer was deleted, cancelling context")
-		svcCtx.IsActive = false
 		svcCtx.Cancel()
 		log.Warn("(svcs) waiting for load balancer to finish")
 		<-svcCtx.Ctx.Done()

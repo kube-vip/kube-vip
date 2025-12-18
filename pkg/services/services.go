@@ -41,7 +41,7 @@ const (
 )
 
 func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
-	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name)
+	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
 
@@ -126,7 +126,7 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 		}
 	}
 	if len(addresses) > 0 || len(hostnames) > 0 {
-		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "addresses", addresses, "hostnames", hostnames)
+		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID, "addresses", addresses, "hostnames", hostnames)
 		return ActionAdd // If no matching instance is found, we need to add a new service instance
 	}
 	return ActionNone
@@ -161,7 +161,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 	}
 
 	for x := range newService.VIPConfigs {
-		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace)
+		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
 		newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, svc.Name, p.CountRouteReferences)
 	}
 
@@ -329,7 +329,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 	var serviceInstance *instance.Instance
 	found := false
 	for x := range p.ServiceInstances {
-		log.Debug("[service] lookup", "target UID", uid, "found UID ", p.ServiceInstances[x].ServiceSnapshot.UID, "name", p.ServiceInstances[x].ServiceSnapshot.Name, "namespace", p.ServiceInstances[x].ServiceSnapshot.Namespace)
+		log.Debug("[service] lookup", "target UID", uid, "found UID", p.ServiceInstances[x].ServiceSnapshot.UID, "name", p.ServiceInstances[x].ServiceSnapshot.Name, "namespace", p.ServiceInstances[x].ServiceSnapshot.Namespace)
 		// Add the running services to the new array
 		if p.ServiceInstances[x].ServiceSnapshot.UID != uid {
 			updatedInstances = append(updatedInstances, p.ServiceInstances[x])
@@ -354,7 +354,7 @@ func (p *Processor) deleteService(uid types.UID) error {
 		}
 	}
 
-	// Determine if this this VIP is shared with other loadbalancers
+	// Determine if this VIP is shared with other loadbalancers
 	shared := false
 	vipSet := make(map[string]interface{})
 	for x := range updatedInstances {
