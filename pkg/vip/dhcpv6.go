@@ -88,20 +88,21 @@ func NewDHCPv6InternalClient(iface string) (*DHCPv6InternalClient, error) {
 }
 
 type DHCPv6Client struct {
-	iface          *net.Interface
-	ddnsHostName   string
-	initRebootFlag bool
-	requestedIP    net.IP
-	stopChan       chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
-	releasedChan   chan struct{} // indicate that the IP has been released
-	errorChan      chan error    // indicates there was an error on the IP request
-	ipChan         chan string
-	ic             *DHCPv6InternalClient
-	addr           *dhcpv6.OptIAAddress
+	iface           *net.Interface
+	ddnsHostName    string
+	initRebootFlag  bool
+	requestedIP     net.IP
+	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
+	releasedChan    chan struct{} // indicate that the IP has been released
+	errorChan       chan error    // indicates there was an error on the IP request
+	ipChan          chan string
+	ic              *DHCPv6InternalClient
+	addr            *dhcpv6.OptIAAddress
+	backoffAttempts uint
 }
 
 // NewDHCPv6Client returns a new DHCP6 Client.
-func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag bool, requestedIP string) (*DHCPv6Client, error) {
+func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag bool, requestedIP string, backoffAttempts uint) (*DHCPv6Client, error) {
 	name := iface.Name
 	if parent != nil {
 		name = parent.Attrs().Name
@@ -113,14 +114,15 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 	}
 
 	return &DHCPv6Client{
-		iface:          iface,
-		stopChan:       make(chan struct{}),
-		releasedChan:   make(chan struct{}),
-		errorChan:      make(chan error),
-		initRebootFlag: initRebootFlag,
-		requestedIP:    net.ParseIP(requestedIP),
-		ipChan:         make(chan string),
-		ic:             client,
+		iface:           iface,
+		stopChan:        make(chan struct{}),
+		releasedChan:    make(chan struct{}),
+		errorChan:       make(chan error),
+		initRebootFlag:  initRebootFlag,
+		requestedIP:     net.ParseIP(requestedIP),
+		ipChan:          make(chan string),
+		ic:              client,
+		backoffAttempts: backoffAttempts,
 	}, nil
 }
 
@@ -151,7 +153,6 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 	dhcpContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// REQUEST WITH BACKOFF ACTION
 	addr, err := c.requestWithBackoff(dhcpContext)
 
 	if err != nil {
@@ -165,7 +166,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 	// Set up two ticker to renew/rebind regularly
 	t1Timeout := c.addr.PreferredLifetime / 2
 	t2Timeout := (c.addr.ValidLifetime / 8) * 7
-	log.Debug("[DHCPv6] timeouts", "timeout1", t1Timeout, "timeoute2", t2Timeout)
+	log.Debug("[DHCPv6] timeouts", "timeout1", t1Timeout, "timeout2", t2Timeout)
 	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
 
 	for {
@@ -231,20 +232,20 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 	var addr *dhcpv6.OptIAAddress
 
 	for {
-		log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt())
+		log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt()+1)
 
 		addr, err = c.request(ctx, false)
 
 		if err != nil {
 			dur := backoff.Duration()
-			if backoff.Attempt() > maxBackoffAttempts-1 {
-				errMsg := fmt.Errorf("failed to get an IP address after %d attempts, error %s, giving up", maxBackoffAttempts, err.Error())
-				log.Error(errMsg.Error())
+			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
+				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
+				log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
 				c.errorChan <- errMsg
 				c.Stop()
 				return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 			}
-			log.Error("[DHCPv6] request failed", "err", err.Error(), "waiting", dur)
+			log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
 			time.Sleep(dur)
 			continue
 		}

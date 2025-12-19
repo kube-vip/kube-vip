@@ -18,20 +18,22 @@ type DDNSManager interface {
 }
 
 type ddnsManager struct {
-	network Network
+	network         Network
+	backoffAttempts uint
 }
 
 // NewDDNSManager returns a newly created Dynamic DNS manager
-func NewDDNSManager(network Network) DDNSManager {
+func NewDDNSManager(network Network, backoffAttempts uint) DDNSManager {
 	return &ddnsManager{
-		network: network,
+		network:         network,
+		backoffAttempts: backoffAttempts,
 	}
 }
 
 // Start will start the dhcpclient routine to keep the lease
 // and return the IP it got from DHCP
 func (ddns *ddnsManager) Start(ctx context.Context) (string, error) {
-	client, err := NewDHCPClient(ddns.network)
+	client, err := NewDHCPClient(ddns.network, ddns.backoffAttempts)
 	if err != nil {
 		return "", fmt.Errorf("unable to create DHCP client: %w", err)
 	}
