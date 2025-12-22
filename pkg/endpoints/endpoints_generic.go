@@ -15,8 +15,8 @@ import (
 )
 
 type endpointWorker interface {
-	processInstance(svcCtx *servicecontext.Context, service *v1.Service, leaderElectionActive *bool) error
-	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool)
+	processInstance(svcCtx *servicecontext.Context, service *v1.Service) error
+	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service)
 	getEndpoints(service *v1.Service, id string) ([]string, error)
 	removeEgress(service *v1.Service, lastKnownGoodEndpoint *string)
 	delete(service *v1.Service, id string) error
@@ -50,15 +50,15 @@ func newGeneric(config *kubevip.Config, provider providers.Provider, instances *
 	}
 }
 
-func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service, _ *bool) error {
+func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service) error {
 	return nil
 }
 
-func (g *generic) clear(_ *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
-	g.clearEgress(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
+func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
+	g.clearEgress(lastKnownGoodEndpoint, service, svcCtx.Cancel)
 }
 
-func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
+func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc) {
 	if *lastKnownGoodEndpoint != "" {
 		log.Warn("existing  endpoint has been removed, no remaining endpoints for leaderElection", "provider", g.provider.GetLabel(), "endpoint", lastKnownGoodEndpoint)
 		if err := egress.Teardown(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, string(service.UID), service.Annotations, g.config.EgressWithNftables); err != nil {
@@ -69,7 +69,6 @@ func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service
 		if g.config.EnableServicesElection || g.config.EnableLeaderElection {
 			cancel() // stop services watcher
 		}
-		*leaderElectionActive = false
 	}
 }
 

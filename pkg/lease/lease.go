@@ -62,17 +62,6 @@ func (m *Manager) Get(service *v1.Service) *Lease {
 	return nil
 }
 
-// GetLeaderContext returns leder context for the service.
-func (m *Manager) GetLeaderContext(service *v1.Service) context.Context {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	_, id := GetName(service)
-	if _, ok := m.leases[id]; !ok {
-		return nil
-	}
-	return m.leases[id].Ctx
-}
-
 // Lease holds lease data.
 type Lease struct {
 	cnt     uint

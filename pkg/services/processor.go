@@ -90,7 +90,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc func(context.Context, *v1.Service) error) (bool, error) {
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc func(*servicecontext.Context, *v1.Service) error) (bool, error) {
 	// log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
@@ -209,7 +209,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				if !svcCtx.IsWatched {
 					// background the endpoint watcher
 					if (p.config.EnableRoutingTable || p.config.EnableBGP) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
-						err = serviceFunc(svcCtx.Ctx, svc)
+						err = serviceFunc(svcCtx, svc)
 						if err != nil {
 							log.Error(err.Error())
 						}
@@ -234,7 +234,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					svcCtx.IsWatched = true
 				}
 			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
-				err = serviceFunc(svcCtx.Ctx, svc)
+				err = serviceFunc(svcCtx, svc)
 				if err != nil {
 					log.Error(err.Error())
 				}
@@ -264,11 +264,13 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 							log.Warn("(svcs) restartable service watcher ending", "uid", svc.UID)
 							return
 						default:
-							log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
-							err = serviceFunc(svcCtx.Ctx, svc)
+							if !svcCtx.IsActive {
+								log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
+								err = serviceFunc(svcCtx, svc)
 
-							if err != nil {
-								log.Error(err.Error())
+								if err != nil {
+									log.Error(err.Error())
+								}
 							}
 						}
 					}
@@ -277,7 +279,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			}
 		} else {
 			// Increment the waitGroup before the service Func is called (Done is completed in there)
-			err = serviceFunc(svcCtx.Ctx, svc)
+			err = serviceFunc(svcCtx, svc)
 			if err != nil {
 				log.Error(err.Error())
 			}

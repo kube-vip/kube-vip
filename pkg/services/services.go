@@ -24,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -40,7 +41,7 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
-func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
+func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service) error {
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -49,7 +50,7 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 	switch action {
 	case ActionDelete:
 		// remove the label from the node before deleting the service
-		if err := p.nodeLabelManager.RemoveLabel(ctx, svc); err != nil {
+		if err := p.nodeLabelManager.RemoveLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
 
@@ -59,12 +60,12 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.addService(ctx, svc); err != nil {
+		if err := p.addService(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
 		// add the label to the node after adding the service
-		if err := p.nodeLabelManager.AddLabel(ctx, svc); err != nil {
+		if err := p.nodeLabelManager.AddLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding label to node: %w", err)
 		}
 	case ActionNone:
