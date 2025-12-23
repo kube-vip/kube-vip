@@ -64,14 +64,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		p.leaseMgr.Delete(service)
 	}()
 
-	// svcCtx, err := p.getServiceContext(service.UID)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get context for service %q with UID %q: %w", service.Name, service.UID, err)
-	// }
-	// if svcCtx == nil {
-	// 	return fmt.Errorf("failed to get context for service %q with UID %q: nil context", service.Name, service.UID)
-	// }
-
 	svcLease, isNew := p.leaseMgr.Add(service)
 	// this service is sharing lease
 	if !isNew {
@@ -110,6 +102,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 		return nil
 	}
+
 	// start the leader election code loop
 	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,

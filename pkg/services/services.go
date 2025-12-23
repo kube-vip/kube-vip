@@ -572,7 +572,6 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 }
 
 func (p *Processor) updateStatus(i *instance.Instance) error {
-	log.Debug("updating status")
 	// let's retry status update every 10ms for 30s
 	retryConfig := wait.Backoff{
 		Steps:    3000,
@@ -667,8 +666,10 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 				}
 			}
 		}
-		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
+		log.Debug("LB status", "current", currentService.Status.LoadBalancer.Ingress, "new", ingresses)
+		if !ingressEqual(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
+			log.Debug("updating service status", "namespace", currentService.Namespace, "name", currentService.Name, "uid", currentService.UID)
 			_, err = p.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
 			if err != nil && !apierrors.IsInvalid(err) {
 				log.Error("updating Service", "namespace", i.ServiceSnapshot.Namespace, "name", i.ServiceSnapshot.Name, "err", err)
@@ -679,6 +680,19 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 	})
 
 	return err
+}
+
+func ingressEqual(a, b []v1.LoadBalancerIngress) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		if a[i].IP != b[i].IP || a[i].Hostname != b[i].Hostname ||
+			!cmp.Equal(a[i].Ports, b[i].Ports) {
+			return false
+		}
+	}
+	return true
 }
 
 func isUPNPEnabled(s *v1.Service) bool {
