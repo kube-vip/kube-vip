@@ -24,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -40,7 +41,7 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
-func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
+func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service) error {
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -49,7 +50,7 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 	switch action {
 	case ActionDelete:
 		// remove the label from the node before deleting the service
-		if err := p.nodeLabelManager.RemoveLabel(ctx, svc); err != nil {
+		if err := p.nodeLabelManager.RemoveLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
 
@@ -59,12 +60,12 @@ func (p *Processor) SyncServices(ctx context.Context, svc *v1.Service) error {
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.addService(ctx, svc); err != nil {
+		if err := p.addService(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
 		// add the label to the node after adding the service
-		if err := p.nodeLabelManager.AddLabel(ctx, svc); err != nil {
+		if err := p.nodeLabelManager.AddLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding label to node: %w", err)
 		}
 	case ActionNone:
@@ -571,7 +572,6 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 }
 
 func (p *Processor) updateStatus(i *instance.Instance) error {
-	log.Debug("updating status")
 	// let's retry status update every 10ms for 30s
 	retryConfig := wait.Backoff{
 		Steps:    3000,
@@ -666,8 +666,10 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 				}
 			}
 		}
-		if !cmp.Equal(currentService.Status.LoadBalancer.Ingress, ingresses) {
+		log.Debug("LB status", "current", currentService.Status.LoadBalancer.Ingress, "new", ingresses)
+		if !ingressEqual(currentService.Status.LoadBalancer.Ingress, ingresses) {
 			currentService.Status.LoadBalancer.Ingress = ingresses
+			log.Debug("updating service status", "namespace", currentService.Namespace, "name", currentService.Name, "uid", currentService.UID)
 			_, err = p.clientSet.CoreV1().Services(currentService.Namespace).UpdateStatus(context.TODO(), currentService, metav1.UpdateOptions{})
 			if err != nil && !apierrors.IsInvalid(err) {
 				log.Error("updating Service", "namespace", i.ServiceSnapshot.Namespace, "name", i.ServiceSnapshot.Name, "err", err)
@@ -678,6 +680,19 @@ func (p *Processor) updateStatus(i *instance.Instance) error {
 	})
 
 	return err
+}
+
+func ingressEqual(a, b []v1.LoadBalancerIngress) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		if a[i].IP != b[i].IP || a[i].Hostname != b[i].Hostname ||
+			!cmp.Equal(a[i].Ports, b[i].Ports) {
+			return false
+		}
+	}
+	return true
 }
 
 func isUPNPEnabled(s *v1.Service) bool {

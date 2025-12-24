@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -38,7 +39,10 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1.Service) error {
+func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, service *v1.Service) error {
+	if svcCtx == nil {
+		return fmt.Errorf("no context context for service %q with UID %q: nil context", service.Name, service.UID)
+	}
 	serviceLease, _ := lease.GetName(service)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 	// we use the Lease lock type since edits to Leases are less common
@@ -56,17 +60,9 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 
 	go func() {
 		// wait for the service context to end and delete the lease then
-		<-ctx.Done()
+		<-svcCtx.Ctx.Done()
 		p.leaseMgr.Delete(service)
 	}()
-
-	svcCtx, err := p.getServiceContext(service.UID)
-	if err != nil {
-		return fmt.Errorf("failed to get context for service %q with UID %q: %w", service.Name, service.UID, err)
-	}
-	if svcCtx == nil {
-		return fmt.Errorf("failed to get context for service %q with UID %q: nil context", service.Name, service.UID)
-	}
 
 	svcLease, isNew := p.leaseMgr.Add(service)
 	// this service is sharing lease
@@ -78,16 +74,15 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 			svcCtx.IsActive = false
 			return nil
 		}
-		<-svcLease.Started
 
-		if lease.UsesCommon(service) {
-			svcCtx.IsActive = true
-			if err := p.SyncServices(ctx, service); err != nil {
+		if lease.UsesCommon(service) && !svcCtx.IsActive {
+			if err := p.SyncServices(svcCtx, service); err != nil {
 				log.Error("service sync", "err", err, "uid", service.UID)
 				svcLease.Cancel()
 			}
+			svcCtx.IsActive = true
 			// just block until context is cancelled
-			<-ctx.Done()
+			<-svcCtx.Ctx.Done()
 		}
 
 		// wait for service context to finish
@@ -107,6 +102,7 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 
 		return nil
 	}
+
 	// start the leader election code loop
 	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -121,11 +117,11 @@ func (p *Processor) StartServicesLeaderElection(ctx context.Context, service *v1
 		RenewDeadline:   time.Duration(p.config.RenewDeadline) * time.Second,
 		RetryPeriod:     time.Duration(p.config.RetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
+			OnStartedLeading: func(_ context.Context) {
 				// Mark this service as active (as we've started leading)
 				// we run this in background as it's blocking
 				svcCtx.IsActive = true
-				if err := p.SyncServices(ctx, service); err != nil {
+				if err := p.SyncServices(svcCtx, service); err != nil {
 					log.Error("service sync", "uid", service.UID, "err", err)
 					svcLease.Cancel()
 				}

@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"fmt"
 
 	log "log/slog"
@@ -18,12 +17,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
-	leaderCtx, cancel := context.WithCancel(svcCtx.Ctx)
-	defer cancel()
-
-	var leaderElectionActive bool
-
-	rw, err := provider.CreateRetryWatcher(leaderCtx, p.rwClientSet, service)
+	rw, err := provider.CreateRetryWatcher(svcCtx.Ctx, p.rwClientSet, service)
 	if err != nil {
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
 	}
@@ -35,22 +29,20 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			log.Debug("context cancelled", "provider", provider.GetLabel())
 			// Stop the retry watcher
 			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			cancel()
 			return
 		case <-p.shutdownChan:
 			log.Debug("shutdown called", "provider", provider.GetLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
-			cancel()
+			svcCtx.Cancel()
 			return
 		case <-exitFunction:
 			log.Debug("function ending", "provider", provider.GetLabel())
 			// Stop the retry watcher
 			rw.Stop()
 			// Cancel the context, which will in turn cancel the leadership
-			cancel()
+			svcCtx.Cancel()
 			return
 		}
 	}()
@@ -65,7 +57,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		switch event.Type {
 
 		case watch.Added, watch.Modified:
-			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, &leaderElectionActive, p.StartServicesLeaderElection, &leaderCtx, &cancel)
+			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection)
 			if restart {
 				continue
 			} else if err != nil {

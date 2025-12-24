@@ -1,7 +1,6 @@
 package endpoints
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -26,7 +25,7 @@ func newRoutingTable(generic generic) endpointWorker {
 	}
 }
 
-func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1.Service, leaderElectionActive *bool) error {
+func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1.Service) error {
 	instance := instance.FindServiceInstance(service, *rt.instances)
 	if instance != nil {
 		for _, cluster := range instance.Clusters {
@@ -59,7 +58,6 @@ func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1
 							rt.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace",
 							service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", rt.config.RoutingTableID)
 						ctx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
-						*leaderElectionActive = true
 					}
 				}
 			}
@@ -69,7 +67,7 @@ func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1
 	return nil
 }
 
-func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
+func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
 		if errs := ClearRoutes(service, rt.instances); len(errs) == 0 {
 			svcCtx.ConfiguredNetworks.Clear()
@@ -80,7 +78,7 @@ func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpo
 		}
 	}
 
-	rt.clearEgress(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
+	rt.clearEgress(lastKnownGoodEndpoint, service, svcCtx.Cancel)
 }
 
 func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, error) {

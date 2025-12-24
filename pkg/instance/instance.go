@@ -631,7 +631,6 @@ func FetchServiceAddresses(s *v1.Service) ([]string, []string) {
 func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	log.Debug("finding service", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	for i := range instances {
-		log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
 		if instances[i].ServiceSnapshot.UID == svc.UID {
 			return instances[i]
 		}
@@ -652,7 +651,6 @@ func FindServiceInstanceWithTimeout(svc *v1.Service, instances []*Instance) *Ins
 			return nil
 		case <-ticker.C:
 			for i := range instances {
-				log.Debug("saved service", "instance", i, "UID", instances[i].ServiceSnapshot.UID)
 				if instances[i].ServiceSnapshot.UID == svc.UID {
 					return instances[i]
 				}

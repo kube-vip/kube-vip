@@ -1,7 +1,6 @@
 package endpoints
 
 import (
-	"context"
 	"fmt"
 	log "log/slog"
 
@@ -23,11 +22,11 @@ func newBGP(generic generic, bgpServer *bgp.Server) endpointWorker {
 	}
 }
 
-func (b *BGP) processInstance(ctx *servicecontext.Context, service *v1.Service, leaderElectionActive *bool) error {
+func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
 	if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
 		for _, cluster := range instance.Clusters {
 			for i := range cluster.Network {
-				if !ctx.IsNetworkConfigured(cluster.Network[i].IP()) {
+				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
 					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
 					err := b.bgpServer.AddHost(cluster.Network[i].CIDR())
 					if err != nil {
@@ -35,8 +34,7 @@ func (b *BGP) processInstance(ctx *servicecontext.Context, service *v1.Service, 
 					} else {
 						log.Info("added BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].CIDR(), "service name", service.Name, "namespace", service.Namespace)
-						ctx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
-						*leaderElectionActive = true
+						svcCtx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
 					}
 				}
 			}
@@ -45,7 +43,7 @@ func (b *BGP) processInstance(ctx *servicecontext.Context, service *v1.Service, 
 	return nil
 }
 
-func (b *BGP) clear(ctx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc, leaderElectionActive *bool) {
+func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
 		// If BGP mode is enabled - routes should be deleted
 		if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
@@ -57,8 +55,7 @@ func (b *BGP) clear(ctx *servicecontext.Context, lastKnownGoodEndpoint *string, 
 					} else {
 						log.Info("deleted BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace)
-						ctx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
-						*leaderElectionActive = false
+						svcCtx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
 					}
 				}
 			}
@@ -66,7 +63,7 @@ func (b *BGP) clear(ctx *servicecontext.Context, lastKnownGoodEndpoint *string, 
 		}
 	}
 
-	b.clearEgress(lastKnownGoodEndpoint, service, cancel, leaderElectionActive)
+	b.clearEgress(lastKnownGoodEndpoint, service, svcCtx.Cancel)
 }
 
 func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {
