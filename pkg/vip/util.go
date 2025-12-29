@@ -40,10 +40,19 @@ func GetDefaultGatewayInterface() (*net.Interface, error) {
 
 	for _, route := range routes {
 		if route.Dst == nil || route.Dst.String() == "0.0.0.0/0" || route.Dst.String() == "::/0" {
-			if route.LinkIndex <= 0 {
-				return nil, errors.New("Found default route but could not determine interface")
+			idx := route.LinkIndex
+			if idx <= 0 && len(route.MultiPath) > 0 {
+				for _, nh := range route.MultiPath {
+					if nh.LinkIndex > 0 {
+						idx = nh.LinkIndex
+						break
+					}
+				}
 			}
-			return net.InterfaceByIndex(route.LinkIndex)
+			if idx <= 0 {
+				continue // try next route instead of failing
+			}
+			return net.InterfaceByIndex(idx)
 		}
 	}
 
