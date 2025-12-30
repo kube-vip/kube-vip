@@ -24,7 +24,7 @@ var _ = Describe("SIGUSR1 Signal Handler", func() {
 	)
 
 	BeforeEach(func() {
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel = context.WithTimeout(context.TODO(), 30*time.Second)
 	})
 
 	AfterEach(func() {

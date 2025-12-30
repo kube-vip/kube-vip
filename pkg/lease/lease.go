@@ -28,6 +28,7 @@ func (m *Manager) Add(service *v1.Service) (*Lease, bool) {
 	defer m.lock.Unlock()
 	_, id := GetName(service)
 	if _, exist := m.leases[id]; !exist {
+		// create new lease context (independent)
 		ctx, cancel := context.WithCancel(context.Background())
 		m.leases[id] = newLease(ctx, cancel)
 		return m.leases[id], true

@@ -65,6 +65,8 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			tempDirPathRoot                 string
 		)
 
+		ctx, cancel := context.WithCancel(context.TODO())
+
 		BeforeEach(func() {
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
@@ -99,6 +101,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}
+			cancel()
 		})
 
 		Describe("kube-vip IPv4 functionality, vip_leaderelection=true", Ordered, func() {
@@ -130,19 +133,19 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			It(clusterName+" provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs([]string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
 			})
 		})
 
@@ -175,13 +178,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -189,7 +192,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv4 VIP address for service",
 				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, currentOffset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -198,7 +201,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 2)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -234,13 +237,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-el-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -248,7 +251,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv4 VIP address for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset)
-					testService(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv4Protocol}, 1)
+					testService(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv4Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -285,7 +288,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, clusterCfg = prepareCluster(tempDirPath, "ipv6", k8sImagePath, v129,
+				clusterName, client, clusterCfg = prepareCluster(ctx, tempDirPath, "ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
@@ -293,13 +296,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				c, err := kubernetes.NewForConfig(clusterCfg)
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), c, tempDirPath)
+					return e2e.GetLogs(ctx, c, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			It(clusterName+"provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs([]string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
 			})
 		})
 
@@ -332,13 +335,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -346,7 +349,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv6 VIP address for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol}, 1)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -355,7 +358,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol}, 2)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -391,13 +394,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-el-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -405,7 +408,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv6 VIP address for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
-					testService(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv6Protocol}, 1)
+					testService(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv6Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -441,19 +444,19 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
 			AfterAll(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			It(clusterName+" provides a DualStack VIP addresses for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(vip.Split(cpVIP), clusterName, client)
+				testControlPlaneVIPs(ctx, vip.Split(cpVIP), clusterName, client)
 			})
 		})
 
@@ -486,14 +489,14 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-svc-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -501,7 +504,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 1)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -510,7 +513,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 2)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -546,14 +549,14 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-svc-el-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-el-ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -561,7 +564,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 1)
+					testService(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -599,20 +602,20 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			It(clusterName+" provides a DualStack VIP addresses for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(vip.Split(cpVIP), clusterName, client)
+				testControlPlaneVIPs(ctx, vip.Split(cpVIP), clusterName, client)
 			})
 		})
 
@@ -647,28 +650,28 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-svc-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 1)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -677,7 +680,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("only removes VIP address if it was referenced by multiple services and all of them were deleted",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 2)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 2)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -715,14 +718,14 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ds-svc-el-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-el-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 1, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -730,7 +733,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an IPv6 VIP address for service",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testService(svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 1)
+					testService(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, trafficPolicy, client, true, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 1)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -766,20 +769,20 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "ipv4-hostname", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv4-hostname", k8sImagePath, v129,
 					kubeVIPHostnameManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
 
 			It(clusterName+" uses hostname fallback while providing an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs([]string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
 			})
 		})
 
@@ -812,14 +815,14 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-el-m-ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-m-ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 2, nil, 3)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -827,7 +830,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an single IPv6 VIP address for multiple services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset)
-					testServiceCommonLease(svcName, lbAddress, dsNamespace,
+					testServiceCommonLease(ctx, svcName, lbAddress, dsNamespace,
 						trafficPolicy,
 						client, []corev1.IPFamily{corev1.IPv6Protocol}, 3)
 				},
@@ -866,14 +869,14 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareCluster(tempDirPath, "svc-el-m-ds", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-m-ds", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 2, nil, 3)
 			})
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(context.Background(), client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -881,7 +884,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			DescribeTable("configures an single IPv4 and IPv6 VIP address for multiple services",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset)
-					testServiceCommonLease(svcName, lbAddress, dsNamespace,
+					testServiceCommonLease(ctx, svcName, lbAddress, dsNamespace,
 						trafficPolicy,
 						client, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 3)
 				},
@@ -1009,7 +1012,7 @@ func withTimestamp(text string) string {
 	return fmt.Sprintf("%s: %s", time.Now(), text)
 }
 
-func createTestDS(name, namespace string, client kubernetes.Interface, port int) {
+func createTestDS(ctx context.Context, name, namespace string, client kubernetes.Interface, port int) {
 	labels := make(map[string]string)
 	labels["app"] = name
 	d := v1.DaemonSet{
@@ -1061,11 +1064,11 @@ func createTestDS(name, namespace string, client kubernetes.Interface, port int)
 		},
 	}
 
-	_, err := client.AppsV1().DaemonSets(namespace).Create(context.TODO(), &d, metav1.CreateOptions{})
+	_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &d, metav1.CreateOptions{})
 	Expect(err).ToNot(HaveOccurred())
 }
 
-func createTestService(name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
+func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
 	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int) {
 	svcAnnotations := make(map[string]string)
 	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
@@ -1101,14 +1104,14 @@ func createTestService(name, namespace, target, lbAddress string, client kuberne
 	}
 
 	Eventually(func() error {
-		_, err := client.CoreV1().Services(namespace).Create(context.TODO(), &s, metav1.CreateOptions{})
+		_, err := client.CoreV1().Services(namespace).Create(ctx, &s, metav1.CreateOptions{})
 		return err
 	}, time.Second*60, time.Second).Should(Succeed())
 	By(withTimestamp(fmt.Sprintf("service %s/%s created", namespace, name)))
 
 	Eventually(func() error {
 		By(withTimestamp(fmt.Sprintf("getting service %s/%s\n", namespace, name)))
-		_, err := client.CoreV1().Services(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		_, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 		return err
 	}, time.Second*60, time.Second).Should(Succeed())
 }
@@ -1131,7 +1134,7 @@ func checkIPAddress(lbAddress, container string, expected bool) bool {
 	}
 }
 
-func checkIPAddressByLease(name, namespace, lbAddress string, expected bool, client kubernetes.Interface) bool {
+func checkIPAddressByLease(ctx context.Context, name, namespace, lbAddress string, expected bool, client kubernetes.Interface) bool {
 	By(withTimestamp(fmt.Sprintf("checking LB %q by lease %s/%s, should exist: %t", lbAddress, namespace, name, expected)))
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -1142,14 +1145,14 @@ func checkIPAddressByLease(name, namespace, lbAddress string, expected bool, cli
 		case <-to.C:
 			return false
 		case <-ticker.C:
-			if e2e.CheckIPAddressPresenceByLease(name, namespace, lbAddress, client, expected) {
+			if e2e.CheckIPAddressPresenceByLease(ctx, name, namespace, lbAddress, client, expected) {
 				return true
 			}
 		}
 	}
 }
 
-func prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath string,
+func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImagePath string,
 	v129 bool, kubeVIPManifestTemplate *template.Template, logger log.Logger,
 	manifestValues *e2e.KubevipManifestValues, networking *kindconfigv1alpha4.Networking, nodesNum int,
 	addSAN *san, dsNumber int) (string, kubernetes.Interface, *rest.Config) {
@@ -1231,7 +1234,7 @@ func prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath string,
 		if i > 0 {
 			tmpDsName = fmt.Sprintf("%s-%d", dsName, i)
 		}
-		createTestDS(tmpDsName, dsNamespace, client, 80+i)
+		createTestDS(ctx, tmpDsName, dsNamespace, client, 80+i)
 	}
 
 	By(withTimestamp("loading local docker image to kind cluster"))
@@ -1259,7 +1262,7 @@ func cleanupCluster(clusterName string, configMtx *sync.Mutex, logger log.Logger
 	}, "60s", "200ms").Should(Succeed())
 }
 
-func testControlPlaneVIPs(cpVIPs []string, clusterName string, client kubernetes.Interface) {
+func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface) {
 	Expect(cpVIPs).ToNot(BeEmpty())
 
 	By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned VIP"))
@@ -1276,7 +1279,7 @@ func testControlPlaneVIPs(cpVIPs []string, clusterName string, client kubernetes
 		return leaderName
 	}, "600s").ShouldNot(BeEmpty())
 
-	Eventually(client.CoreV1().Nodes().Delete(context.Background(), leaderName, metav1.DeleteOptions{}), "60s", "1s").Should(Succeed())
+	Eventually(client.CoreV1().Nodes().Delete(ctx, leaderName, metav1.DeleteOptions{}), "60s", "1s").Should(Succeed())
 
 	By(withTimestamp("killing the leader Kubernetes control plane node to trigger a fail-over scenario"))
 	killLeader(leaderName)
@@ -1289,7 +1292,7 @@ func testControlPlaneVIPs(cpVIPs []string, clusterName string, client kubernetes
 	}
 }
 
-func testService(svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
+func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int) {
 	lbAddresses := vip.Split(lbAddress)
 
@@ -1306,22 +1309,22 @@ func testService(svcName, lbAddress, leaseName, leaseNamespace string, trafficPo
 	}
 
 	for _, svc := range services {
-		createTestService(svc, dsNamespace, dsName, lbAddress,
+		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
 			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 80)
 		time.Sleep(time.Second)
 	}
 
 	for _, addr := range lbAddresses {
-		Expect(checkIPAddressByLease(leases[0], leaseNamespace, addr, true, client)).To(BeTrue())
+		Expect(checkIPAddressByLease(ctx, leases[0], leaseNamespace, addr, true, client)).To(BeTrue())
 		assertConnection("http", addr, "80", "", 3*time.Second, 60*time.Second)
 	}
 
-	container := e2e.GetLeaseHolder(leases[0], leaseNamespace, client)
+	container := e2e.GetLeaseHolder(ctx, leases[0], leaseNamespace, client)
 
 	for i := range numberOfServices {
 		expected := i < numberOfServices-1
 
-		err := client.CoreV1().Services(dsNamespace).Delete(context.TODO(), services[i], metav1.DeleteOptions{})
+		err := client.CoreV1().Services(dsNamespace).Delete(ctx, services[i], metav1.DeleteOptions{})
 		Expect(err).ToNot(HaveOccurred())
 		time.Sleep(time.Second)
 
@@ -1329,7 +1332,7 @@ func testService(svcName, lbAddress, leaseName, leaseNamespace string, trafficPo
 			if serviceElection {
 				Expect(checkIPAddress(addr, container, expected)).To(BeTrue())
 			} else {
-				Expect(checkIPAddressByLease(leases[i], leaseNamespace, addr, expected, client)).To(BeTrue())
+				Expect(checkIPAddressByLease(ctx, leases[i], leaseNamespace, addr, expected, client)).To(BeTrue())
 			}
 
 			if expected {
@@ -1341,7 +1344,7 @@ func testService(svcName, lbAddress, leaseName, leaseNamespace string, trafficPo
 	}
 }
 
-func testServiceCommonLease(svcName, lbAddress, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
+func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, ipFamily []corev1.IPFamily, numberOfServices int) {
 	lbAddresses := vip.Split(lbAddress)
 
@@ -1357,19 +1360,19 @@ func testServiceCommonLease(svcName, lbAddress, leaseNamespace string, trafficPo
 		if i > 0 {
 			tmpDsName = fmt.Sprintf("%s-%d", tmpDsName, i)
 		}
-		createTestService(svc, dsNamespace, tmpDsName, lbAddress,
+		createTestService(ctx, svc, dsNamespace, tmpDsName, lbAddress,
 			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, lease, 80+i)
 		time.Sleep(time.Second)
 	}
 
 	for i, addr := range lbAddresses {
-		checkIPAddressByLease(lease, leaseNamespace, addr, true, client)
+		checkIPAddressByLease(ctx, lease, leaseNamespace, addr, true, client)
 		assertConnection("http", addr, strconv.Itoa(80+i), "", 3*time.Second, 60*time.Second)
 	}
 
-	container := e2e.GetLeaseHolder(lease, leaseNamespace, client)
+	container := e2e.GetLeaseHolder(ctx, lease, leaseNamespace, client)
 
-	nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	Expect(err).ToNot(HaveOccurred())
 
 	for _, node := range nodes.Items {
@@ -1384,12 +1387,12 @@ func testServiceCommonLease(svcName, lbAddress, leaseNamespace string, trafficPo
 
 		By(fmt.Sprintf("deleting service %q", services[i]))
 
-		err := client.CoreV1().Services(dsNamespace).Delete(context.TODO(), services[i], metav1.DeleteOptions{})
+		err := client.CoreV1().Services(dsNamespace).Delete(ctx, services[i], metav1.DeleteOptions{})
 		Expect(err).ToNot(HaveOccurred())
 		time.Sleep(time.Second)
 
 		Eventually(func() error {
-			_, err := client.CoreV1().Services(dsNamespace).Get(context.Background(), services[i], metav1.GetOptions{})
+			_, err := client.CoreV1().Services(dsNamespace).Get(ctx, services[i], metav1.GetOptions{})
 			return err
 		}).ShouldNot(Succeed())
 

@@ -29,7 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
+func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
 	var err error
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
@@ -50,7 +50,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		network := cluster.Network[i]
 
 		if network.IsDDNS() {
-			if err := cluster.StartDDNS(ctxDNS, cluster.Network[i], c.DHCPBackoffAttempts); err != nil {
+			if err := cluster.StartDDNS(ctx, cluster.Network[i], c.DHCPBackoffAttempts); err != nil {
 				log.Error("failed to start DDNS", "err", err)
 			}
 		}
@@ -64,7 +64,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if network.IsDNS() {
 			log.Info("starting the DNS updater", "address", network.DNSName())
 			ipUpdater := vip.NewIPUpdater(network)
-			ipUpdater.Run(ctxDNS)
+			ipUpdater.Run(ctx)
 		}
 
 		if !c.EnableRoutingTable {
@@ -77,7 +77,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
-			err = bgpServer.AddHost(network.CIDR())
+			err = bgpServer.AddHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -90,7 +90,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 			}
 
 			go func() {
-				err = sm.NodeWatcher(ctxArp, lb, c.Port) //TODO: We're using the ctxARP as the context this will change when rkatz finishes his change
+				err = sm.NodeWatcher(ctx, lb, c.Port) //TODO: We're using the ctxARP as the context this will change when rkatz finishes his change
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
 				}
@@ -101,7 +101,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		if c.EnableARP {
 			arpWG.Add(1)
-			go cluster.layer2Update(ctxArp, network, c, &arpWG)
+			go cluster.layer2Update(ctx, network, c, &arpWG)
 		}
 	}
 
@@ -130,7 +130,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		ips := []string{}
 		if nodename != "" {
-			if ips, err = getNodeIPs(ctxArp, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+			if ips, err = getNodeIPs(ctx, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
 				log.Error("failed to get IP of control-plane nod", "err", err)
 			}
 		}
@@ -335,7 +335,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(network.CIDR())
+			err = bgp.AddHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
