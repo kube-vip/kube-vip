@@ -161,8 +161,8 @@ func CheckIPAddressPresence(ip string, container string, expected bool) bool {
 	return strings.Contains(cmdOut.String(), ip) == expected
 }
 
-func CheckIPAddressPresenceByLease(name, namespace, ip string, client kubernetes.Interface, expected bool) bool {
-	container := GetLeaseHolder(name, namespace, client)
+func CheckIPAddressPresenceByLease(ctx context.Context, name, namespace, ip string, client kubernetes.Interface, expected bool) bool {
+	container := GetLeaseHolder(ctx, name, namespace, client)
 	By("Lease holder: " + container)
 	if container == "" {
 		return false
@@ -199,11 +199,11 @@ func CheckRoutePresence(ip string, container string, expected bool) bool {
 	return result
 }
 
-func CheckLeasePresence(name, namespace string, client kubernetes.Interface, expected bool) *coordinationv1.Lease {
+func CheckLeasePresence(ctx context.Context, name, namespace string, client kubernetes.Interface, expected bool) *coordinationv1.Lease {
 	var lease *coordinationv1.Lease
 	Eventually(func() error {
 		var err error
-		lease, err = client.CoordinationV1().Leases(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		lease, err = client.CoordinationV1().Leases(namespace).Get(ctx, name, metav1.GetOptions{})
 		return err
 	}, "360s", "1s").ShouldNot(HaveOccurred())
 
@@ -224,10 +224,10 @@ func CheckLeasePresence(name, namespace string, client kubernetes.Interface, exp
 	return lease
 }
 
-func GetLeaseHolder(name, namespace string, client kubernetes.Interface) string {
+func GetLeaseHolder(ctx context.Context, name, namespace string, client kubernetes.Interface) string {
 	var lease *coordinationv1.Lease
 	Eventually(func() string {
-		lease = CheckLeasePresence(name, namespace, client, true)
+		lease = CheckLeasePresence(ctx, name, namespace, client, true)
 		return *lease.Spec.HolderIdentity
 	}, "360s", "1s").ShouldNot(BeEmpty())
 

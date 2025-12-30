@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"fmt"
 	log "log/slog"
 
@@ -28,7 +29,7 @@ func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Servic
 			for i := range cluster.Network {
 				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
 					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
-					err := b.bgpServer.AddHost(cluster.Network[i].CIDR())
+					err := b.bgpServer.AddHost(svcCtx.Ctx, cluster.Network[i].CIDR())
 					if err != nil {
 						log.Error("error adding BGP host", "provider", b.provider.GetLabel(), "err", err)
 					} else {
@@ -49,7 +50,7 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 		if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
 			for _, cluster := range instance.Clusters {
 				for i := range cluster.Network {
-					err := b.bgpServer.DelHost(cluster.Network[i].CIDR())
+					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR())
 					if err != nil {
 						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
@@ -70,7 +71,7 @@ func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {
 	return b.getAllEndpoints(service, id)
 }
 
-func (b *BGP) delete(service *v1.Service, id string) error {
+func (b *BGP) delete(ctx context.Context, service *v1.Service, id string) error {
 	// When no-leader-elecition mode
 	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
 		// find all existing local endpoints
@@ -81,32 +82,32 @@ func (b *BGP) delete(service *v1.Service, id string) error {
 
 		// If there were local endpoints deleted
 		if len(endpoints) > 0 {
-			b.deleteAction(service)
+			b.deleteAction(ctx, service)
 		}
 	}
 
 	return nil
 }
 
-func (b *BGP) deleteAction(service *v1.Service) {
-	b.clearBGPHosts(service)
+func (b *BGP) deleteAction(ctx context.Context, service *v1.Service) {
+	b.clearBGPHosts(ctx, service)
 }
 
-func (b *BGP) clearBGPHosts(service *v1.Service) {
-	ClearBGPHosts(service, b.instances, b.bgpServer)
+func (b *BGP) clearBGPHosts(ctx context.Context, service *v1.Service) {
+	ClearBGPHosts(ctx, service, b.instances, b.bgpServer)
 }
 
 func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
 	return nil
 }
 
-func ClearBGPHosts(service *v1.Service, instances *[]*instance.Instance, bgpServer *bgp.Server) {
+func ClearBGPHosts(ctx context.Context, service *v1.Service, instances *[]*instance.Instance, bgpServer *bgp.Server) {
 	if instance := instance.FindServiceInstance(service, *instances); instance != nil {
-		ClearBGPHostsByInstance(instance, bgpServer)
+		ClearBGPHostsByInstance(ctx, instance, bgpServer)
 	}
 }
 
-func ClearBGPHostsByInstance(instance *instance.Instance, bgpServer *bgp.Server) {
+func ClearBGPHostsByInstance(ctx context.Context, instance *instance.Instance, bgpServer *bgp.Server) {
 	if instance == nil {
 		log.Error("failed to clear BGP host for nil instance")
 		return
@@ -114,7 +115,7 @@ func ClearBGPHostsByInstance(instance *instance.Instance, bgpServer *bgp.Server)
 	for _, cluster := range instance.Clusters {
 		for i := range cluster.Network {
 			network := cluster.Network[i]
-			err := bgpServer.DelHost(network.CIDR())
+			err := bgpServer.DelHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error("[endpoint] error deleting BGP host", "err", err)
 			} else {

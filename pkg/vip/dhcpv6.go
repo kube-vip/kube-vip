@@ -150,10 +150,10 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
-	dhcpContext, cancel := context.WithCancel(ctx)
+	dhcpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	addr, err := c.requestWithBackoff(dhcpContext)
+	addr, err := c.requestWithBackoff(dhcpCtx)
 
 	if err != nil {
 		return fmt.Errorf("DHCPv6 client failed: %w", err)
@@ -178,7 +178,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			// This way there's not much to do other than log and continue, as the renew error
 			// may be an offline server, or may be an incorrect package match
 
-			addr, err := c.renew(dhcpContext)
+			addr, err := c.renew(dhcpCtx)
 			if err == nil {
 				c.addr = addr
 				log.Info("[DHCPv6] renew", "addr", addr.IPv6Addr.String())
@@ -188,25 +188,26 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			}
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
-			addr, err := c.request(dhcpContext, true)
+			addr, err := c.request(dhcpCtx, true)
 			if err == nil {
 				c.addr = addr
 				log.Info("[DHCPv6] rebind", "lease", addr)
 			} else {
 				log.Warn("[DHCPv6] ip may have changed", "ip", addr.IPv6Addr.String(), "err", err)
 				c.initRebootFlag = false
-				c.addr, err = c.requestWithBackoff(dhcpContext)
+				c.addr, err = c.requestWithBackoff(dhcpCtx)
 				log.Error("[DHCPv6] rebind failed", "err", err)
 			}
 			t1.Reset(t1Timeout)
 			t2.Reset(t2Timeout)
 
 		case <-c.stopChan:
-			dhcpStopContext, cancel := context.WithCancel(context.Background())
+			// create new context for DHCP cleanup (independent)
+			dhcpStopCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			// IP address release.
 			var err error
-			if err = c.release(dhcpStopContext); err != nil {
+			if err = c.release(dhcpStopCtx); err != nil {
 				log.Error("[DHCPv6] release failed", "err", err)
 			} else {
 				log.Info("[DHCPv6] released", "address", c.addr.String())

@@ -19,7 +19,7 @@ type endpointWorker interface {
 	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service)
 	getEndpoints(service *v1.Service, id string) ([]string, error)
 	removeEgress(service *v1.Service, lastKnownGoodEndpoint *string)
-	delete(service *v1.Service, id string) error
+	delete(ctx context.Context, service *v1.Service, id string) error
 	setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
 }
 
@@ -110,7 +110,7 @@ func (g *generic) getAllEndpoints(service *v1.Service, id string) ([]string, err
 func (g *generic) removeEgress(_ *v1.Service, _ *string) {
 }
 
-func (g *generic) delete(_ *v1.Service, _ string) error {
+func (g *generic) delete(_ context.Context, _ *v1.Service, _ string) error {
 	return nil
 }
 

@@ -171,7 +171,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				log.Warn("(svcs) waiting for load balancer to finish")
 				<-svcCtx.Ctx.Done()
 
-				if err := p.deleteService(svc.UID); err != nil {
+				if err := p.deleteService(ctx, svc.UID); err != nil {
 					log.Error("(svc) unable to remove", "service", svc.UID)
 				}
 				// in theory this should never fail
@@ -336,7 +336,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 		if svcCtx.IsActive && !p.config.EnableServicesElection {
 			// If this is an active service then and additional leaderElection will handle stopping
-			err = p.deleteService(svc.UID)
+			err = p.deleteService(svcCtx.Ctx, svc.UID)
 			if err != nil {
 				log.Error(err.Error())
 			}
