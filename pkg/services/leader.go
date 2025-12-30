@@ -95,7 +95,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		<-svcCtx.Ctx.Done()
 
 		if svcCtx.IsActive {
-			if err := p.deleteService(service.UID); err != nil {
+			if err := p.deleteService(context.TODO(), service.UID); err != nil {
 				log.Error("service deletion", "uid", service.UID, "err", err)
 			}
 		}
@@ -165,7 +165,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 				log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
 				if svcCtx.IsActive {
 					log.Debug("deleting service due to lost leadership", "uid", service.UID)
-					if err := p.deleteService(service.UID); err != nil {
+					if err := p.deleteService(svcCtx.Ctx, service.UID); err != nil {
 						log.Error("service deletion", "err", err)
 					}
 				}

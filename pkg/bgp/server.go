@@ -52,10 +52,10 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 }
 
 // Start starts the BGP server
-func (b *Server) Start(peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (err error) {
+func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (err error) {
 	go b.s.Serve()
 
-	if err = b.s.StartBgp(context.Background(), &api.StartBgpRequest{
+	if err = b.s.StartBgp(ctx, &api.StartBgpRequest{
 		Global: &api.Global{
 			Asn:        b.c.AS,
 			RouterId:   b.c.RouterID,
@@ -65,7 +65,7 @@ func (b *Server) Start(peerStateChangeCallback func(*api.WatchEventResponse_Peer
 		return
 	}
 
-	if err = b.s.WatchEvent(context.Background(), &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
+	if err = b.s.WatchEvent(ctx, &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
 		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
 			log.Info("[BGP]", "peer", p.String())
 			if peerStateChangeCallback != nil {
@@ -77,13 +77,13 @@ func (b *Server) Start(peerStateChangeCallback func(*api.WatchEventResponse_Peer
 	}
 
 	for _, p := range b.c.Peers {
-		if err = b.AddPeer(p); err != nil {
+		if err = b.AddPeer(ctx, p); err != nil {
 			return
 		}
 	}
 
 	if b.c.Zebra.Enabled {
-		if err = b.s.EnableZebra(context.Background(), &api.EnableZebraRequest{
+		if err = b.s.EnableZebra(ctx, &api.EnableZebraRequest{
 			Url:          b.c.Zebra.URL,
 			Version:      b.c.Zebra.Version,
 			SoftwareName: b.c.Zebra.SoftwareName,
@@ -98,7 +98,8 @@ func (b *Server) Start(peerStateChangeCallback func(*api.WatchEventResponse_Peer
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
-	ctx, cf := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cf()
+	// create new BGP stop context (independent)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	return b.s.StopBgp(ctx, &api.StopBgpRequest{})
 }

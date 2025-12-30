@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -97,8 +98,8 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	return false, nil
 }
 
-func (p *Processor) Delete(service *v1.Service, id string) error {
-	if err := p.worker.delete(service, id); err != nil {
+func (p *Processor) Delete(ctx context.Context, service *v1.Service, id string) error {
+	if err := p.worker.delete(ctx, service, id); err != nil {
 		return fmt.Errorf("[%s] error deleting service: %w", p.provider.GetLabel(), err)
 	}
 	return nil

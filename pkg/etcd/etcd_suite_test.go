@@ -29,7 +29,8 @@ const (
 
 func TestMain(m *testing.M) {
 	logrus.SetLevel(logrus.DebugLevel)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	expectSuccess(startEtcd(ctx), "starting etcd")
 
 	os.Exit(runTestsWithCleanup(m, func() {

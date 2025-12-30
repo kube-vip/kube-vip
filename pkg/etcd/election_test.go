@@ -20,7 +20,8 @@ import (
 func TestRunElectionWithMemberIDCollision(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cli := client(g)
 	defer cli.Close()
 
@@ -90,7 +91,8 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cli := client(g)
 	defer cli.Close()
 

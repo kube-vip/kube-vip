@@ -37,6 +37,7 @@ func (m *Manager) Add(service *v1.Service) (lease *Lease, newService bool, share
 	_, id := GetName(service)
 
 	if _, sharedLease = m.leases[id]; !sharedLease {
+		// create new lease context (independent)
 		ctx, cancel := context.WithCancel(context.Background())
 		m.leases[id] = newLease(ctx, cancel)
 	}

@@ -17,18 +17,18 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startARP(id string) error {
+func (sm *Manager) startARP(ctx context.Context, id string) error {
 	var cpCluster *cluster.Cluster
 	var ns string
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	arpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	log.Info("Start ARP/NDP advertisement")
-	go sm.arpMgr.StartAdvertisement(ctx)
+	go sm.arpMgr.StartAdvertisement(arpCtx)
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -37,7 +37,7 @@ func (sm *Manager) startARP(id string) error {
 			switch sig {
 			case syscall.SIGUSR1:
 				log.Info("Received SIGUSR1, dumping configuration")
-				sm.dumpConfiguration()
+				sm.dumpConfiguration(arpCtx)
 			case syscall.SIGINT, syscall.SIGTERM:
 				log.Info("Received kube-vip termination, signaling shutdown")
 				if sm.config.EnableControlPlane {
@@ -64,7 +64,7 @@ func (sm *Manager) startARP(id string) error {
 		}
 
 		go func() {
-			err := cpCluster.StartCluster(sm.config, clusterManager, nil)
+			err := cpCluster.StartCluster(arpCtx, sm.config, clusterManager, nil)
 			if err != nil {
 				log.Error("starting control plane", "err", err)
 				// Trigger the shutdown of this manager instance
@@ -99,7 +99,7 @@ func (sm *Manager) startARP(id string) error {
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+		err = sm.svcProcessor.StartServicesWatchForLeaderElection(arpCtx)
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ func (sm *Manager) startARP(id string) error {
 		}
 
 		// start the leader election code loop
-		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		leaderelection.RunOrDie(arpCtx, leaderelection.LeaderElectionConfig{
 			Lock: lock,
 			// IMPORTANT: you MUST ensure that any code you have that
 			// is protected by the lease must terminate **before**
@@ -153,7 +153,7 @@ func (sm *Manager) startARP(id string) error {
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
 					if sm.config.EnableNodeLabeling {
-						applyNodeLabel(sm.clientSet, sm.config.Address, id, identity)
+						applyNodeLabel(arpCtx, sm.clientSet, sm.config.Address, id, identity)
 					}
 					if identity == id {
 						// I just got the lock
