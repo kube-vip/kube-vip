@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -117,6 +118,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+		defer close(cluster.completed)
+	}
+
 	go func() {
 		<-signalChan
 		log.Info("Received termination, signaling cluster shutdown")
@@ -184,6 +190,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 			err := cluster.vipService(clusterCtx, c, sm, bgpServer, leaderCancel)
 			if err != nil {
 				log.Error("starting VIP service on leader", "err", err)
+				signalChan <- syscall.SIGINT
 			}
 		},
 		onStoppedLeading: func() {
@@ -235,7 +242,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 			}
 
 			log.Error("lost leadership, restarting kube-vip")
-			panic("") // TODO - we could also return here
+			signalChan <- syscall.SIGINT
 		},
 		onNewLeader: func(identity string) {
 			// we're notified when new leader elected
@@ -264,7 +271,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 	case "kubernetes", "":
 		cluster.runKubernetesLeaderElectionOrDie(leaderCtx, run)
 	case "etcd":
-		cluster.runEtcdLeaderElectionOrDie(leaderCtx, run)
+		if err := cluster.runEtcdLeaderElectionOrDie(leaderCtx, run); err != nil {
+			return err
+		}
 	default:
 		log.Info(fmt.Sprintf("LeaderElectionMode %s not supported, exiting", c.LeaderElectionType))
 	}
@@ -323,8 +332,8 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 	})
 }
 
-func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) {
-	etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
+func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) error {
+	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.sm.EtcdClient},
 		Name:                 run.config.LeaseName,
 		MemberID:             run.leaseID,
@@ -334,10 +343,13 @@ func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *run
 			OnStoppedLeading: run.onStoppedLeading,
 			OnNewLeader:      run.onNewLeader,
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("etcd leaderelection: %w", err)
+	}
+	return nil
 }
 
-func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
+func (sm *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
@@ -345,9 +357,9 @@ func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoad
 		LabelSelector: "node-role.kubernetes.io/control-plane",
 	}
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctxArp, "1", &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(ctxArp, listOptions)
+			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(ctx, listOptions)
 		},
 	})
 	if err != nil {
@@ -379,6 +391,9 @@ func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoad
 						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 						if err != nil {
 							log.Error("add IPVS backend", "err", err)
+							if errors.Is(err, &utils.PanicError{}) {
+								return fmt.Errorf("add IPVS backend: %w", err)
+							}
 						}
 					} else {
 						err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)

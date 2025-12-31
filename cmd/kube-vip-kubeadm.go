@@ -65,7 +65,11 @@ var kubeKubeadmInit = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		if err != nil {
+			log.Error("unable to create manifest", "err", err)
+			return
+		}
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
@@ -110,7 +114,11 @@ var kubeKubeadmJoin = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		if err != nil {
+			log.Error("unable to create manifest", "err", err)
+			return
+		}
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }

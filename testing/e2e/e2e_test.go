@@ -899,7 +899,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 	}
 })
 
-func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName string) (kubernetes.Interface, *rest.Config) {
+func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName string) (kubernetes.Interface, *rest.Config, error) {
 	provider := cluster.NewProvider(
 		cluster.ProviderWithLogger(logger),
 		cluster.ProviderWithDocker(),
@@ -920,13 +920,13 @@ func createKindCluster(logger log.Logger, config *v1alpha4.Cluster, clusterName 
 
 	cfg, err := clientcmd.BuildConfigFromKubeconfigGetter("", kubeconfigGetter)
 	if err != nil {
-		panic(err.Error())
+		return nil, nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
 
 	client, err := kubernetes.NewForConfig(cfg)
 	Expect(err).ToNot(HaveOccurred())
 
-	return client, cfg
+	return client, cfg, nil
 }
 
 // Assume the VIP is routable if status code is 200 or 500. Since etcd might glitch.
@@ -1231,7 +1231,8 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	clusterName := fmt.Sprintf("%s-%s", filepath.Base(tempDirPath), clusterNameSuffix)
 
 	By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
-	client, cfg := createKindCluster(logger, &clusterConfig, clusterName)
+	client, cfg, err := createKindCluster(logger, &clusterConfig, clusterName)
+	Expect(err).ToNot(HaveOccurred())
 
 	By(withTimestamp("creating test daemonset"))
 	for i := range dsNumber {
