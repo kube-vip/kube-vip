@@ -132,7 +132,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 				// we can do cleanup here
 				log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
 				if svcCtx.IsActive {
-					log.Debug("DELETING LEADER", "uid", service.UID)
 					if err := p.deleteService(svcCtx.Ctx, service.UID); err != nil {
 						log.Error("service deletion", "err", err)
 					}

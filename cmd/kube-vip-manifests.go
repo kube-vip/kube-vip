@@ -54,7 +54,7 @@ var kubeManifestPod = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Error("No address is specified for kube-vip to expose services on")
+			log.Error("no address is specified for kube-vip to expose services on")
 			return
 		}
 
@@ -67,7 +67,11 @@ var kubeManifestPod = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		if err != nil {
+			log.Error("unable to create manifest", "err", err)
+			return
+		}
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
@@ -87,7 +91,7 @@ var kubeManifestDaemon = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Error("No address is specified for kube-vip to expose services on")
+			log.Error("no address is specified for kube-vip to expose services on")
 			return
 		}
 
@@ -100,7 +104,11 @@ var kubeManifestDaemon = &cobra.Command{
 			}
 		}
 
-		cfg := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, image, Release.Version, inCluster, taint)
+		cfg, err := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, image, Release.Version, inCluster, taint)
+		if err != nil {
+			log.Error("unable to create manifest", "err", err)
+			return
+		}
 		fmt.Println(cfg) // output manifest to stdout
 	},
 }
@@ -121,7 +129,7 @@ var kubeManifestRbac = &cobra.Command{
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
-			log.Error("No address is specified for kube-vip to expose services on")
+			log.Error("no address is specified for kube-vip to expose services on")
 			return
 		}
 

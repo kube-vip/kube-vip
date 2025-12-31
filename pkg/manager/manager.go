@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -72,6 +74,9 @@ type Manager struct {
 	// implementation will be decided in constructor
 	// based on config.EnableNodeLabeling
 	nodeLabelManager node.LabelManager
+
+	// This variable reports if manager is being closed
+	closing atomic.Bool
 }
 
 // New will create a new managing object
@@ -354,4 +359,25 @@ func (sm *Manager) parseAnnotations(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+	defer close(sm.shutdownChan)
+	for {
+		sig := <-sm.signalChan
+		switch sig {
+		case syscall.SIGUSR1:
+			log.Info("Received SIGUSR1, dumping configuration")
+			sm.dumpConfiguration(ctx)
+		case syscall.SIGINT, syscall.SIGTERM:
+			sm.closing.Store(true)
+			log.Info("Received kube-vip termination, signaling shutdown")
+			if cpCluster != nil {
+				cpCluster.Stop()
+			}
+			// Cancel the context, which will in turn cancel the leadership and all goroutines
+			cancel()
+			return
+		}
+	}
 }

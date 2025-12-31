@@ -167,10 +167,10 @@ func GenerateRoleBinding(rolebinding bool, saCfg *applyCoreV1.ServiceAccountAppl
 }
 
 // generatePodSpec will take a kube-vip config and generate a Pod spec
-func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *corev1.Pod {
+func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*corev1.Pod, error) {
 	imageRef, err := name.NewTag(image, name.WeakValidation, name.WithDefaultTag(imageVersion))
 	if err != nil {
-		panic(fmt.Errorf("cannot parse %q: %w", image, err))
+		return nil, fmt.Errorf("cannot parse %q: %w", image, err)
 	}
 	command := "manager"
 
@@ -669,18 +669,24 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *cor
 		newManifest.Spec.HostAliases = append(newManifest.Spec.HostAliases, hostAlias)
 	}
 
-	return newManifest
+	return newManifest, nil
 }
 
 // GeneratePodManifestFromConfig will take a kube-vip config and generate a manifest
-func GeneratePodManifestFromConfig(c *Config, image, imageVersion string, inCluster bool) string {
-	newManifest := generatePodSpec(c, image, imageVersion, inCluster)
-	b, _ := yaml.Marshal(newManifest)
-	return string(b)
+func GeneratePodManifestFromConfig(c *Config, image, imageVersion string, inCluster bool) (string, error) {
+	newManifest, err := generatePodSpec(c, image, imageVersion, inCluster)
+	if err != nil {
+		return "", err
+	}
+	b, err := yaml.Marshal(newManifest)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal manifest: %w", err)
+	}
+	return string(b), nil
 }
 
 // GenerateDaemonsetManifestFromConfig will take a kube-vip config and generate a manifest
-func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, inCluster, taint bool) string {
+func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, inCluster, taint bool) (string, error) {
 	// Determine where the pod should be deployed
 	var namespace string
 	if c.ServiceNamespace != "" {
@@ -689,7 +695,11 @@ func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, 
 		namespace = metav1.NamespaceSystem
 	}
 
-	podSpec := generatePodSpec(c, image, imageVersion, inCluster).Spec
+	pod, err := generatePodSpec(c, image, imageVersion, inCluster)
+	if err != nil {
+		return "", err
+	}
+
 	newManifest := &appv1.DaemonSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "DaemonSet",
@@ -716,7 +726,7 @@ func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, 
 						"app.kubernetes.io/version": imageVersion,
 					},
 				},
-				Spec: podSpec,
+				Spec: pod.Spec,
 			},
 		},
 	}
@@ -766,5 +776,5 @@ func GenerateDaemonsetManifestFromConfig(c *Config, image, imageVersion string, 
 	delete(m, "status")
 
 	b, _ = yaml.Marshal(m)
-	return string(b)
+	return string(b), nil
 }

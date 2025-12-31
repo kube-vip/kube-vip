@@ -1046,7 +1046,7 @@ func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolic
 func GetContainerIPs(ctx context.Context, containerName string) (string, string, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
-		panic(err)
+		return "", "", fmt.Errorf("failed to create client: %w", err)
 	}
 	containers, err := cli.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
@@ -1056,7 +1056,6 @@ func GetContainerIPs(ctx context.Context, containerName string) (string, string,
 	for _, c := range containers {
 		for _, n := range c.Names {
 			if n[1:] == containerName {
-				fmt.Println(n)
 				for _, n := range c.NetworkSettings.Networks {
 					return n.IPAddress, n.GlobalIPv6Address, nil
 				}

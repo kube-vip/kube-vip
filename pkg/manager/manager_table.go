@@ -46,24 +46,33 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 	}
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go func() {
-		for {
-			sig := <-sm.signalChan
-			switch sig {
-			case syscall.SIGUSR1:
-				log.Info("Received SIGUSR1, dumping configuration")
-				sm.dumpConfiguration(rtCtx)
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Info("Received kube-vip termination, signaling shutdown")
-				if sm.config.EnableControlPlane {
-					cpCluster.Stop()
-				}
-				// Cancel the context, which will in turn cancel the leadership
-				cancel()
-				return
-			}
+	go sm.waitForShutdown(rtCtx, cancel, cpCluster)
+
+	if sm.config.EnableControlPlane {
+		log.Debug("initCluster for ControlPlane")
+		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
+		if err != nil {
+			log.Debug("init of ControlPlane NOT successful")
+			return fmt.Errorf("cluster initialization error: %w", err)
 		}
-	}()
+		log.Debug("init of ControlPlane successful")
+		log.Debug("init ClusterManager")
+		clusterManager, err := initClusterManager(sm)
+		if err != nil {
+			log.Debug("init cluster manager NOT successful")
+			return fmt.Errorf("cluster manager initialization error: %w", err)
+		}
+		log.Debug("init ClusterManager successful")
+		if err := cpCluster.StartVipService(rtCtx, sm.config, clusterManager, nil); err != nil {
+			log.Error("Control Plane", "err", err)
+			// Trigger the shutdown of this manager instance
+			if !sm.closing.Load() {
+				sm.signalChan <- syscall.SIGINT
+			}
+		} else {
+			log.Debug("start VipServer for cluster manager successful")
+		}
+	}
 
 	if sm.config.EnableServices {
 		log.Debug("starting Services")
@@ -114,7 +123,7 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 						err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 						if err != nil {
 							log.Error(err.Error())
-							panic("")
+							sm.signalChan <- syscall.SIGINT
 						}
 					},
 					OnStoppedLeading: func() {
@@ -124,8 +133,8 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 						log.Info("leader lost", "id", id)
 						sm.svcProcessor.Stop()
 
-						log.Error("lost leadership, restarting kube-vip")
-						panic("")
+						log.Error("lost services leadership, restarting kube-vip")
+						sm.signalChan <- syscall.SIGINT
 					},
 					OnNewLeader: func(identity string) {
 						// we're notified when new leader elected
@@ -141,35 +150,15 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 			log.Info("beginning watching services without leader election")
 			err = sm.svcProcessor.ServicesWatcher(rtCtx, sm.svcProcessor.SyncServices)
 			if err != nil {
-				log.Error("Cannot watch services", "err", err)
+				return fmt.Errorf("cannot watch services: %w", err)
 			} else {
 				log.Debug("watching services")
 			}
 		}
 	}
-	if sm.config.EnableControlPlane {
-		log.Debug("initCluster for ControlPlane")
-		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
-		if err != nil {
-			log.Debug("init of ControlPlane NOT successful")
-			return fmt.Errorf("cluster initialization error: %w", err)
-		}
-		log.Debug("init of ControlPlane successful")
-		log.Debug("init ClusterManager")
-		clusterManager, err := initClusterManager(sm)
-		if err != nil {
-			log.Debug("init cluster manager NOT successful")
-			return fmt.Errorf("cluster manager initialization error: %w", err)
-		}
-		log.Debug("init ClusterManager successful")
-		if err := cpCluster.StartVipService(rtCtx, sm.config, clusterManager, nil); err != nil {
-			log.Error("Control Plane", "err", err)
-			// Trigger the shutdown of this manager instance
-			sm.signalChan <- syscall.SIGINT
-		} else {
-			log.Debug("start VipServer for cluster manager successful")
-		}
-	}
+
+	<-sm.shutdownChan
+	log.Info("Shutting down Kube-Vip")
 
 	return nil
 }

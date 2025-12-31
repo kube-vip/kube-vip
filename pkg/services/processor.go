@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
@@ -212,6 +214,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 						err = serviceFunc(svcCtx, svc)
 						if err != nil {
 							log.Error(err.Error())
+							if errors.Is(err, &utils.PanicError{}) {
+								return false, err
+							}
 						}
 					}
 
@@ -237,6 +242,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				err = serviceFunc(svcCtx, svc)
 				if err != nil {
 					log.Error(err.Error())
+					if errors.Is(err, &utils.PanicError{}) {
+						return false, err
+					}
 				}
 
 				go func() {
@@ -267,14 +275,15 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 							if !svcCtx.IsActive {
 								log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
 								err = serviceFunc(svcCtx, svc)
-
 								if err != nil {
 									log.Error(err.Error())
+									if errors.Is(err, &utils.PanicError{}) {
+										svcCtx.Cancel()
+									}
 								}
 							}
 						}
 					}
-
 				}()
 			}
 		} else {
@@ -282,6 +291,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			err = serviceFunc(svcCtx, svc)
 			if err != nil {
 				log.Error(err.Error())
+				if errors.Is(err, &utils.PanicError{}) {
+					return false, err
+				}
 			}
 		}
 		if !p.config.EnableServicesElection {

@@ -26,7 +26,7 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		logLevel, err := strconv.ParseInt(env, 10, 32)
 		if err != nil {
-			panic("Unable to parse environment variable [vip_loglevel], should be int")
+			return fmt.Errorf("unable to parse environment variable [vip_loglevel], should be int")
 		}
 		c.Logging = int32(logLevel)
 	}
