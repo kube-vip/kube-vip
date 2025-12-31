@@ -60,26 +60,7 @@ func (sm *Manager) startBGP(ctx context.Context) error {
 	}()
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go func() {
-		for {
-			sig := <-sm.signalChan
-			switch sig {
-			case syscall.SIGUSR1:
-				log.Info("Received SIGUSR1, dumping configuration")
-				sm.dumpConfiguration(bgpCtx)
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Info("Received termination, signaling shutdown")
-				if sm.config.EnableControlPlane {
-					if cpCluster != nil {
-						cpCluster.Stop()
-					}
-				}
-				// Cancel the context, which will in turn cancel the leadership
-				cancel()
-				return
-			}
-		}
-	}()
+	go sm.waitForShutdown(bgpCtx, cancel, cpCluster)
 
 	if sm.config.EnableControlPlane {
 		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
@@ -101,33 +82,30 @@ func (sm *Manager) startBGP(ctx context.Context) error {
 			if err != nil {
 				log.Error("Control Plane", "err", err)
 				// Trigger the shutdown of this manager instance
-				sm.signalChan <- syscall.SIGINT
+				if !sm.closing.Load() {
+					sm.signalChan <- syscall.SIGINT
+				}
 			}
 		}()
+	}
 
-		// Check if we're also starting the services, if not we can sit and wait on the closing channel and return here
-		if !sm.config.EnableServices {
-			<-sm.signalChan
-			log.Info("Shutting down Kube-Vip")
-
-			return nil
+	if sm.config.EnableServices {
+		if sm.config.EnableServicesElection {
+			log.Info("beginning watching services, leaderelection will happen for every service")
+			err = sm.svcProcessor.StartServicesWatchForLeaderElection(bgpCtx)
+			if err != nil {
+				return err
+			}
+		} else {
+			log.Info("beginning watching services without leader election")
+			err = sm.svcProcessor.ServicesWatcher(bgpCtx, sm.svcProcessor.SyncServices)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	if sm.config.EnableServicesElection {
-		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.svcProcessor.StartServicesWatchForLeaderElection(bgpCtx)
-		if err != nil {
-			return err
-		}
-	} else {
-		log.Info("beginning watching services without leader election")
-		err = sm.svcProcessor.ServicesWatcher(bgpCtx, sm.svcProcessor.SyncServices)
-		if err != nil {
-			return err
-		}
-	}
-
+	<-sm.shutdownChan
 	log.Info("Shutting down Kube-Vip")
 
 	return nil

@@ -95,6 +95,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		<-svcCtx.Ctx.Done()
 
 		if svcCtx.IsActive {
+			// we have no context left here so we use a new one
 			if err := p.deleteService(context.TODO(), service.UID); err != nil {
 				log.Error("service deletion", "uid", service.UID, "err", err)
 			}
