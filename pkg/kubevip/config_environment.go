@@ -302,9 +302,6 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.PreserveVIPOnLeadershipLoss = b
-	} else {
-		// Default to false for backward compatibility
-		c.PreserveVIPOnLeadershipLoss = false
 	}
 
 	// Wireguard Mode
