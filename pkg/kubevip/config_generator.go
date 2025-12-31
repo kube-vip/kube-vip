@@ -594,6 +594,16 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *cor
 		}
 	}
 
+	if c.PreserveVIPOnLeadershipLoss {
+		preserveVIPOnLeadershipLoss := []corev1.EnvVar{
+			{
+				Name:  vipPreserveOnLeadershipLoss,
+				Value: strconv.FormatBool(c.PreserveVIPOnLeadershipLoss),
+			},
+		}
+		newEnvironment = append(newEnvironment, preserveVIPOnLeadershipLoss...)
+	}
+
 	newManifest := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
