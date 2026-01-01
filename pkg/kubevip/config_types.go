@@ -199,6 +199,9 @@ type Config struct {
 
 	// ConfigFile defines the path to a JSON/YAML configuration file
 	ConfigFile string `yaml:"configFile"`
+
+	// DHCPBackoffAttempts defaines how many times will DHCP client try to obtain address (unlimited when 0)
+	DHCPBackoffAttempts uint `yaml:"dhcpBackoffAttempts"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

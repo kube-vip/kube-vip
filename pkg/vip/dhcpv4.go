@@ -17,31 +17,32 @@ import (
 
 const dhcpClientPort = "68"
 const defaultDHCPRenew = time.Hour
-const maxBackoffAttempts = 3
 
 // DHCPv4Client is responsible for maintaining ipv4 lease for one specified interface
 type DHCPv4Client struct {
-	iface          *net.Interface
-	ddnsHostName   string
-	lease          *nclient4.Lease
-	initRebootFlag bool
-	requestedIP    net.IP
-	stopChan       chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
-	releasedChan   chan struct{} // indicate that the IP has been released
-	errorChan      chan error    // indicates there was an error on the IP request
-	ipChan         chan string
+	iface           *net.Interface
+	ddnsHostName    string
+	lease           *nclient4.Lease
+	initRebootFlag  bool
+	requestedIP     net.IP
+	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
+	releasedChan    chan struct{} // indicate that the IP has been released
+	errorChan       chan error    // indicates there was an error on the IP request
+	ipChan          chan string
+	backoffAttempts uint
 }
 
 // NewDHCPv4Client returns a new DHCP Client.
-func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP string) *DHCPv4Client {
+func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP string, backoffAttempts uint) *DHCPv4Client {
 	return &DHCPv4Client{
-		iface:          iface,
-		stopChan:       make(chan struct{}),
-		releasedChan:   make(chan struct{}),
-		errorChan:      make(chan error),
-		initRebootFlag: initRebootFlag,
-		requestedIP:    net.ParseIP(requestedIP),
-		ipChan:         make(chan string),
+		iface:           iface,
+		stopChan:        make(chan struct{}),
+		releasedChan:    make(chan struct{}),
+		errorChan:       make(chan error),
+		initRebootFlag:  initRebootFlag,
+		requestedIP:     net.ParseIP(requestedIP),
+		ipChan:          make(chan string),
+		backoffAttempts: backoffAttempts,
 	}
 }
 
@@ -133,7 +134,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 	// Set up two ticker to renew/rebind regularly
 	t1Timeout := c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 2
 	t2Timeout := (c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 8) * 7
-	log.Debug("[DHCPv4] timeouts", "timeout1", t1Timeout, "timeoute2", t2Timeout)
+	log.Debug("[DHCPv4] timeouts", "timeout1", t1Timeout, "timeout2", t2Timeout)
 	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
 
 	for {
@@ -208,19 +209,21 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) *nclient4.Lease {
 	var lease *nclient4.Lease
 	var err error
 
+	log.Debug("[DHCPv4]", "attempts", c.backoffAttempts)
+
 	for {
-		log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt())
+		log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
 		lease, err = c.request(ctx, false)
 		if err != nil {
 			dur := backoff.Duration()
-			if backoff.Attempt() > maxBackoffAttempts-1 {
-				errMsg := fmt.Errorf("failed to get an IP address after %d attempts, error %s, giving up", maxBackoffAttempts, err.Error())
-				log.Error(errMsg.Error())
+			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
+				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
+				log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
 				c.errorChan <- errMsg
 				c.Stop()
 				return nil
 			}
-			log.Error("[DHCPv4] request failed", "err", err.Error(), "waiting", dur)
+			log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
 			time.Sleep(dur)
 			continue
 		}

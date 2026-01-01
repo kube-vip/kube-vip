@@ -215,6 +215,9 @@ const (
 	// dhcpMode defines mode that DHCP lookup will be performed with (ipv4, ipv6, dual)
 	dhcpMode = "dhcp_mode"
 
+	// dhcpBackoffAttempts defines how many times DHCP client will try to obtain an IP address
+	dhcpBackoffAttempts = "dhcp_backoff_attempts"
+
 	// disableServiceUpdates disables service updating
 	disableServiceUpdates = "disable_service_updates"
 

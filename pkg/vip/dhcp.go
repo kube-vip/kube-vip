@@ -17,7 +17,7 @@ type DHCPClient interface {
 	WithHostName(hostname string) DHCPClient
 }
 
-func NewDHCPClient(network Network) (DHCPClient, error) {
+func NewDHCPClient(network Network, backoffAttempts uint) (DHCPClient, error) {
 	interfaceName := network.Interface()
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
@@ -27,12 +27,12 @@ func NewDHCPClient(network Network) (DHCPClient, error) {
 	var client DHCPClient
 
 	if strings.EqualFold(network.DHCPFamily(), utils.IPv6Family) {
-		client, err = NewDHCPv6Client(iface, nil, false, "")
+		client, err = NewDHCPv6Client(iface, nil, false, "", backoffAttempts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create DHCP client: %w", err)
 		}
 	} else {
-		client = NewDHCPv4Client(iface, false, "")
+		client = NewDHCPv4Client(iface, false, "", backoffAttempts)
 	}
 
 	return client, nil
