@@ -29,7 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
+func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
 	var err error
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
@@ -42,6 +42,40 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	shouldClose := false
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+		shouldClose = true
+	}
+
+	go func() {
+		<-ctx.Done()
+		signalChan <- syscall.SIGINT
+		for i := range cluster.Network {
+			network := cluster.Network[i]
+
+			err = network.DeleteRoute()
+			if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
+				log.Warn("deleting route", "err", err)
+			} else if err == nil {
+				log.Info("deleted route", "route", network.PrepareRoute().String())
+			}
+
+			deleted, err := network.DeleteIP()
+			if err != nil {
+				log.Error("error deleting IP", "err", err)
+				signalChan <- syscall.SIGINT
+				return
+			}
+			if deleted {
+				log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
+			}
+		}
+		if shouldClose {
+			defer close(cluster.completed)
+		}
+	}()
+
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
 
 	var arpWG sync.WaitGroup
@@ -50,21 +84,20 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		network := cluster.Network[i]
 
 		if network.IsDDNS() {
-			if err := cluster.StartDDNS(ctxDNS, cluster.Network[i]); err != nil {
+			if err := cluster.StartDDNS(ctx, cluster.Network[i]); err != nil {
 				log.Error("failed to start DDNS", "err", err)
 			}
 		}
 
 		if err := network.SetMask(c.VIPSubnet); err != nil {
-			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
-			panic("")
+			return fmt.Errorf("failed to set mask for subnet %q: %w", c.VIPSubnet, err)
 		}
 
 		// start the dns updater if address is dns
 		if network.IsDNS() {
 			log.Info("starting the DNS updater", "address", network.DNSName())
 			ipUpdater := vip.NewIPUpdater(network)
-			ipUpdater.Run(ctxDNS)
+			ipUpdater.Run(ctx)
 		}
 
 		if !c.EnableRoutingTable {
@@ -77,7 +110,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
-			err = bgpServer.AddHost(network.CIDR())
+			err = bgpServer.AddHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -86,13 +119,16 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 		if c.EnableLoadBalancer {
 			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan)
 			if err != nil {
-				log.Error("Error creating IPVS LoadBalancer", "err", err)
+				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
 			go func() {
-				err = sm.NodeWatcher(ctxArp, lb, c.Port) //TODO: We're using the ctxARP as the context this will change when rkatz finishes his change
+				err = sm.NodeWatcher(ctx, lb, c.Port)
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
+					if errors.Is(err, &utils.PanicError{}) {
+						signalChan <- syscall.SIGINT
+					}
 				}
 			}()
 
@@ -101,7 +137,7 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		if c.EnableARP {
 			arpWG.Add(1)
-			go cluster.layer2Update(ctxArp, network, c, &arpWG)
+			go cluster.layer2Update(ctx, network, c, &arpWG)
 		}
 	}
 
@@ -130,8 +166,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 
 		ips := []string{}
 		if nodename != "" {
-			if ips, err = getNodeIPs(ctxArp, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
-				log.Error("failed to get IP of control-plane nod", "err", err)
+			if ips, err = getNodeIPs(ctx, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+				log.Error("failed to get IP of control-plane node", "err", err)
 			}
 		}
 
@@ -231,7 +267,8 @@ func (cluster *Cluster) vipService(ctxArp, ctxDNS context.Context, c *kubevip.Co
 					deleted, err := network.DeleteIP()
 					if err != nil {
 						log.Error("error deleting IP", "err", err)
-						panic("")
+						signalChan <- syscall.SIGINT
+						return
 					}
 					if deleted {
 						log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
@@ -267,7 +304,7 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int) {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
@@ -303,7 +340,8 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		log.Debug("current ip to process", "ip", network.IP(), "mask", c.VIPSubnet)
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
-			panic("")
+			cancelArp()
+			return utils.NewPanicError(fmt.Sprintf("failed to set mask for subnet %q: %s", c.VIPSubnet, err.Error()))
 		}
 		_, err := network.DeleteIP()
 		if err != nil {
@@ -335,7 +373,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(network.CIDR())
+			err = bgp.AddHost(ctx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -417,6 +455,8 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 		close(cluster.completed)
 	}()
+
+	return nil
 }
 
 // Layer2Update, handles the creation of the

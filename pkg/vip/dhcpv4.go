@@ -122,10 +122,10 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
-	dhcpContext, cancel := context.WithCancel(ctx)
+	dhcpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	lease := c.requestWithBackoff(dhcpContext)
+	lease := c.requestWithBackoff(dhcpCtx)
 
 	c.initRebootFlag = false
 	c.lease = lease
@@ -144,7 +144,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			// on renew error due to IP Change, but instead it returns a different error
 			// This way there's not much to do other than log and continue, as the renew error
 			// may be an offline server, or may be an incorrect package match
-			lease, err := c.renew(dhcpContext)
+			lease, err := c.renew(dhcpCtx)
 			if err == nil {
 				c.lease = lease
 				log.Info("[DHCPv4] renew", "lease", lease)
@@ -154,7 +154,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			}
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
-			lease, err := c.request(dhcpContext, true)
+			lease, err := c.request(dhcpCtx, true)
 			if err == nil {
 				c.lease = lease
 				log.Info("[DHCPv4] rebind", "lease", lease)
@@ -166,7 +166,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 				}
 				log.Warn("[DHCPv4] ip may have changed", "ip", c.lease.ACK.YourIPAddr, "err", err)
 				c.initRebootFlag = false
-				c.lease = c.requestWithBackoff(dhcpContext)
+				c.lease = c.requestWithBackoff(dhcpCtx)
 			}
 			t1.Reset(t1Timeout)
 			t2.Reset(t2Timeout)

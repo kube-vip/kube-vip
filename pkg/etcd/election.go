@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"time"
 
@@ -64,10 +65,11 @@ type ClientConfig struct {
 }
 
 // RunElectionOrDie behaves the same way as RunElection but panics if there is an error.
-func RunElectionOrDie(ctx context.Context, config *LeaderElectionConfig) {
+func RunElectionOrDie(ctx context.Context, config *LeaderElectionConfig) error {
 	if err := RunElection(ctx, config); err != nil {
-		panic(err)
+		return fmt.Errorf("leaderelection error: %w", err)
 	}
+	return nil
 }
 
 // RunElection starts a client with the provided config or panics.

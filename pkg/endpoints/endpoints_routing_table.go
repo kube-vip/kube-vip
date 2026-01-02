@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -92,7 +93,7 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 	}
 }
 
-func (rt *RoutingTable) delete(service *v1.Service, id string) error {
+func (rt *RoutingTable) delete(_ context.Context, service *v1.Service, id string) error {
 	// When no-leader-elecition mode
 	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
 		// find all existing local endpoints

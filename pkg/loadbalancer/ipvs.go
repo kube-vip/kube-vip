@@ -66,28 +66,34 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	c, err := ipvs.New()
 	if err != nil {
 		log.Error("ensure IPVS kernel modules are loaded")
-		log.Error("Error starting IPVS", "err", err)
-		panic("")
+		log.Error("error starting IPVS", "err", err)
+		return nil, fmt.Errorf("starting IPVS: %w", err)
 	}
 	i, err := c.Info()
 	if err != nil {
 		log.Error("ensure IPVS kernel modules are loaded")
-		log.Error("Error retrieving IPVS info", "err", err)
+		log.Error("error retrieving IPVS info", "err", err)
 		if errors.Is(err, os.ErrPermission) {
 			log.Error("no permission to get IPVS info - please ensure that kube-vip is running with proper capabilities/privileged mode")
 		}
-		panic("")
+		return nil, fmt.Errorf("retrieving IPVS: %w", err)
 	}
 	log.Info("IPVS Loadbalancer enabled", "version", fmt.Sprintf("%d.%d.%d", i.Version[0], i.Version[1], i.Version[2]))
 
 	ip, family := ipAndFamily(address)
 
 	if strings.ToLower(forwardingMethod) == "masquerade" {
-		enableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack")
+		if err := enableProcSys("/proc/sys/net/ipv4/vs/conntrack", "net.ipv4.vs.conntrack"); err != nil {
+			return nil, err
+		}
 		if family == ipvs.INET6 {
-			enableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding")
+			if err := enableProcSys("/proc/sys/net/ipv6/conf/all/forwarding", "net.ipv6.conf.all.forwarding"); err != nil {
+				return nil, err
+			}
 		} else {
-			enableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward")
+			if err := enableProcSys("/proc/sys/net/ipv4/ip_forward", "net.ipv4.ip_forward"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -148,15 +154,15 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 	return lb, nil
 }
 
-func enableProcSys(path, name string) {
+func enableProcSys(path, name string) error {
 	isSet, err := sysctl.EnableProcSys(path)
 	if err != nil {
-		log.Error(fmt.Sprintf("ensuring %s enabled", name), "err", err)
-		panic("")
+		return fmt.Errorf("ensuring %s enabled: %w", name, err)
 	}
 	if isSet {
 		log.Info(fmt.Sprintf("sysctl set %s to 1", name))
 	}
+	return nil
 }
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
@@ -228,7 +234,7 @@ func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
 			// Fatal error at this point as IPVS is probably not working
 			log.Error("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
 			log.Error("IPVS service", "err", err)
-			panic("")
+			return utils.NewPanicError(fmt.Sprintf("unable to create an IPVS service - %s", err))
 
 		}
 		log.Info("load-Balancer services created", "address", lb.addrString(), "port", lb.Port)
