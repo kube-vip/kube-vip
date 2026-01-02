@@ -118,8 +118,10 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
-	cluster.completed = make(chan bool, 1)
-	defer close(cluster.completed)
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+		defer close(cluster.completed)
+	}
 
 	go func() {
 		<-signalChan

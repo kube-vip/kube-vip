@@ -42,6 +42,40 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	shouldClose := false
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+		shouldClose = true
+	}
+
+	go func() {
+		<-ctx.Done()
+		signalChan <- syscall.SIGINT
+		for i := range cluster.Network {
+			network := cluster.Network[i]
+
+			err = network.DeleteRoute()
+			if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
+				log.Warn("deleting route", "err", err)
+			} else if err == nil {
+				log.Info("deleted route", "route", network.PrepareRoute().String())
+			}
+
+			deleted, err := network.DeleteIP()
+			if err != nil {
+				log.Error("error deleting IP", "err", err)
+				signalChan <- syscall.SIGINT
+				return
+			}
+			if deleted {
+				log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
+			}
+		}
+		if shouldClose {
+			defer close(cluster.completed)
+		}
+	}()
+
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
 
 	var arpWG sync.WaitGroup
@@ -133,7 +167,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 		ips := []string{}
 		if nodename != "" {
 			if ips, err = getNodeIPs(ctx, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
-				log.Error("failed to get IP of control-plane nod", "err", err)
+				log.Error("failed to get IP of control-plane node", "err", err)
 			}
 		}
 
