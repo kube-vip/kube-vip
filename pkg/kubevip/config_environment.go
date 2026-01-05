@@ -389,6 +389,18 @@ func ParseEnvironment(c *Config) error {
 		}
 	}
 
+	// DHCP backoff attempts
+	env = os.Getenv(dhcpBackoffAttempts)
+	if env != "" {
+		tmp, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return err
+		}
+		if tmp >= 0 {
+			c.DHCPBackoffAttempts = uint(tmp)
+		}
+	}
+
 	// Disable updates for services (status.LoadBalancer.Ingress will not be updated)
 	env = os.Getenv(disableServiceUpdates)
 	if env != "" {
@@ -888,9 +900,14 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 		baseConfig.DNSMode = fileConfig.DNSMode
 	}
 
-	// DHCP configuration
+	// DHCP configuration - mode
 	if baseConfig.DHCPMode == "" && fileConfig.DHCPMode != "" {
 		baseConfig.DHCPMode = fileConfig.DHCPMode
+	}
+
+	// DHCP configuration - backoff attempts
+	if baseConfig.DHCPBackoffAttempts == DefaultDHCPBackoffAttempts && fileConfig.DHCPBackoffAttempts != DefaultDHCPBackoffAttempts {
+		baseConfig.DHCPBackoffAttempts = fileConfig.DHCPBackoffAttempts
 	}
 
 	// Health check configuration

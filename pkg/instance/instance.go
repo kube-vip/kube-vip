@@ -174,6 +174,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, i
 			EnableServiceSecurity:       config.EnableServiceSecurity,
 			DNSMode:                     config.DNSMode,
 			DHCPMode:                    config.DHCPMode,
+			DHCPBackoffAttempts:         config.DHCPBackoffAttempts,
 			DisableServiceUpdates:       config.DisableServiceUpdates,
 			EnableServicesElection:      config.EnableServicesElection,
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
@@ -285,7 +286,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, i
 	}
 	for i := range instance.VIPConfigs {
 		if instance.VIPConfigs[i].VIP == "0.0.0.0" {
-			err := instance.startDHCP(ctx, i)
+			err := instance.startDHCP(ctx, i, config.DHCPBackoffAttempts)
 			if err != nil {
 				return nil, err
 			}
@@ -300,7 +301,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, i
 			}
 		}
 		if instance.VIPConfigs[i].VIP == "::" {
-			err := instance.startDHCP(ctx, i)
+			err := instance.startDHCP(ctx, i, config.DHCPBackoffAttempts)
 			if err != nil {
 				return nil, err
 			}
@@ -425,7 +426,7 @@ func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
 	return link.Attrs().Name
 }
 
-func (i *Instance) startDHCP(ctx context.Context, index int) error {
+func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint) error {
 	if len(i.VIPConfigs) > 2 {
 		return fmt.Errorf("DHCP can be used with 2 VIP config maximally, got: %v", len(i.VIPConfigs))
 	}
@@ -512,7 +513,7 @@ func (i *Instance) startDHCP(ctx context.Context, index int) error {
 			initRebootFlag = true
 		}
 
-		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4)
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4, backoffAttempts)
 
 		// Add the client so that we can call it to stop function
 		i.DHCPv4Client = client
@@ -524,7 +525,7 @@ func (i *Instance) startDHCP(ctx context.Context, index int) error {
 			initRebootFlag = true
 		}
 
-		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, i.DHCPInterfaceIPv6)
+		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, i.DHCPInterfaceIPv6, backoffAttempts)
 		if err != nil {
 			return fmt.Errorf("unable to create client: %w", err)
 		}

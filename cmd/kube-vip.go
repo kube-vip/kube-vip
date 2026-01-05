@@ -135,6 +135,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesLeaseName, "servicesLeaseName", "plndr-svcs-lock", "Name of the lease that is used for leader election for services (in arp mode)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DNSMode, "dnsMode", "first", "Name of the mode that DNS lookup will be performed (first, ipv4, ipv6, dual)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DHCPMode, "dhcpMode", "", "Mode DHCP resolving will use to obtain IP addresses (ipv4, ipv6, dual)")
+	kubeVipCmd.PersistentFlags().UintVar(&initConfig.DHCPBackoffAttempts, "dhcpBackoffAttempts", kubevip.DefaultDHCPBackoffAttempts,
+		fmt.Sprintf("number of times DHCP client will try to obtain an IP address (defaults to: %d, 0 for unlimited retries)", kubevip.DefaultDHCPBackoffAttempts))
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.DisableServiceUpdates, "disableServiceUpdates", false, "If true, kube-vip will process services as usual, but will not update service's Status.LoadBalancer.Ingress slice")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpoints, "enableEndpoints", false, "If enabled, kube-vip will only advertise services, but will use the (deprecated since v1.33) endpoints for IP addresses")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")

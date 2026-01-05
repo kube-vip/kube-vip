@@ -266,6 +266,17 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) *cor
 		newEnvironment = append(newEnvironment, dhcpModeSelector...)
 	}
 
+	if c.DHCPBackoffAttempts != DefaultDHCPBackoffAttempts {
+		// build environment variables
+		dhcpBackoff := []corev1.EnvVar{
+			{
+				Name:  dhcpBackoffAttempts,
+				Value: strconv.FormatUint(uint64(c.DHCPBackoffAttempts), 10),
+			},
+		}
+		newEnvironment = append(newEnvironment, dhcpBackoff...)
+	}
+
 	// If we're doing the hybrid mode
 	if c.EnableControlPlane {
 		cp := []corev1.EnvVar{
