@@ -59,7 +59,7 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		time.Sleep(time.Millisecond * 50) // make sure the first one becomes leader
+		time.Sleep(time.Millisecond * 100) // make sure the first one becomes leader
 		g.Expect(etcd.RunElection(ctx, config)).Should(MatchError(ContainSubstring("creating lease")))
 	}()
 

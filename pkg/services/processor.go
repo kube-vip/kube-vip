@@ -333,9 +333,9 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 		}
 
 		// Calls the cancel function of the context
-		log.Warn("(svcs) The load balancer was deleted, cancelling context")
+		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		svcCtx.Cancel()
-		log.Warn("(svcs) waiting for load balancer to finish")
+		log.Warn("(svcs) waiting for load balancer to finish", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		<-svcCtx.Ctx.Done()
 		p.svcMap.Delete(svc.UID)
 	}

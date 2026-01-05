@@ -47,6 +47,10 @@ fmt:
 docker:
 	# @docker buildx build  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
 	@docker buildx build  --platform linux/amd64 --push -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@echo New Multi Architecture Docker image created and pushed
+
+dockerLocal:
+	@docker buildx build  --platform linux/amd64 -t $(REPOSITORY)/$(TARGET):$(VERSION) .
 	@echo New Multi Architecture Docker image created
 
 simplify:

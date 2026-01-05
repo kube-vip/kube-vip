@@ -1237,6 +1237,9 @@ func prepareCluster(tempDirPath, clusterNameSuffix, k8sImagePath string,
 	By(withTimestamp("loading local docker image to kind cluster"))
 	e2e.LoadDockerImageToKind(logger, manifestValues.ImagePath, clusterName)
 
+	By(withTimestamp("loading traefik/whoami image to kind cluster"))
+	e2e.LoadDockerImageToKind(logger, "ghcr.io/traefik/whoami:v1.11", clusterName)
+
 	return clusterName, client, cfg
 }
 

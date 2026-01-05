@@ -133,20 +133,25 @@ integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
 
 e2e-tests:
+	docker pull ghcr.io/traefik/whoami:v1.11
 	GOMAXPROCS=4 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e ./testing/e2e/etcd
 
 e2e-tests129-arp:
+	docker pull ghcr.io/traefik/whoami:v1.11
 	GOMAXPROCS=4 TEST_MODE=arp V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
 e2e-tests129-rt:
+	docker pull ghcr.io/traefik/whoami:v1.11
 	GOMAXPROCS=4 TEST_MODE=rt V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
 e2e-tests129-bgp:
+	docker pull ghcr.io/traefik/whoami:v1.11
 	GOMAXPROCS=4 TEST_MODE=bgp V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
 e2e-tests129: e2e-tests129-arp e2e-tests129-rt e2e-tests129-bgp
 
-service-tests:
+service-tests: 
+	$(MAKE) -C testing/e2e/e2e dockerLocal
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
 
 trivy: dockerx86ActionIPTables

@@ -1107,7 +1107,7 @@ func checkGoBGPPaths(ctx context.Context, client api.GobgpApiClient, family *api
 			return fmt.Errorf("expected %d paths, but found %d", expectedPaths, len(paths))
 		}
 		return nil
-	}, "360s", "1s").ShouldNot(HaveOccurred())
+	}, "30s", "1s").ShouldNot(HaveOccurred())
 	return paths
 }
 
@@ -1128,12 +1128,15 @@ func getGoBGPPaths(ctx context.Context, client api.GobgpApiClient, family *api.F
 	rib := make([]*api.Destination, 0)
 	for {
 		r, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
+		if err != nil && err != io.EOF {
 			return nil, err
 		}
-		rib = append(rib, r.Destination)
+		if r != nil {
+			rib = append(rib, r.Destination)
+		}
+		if err != nil && err == io.EOF {
+			break
+		}
 	}
 
 	return rib, nil
