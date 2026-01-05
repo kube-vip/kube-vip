@@ -124,10 +124,14 @@ func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoint
 				// if there are no endpoints set HasEndpoints false just in case
 				if len(endpoints) < 1 {
 					c.Network[n].SetHasEndpoints(false)
-				}
-				// check if endpoint are available and are of same IP family as service
-				if len(endpoints) > 0 && ((net.ParseIP(c.Network[n].IP()).To4() == nil) == (net.ParseIP(endpoints[0]).To4() == nil)) {
-					c.Network[n].SetHasEndpoints(true)
+				} else {
+					// check if endpoint are available and are of same IP family as service
+					for _, ep := range endpoints {
+						if (net.ParseIP(c.Network[n].IP()).To4() == nil) == (net.ParseIP(ep).To4() == nil) {
+							c.Network[n].SetHasEndpoints(true)
+							break
+						}
+					}
 				}
 			}
 		}

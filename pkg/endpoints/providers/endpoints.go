@@ -131,7 +131,3 @@ func (ep *Endpoints) UpdateServiceAnnotation(endpoint string, _ string, service 
 func (ep *Endpoints) GetLabel() string {
 	return ep.label
 }
-
-func (ep *Endpoints) GetProtocol() string {
-	return ""
-}

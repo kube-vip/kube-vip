@@ -20,8 +20,9 @@ import (
 )
 
 type Endpointslices struct {
-	label     string
-	endpoints *discoveryv1.EndpointSlice
+	label       string
+	endpointsv4 []discoveryv1.Endpoint
+	endpointsv6 []discoveryv1.Endpoint
 }
 
 func NewEndpointslices() Provider {
@@ -56,27 +57,39 @@ func (ep *Endpointslices) LoadObject(endpoints runtime.Object, cancel context.Ca
 		cancel()
 		return fmt.Errorf("[%s] error casting endpoints to v1.Endpoints struct", ep.label)
 	}
-	ep.endpoints = eps
+
+	if eps.AddressType == discoveryv1.AddressTypeIPv6 {
+		ep.endpointsv6 = eps.Endpoints
+	} else {
+		ep.endpointsv4 = eps.Endpoints
+	}
+
 	return nil
 }
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
-	for _, ep := range ep.endpoints.Endpoints {
-		result = append(result, ep.Addresses...)
+	for _, e := range ep.endpointsv4 {
+		result = append(result, e.Addresses...)
+	}
+	for _, e := range ep.endpointsv6 {
+		result = append(result, e.Addresses...)
 	}
 	return result, nil
 }
 
 func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
-	for _, endpoint := range ep.endpoints.Endpoints {
+	tmpEps := []discoveryv1.Endpoint{}
+
+	tmpEps = append(tmpEps, ep.endpointsv4...)
+	tmpEps = append(tmpEps, ep.endpointsv6...)
+
+	for _, endpoint := range tmpEps {
 		if endpoint.Conditions.Serving == nil || !*endpoint.Conditions.Serving {
 			continue
 		}
 		for _, address := range endpoint.Addresses {
-			log.Debug("processing endpoint", "provider", ep.label, "ip", address)
-
 			// 1. Compare the Nodename
 			if endpoint.NodeName != nil && id == *endpoint.NodeName {
 				if endpoint.Hostname != nil {
@@ -132,8 +145,4 @@ func (ep *Endpointslices) UpdateServiceAnnotation(endpoint, endpointIPv6 string,
 
 func (ep *Endpointslices) GetLabel() string {
 	return ep.label
-}
-
-func (ep *Endpointslices) GetProtocol() string {
-	return string(ep.endpoints.AddressType)
 }
