@@ -26,52 +26,53 @@ func getHostName(dnsName string) string {
 
 // GetDefaultGatewayInterface return default gateway interface link
 func GetDefaultGatewayInterface() (*net.Interface, error) {
-    findDefault := func(family int) (*net.Interface, error) {
-        // only search for default routes
-        filter := &netlink.Route{Dst: nil} 
-        mask := netlink.RT_FILTER_DST
+	// Attempt IPv4 first (usually the default)
+	if iface, err := getDefaultRoute(syscall.AF_INET); err == nil {
+		return iface, nil
+	}
 
-        routes, err := netlink.RouteListFiltered(family, filter, mask)
-        if err != nil {
-            return nil, err
-        }
+	// If the IPv4 default route is not found, then attempt IPv6.
+	if iface, err := getDefaultRoute(syscall.AF_INET6); err == nil {
+		return iface, nil
+	}
 
-        for _, route := range routes {
-            // duble check
-            if route.Dst != nil && route.Dst.String() != "0.0.0.0/0" && route.Dst.String() != "::/0" {
-                continue
-            }
+	return nil, errors.New("unable to find default route")
+}
 
-            idx := route.LinkIndex
-            
-            // handle MultiPath
-            if idx <= 0 && len(route.MultiPath) > 0 {
-                for _, nh := range route.MultiPath {
-                    if nh.LinkIndex > 0 {
-                        idx = nh.LinkIndex
-                        break
-                    }
-                }
-            }
+// getDefaultRoute attempts to find the default route for the specified address family.
+func getDefaultRoute(family int) (*net.Interface, error) {
+	// only search for default routes
+	filter := &netlink.Route{Dst: nil}
+	mask := netlink.RT_FILTER_DST
 
-            if idx > 0 {
-                return net.InterfaceByIndex(idx)
-            }
-        }
-        return nil, errors.New("default route not found")
-    }
+	routes, err := netlink.RouteListFiltered(family, filter, mask)
+	if err != nil {
+		return nil, err
+	}
 
-    // Attempt IPv4 first (usually the default)
-    if iface, err := findDefault(syscall.AF_INET); err == nil {
-        return iface, nil
-    }
+	for _, route := range routes {
+		// double check
+		if route.Dst != nil && route.Dst.String() != "0.0.0.0/0" && route.Dst.String() != "::/0" {
+			continue
+		}
 
-    // If the IPv4 default route is not found, then attempt IPv6.
-    if iface, err := findDefault(syscall.AF_INET6); err == nil {
-        return iface, nil
-    }
+		idx := route.LinkIndex
 
-    return nil, errors.New("unable to find default route")
+		// handle MultiPath
+		if idx <= 0 && len(route.MultiPath) > 0 {
+			for _, nh := range route.MultiPath {
+				if nh.LinkIndex > 0 {
+					idx = nh.LinkIndex
+					break
+				}
+			}
+		}
+
+		if idx > 0 {
+			return net.InterfaceByIndex(idx)
+		}
+	}
+	return nil, errors.New("default route not found")
 }
 
 // MonitorDefaultInterface monitor the default interface and catch the event of the default route
