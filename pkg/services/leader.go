@@ -43,19 +43,21 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	if svcCtx == nil {
 		return fmt.Errorf("no context context for service %q with UID %q: nil context", service.Name, service.UID)
 	}
-	serviceLease, _ := lease.GetName(service)
-	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
-	// we use the Lease lock type since edits to Leases are less common
-	// and fewer objects in the cluster watch "all Leases".
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:      serviceLease,
-			Namespace: service.Namespace,
-		},
-		Client: p.clientSet.CoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: p.config.NodeName,
-		},
+
+	svcLease, newService, sharedLease := p.leaseMgr.Add(service)
+
+	// this service was already processed so we do not need to do anything
+	if !newService {
+		log.Debug("this service was already handled, waiting for it to finish", "service", service.Name, "uid", service.UID)
+		// Wait for either the service context or lease context to be done
+		select {
+		case <-svcCtx.Ctx.Done():
+			// Service was deleted
+			p.leaseMgr.Delete(service)
+		case <-svcLease.Ctx.Done():
+			// Leader election ended (leadership lost or context cancelled)
+		}
+		return nil
 	}
 
 	// Start a goroutine that will delete the lease when the service context is cancelled.
@@ -67,9 +69,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		p.leaseMgr.Delete(service)
 	}()
 
-	svcLease, isNew := p.leaseMgr.Add(service)
-	// this service is sharing lease with another service for the common lease feature
-	if !isNew {
+	// this service is sharing lease with another service
+	if sharedLease {
 		// wait for leader election to start or context to be done
 		select {
 		case <-svcLease.Started:
@@ -78,21 +79,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// This allows the restart loop to create a fresh lease
 			log.Debug("lease context cancelled before leader election started", "service", service.Name, "uid", service.UID)
 			svcCtx.IsActive = false
-			return nil
-		}
-
-		// For non-common lease services, we need to wait for the existing leader election
-		// to finish before returning. This prevents a infinite loop in startLeaderElection.
-		// The lease context will be cancelled when RunOrDie returns and the defer deletes the lease.
-		if !lease.UsesCommon(service) {
-			log.Debug("lease already exists for non-common service, waiting for it to finish", "service", service.Name, "uid", service.UID)
-			// Wait for either the service context or lease context to be done
-			select {
-			case <-svcCtx.Ctx.Done():
-				// Service was deleted
-			case <-svcLease.Ctx.Done():
-				// Leader election ended (leadership lost or context cancelled)
-			}
 			return nil
 		}
 
@@ -135,6 +121,21 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		p.leaseMgr.Delete(service)
 	}()
 
+	serviceLease, _ := lease.GetName(service)
+	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
+	// we use the Lease lock type since edits to Leases are less common
+	// and fewer objects in the cluster watch "all Leases".
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      serviceLease,
+			Namespace: service.Namespace,
+		},
+		Client: p.clientSet.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: p.config.NodeName,
+		},
+	}
+
 	// start the leader election code loop
 	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
 		Lock: lock,
@@ -163,7 +164,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 				// we can do cleanup here
 				log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
 				if svcCtx.IsActive {
-					log.Debug("DELETING LEADER", "uid", service.UID)
+					log.Debug("deleting service due to lost leadership", "uid", service.UID)
 					if err := p.deleteService(service.UID); err != nil {
 						log.Error("service deletion", "err", err)
 					}

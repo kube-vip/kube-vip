@@ -636,7 +636,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were delete while using common lease",
+			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, client, 2, gobgpClient, defaultFixedNexthopv6, "common-lease")

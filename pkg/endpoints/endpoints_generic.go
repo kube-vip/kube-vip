@@ -1,7 +1,6 @@
 package endpoints
 
 import (
-	"context"
 	"fmt"
 	log "log/slog"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
@@ -23,8 +23,8 @@ type endpointWorker interface {
 	setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
 }
 
-func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance) endpointWorker {
-	generic := newGeneric(config, provider, instances)
+func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance, leaseMgr *lease.Manager) endpointWorker {
+	generic := newGeneric(config, provider, instances, leaseMgr)
 
 	if config.EnableRoutingTable {
 		return newRoutingTable(generic)
@@ -40,13 +40,15 @@ type generic struct {
 	config    *kubevip.Config
 	provider  providers.Provider
 	instances *[]*instance.Instance
+	leaseMgr  *lease.Manager
 }
 
-func newGeneric(config *kubevip.Config, provider providers.Provider, instances *[]*instance.Instance) generic {
+func newGeneric(config *kubevip.Config, provider providers.Provider, instances *[]*instance.Instance, leaseMgr *lease.Manager) generic {
 	return generic{
 		config:    config,
 		provider:  provider,
 		instances: instances,
+		leaseMgr:  leaseMgr,
 	}
 }
 
@@ -55,19 +57,19 @@ func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service) erro
 }
 
 func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
-	g.clearEgress(lastKnownGoodEndpoint, service, svcCtx.Cancel)
+	g.clearEgress(lastKnownGoodEndpoint, service)
 }
 
-func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service, cancel context.CancelFunc) {
+func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service) {
 	if *lastKnownGoodEndpoint != "" {
-		log.Warn("existing  endpoint has been removed, no remaining endpoints for leaderElection", "provider", g.provider.GetLabel(), "endpoint", lastKnownGoodEndpoint)
+		log.Warn("existing endpoint has been removed, no remaining endpoints for leaderElection", "provider", g.provider.GetLabel(), "endpoint", lastKnownGoodEndpoint)
 		if err := egress.Teardown(*lastKnownGoodEndpoint, service.Spec.LoadBalancerIP, service.Namespace, string(service.UID), service.Annotations, g.config.EgressWithNftables); err != nil {
 			log.Error("error removing redundant egress rules", "err", err)
 		}
 
 		*lastKnownGoodEndpoint = "" // reset endpoint
 		if g.config.EnableServicesElection || g.config.EnableLeaderElection {
-			cancel() // stop services watcher
+			g.leaseMgr.Delete(service)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
@@ -25,13 +26,13 @@ type Processor struct {
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance) *Processor {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager) *Processor {
 	return &Processor{
 		config:    config,
 		provider:  provider,
 		bgpServer: bgpServer,
 		instances: instances,
-		worker:    newEndpointWorker(config, provider, bgpServer, instances),
+		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr),
 	}
 }
 
@@ -67,6 +68,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		}
 
 		p.updateLastKnownGoodEndpoint(svcCtx, lastKnownGoodEndpoint, endpoints, service)
+		svcCtx.HasEndpoints.Store(true)
 		// start leader election if it's enabled and not already started
 		if !svcCtx.IsActive && p.config.EnableServicesElection {
 			go func() {
@@ -81,6 +83,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 			}
 		}
 	} else {
+		svcCtx.HasEndpoints.Store(false)
 		// There are no local endpoints
 		p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
 	}
@@ -129,7 +132,9 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 		if svcCtx.IsActive && (p.config.EnableServicesElection || p.config.EnableLeaderElection) {
 			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.GetLabel(), "endpoint", *lastKnownGoodEndpoint)
 			// Stop the existing leaderElection
-			svcCtx.Cancel()
+			if svcCtx.Lease != nil {
+				svcCtx.Lease.Cancel()
+			}
 		}
 		// Set our active endpoint to an existing one
 		*lastKnownGoodEndpoint = ep
@@ -159,7 +164,10 @@ func startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, se
 			if err != nil {
 				log.Error(err.Error())
 			}
-			// if the context isn't cancelled restart
+			if !svcCtx.HasEndpoints.Load() {
+				log.Debug("there are no available endpoints for this service, exiting watch", "service", service.Name, "uid", service.UID)
+				return
+			}
 		}
 	}
 }
