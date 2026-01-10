@@ -13,6 +13,7 @@ import (
 
 	"github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/vishvananda/netlink"
 
@@ -508,14 +509,20 @@ func GetLocalIP(ifName string, family int) (*net.IP, *net.IPNet, error) {
 		return nil, nil, fmt.Errorf("netlink: failed to list links: %w", err)
 	}
 
+	famStr := utils.IPv4Family
+
+	if family == netlink.FAMILY_V6 {
+		famStr = utils.IPv6Family
+	}
+
 	for _, link := range links {
 		if strings.Contains(link.Attrs().Name, ifName) {
 			ip, ipnet, err := getNetwork(link, family)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to get IPv4 address: %w", err)
+				return nil, nil, fmt.Errorf("failed to get %s address: %w", famStr, err)
 			}
 			if ip == nil {
-				return nil, nil, fmt.Errorf("failed to find IPv4 address on the interface %q", ifName)
+				return nil, nil, fmt.Errorf("failed to find %s address on the interface %q", famStr, ifName)
 			}
 			return ip, ipnet, nil
 		}

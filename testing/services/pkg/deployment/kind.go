@@ -116,6 +116,14 @@ func (config *TestConfig) CreateKind() error {
 		if err != nil {
 			return err
 		}
+
+		loadE2EImageCmd := load.NewCommand(cmd.NewLogger(), cmd.StandardIOStreams())
+		loadE2EImageCmd.SetArgs([]string{"--name", "services", "docker.io/plndr/e2e:0.0.1"})
+		err = loadE2EImageCmd.Execute()
+		if err != nil {
+			return err
+		}
+
 		nodes, err := provider.ListNodes("services")
 		if err != nil {
 			return err

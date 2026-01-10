@@ -16,7 +16,8 @@ func main() {
 	// Lookup environment variables
 	mode, exists := os.LookupEnv("E2EMODE")
 	if !exists {
-		log.Fatal("The environment variable E2ESERVER, was not set")
+		log.Error("The environment variable E2ESERVER, was not set")
+		os.Exit(1)
 	}
 
 	switch mode {
@@ -25,14 +26,16 @@ func main() {
 			fmt.Fprintf(w, "Hello!")
 		})
 
-		log.Info("Starting server at port 80")
+		log.Info("starting server at port 80")
 		if err := http.ListenAndServe(":80", nil); err != nil {
-			log.Fatal(err)
+			log.Error(err.Error())
+			os.Exit(1)
 		}
 	case strings.ToUpper("CLIENT"):
 		address, exists := os.LookupEnv("E2EADDRESS")
 		if !exists {
-			log.Fatal("The environment variable E2EADDRESS, was not set")
+			log.Error("the environment variable E2EADDRESS, was not set")
+			os.Exit(1)
 		}
 		ip := net.ParseIP(address)
 		network := "tcp"
@@ -41,20 +44,20 @@ func main() {
 			network = "tcp6"
 			address = fmt.Sprintf("[%s]", address)
 			port = ":12346" // use a different port for IPv6 incase the IPv4 port is left connected
-			log.Infoln("Connecting with IPv6")
+			log.Info("connecting with IPv6")
 		}
 		for {
 			// Connect to e2e endpoint with a second timeout
 			conn, err := net.DialTimeout(network, address+port, time.Second)
 			if err != nil {
-				log.Errorf("Dial failed: %v", err.Error())
+				log.Error("dial failed", "err", err)
 				// Wait for a second and connect again
 				time.Sleep(time.Second)
 				continue
 			}
 			_, err = conn.Write([]byte("The Grid, a digital frontier"))
 			if err != nil {
-				log.Errorf("Write data failed: %v ", err.Error())
+				log.Error("write data  failed", "err", err)
 				// Wait for a second and connect again
 				time.Sleep(time.Second)
 				continue
@@ -64,20 +67,20 @@ func main() {
 			received := make([]byte, 1024)
 			_, err = conn.Read(received)
 			if err != nil {
-				log.Errorf("Read data failed: %v", err.Error())
+				log.Error("Read data failed", "err", err)
 				// Wait for a second and connect again
 				time.Sleep(time.Second)
 				continue
 			}
 
-			log.Infof("Received message: %s\n", string(received))
+			log.Info("received", "message", string(received))
 
 			conn.Close()
 			// Wait for a second and connect again
 			time.Sleep(time.Second)
 		}
 	default:
-		log.Fatalf("Unknown mode [%s]", mode)
+		log.Error("Unknown mode", "value", mode)
+		os.Exit(1)
 	}
-
 }
