@@ -11,8 +11,8 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -62,7 +62,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	// Check that we have local endpoints
 	if len(endpoints) != 0 {
 		// Ignore IPv4
-		if service.Annotations[kubevip.EgressIPv6] == "true" && net.ParseIP(endpoints[0]).To4() != nil {
+		if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
 			return true, nil
 		}
 
@@ -103,8 +103,15 @@ func (p *Processor) Delete(service *v1.Service, id string) error {
 
 func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, endpoints []string, service *v1.Service) {
 	// if we haven't populated one, then do so
+	family := utils.IPv4Family
+	if service.Annotations[kubevip.EgressIPv6] == "true" {
+		family = utils.IPv6Family
+	}
+
+	ep := getEndpoint(endpoints, family)
+
 	if *lastKnownGoodEndpoint == "" {
-		*lastKnownGoodEndpoint = endpoints[0]
+		*lastKnownGoodEndpoint = ep
 		return
 	}
 
@@ -125,16 +132,16 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 			svcCtx.Cancel()
 		}
 		// Set our active endpoint to an existing one
-		*lastKnownGoodEndpoint = endpoints[0]
+		*lastKnownGoodEndpoint = ep
 	}
 }
 
 func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
+		ip := net.ParseIP(*lastKnownGoodEndpoint)
 		activeEndpointAnnotation := kubevip.ActiveEndpoint
-
-		if !p.config.EnableEndpoints && p.provider.GetProtocol() == string(discoveryv1.AddressTypeIPv6) {
+		if ip.To4() == nil && !p.config.EnableEndpoints {
 			activeEndpointAnnotation = kubevip.ActiveEndpointIPv6
 		}
 		service.Annotations[activeEndpointAnnotation] = *lastKnownGoodEndpoint
@@ -155,4 +162,29 @@ func startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, se
 			// if the context isn't cancelled restart
 		}
 	}
+}
+
+func hasV6(endpoints []string) bool {
+	for _, e := range endpoints {
+		ip := net.ParseIP(e)
+		if ip != nil {
+			if ip.To4() == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func getEndpoint(endpoints []string, family string) string {
+	for _, e := range endpoints {
+		ip := net.ParseIP(e)
+		if family == utils.IPv4Family && ip.To4() != nil {
+			return e
+		}
+		if family == utils.IPv6Family && ip.To4() == nil {
+			return e
+		}
+	}
+	return ""
 }

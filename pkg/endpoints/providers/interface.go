@@ -18,5 +18,4 @@ type Provider interface {
 	GetLabel() string
 	UpdateServiceAnnotation(string, string, *v1.Service, *kubernetes.Clientset) error
 	LoadObject(runtime.Object, context.CancelFunc) error
-	GetProtocol() string
 }
