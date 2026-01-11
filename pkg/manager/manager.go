@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -72,6 +74,9 @@ type Manager struct {
 	// implementation will be decided in constructor
 	// based on config.EnableNodeLabeling
 	nodeLabelManager node.LabelManager
+
+	// This variable reports if manager is being closed
+	closing atomic.Bool
 }
 
 // New will create a new managing object
@@ -235,7 +240,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 }
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) Start() error {
+func (sm *Manager) Start(ctx context.Context) error {
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -283,18 +288,18 @@ func (sm *Manager) Start() error {
 	if sm.config.EnableBGP {
 
 		// If Annotations have been set then we will look them up
-		err := sm.parseAnnotations()
+		err := sm.parseAnnotations(ctx)
 		if err != nil {
 			return err
 		}
 
 		log.Info("Starting Kube-vip Manager with the BGP engine")
-		return sm.startBGP()
+		return sm.startBGP(ctx)
 	}
 
 	if sm.config.EnableARP || sm.config.EnableWireguard {
 		if sm.config.EnableUPNP {
-			clients := upnp.GetConnectionClients(context.TODO())
+			clients := upnp.GetConnectionClients(ctx)
 			if len(clients) == 0 {
 				log.Error("Error Enabling UPNP. No Clients found")
 				// Set the struct to false so nothing should use it in future
@@ -309,24 +314,24 @@ func (sm *Manager) Start() error {
 				}
 			}
 			// TODO: It would be nice to run the UPNP refresh only on the leader.
-			go sm.svcProcessor.RefreshUPNPForwards()
+			go sm.svcProcessor.RefreshUPNPForwards(ctx)
 		}
 	}
 
 	// If ARP is enabled then we start a LeaderElection that will use ARP to advertise VIPs
 	if sm.config.EnableARP {
 		log.Info("Starting Kube-vip Manager with the ARP engine")
-		return sm.startARP(sm.config.NodeName)
+		return sm.startARP(ctx, sm.config.NodeName)
 	}
 
 	if sm.config.EnableWireguard {
 		log.Info("Starting Kube-vip Manager with the Wireguard engine")
-		return sm.startWireguard(sm.config.NodeName)
+		return sm.startWireguard(ctx, sm.config.NodeName)
 	}
 
 	if sm.config.EnableRoutingTable {
 		log.Info("Starting Kube-vip Manager with the Routing Table engine")
-		return sm.startTableMode(sm.config.NodeName)
+		return sm.startTableMode(ctx, sm.config.NodeName)
 	}
 
 	log.Error("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
@@ -343,15 +348,36 @@ func returnNameSpace() (string, error) {
 	return "", fmt.Errorf("unable to find Namespace")
 }
 
-func (sm *Manager) parseAnnotations() error {
+func (sm *Manager) parseAnnotations(ctx context.Context) error {
 	if sm.config.Annotations == "" {
 		log.Debug("No Node annotations to parse")
 		return nil
 	}
 
-	err := sm.annotationsWatcher()
+	err := sm.annotationsWatcher(ctx)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+	defer close(sm.shutdownChan)
+	for {
+		sig := <-sm.signalChan
+		switch sig {
+		case syscall.SIGUSR1:
+			log.Info("Received SIGUSR1, dumping configuration")
+			sm.dumpConfiguration(ctx)
+		case syscall.SIGINT, syscall.SIGTERM:
+			sm.closing.Store(true)
+			log.Info("Received kube-vip termination, signaling shutdown")
+			if cpCluster != nil {
+				cpCluster.Stop()
+			}
+			// Cancel the context, which will in turn cancel the leadership and all goroutines
+			cancel()
+			return
+		}
+	}
 }

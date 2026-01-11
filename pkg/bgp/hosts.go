@@ -9,7 +9,7 @@ import (
 )
 
 // AddHost will update peers of a host
-func (b *Server) AddHost(addr string) (err error) {
+func (b *Server) AddHost(ctx context.Context, addr string) (err error) {
 	ip, _, err := net.ParseCIDR(addr)
 	if err != nil {
 		return err
@@ -20,7 +20,7 @@ func (b *Server) AddHost(addr string) (err error) {
 		return fmt.Errorf("failed to get path for %v", ip)
 	}
 
-	_, err = b.s.AddPath(context.Background(), &api.AddPathRequest{
+	_, err = b.s.AddPath(ctx, &api.AddPathRequest{
 		Path: p,
 	})
 
@@ -32,7 +32,7 @@ func (b *Server) AddHost(addr string) (err error) {
 }
 
 // DelHost will inform peers to remove a host
-func (b *Server) DelHost(addr string) (err error) {
+func (b *Server) DelHost(ctx context.Context, addr string) (err error) {
 	ip, _, err := net.ParseCIDR(addr)
 	if err != nil {
 		return err
@@ -42,7 +42,7 @@ func (b *Server) DelHost(addr string) (err error) {
 		return
 	}
 
-	return b.s.DeletePath(context.Background(), &api.DeletePathRequest{
+	return b.s.DeletePath(ctx, &api.DeletePathRequest{
 		Path: p,
 	})
 }

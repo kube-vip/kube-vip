@@ -21,8 +21,7 @@ type patchStringLabel struct {
 
 // applyNodeLabel add/remove node label `kube-vip.io/has-ip=<VIP-Address>` to/from
 // the node where the virtual IP was added to/removed from.
-func applyNodeLabel(clientSet *kubernetes.Clientset, address, id, identity string) {
-	ctx := context.Background()
+func applyNodeLabel(ctx context.Context, clientSet *kubernetes.Clientset, address, id, identity string) {
 	node, err := clientSet.CoreV1().Nodes().Get(ctx, id, metav1.GetOptions{})
 	if err != nil {
 		log.Error("can't query node labels", "node", id, "err", err)

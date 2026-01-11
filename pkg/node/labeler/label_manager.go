@@ -69,6 +69,7 @@ func (m *Manager) RemoveLabel(ctx context.Context, svc *corev1.Service) error {
 func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	log.Debug("cleaning up labels for node", "node", m.nodeName, "timeout", timeout)
 
+	// create new contex for labels cleanup (independent)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 

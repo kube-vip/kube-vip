@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -92,25 +93,20 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 }
 
 // StartCluster - Begins a running instance of the Leader Election cluster
-func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
+func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
 	var err error
 
 	log.Info("cluster membership", "namespace", c.Namespace, "lock", c.LeaseName, "id", c.NodeName)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	leaderCtx, leaderCancel := context.WithCancel(ctx)
+	defer leaderCancel()
 
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
-	ctxArp, cancelArp := context.WithCancel(context.Background())
-	defer cancelArp()
-
-	// use a Go context so we can tell the dns loop code when we
-	// want to step down
-	ctxDNS, cancelDNS := context.WithCancel(context.Background())
-	defer cancelDNS()
+	clusterCtx, clusterCancel := context.WithCancel(ctx)
+	defer clusterCancel()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -122,12 +118,16 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+		defer close(cluster.completed)
+	}
+
 	go func() {
 		<-signalChan
 		log.Info("Received termination, signaling cluster shutdown")
-		// Cancel the context, which will in turn cancel the leadership
-		cancel()
-		// Cancel the arp context, which will in turn stop any broadcasts
+		// Cancel the leader context, which will in turn cancel the leadership
+		leaderCancel()
 	}()
 
 	// (attempt to) Remove the virtual IP, in case it already exists
@@ -156,7 +156,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		if err != nil {
 			log.Error("new BGP server", "err", err)
 		}
-		if err := bgpServer.Start(nil); err != nil {
+		if err := bgpServer.Start(ctx, nil); err != nil {
 			log.Error("starting BGP server", "err", err)
 		}
 	}
@@ -165,7 +165,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 		config:  c,
 		leaseID: c.NodeName,
 		sm:      sm,
-		onStartedLeading: func(ctx context.Context) { //nolint TODO: potential clean code
+		onStartedLeading: func(context.Context) { //nolint TODO: potential clean code
 			// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
 			if c.PreserveVIPOnLeadershipLoss {
 				log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
@@ -184,22 +184,21 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 			// Start ARP advertisements now that we have leadership
 			log.Info("Start ARP/NDP advertisement")
-			go cluster.arpMgr.StartAdvertisement(ctxArp)
+			go cluster.arpMgr.StartAdvertisement(clusterCtx)
 
 			// As we're leading lets start the vip service
-			err := cluster.vipService(ctxArp, ctxDNS, c, sm, bgpServer, cancel)
+			err := cluster.vipService(clusterCtx, c, sm, bgpServer, leaderCancel)
 			if err != nil {
 				log.Error("starting VIP service on leader", "err", err)
+				signalChan <- syscall.SIGINT
 			}
 		},
 		onStoppedLeading: func() {
 			// we can do cleanup here
 			log.Info("This node is becoming a follower within the cluster")
 
-			// Stop the dns context
-			cancelDNS()
-			// Stop the Arp context if it is running
-			cancelArp()
+			// Stop the cluster context if it is running
+			clusterCancel()
 
 			// Stop the BGP server
 			if bgpServer != nil {
@@ -243,7 +242,7 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 			}
 
 			log.Error("lost leadership, restarting kube-vip")
-			panic("") // TODO - we could also return here
+			signalChan <- syscall.SIGINT
 		},
 		onNewLeader: func(identity string) {
 			// we're notified when new leader elected
@@ -270,9 +269,11 @@ func (cluster *Cluster) StartCluster(c *kubevip.Config, sm *Manager, bgpServer *
 
 	switch c.LeaderElectionType {
 	case "kubernetes", "":
-		cluster.runKubernetesLeaderElectionOrDie(ctx, run)
+		cluster.runKubernetesLeaderElectionOrDie(leaderCtx, run)
 	case "etcd":
-		cluster.runEtcdLeaderElectionOrDie(ctx, run)
+		if err := cluster.runEtcdLeaderElectionOrDie(leaderCtx, run); err != nil {
+			return err
+		}
 	default:
 		log.Info(fmt.Sprintf("LeaderElectionMode %s not supported, exiting", c.LeaderElectionType))
 	}
@@ -331,8 +332,8 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 	})
 }
 
-func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) {
-	etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
+func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) error {
+	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.sm.EtcdClient},
 		Name:                 run.config.LeaseName,
 		MemberID:             run.leaseID,
@@ -342,7 +343,10 @@ func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *run
 			OnStoppedLeading: run.onStoppedLeading,
 			OnNewLeader:      run.onNewLeader,
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("etcd leaderelection: %w", err)
+	}
+	return nil
 }
 
 func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
@@ -355,7 +359,7 @@ func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoad
 
 	rw, err := watchtools.NewRetryWatcherWithContext(ctxArp, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(context.Background(), listOptions)
+			return sm.RetryWatcherClient.CoreV1().Nodes().Watch(ctxArp, listOptions)
 		},
 	})
 	if err != nil {
@@ -387,6 +391,9 @@ func (sm *Manager) NodeWatcher(ctxArp context.Context, lb *loadbalancer.IPVSLoad
 						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 						if err != nil {
 							log.Error("add IPVS backend", "err", err)
+							if errors.Is(err, &utils.PanicError{}) {
+								return fmt.Errorf("add IPVS backend: %w", err)
+							}
 						}
 					} else {
 						err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)

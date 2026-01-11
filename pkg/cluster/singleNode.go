@@ -70,16 +70,11 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	return nil
 }
 
-func (cluster *Cluster) StartVipService(c *kubevip.Config, sm *Manager, bgp *bgp.Server) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, sm *Manager, bgp *bgp.Server) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
-	ctxArp, cancelArp := context.WithCancel(context.Background())
-	defer cancelArp()
+	clusterCtx, clusterCancel := context.WithCancel(ctx)
+	defer clusterCancel()
 
-	// use a Go context so we can tell the dns loop code when we
-	// want to step down
-	ctxDNS, cancelDNS := context.WithCancel(context.Background())
-	defer cancelDNS()
-
-	return cluster.vipService(ctxArp, ctxDNS, c, sm, bgp, nil)
+	return cluster.vipService(clusterCtx, c, sm, bgp, nil)
 }
