@@ -31,7 +31,7 @@ func GetDefaultGatewayInterface() (*net.Interface, error) {
 		return iface, nil
 	}
 
-	// If the IPv4 default route is not found, then attempt IPv6.
+	// If the IPv6 default route is not found, then attempt IPv6.
 	if iface, err := getDefaultRoute(syscall.AF_INET6); err == nil {
 		return iface, nil
 	}
