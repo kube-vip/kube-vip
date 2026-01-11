@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,15 +29,20 @@ func (sm *Manager) startWireguard(id string) error {
 		return err
 	}
 	// parse all the details needed for Wireguard
-	peerPublicKey := s.Data["peerPublicKey"]
-	peerEndpoint := s.Data["peerEndpoint"]
-	privateKey := s.Data["privateKey"]
-
-	// Configure the interface to join the Wireguard VPN
-	err = wireguard.ConfigureInterface(string(privateKey), string(peerPublicKey), string(peerEndpoint))
-	if err != nil {
-		return err
-	}
+	peerPublicKey := string(s.Data["peerPublicKey"])
+	peerEndpoint := string(s.Data["peerEndpoint"])
+	privateKey := string(s.Data["privateKey"])
+	allowedIPs := string(s.Data["allowedIPs"])
+	routes := string(s.Data["routes"])
+	wg := wireguard.NewWireGuard(wireguard.WGConfig{
+		PrivateKey:    privateKey,
+		PeerPublicKey: peerPublicKey,
+		PeerEndpoint:  peerEndpoint,
+		InterfaceName: "wg0",
+		KeepAlive:     time.Duration(5 * time.Second),
+		AllowedIPs:    strings.Split(allowedIPs, ","),
+		Routes:        strings.Split(routes, ","),
+	})
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -100,9 +106,12 @@ func (sm *Manager) startWireguard(id string) error {
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
+					log.Info("started leading", "id", id)
+					wg.Up()
 					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 					if err != nil {
 						log.Error(err.Error())
+						wg.Down()
 						panic("")
 					}
 				},
@@ -111,6 +120,7 @@ func (sm *Manager) startWireguard(id string) error {
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
 					log.Info("leader lost", "id", id)
+					wg.Down()
 					sm.svcProcessor.Stop()
 
 					log.Error("lost leadership, restarting kube-vip")
@@ -122,6 +132,8 @@ func (sm *Manager) startWireguard(id string) error {
 						// I just got the lock
 						return
 					}
+					// safety check
+					wg.Down()
 					log.Info("new leader elected", "id", identity)
 				},
 			},
