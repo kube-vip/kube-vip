@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Updated signal handlers in manager_arp.go, manager_bgp.go, manager_wireguard.go, and manager_table.go to use switch statement pattern for handling multiple signals (SIGUSR1, SIGINT, SIGTERM)
+- wireguard.go now manages a complete wireguard interface on the current network namespace
+- manager_wireguard.go uses the new wireguard.go implementation
 
 ## [v1.0.1] - Previous Release
 
