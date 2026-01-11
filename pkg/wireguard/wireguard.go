@@ -2,9 +2,10 @@ package wireguard
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"time"
+
+	log "log/slog"
 
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
@@ -33,8 +34,29 @@ func NewWireGuard(cfg WGConfig) *WireGuard {
 	}
 }
 
+// Up brings up the interface, configures peers, and sets routes
+func (w *WireGuard) Up() error {
+	if err := w.createInterface(); err != nil {
+		return err
+	}
+	if err := w.configurePeer(); err != nil {
+		w.teardown()
+		return err
+	}
+	if err := w.addRoutes(); err != nil {
+		w.teardown()
+		return err
+	}
+	return nil
+}
+
+// Down tears down the interface and routes
+func (w *WireGuard) Down() error {
+	return w.teardown()
+}
+
 // CreateInterface creates the wg interface in the current netns if it doesn't exist
-func (w *WireGuard) CreateInterface() error {
+func (w *WireGuard) createInterface() error {
 	genericLink := &netlink.GenericLink{
 		LinkAttrs: netlink.LinkAttrs{Name: w.cfg.InterfaceName},
 		LinkType:  "wireguard",
@@ -56,11 +78,12 @@ func (w *WireGuard) CreateInterface() error {
 	}
 
 	w.link = link
+	log.Debug("create link ", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
 // ConfigurePeer sets the private key, peer, allowed IPs, endpoint, keepalive
-func (w *WireGuard) ConfigurePeer() error {
+func (w *WireGuard) configurePeer() error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("failed to open wgctrl client: %v", err)
@@ -79,7 +102,7 @@ func (w *WireGuard) ConfigurePeer() error {
 
 	addr, err := net.ResolveUDPAddr("udp", w.cfg.PeerEndpoint)
 	if err != nil {
-		log.Fatalf("Failed to resolve UDP address: %v", err)
+		return fmt.Errorf("Failed to resolve UDP address: %v", err)
 	}
 
 	peer := wgtypes.PeerConfig{
@@ -108,11 +131,12 @@ func (w *WireGuard) ConfigurePeer() error {
 		return fmt.Errorf("failed to configure wireguard device: %v", err)
 	}
 
+	log.Debug("wireguard device configured ", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
 // AddRoutes creates the routes for the VIP/public IPs via the wg interface
-func (w *WireGuard) AddRoutes() error {
+func (w *WireGuard) addRoutes() error {
 	for _, cidr := range w.cfg.Routes {
 		_, dstNet, err := net.ParseCIDR(cidr)
 		if err != nil {
@@ -130,7 +154,7 @@ func (w *WireGuard) AddRoutes() error {
 }
 
 // RemoveRoutes deletes the previously added routes
-func (w *WireGuard) RemoveRoutes() error {
+func (w *WireGuard) removeRoutes() error {
 	for _, cidr := range w.cfg.Routes {
 		_, dstNet, _ := net.ParseCIDR(cidr)
 		route := netlink.Route{
@@ -139,12 +163,13 @@ func (w *WireGuard) RemoveRoutes() error {
 		}
 		_ = netlink.RouteDel(&route) // best effort
 	}
+	log.Debug("routes removed", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
 // Teardown deletes the interface entirely (called on leadership loss)
-func (w *WireGuard) Teardown() error {
-	if err := w.RemoveRoutes(); err != nil {
+func (w *WireGuard) teardown() error {
+	if err := w.removeRoutes(); err != nil {
 		return fmt.Errorf("failed to remove routes: %v", err)
 	}
 	if w.link != nil {
@@ -153,28 +178,8 @@ func (w *WireGuard) Teardown() error {
 		}
 		w.link = nil
 	}
+	log.Debug("teared down complete", "interface", w.cfg.InterfaceName)
 	return nil
-}
-
-// Up brings up the interface, configures peers, and sets routes
-func (w *WireGuard) Up() error {
-	if err := w.CreateInterface(); err != nil {
-		return err
-	}
-	if err := w.ConfigurePeer(); err != nil {
-		w.Teardown()
-		return err
-	}
-	if err := w.AddRoutes(); err != nil {
-		w.Teardown()
-		return err
-	}
-	return nil
-}
-
-// Down tears down the interface and routes
-func (w *WireGuard) Down() error {
-	return w.Teardown()
 }
 
 // helper: check if error indicates interface/route exists
