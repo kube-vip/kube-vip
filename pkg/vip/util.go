@@ -36,7 +36,7 @@ func GetDefaultGatewayInterface() (*net.Interface, error) {
 		return iface, nil
 	}
 
-	return nil, errors.New("unable to find default route")
+	return nil, errors.New("unable to find interface with default route")
 }
 
 // getDefaultRoute attempts to find the default route for the specified address family.
