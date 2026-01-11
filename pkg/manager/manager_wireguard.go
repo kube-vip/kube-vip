@@ -39,7 +39,7 @@ func (sm *Manager) startWireguard(id string) error {
 		PeerPublicKey: peerPublicKey,
 		PeerEndpoint:  peerEndpoint,
 		InterfaceName: "wg0",
-		KeepAlive:     time.Duration(5 * time.Second),
+		KeepAlive:     time.Duration(5) * time.Second,
 		AllowedIPs:    strings.Split(allowedIPs, ","),
 		Routes:        strings.Split(routes, ","),
 	})
@@ -107,11 +107,17 @@ func (sm *Manager) startWireguard(id string) error {
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					log.Info("started leading", "id", id)
-					wg.Up()
+					err = wg.Up()
+					if err != nil {
+						log.Error(err.Error())
+						_ = wg.Down()
+						panic("")
+					}
+
 					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 					if err != nil {
 						log.Error(err.Error())
-						wg.Down()
+						_ = wg.Down()
 						panic("")
 					}
 				},
@@ -120,7 +126,10 @@ func (sm *Manager) startWireguard(id string) error {
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
 					log.Info("leader lost", "id", id)
-					wg.Down()
+					err = wg.Down()
+					if err != nil {
+						log.Error(err.Error(), "id", id)
+					}
 					sm.svcProcessor.Stop()
 
 					log.Error("lost leadership, restarting kube-vip")
@@ -133,7 +142,7 @@ func (sm *Manager) startWireguard(id string) error {
 						return
 					}
 					// safety check
-					wg.Down()
+					_ = wg.Down()
 					log.Info("new leader elected", "id", identity)
 				},
 			},

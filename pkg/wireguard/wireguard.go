@@ -40,11 +40,19 @@ func (w *WireGuard) Up() error {
 		return err
 	}
 	if err := w.configurePeer(); err != nil {
-		w.teardown()
+		tdErr := w.teardown()
+		if tdErr != nil {
+			err := fmt.Errorf("failed to teardown wireguard interface: %v", tdErr)
+			return err
+		}
 		return err
 	}
 	if err := w.addRoutes(); err != nil {
-		w.teardown()
+		tdErr := w.teardown()
+		if tdErr != nil {
+			err := fmt.Errorf("failed to teardown wireguard interface: %v", tdErr)
+			return err
+		}
 		return err
 	}
 	return nil
@@ -102,7 +110,7 @@ func (w *WireGuard) configurePeer() error {
 
 	addr, err := net.ResolveUDPAddr("udp", w.cfg.PeerEndpoint)
 	if err != nil {
-		return fmt.Errorf("Failed to resolve UDP address: %v", err)
+		return fmt.Errorf("failed to resolve UDP address: %v", err)
 	}
 
 	peer := wgtypes.PeerConfig{
@@ -161,7 +169,10 @@ func (w *WireGuard) removeRoutes() error {
 			LinkIndex: w.link.Attrs().Index,
 			Dst:       dstNet,
 		}
-		_ = netlink.RouteDel(&route) // best effort
+		err := netlink.RouteDel(&route) // best effort
+		if err != nil {
+			return fmt.Errorf("failed to remove route %s: %v", cidr, err)
+		}
 	}
 	log.Debug("routes removed", "interface", w.cfg.InterfaceName)
 	return nil
