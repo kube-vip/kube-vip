@@ -69,7 +69,7 @@ func getDefaultRoute(family int) (*net.Interface, error) {
 		}
 
 		if idx > 0 {
-			return net.InterfaceByIndex(idx)
+			return net.InterfaceByIndex(idx), nil
 		}
 	}
 	return nil, errors.New("default route not found")
