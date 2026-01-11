@@ -47,7 +47,7 @@ func getDefaultRoute(family int) (*net.Interface, error) {
 
 	routes, err := netlink.RouteListFiltered(family, filter, mask)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing routes: %w", err)
 	}
 
 	for _, route := range routes {
