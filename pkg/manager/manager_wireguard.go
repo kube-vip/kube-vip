@@ -40,6 +40,7 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 		PeerPublicKey: peerPublicKey,
 		PeerEndpoint:  peerEndpoint,
 		InterfaceName: "wg0",
+		Address:       sm.config.VIP,
 		KeepAlive:     time.Duration(5) * time.Second,
 		AllowedIPs:    strings.Split(allowedIPs, ","),
 		Routes:        strings.Split(routes, ","),
@@ -58,13 +59,8 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
-	if sm.config.EnableServicesElection {
-		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.svcProcessor.StartServicesWatchForLeaderElection(wgCtx)
-		if err != nil {
-			return err
-		}
-	} else {
+	if sm.config.EnableControlPlane {
+
 		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
@@ -97,14 +93,7 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 					log.Info("started leading", "id", id)
 					err = wg.Up()
 					if err != nil {
-						log.Error(err.Error())
-						_ = wg.Down()
-						panic("")
-					}
-
-					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
-					if err != nil {
-						log.Error(err.Error())
+						log.Error("could not start wireguard", "err", err)
 						_ = wg.Down()
 						if !closing.Load() {
 							sm.signalChan <- syscall.SIGINT
@@ -120,7 +109,6 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 					if err != nil {
 						log.Error(err.Error(), "id", id)
 					}
-					sm.svcProcessor.Stop()
 
 					log.Error("lost services leadership, restarting kube-vip")
 					if !closing.Load() {
