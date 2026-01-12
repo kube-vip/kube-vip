@@ -25,18 +25,18 @@ func getHostName(dnsName string) string {
 }
 
 // GetDefaultGatewayInterface return default gateway interface link
-func GetDefaultGatewayInterface() (*net.Interface, error) {
+func GetDefaultGatewayInterface() (iface *net.Interface, err error) {
 	// Attempt IPv4 first (usually the default)
-	if iface, err := getDefaultRoute(syscall.AF_INET); err == nil {
+	if iface, err = getDefaultRoute(syscall.AF_INET); err == nil {
 		return iface, nil
 	}
 
-	// If the IPv6 default route is not found, then attempt IPv6.
-	if iface, err := getDefaultRoute(syscall.AF_INET6); err == nil {
+	// If the IPv4 default route is not found, then attempt IPv6 default route.
+	if iface, err = getDefaultRoute(syscall.AF_INET6); err == nil {
 		return iface, nil
 	}
 
-	return nil, errors.New("unable to find interface with default route")
+	return nil, fmt.Errorf("unable to find interface with default route: %w", err)
 }
 
 // getDefaultRoute attempts to find the default route for the specified address family.
@@ -69,7 +69,7 @@ func getDefaultRoute(family int) (*net.Interface, error) {
 		}
 
 		if idx > 0 {
-			return net.InterfaceByIndex(idx), nil
+			return net.InterfaceByIndex(idx)
 		}
 	}
 	return nil, errors.New("default route not found")
