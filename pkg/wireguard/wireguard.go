@@ -17,6 +17,7 @@ type WGConfig struct {
 	PrivateKey    string
 	PeerPublicKey string
 	PeerEndpoint  string
+	Address       string
 	AllowedIPs    []string // CIDRs allowed through tunnel
 	ListenPort    int
 	KeepAlive     time.Duration
@@ -24,8 +25,9 @@ type WGConfig struct {
 }
 
 type WireGuard struct {
-	cfg  WGConfig
-	link netlink.Link
+	cfg       WGConfig
+	linkIndex *int
+	client    *wgctrl.Client
 }
 
 func NewWireGuard(cfg WGConfig) *WireGuard {
@@ -36,6 +38,7 @@ func NewWireGuard(cfg WGConfig) *WireGuard {
 
 // Up brings up the interface, configures peers, and sets routes
 func (w *WireGuard) Up() error {
+	log.Info("bringing up wireguard interface", "interface", w.cfg.InterfaceName)
 	if err := w.createInterface(); err != nil {
 		return err
 	}
@@ -85,8 +88,17 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to bring interface up: %v", err)
 	}
 
-	w.link = link
-	log.Debug("create link ", "interface", w.cfg.InterfaceName)
+	addr, err := netlink.ParseAddr(w.cfg.Address)
+	if err != nil {
+		return fmt.Errorf("failed to parse address: %s, %v", w.cfg.Address, err)
+	}
+
+	err = netlink.AddrAdd(link, addr)
+	if err != nil {
+		return fmt.Errorf("could not add address to link: %v", err)
+	}
+	w.linkIndex = &link.Attrs().Index
+	log.Info("created link", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
@@ -96,7 +108,6 @@ func (w *WireGuard) configurePeer() error {
 	if err != nil {
 		return fmt.Errorf("failed to open wgctrl client: %v", err)
 	}
-	defer client.Close()
 
 	privKey, err := wgtypes.ParseKey(w.cfg.PrivateKey)
 	if err != nil {
@@ -135,11 +146,12 @@ func (w *WireGuard) configurePeer() error {
 		Peers:        []wgtypes.PeerConfig{peer},
 	}
 
-	if err := client.ConfigureDevice(w.cfg.InterfaceName, conf); err != nil {
+	if err = client.ConfigureDevice(w.cfg.InterfaceName, conf); err != nil {
 		return fmt.Errorf("failed to configure wireguard device: %v", err)
 	}
+	w.client = client
 
-	log.Debug("wireguard device configured ", "interface", w.cfg.InterfaceName)
+	log.Info("wireguard device configured", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
@@ -151,9 +163,10 @@ func (w *WireGuard) addRoutes() error {
 			return fmt.Errorf("invalid route CIDR %s: %v", cidr, err)
 		}
 		route := netlink.Route{
-			LinkIndex: w.link.Attrs().Index,
+			LinkIndex: *w.linkIndex,
 			Dst:       dstNet,
 		}
+		log.Info("Added route", "dst", dstNet.String())
 		if err := netlink.RouteAdd(&route); err != nil && !isExistErr(err) {
 			return fmt.Errorf("failed to add route %s: %v", cidr, err)
 		}
@@ -164,32 +177,46 @@ func (w *WireGuard) addRoutes() error {
 // RemoveRoutes deletes the previously added routes
 func (w *WireGuard) removeRoutes() error {
 	for _, cidr := range w.cfg.Routes {
-		_, dstNet, _ := net.ParseCIDR(cidr)
+		_, dstNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Error("invalid route CIDR, skipping", "cidr", cidr, "err", err)
+			continue
+		}
+		if w.linkIndex == nil {
+			log.Error("link index is nil, skipping route removal", "cidr", cidr)
+			continue
+		}
 		route := netlink.Route{
-			LinkIndex: w.link.Attrs().Index,
+			LinkIndex: *w.linkIndex,
 			Dst:       dstNet,
 		}
-		err := netlink.RouteDel(&route) // best effort
+		err = netlink.RouteDel(&route) // best effort
 		if err != nil {
 			return fmt.Errorf("failed to remove route %s: %v", cidr, err)
 		}
 	}
-	log.Debug("routes removed", "interface", w.cfg.InterfaceName)
+	log.Info("routes removed", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
 // Teardown deletes the interface entirely (called on leadership loss)
 func (w *WireGuard) teardown() error {
+	if w.client != nil {
+		if err := w.client.Close(); err != nil {
+			return fmt.Errorf("failed to close wgctrl client: %v", err)
+		}
+		w.client = nil
+	}
 	if err := w.removeRoutes(); err != nil {
 		return fmt.Errorf("failed to remove routes: %v", err)
 	}
-	if w.link != nil {
-		if err := netlink.LinkDel(w.link); err != nil {
+	if w.linkIndex != nil {
+		if err := netlink.LinkDel(&netlink.GenericLink{LinkAttrs: netlink.LinkAttrs{Index: *w.linkIndex}}); err != nil {
 			return fmt.Errorf("failed to delete wg interface: %v", err)
 		}
-		w.link = nil
+		w.linkIndex = nil
 	}
-	log.Debug("teared down complete", "interface", w.cfg.InterfaceName)
+	log.Info("tear down complete", "interface", w.cfg.InterfaceName)
 	return nil
 }
 
