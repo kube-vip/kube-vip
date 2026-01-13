@@ -2,13 +2,17 @@ package manager
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 	"syscall"
 	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
+	"github.com/vishvananda/netlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -34,7 +38,7 @@ func (sm *Manager) startWireguard(id string) error {
 	privateKey := string(s.Data["privateKey"])
 	allowedIPs := string(s.Data["allowedIPs"])
 	routes := string(s.Data["routes"])
-	wg := wireguard.NewWireGuard(wireguard.WGConfig{
+	cfg := wireguard.WGConfig{
 		PrivateKey:    privateKey,
 		PeerPublicKey: peerPublicKey,
 		PeerEndpoint:  peerEndpoint,
@@ -43,7 +47,8 @@ func (sm *Manager) startWireguard(id string) error {
 		KeepAlive:     time.Duration(5) * time.Second,
 		AllowedIPs:    strings.Split(allowedIPs, ","),
 		Routes:        strings.Split(routes, ","),
-	})
+	}
+	wg := wireguard.NewWireGuard(cfg)
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -71,6 +76,10 @@ func (sm *Manager) startWireguard(id string) error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableControlPlane {
+		nodeIP := os.Getenv("NODE_IP")
+		if nodeIP == "" {
+			return fmt.Errorf("NODE_IP not set via Downward API")
+		}
 
 		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
@@ -108,12 +117,25 @@ func (sm *Manager) startWireguard(id string) error {
 						_ = wg.Down()
 						panic("")
 					}
+
+					log.Info("starting dnat", "nodeIP", nodeIP, "vipIP", cfg.Address)
+					// if wireguard was successful, parse is already validated
+					addr, _ := netlink.ParseAddr(cfg.Address)
+					err = nftables.ApplyAPIServerDNAT(cfg.InterfaceName, addr.IP.String(), nodeIP, 6443, "controlplane", false)
+					if err != nil {
+						log.Error("could not apply DNAT rules", "err", err)
+					}
 				},
 				OnStoppedLeading: func() {
 					// we can do cleanup here
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
 					log.Info("leader lost", "id", id)
+					err = nftables.DeleteIngressChains(false, "controlplane")
+					if err != nil {
+						log.Error("could not delete DNAT ingress chains", "err", err)
+					}
+
 					err = wg.Down()
 					if err != nil {
 						log.Error(err.Error(), "id", id)

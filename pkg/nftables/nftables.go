@@ -20,6 +20,11 @@ const (
 	SNatChain = "kube_vip_snat_%s"
 )
 
+const (
+	DNATChain  = "kube_vip_prerouting_%s"
+	InputChain = "kube_vip_input_%s"
+)
+
 func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, IPv6 bool) error {
 	conn, err := nftables.New()
 	if err != nil {
@@ -483,4 +488,203 @@ func ListChains() ([]string, error) {
 
 	_ = conn.CloseLasting() // TODO: Should we ignore this error, we're not actually doing any actions with nftables
 	return chains, nil
+}
+
+func GetDNATChain(IPv6 bool, service string) *nftables.Chain {
+	name := fmt.Sprintf(DNATChain, service)
+	return &nftables.Chain{
+		Name:     name,
+		Table:    GetTable(IPv6),
+		Type:     nftables.ChainTypeNAT,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityNATDest,
+	}
+}
+
+func GetInputChain(IPv6 bool, service string) *nftables.Chain {
+	name := fmt.Sprintf(InputChain, service)
+	policy := nftables.ChainPolicyAccept
+	return &nftables.Chain{
+		Name:     name,
+		Table:    GetTable(IPv6),
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookInput,
+		Priority: nftables.ChainPriorityFilter,
+		Policy:   &policy,
+	}
+}
+
+func ApplyAPIServerDNAT(
+	wgIf string,
+	vipIP string,
+	targetIP string,
+	port uint16,
+	service string,
+	IPv6 bool,
+) error {
+
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
+
+	table := GetTable(IPv6)
+
+	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
+		conn.AddTable(table)
+	}
+
+	dnatChain := GetDNATChain(IPv6, service)
+	inputChain := GetInputChain(IPv6, service)
+
+	conn.AddChain(dnatChain)
+	conn.AddChain(inputChain)
+
+	if err := conn.Flush(); err != nil {
+		return err
+	}
+
+	vip := net.ParseIP(vipIP)
+	target := net.ParseIP(targetIP)
+	if vip == nil || target == nil {
+		return fmt.Errorf("invalid vip or target ip")
+	}
+
+	/* ---------------- DNAT RULE ---------------- */
+
+	dnatRule := &nftables.Rule{
+		Table: table,
+		Chain: dnatChain,
+		Exprs: []expr.Any{
+
+			// iifname == wgIf
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     append([]byte(wgIf), 0),
+			},
+
+			// tcp
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{unix.IPPROTO_TCP},
+			},
+
+			// dport
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       2,
+				Len:          2,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(port),
+			},
+
+			// dnat target
+			&expr.Immediate{
+				Register: 1,
+				Data:     ipToBytes(target, IPv6),
+			},
+			&expr.Immediate{
+				Register: 2,
+				Data:     binaryutil.BigEndian.PutUint16(port),
+			},
+			&expr.NAT{
+				Type:        expr.NATTypeDestNAT,
+				Family:      ipFamily(IPv6),
+				RegAddrMin:  1,
+				RegProtoMin: 2,
+			},
+		},
+	}
+
+	conn.AddRule(dnatRule)
+
+	/* ---------------- INPUT ACCEPT RULE ---------------- */
+
+	inputRule := &nftables.Rule{
+		Table: table,
+		Chain: inputChain,
+		Exprs: []expr.Any{
+
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     append([]byte(wgIf), 0),
+			},
+
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{unix.IPPROTO_TCP},
+			},
+
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       2,
+				Len:          2,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(port),
+			},
+
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	}
+
+	conn.AddRule(inputRule)
+
+	if err := conn.Flush(); err != nil {
+		return err
+	}
+
+	return conn.CloseLasting()
+}
+
+func DeleteIngressChains(IPv6 bool, service string) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
+
+	table := GetTable(IPv6)
+
+	chains := []string{
+		fmt.Sprintf(DNATChain, service),
+		fmt.Sprintf(InputChain, service),
+	}
+
+	for _, name := range chains {
+		ch, err := conn.ListChain(table, name)
+		if err == nil && ch != nil {
+			conn.DelChain(ch)
+		}
+	}
+
+	return conn.Flush()
+}
+
+func ipToBytes(ip net.IP, IPv6 bool) []byte {
+	if IPv6 {
+		return ip.To16()
+	}
+	return ip.To4()
+}
+
+func ipFamily(IPv6 bool) uint32 {
+	if IPv6 {
+		return unix.NFPROTO_IPV6
+	}
+	return unix.NFPROTO_IPV4
 }
