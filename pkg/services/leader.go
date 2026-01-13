@@ -58,14 +58,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		},
 	}
 
-	go func() {
-		// wait for the service context to end and delete the lease then
-		<-svcCtx.Ctx.Done()
-		p.leaseMgr.Delete(service)
-	}()
-
 	svcLease, isNew := p.leaseMgr.Add(service)
-	// this service is sharing lease
+	// this service is sharing lease with another service for the common lease feature
 	if !isNew {
 		// wait for leader election to start or context to be done
 		select {
@@ -102,6 +96,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 		return nil
 	}
+
+	// For new leases (not shared), ensure cleanup when the leader election ends
+	// This is critical for the restartable service watcher to be able to restart
+	// the leader election after leadership loss
+	defer func() {
+		// Delete the lease from the manager so subsequent calls can create a fresh lease
+		// This handles the case where leader election ends due to:
+		// 1. Leadership loss (e.g., network timeout)
+		// 2. Context cancellation
+		// 3. Any other reason RunOrDie returns
+		p.leaseMgr.Delete(service)
+	}()
 
 	// start the leader election code loop
 	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{
