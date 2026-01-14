@@ -75,7 +75,12 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			if configPath == "" {
 				configPath = "/etc/kubernetes/admin.conf"
 			}
-			_, v129 = os.LookupEnv("V129")
+			v129 = true
+			if v129env, v129set := os.LookupEnv("V129"); v129set {
+				var err error
+				v129, err = strconv.ParseBool(v129env)
+				Expect(err).ToNot(HaveOccurred())
+			}
 			curDir, err := os.Getwd()
 			Expect(err).NotTo(HaveOccurred())
 
