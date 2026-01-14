@@ -17,6 +17,7 @@ LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extld
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
 GO_VERSION := 1.25.5
+K8S_VERSION ?= v1.35.0
 
 .PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
 
@@ -136,26 +137,16 @@ unit-tests-docker:
 integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
 
-integration-tests-docker:
-	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make integration-tests
+e2e-tests-arp: get-whoami
+	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
-e2e-tests:
-	docker pull ghcr.io/traefik/whoami:v1.11
-	GOMAXPROCS=4 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e ./testing/e2e/etcd
+e2e-tests-rt: get-whoami
+	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
-e2e-tests129-arp:
-	docker pull ghcr.io/traefik/whoami:v1.11
-	GOMAXPROCS=4 TEST_MODE=arp V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+e2e-tests-bgp: get-whoami
+	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
-e2e-tests129-rt:
-	docker pull ghcr.io/traefik/whoami:v1.11
-	GOMAXPROCS=4 TEST_MODE=rt V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
-
-e2e-tests129-bgp:
-	docker pull ghcr.io/traefik/whoami:v1.11
-	GOMAXPROCS=4 TEST_MODE=bgp V129=true K8S_IMAGE_PATH=kindest/node:v1.29.0 E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
-
-e2e-tests129: e2e-tests129-arp e2e-tests129-rt e2e-tests129-bgp
+e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
 
 service-tests: 
 	$(MAKE) -C testing/e2e/e2e dockerLocal
@@ -189,3 +180,5 @@ get-gobgp:
 	wget -nc --directory-prefix=bin https://github.com/osrg/gobgp/releases/download/v3.37.0/gobgp_3.37.0_linux_amd64.tar.gz
 	tar -xvzf bin/gobgp_3.37.0_linux_amd64.tar.gz -C bin
 
+get-whoami:
+	docker pull ghcr.io/traefik/whoami:v1.11
