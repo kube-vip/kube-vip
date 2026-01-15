@@ -403,3 +403,191 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 		t.Error("expected lease to be removed after all services deleted")
 	}
 }
+
+// TestManager_RaceCondition_LeaseExistsBeforeDelete tests the scenario where
+// a second goroutine calls Add before the first goroutine's defer deletes the lease.
+// This simulates the race condition that could cause the gaps in the logs where there is no leader.
+func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("traefik", "traefik", nil)
+
+	// Simulate first leader election start
+	lease1, isNew1 := mgr.Add(svc)
+	if !isNew1 {
+		t.Fatal("expected first add to return isNew=true")
+	}
+
+	// Simulate leadership acquired - close Started channel
+	close(lease1.Started)
+
+	// Simulate a second goroutine calling Add BEFORE the first goroutine's defer deletes the lease
+	// This is the race condition scenario
+	lease2, isNew2 := mgr.Add(svc)
+	if isNew2 {
+		t.Error("expected second add before delete to return isNew=false")
+	}
+	if lease1 != lease2 {
+		t.Error("expected same lease to be returned")
+	}
+
+	// The Started channel should be closed (from the first run)
+	select {
+	case <-lease2.Started:
+		// Expected - channel is closed
+	default:
+		t.Error("expected Started channel to be closed")
+	}
+
+	// Now the first goroutine's defer deletes the lease
+	mgr.Delete(svc)
+
+	// The lease should still exist because the second Add incremented the counter
+	if mgr.Get(svc) == nil {
+		t.Error("expected lease to still exist after first delete (counter was incremented)")
+	}
+
+	// Second delete removes the lease
+	mgr.Delete(svc)
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed after second delete")
+	}
+}
+
+// TestManager_NonCommonLease_MultipleAdds tests that multiple Adds for a non-common
+// lease service increment the counter correctly.
+func TestManager_NonCommonLease_MultipleAdds(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("traefik", "traefik", nil) // No common lease annotation
+
+	// First Add
+	lease1, isNew1 := mgr.Add(svc)
+	if !isNew1 {
+		t.Error("expected first add to return isNew=true")
+	}
+
+	// Close Started to simulate leadership acquired
+	close(lease1.Started)
+
+	// Second Add (simulating another goroutine or restart attempt)
+	lease2, isNew2 := mgr.Add(svc)
+	if isNew2 {
+		t.Error("expected second add to return isNew=false")
+	}
+	if lease1 != lease2 {
+		t.Error("expected same lease")
+	}
+
+	// Third Add
+	lease3, isNew3 := mgr.Add(svc)
+	if isNew3 {
+		t.Error("expected third add to return isNew=false")
+	}
+	if lease1 != lease3 {
+		t.Error("expected same lease")
+	}
+
+	// Need 3 deletes to remove the lease
+	mgr.Delete(svc)
+	if mgr.Get(svc) == nil {
+		t.Error("expected lease to exist after first delete")
+	}
+
+	mgr.Delete(svc)
+	if mgr.Get(svc) == nil {
+		t.Error("expected lease to exist after second delete")
+	}
+
+	mgr.Delete(svc)
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed after third delete")
+	}
+}
+
+// TestManager_LeaseContextCancelledBeforeStarted tests the scenario where
+// the lease context is cancelled before the Started channel is closed.
+// This can happen if leadership is never acquired and the context times out.
+func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("traefik", "traefik", nil)
+
+	// First Add
+	lease1, isNew1 := mgr.Add(svc)
+	if !isNew1 {
+		t.Fatal("expected first add to return isNew=true")
+	}
+
+	// Second Add before Started is closed
+	lease2, isNew2 := mgr.Add(svc)
+	if isNew2 {
+		t.Error("expected second add to return isNew=false")
+	}
+
+	// Verify Started is not closed yet
+	select {
+	case <-lease2.Started:
+		t.Error("expected Started channel to be open")
+	default:
+		// Expected
+	}
+
+	// Cancel the lease context (simulating timeout or leadership loss before acquiring)
+	lease1.Cancel()
+
+	// Verify context is cancelled
+	select {
+	case <-lease2.Ctx.Done():
+		// Expected
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected context to be cancelled")
+	}
+
+	// Delete should still work
+	mgr.Delete(svc)
+	mgr.Delete(svc)
+
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed")
+	}
+}
+
+// TestManager_RestartAfterLeaseContextCancelled tests that after the lease
+// context is cancelled and the lease is deleted, a new lease can be created.
+func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("traefik", "traefik", nil)
+
+	// First Add
+	lease1, _ := mgr.Add(svc)
+
+	// Cancel context before Started is closed
+	lease1.Cancel()
+
+	// Delete the lease
+	mgr.Delete(svc)
+
+	// Verify lease is gone
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed after delete")
+	}
+
+	// Add again - should create new lease
+	lease2, isNew2 := mgr.Add(svc)
+	if !isNew2 {
+		t.Error("expected new lease after delete")
+	}
+
+	// Verify new lease has fresh context and Started channel
+	select {
+	case <-lease2.Ctx.Done():
+		t.Error("expected new lease context to be active")
+	default:
+		// Expected
+	}
+
+	select {
+	case <-lease2.Started:
+		t.Error("expected new lease Started channel to be open")
+	default:
+		// Expected
+	}
+}

@@ -10,7 +10,10 @@ type Context struct {
 	Cancel             context.CancelFunc
 	IsActive           bool
 	IsWatched          bool
-	ConfiguredNetworks sync.Map
+	// LeaderElectionRunning indicates if a leader election goroutine is currently running
+	// This prevents multiple goroutines from being started for the same service
+	LeaderElectionRunning bool
+	ConfiguredNetworks    sync.Map
 }
 
 func New(ctx context.Context) *Context {

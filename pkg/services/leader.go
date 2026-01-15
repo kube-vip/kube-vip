@@ -65,21 +65,31 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		select {
 		case <-svcLease.Started:
 		case <-svcLease.Ctx.Done():
+			// Lease was cancelled (e.g., leader election ended), return immediately
+			// This allows the restart loop to create a fresh lease
+			log.Debug("lease context cancelled before leader election started", "service", service.Name, "uid", service.UID)
 			svcCtx.IsActive = false
 			return nil
 		}
 
-		if lease.UsesCommon(service) && !svcCtx.IsActive {
+		// Only services using the common lease feature should sync and wait here
+		// Non-common lease services should return immediately to allow the restart loop
+		// to handle the leader election restart
+		if !lease.UsesCommon(service) {
+			log.Debug("lease already exists for non-common service, returning", "service", service.Name, "uid", service.UID)
+			return nil
+		}
+
+		// Common lease handling: sync the service and wait for context cancellation
+		if !svcCtx.IsActive {
 			if err := p.SyncServices(svcCtx, service); err != nil {
 				log.Error("service sync", "err", err, "uid", service.UID)
 				svcLease.Cancel()
 			}
 			svcCtx.IsActive = true
-			// just block until context is cancelled
-			<-svcCtx.Ctx.Done()
 		}
 
-		// wait for service context to finish
+		// Block until service context is cancelled
 		<-svcCtx.Ctx.Done()
 
 		if svcCtx.IsActive {

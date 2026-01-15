@@ -67,9 +67,15 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		}
 
 		p.updateLastKnownGoodEndpoint(svcCtx, lastKnownGoodEndpoint, endpoints, service)
-		// start leader election if it's enabled and not already started
-		if !svcCtx.IsActive && p.config.EnableServicesElection {
+		// start leader election if it's enabled and not already running
+		// We check LeaderElectionRunning to prevent starting multiple goroutines
+		// for the same service (e.g., when endpoint events come in during restart)
+		if !svcCtx.LeaderElectionRunning && p.config.EnableServicesElection {
+			svcCtx.LeaderElectionRunning = true
 			go func() {
+				defer func() {
+					svcCtx.LeaderElectionRunning = false
+				}()
 				startLeaderElection(svcCtx, service, serviceFunc)
 			}()
 		}
