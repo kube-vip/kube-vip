@@ -131,13 +131,13 @@ unit-tests:
 	go test -race ./...
 
 unit-tests-docker:
-	docker run --rm -it -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make unit-tests
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make unit-tests
 
 integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
 
 integration-tests-docker:
-	docker run --rm -it -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make integration-tests
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make integration-tests
 
 e2e-tests:
 	docker pull ghcr.io/traefik/whoami:v1.11
