@@ -58,6 +58,15 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		},
 	}
 
+	// Start a goroutine that will delete the lease when the service context is cancelled.
+	// This is important for proper cleanup when a service is deleted - it ensures that
+	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
+	// Without this, RunOrDie would continue running until leadership is naturally lost.
+	go func() {
+		<-svcCtx.Ctx.Done()
+		p.leaseMgr.Delete(service)
+	}()
+
 	svcLease, isNew := p.leaseMgr.Add(service)
 	// this service is sharing lease with another service for the common lease feature
 	if !isNew {
