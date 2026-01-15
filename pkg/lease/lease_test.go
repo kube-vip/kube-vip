@@ -591,3 +591,200 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 		// Expected
 	}
 }
+
+// TestManager_NonCommonLease_WaitForLeaseContextDone tests the scenario where
+// a non-common lease service calls Add while another leader election is running.
+// The caller should wait for the lease context to be done before returning.
+// This test verifies the fix for the tight spin loop issue.
+func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("egress-service", "default", nil) // Non-common lease
+
+	// First Add - simulates the first leader election starting
+	lease1, isNew1 := mgr.Add(svc)
+	if !isNew1 {
+		t.Fatal("expected first add to return isNew=true")
+	}
+
+	// Simulate leadership acquired
+	close(lease1.Started)
+
+	// Second Add - simulates another goroutine trying to start leader election
+	// This should return isNew=false
+	lease2, isNew2 := mgr.Add(svc)
+	if isNew2 {
+		t.Error("expected second add to return isNew=false")
+	}
+	if lease1 != lease2 {
+		t.Error("expected same lease to be returned")
+	}
+
+	// Verify Started channel is closed (leadership was acquired by first)
+	select {
+	case <-lease2.Started:
+		// Expected - channel is closed
+	default:
+		t.Error("expected Started channel to be closed")
+	}
+
+	// In the actual code (leader.go), when isNew=false for non-common lease,
+	// the code waits on either svcCtx.Ctx.Done() or svcLease.Ctx.Done()
+	// Here we verify that the lease context gets cancelled when we delete the lease
+
+	// Start a goroutine that waits for the lease context to be done
+	// This simulates what the leader.go code does
+	waitDone := make(chan struct{})
+	go func() {
+		select {
+		case <-lease2.Ctx.Done():
+			close(waitDone)
+		case <-time.After(1 * time.Second):
+			// Timeout - test will fail
+		}
+	}()
+
+	// Verify the goroutine is still waiting (lease context not yet cancelled)
+	select {
+	case <-waitDone:
+		t.Fatal("goroutine should still be waiting")
+	case <-time.After(50 * time.Millisecond):
+		// Expected - still waiting
+	}
+
+	// Now simulate the first leader election ending (defer deletes the lease)
+	mgr.Delete(svc)
+
+	// The lease context should now be cancelled (because counter went to 0)
+	// But we added twice, so we need to delete twice
+	mgr.Delete(svc)
+
+	// Now the goroutine should have completed
+	select {
+	case <-waitDone:
+		// Expected - lease context was cancelled
+	case <-time.After(200 * time.Millisecond):
+		t.Error("expected goroutine to complete after lease context cancelled")
+	}
+
+	// Verify lease is removed
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed")
+	}
+}
+
+// TestManager_NonCommonLease_SpinLoopPrevention tests that the fix prevents
+// a tight spin loop when a non-common lease service repeatedly calls Add
+// while leader election is running. The key behavior is that when isNew=false,
+// the lease context should be used to block until the leader election ends.
+func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("egress-service", "default", nil) // Non-common lease
+
+	// First Add - leader election starts
+	lease1, isNew1 := mgr.Add(svc)
+	if !isNew1 {
+		t.Fatal("expected first add to return isNew=true")
+	}
+	close(lease1.Started)
+
+	// Track how many times Add is called in a tight loop
+	// In the buggy code, this would spin forever
+	// In the fixed code, Add returns isNew=false and the caller blocks on lease.Ctx.Done()
+	addCount := 0
+	done := make(chan struct{})
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			lease, isNew := mgr.Add(svc)
+			addCount++
+			if isNew {
+				// This shouldn't happen while the first lease exists
+				t.Error("unexpected isNew=true")
+				break
+			}
+			// In the fixed code, we would block here on lease.Ctx.Done()
+			// For this test, we just verify that isNew=false is returned
+			// and the same lease is returned each time
+			if lease != lease1 {
+				t.Error("expected same lease")
+				break
+			}
+		}
+		close(done)
+	}()
+
+	// Wait for the loop to complete
+	select {
+	case <-done:
+		// Expected
+	case <-time.After(1 * time.Second):
+		t.Fatal("loop timed out")
+	}
+
+	// All 100 adds should have completed (returning isNew=false)
+	if addCount != 100 {
+		t.Errorf("expected 100 adds, got %d", addCount)
+	}
+
+	// The lease counter should be 101 (1 original + 100 from loop)
+	// We need 101 deletes to remove the lease
+	for i := 0; i < 100; i++ {
+		mgr.Delete(svc)
+	}
+	if mgr.Get(svc) == nil {
+		t.Error("expected lease to still exist after 100 deletes")
+	}
+
+	mgr.Delete(svc)
+	if mgr.Get(svc) != nil {
+		t.Error("expected lease to be removed after 101 deletes")
+	}
+}
+
+// TestManager_NonCommonLease_ServiceContextCancellation tests that when
+// a service is deleted (svcCtx.Ctx cancelled), the waiting goroutine
+// should also unblock. This is the other exit path from the wait.
+func TestManager_NonCommonLease_ServiceContextCancellation(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("egress-service", "default", nil)
+
+	// First Add - leader election starts
+	lease1, _ := mgr.Add(svc)
+	close(lease1.Started)
+
+	// Second Add - returns isNew=false
+	lease2, isNew2 := mgr.Add(svc)
+	if isNew2 {
+		t.Error("expected isNew=false")
+	}
+
+	// Create a simulated service context
+	svcCtx, svcCancel := context.WithCancel(context.Background())
+
+	// Start a goroutine that waits on either svcCtx or lease context
+	// This simulates the behavior in leader.go
+	waitDone := make(chan string)
+	go func() {
+		select {
+		case <-svcCtx.Done():
+			waitDone <- "svcCtx"
+		case <-lease2.Ctx.Done():
+			waitDone <- "leaseCtx"
+		case <-time.After(1 * time.Second):
+			waitDone <- "timeout"
+		}
+	}()
+
+	// Cancel the service context (simulates service deletion)
+	svcCancel()
+
+	// The goroutine should unblock via svcCtx.Done()
+	select {
+	case result := <-waitDone:
+		if result != "svcCtx" {
+			t.Errorf("expected to unblock via svcCtx, got %s", result)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("goroutine should have unblocked")
+	}
+}

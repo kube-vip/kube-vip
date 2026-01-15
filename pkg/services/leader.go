@@ -81,11 +81,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			return nil
 		}
 
-		// Only services using the common lease feature should sync and wait here
-		// Non-common lease services should return immediately to allow the restart loop
-		// to handle the leader election restart
+		// For non-common lease services, we need to wait for the existing leader election
+		// to finish before returning. This prevents a infinite loop in startLeaderElection.
+		// The lease context will be cancelled when RunOrDie returns and the defer deletes the lease.
 		if !lease.UsesCommon(service) {
-			log.Debug("lease already exists for non-common service, returning", "service", service.Name, "uid", service.UID)
+			log.Debug("lease already exists for non-common service, waiting for it to finish", "service", service.Name, "uid", service.UID)
+			// Wait for either the service context or lease context to be done
+			select {
+			case <-svcCtx.Ctx.Done():
+				// Service was deleted
+			case <-svcLease.Ctx.Done():
+				// Leader election ended (leadership lost or context cancelled)
+			}
 			return nil
 		}
 
