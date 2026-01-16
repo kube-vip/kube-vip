@@ -16,8 +16,9 @@ TARGETOS=linux
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
+GO_VERSION := 1.25.5
 
-.PHONY: all build clean install uninstall simplify check run e2e-tests
+.PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
 
 all: check install
 
@@ -127,10 +128,16 @@ manifest-test:
 	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster
 
 unit-tests:
-	go test ./...
+	go test -race ./...
+
+unit-tests-docker:
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make unit-tests
 
 integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
+
+integration-tests-docker:
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make integration-tests
 
 e2e-tests:
 	docker pull ghcr.io/traefik/whoami:v1.11

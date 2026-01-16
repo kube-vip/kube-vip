@@ -58,34 +58,54 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		},
 	}
 
+	// Start a goroutine that will delete the lease when the service context is cancelled.
+	// This is important for proper cleanup when a service is deleted - it ensures that
+	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
+	// Without this, RunOrDie would continue running until leadership is naturally lost.
 	go func() {
-		// wait for the service context to end and delete the lease then
 		<-svcCtx.Ctx.Done()
 		p.leaseMgr.Delete(service)
 	}()
 
 	svcLease, isNew := p.leaseMgr.Add(service)
-	// this service is sharing lease
+	// this service is sharing lease with another service for the common lease feature
 	if !isNew {
 		// wait for leader election to start or context to be done
 		select {
 		case <-svcLease.Started:
 		case <-svcLease.Ctx.Done():
+			// Lease was cancelled (e.g., leader election ended), return immediately
+			// This allows the restart loop to create a fresh lease
+			log.Debug("lease context cancelled before leader election started", "service", service.Name, "uid", service.UID)
 			svcCtx.IsActive = false
 			return nil
 		}
 
-		if lease.UsesCommon(service) && !svcCtx.IsActive {
+		// For non-common lease services, we need to wait for the existing leader election
+		// to finish before returning. This prevents a infinite loop in startLeaderElection.
+		// The lease context will be cancelled when RunOrDie returns and the defer deletes the lease.
+		if !lease.UsesCommon(service) {
+			log.Debug("lease already exists for non-common service, waiting for it to finish", "service", service.Name, "uid", service.UID)
+			// Wait for either the service context or lease context to be done
+			select {
+			case <-svcCtx.Ctx.Done():
+				// Service was deleted
+			case <-svcLease.Ctx.Done():
+				// Leader election ended (leadership lost or context cancelled)
+			}
+			return nil
+		}
+
+		// Common lease handling: sync the service and wait for context cancellation
+		if !svcCtx.IsActive {
 			if err := p.SyncServices(svcCtx, service); err != nil {
 				log.Error("service sync", "err", err, "uid", service.UID)
 				svcLease.Cancel()
 			}
 			svcCtx.IsActive = true
-			// just block until context is cancelled
-			<-svcCtx.Ctx.Done()
 		}
 
-		// wait for service context to finish
+		// Block until service context is cancelled
 		<-svcCtx.Ctx.Done()
 
 		if svcCtx.IsActive {
@@ -102,6 +122,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 		return nil
 	}
+
+	// For new leases (not shared), ensure cleanup when the leader election ends
+	// This is critical for the restartable service watcher to be able to restart
+	// the leader election after leadership loss
+	defer func() {
+		// Delete the lease from the manager so subsequent calls can create a fresh lease
+		// This handles the case where leader election ends due to:
+		// 1. Leadership loss (e.g., network timeout)
+		// 2. Context cancellation
+		// 3. Any other reason RunOrDie returns
+		p.leaseMgr.Delete(service)
+	}()
 
 	// start the leader election code loop
 	leaderelection.RunOrDie(svcLease.Ctx, leaderelection.LeaderElectionConfig{

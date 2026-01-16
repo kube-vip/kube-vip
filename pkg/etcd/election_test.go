@@ -27,6 +27,12 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 	electionName := randomElectionNameForTest("memberIDConflict")
 	log.Printf("Election name %s\n", electionName)
 	memberCtx, cancelMember1 := context.WithCancel(ctx)
+
+	// Use a channel to signal when the first member has observed a new leader
+	// This ensures proper ordering without relying on sleep timing
+	firstMemberObservedLeader := make(chan struct{})
+	var firstMemberObservedOnce sync.Once
+
 	config := &etcd.LeaderElectionConfig{
 		EtcdConfig: etcd.ClientConfig{
 			Client: cli,
@@ -42,6 +48,11 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 			},
 			OnNewLeader: func(identity string) {
 				log.Printf("New leader: %s\n", identity)
+				// Signal that the first member has observed a leader
+				// This means the lease has been created
+				firstMemberObservedOnce.Do(func() {
+					close(firstMemberObservedLeader)
+				})
 			},
 			OnStoppedLeading: func() {
 				log.Println("I'm not the leader anymore")
@@ -59,8 +70,18 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		time.Sleep(time.Millisecond * 100) // make sure the first one becomes leader
-		g.Expect(etcd.RunElection(ctx, config)).Should(MatchError(ContainSubstring("creating lease")))
+		// Wait for the first member to observe a leader, which means the lease has been created
+		select {
+		case <-firstMemberObservedLeader:
+			// First member has created the lease, now try to create a conflicting one
+		case <-time.After(5 * time.Second):
+			t.Error("timeout waiting for first member to observe leader")
+			return
+		}
+		// Use a cancellable context to prevent hanging if this goroutine unexpectedly succeeds
+		member2Ctx, cancelMember2 := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelMember2()
+		g.Expect(etcd.RunElection(member2Ctx, config)).Should(MatchError(ContainSubstring("creating lease")))
 	}()
 
 	wg.Wait()

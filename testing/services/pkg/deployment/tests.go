@@ -221,6 +221,9 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	if err != nil {
 		return err
 	}
+	if len(lbAddresses) == 0 {
+		return fmt.Errorf("no load balancer address found for service %s", config.ServiceName)
+	}
 	lbAddress := lbAddresses[0]
 
 	err = leaderFailover(ctx, &config.ServiceName, &leader, clientset)
@@ -349,6 +352,9 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 		_, lbAddresses, err := svc.CreateService(ctx, clientset)
 		if err != nil {
 			return err
+		}
+		if len(lbAddresses) == 0 {
+			return fmt.Errorf("no load balancer address found for service %s-%d", config.ServiceName, i)
 		}
 		lbAddress := lbAddresses[0]
 
