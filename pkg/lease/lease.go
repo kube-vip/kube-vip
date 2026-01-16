@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	v1 "k8s.io/api/core/v1"
@@ -22,29 +23,37 @@ func NewManager() *Manager {
 	}
 }
 
-// Add adds lease or incerements counter if lease is alreay used.
-func (m *Manager) Add(service *v1.Service) (*Lease, bool) {
+// Add adds lease to the manager.
+// It returns three values:
+// - lease for the service
+// - newService, which reports if it is a new service that is being handled
+// - sharedLease, which is true if service shares the lease with another service
+// If service is new but not shared, we should start leaderelection and sync it
+// If service is new and shared, we should only sync it as the leaderelection should be already handled
+// If service is not new we should do nothing
+func (m *Manager) Add(service *v1.Service) (lease *Lease, newService bool, sharedLease bool) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	_, id := GetName(service)
-	if _, exist := m.leases[id]; !exist {
+
+	if _, sharedLease = m.leases[id]; !sharedLease {
 		ctx, cancel := context.WithCancel(context.Background())
 		m.leases[id] = newLease(ctx, cancel)
-		return m.leases[id], true
 	}
-
-	m.leases[id].increment()
-	return m.leases[id], false
+	lease = m.leases[id]
+	newService = m.leases[id].add(namespacedName(service))
+	return
 }
 
-// Delete decrements lease counter and removes the lease if counter equals 0.
+// Delete removes the lease and cancels it if the lease counter equals 0.
 func (m *Manager) Delete(service *v1.Service) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	_, id := GetName(service)
 	if _, exist := m.leases[id]; exist {
-		m.leases[id].decrement()
-		if m.leases[id].cnt < 1 {
+		m.leases[id].delete(namespacedName(service))
+		if m.leases[id].cnt.Load() < 1 {
+			m.leases[id].Cancel()
 			delete(m.leases, id)
 		}
 	}
@@ -64,38 +73,40 @@ func (m *Manager) Get(service *v1.Service) *Lease {
 
 // Lease holds lease data.
 type Lease struct {
-	cnt     uint
-	Lock    *sync.Mutex
-	Ctx     context.Context
-	Cancel  context.CancelFunc
-	Started chan any
+	Lock     sync.Mutex
+	Ctx      context.Context
+	Cancel   context.CancelFunc
+	Started  chan any
+	services sync.Map
+	cnt      atomic.Int64
 }
 
 func newLease(ctx context.Context, cancel context.CancelFunc) *Lease {
 	return &Lease{
-		Ctx:     ctx,
-		Cancel:  cancel,
-		cnt:     1,
-		Lock:    new(sync.Mutex),
-		Started: make(chan any),
+		Ctx:      ctx,
+		Cancel:   cancel,
+		Started:  make(chan any),
+		services: sync.Map{},
+		cnt:      atomic.Int64{},
 	}
 }
 
-func (l *Lease) increment() {
-	l.Lock.Lock()
-	defer l.Lock.Unlock()
-	l.cnt++
+// add adds the service to the lease and increments counter
+// it will return true if service was added
+func (l *Lease) add(service string) bool {
+	if _, exists := l.services.Load(service); !exists {
+		l.services.Store(service, true)
+		l.cnt.Add(1)
+		return true
+	}
+	return false
 }
 
-func (l *Lease) decrement() {
-	l.Lock.Lock()
-	defer l.Lock.Unlock()
-	if l.cnt == 0 {
-		return
-	}
-	l.cnt--
-	if l.cnt < 1 {
-		l.Cancel()
+// delete removes the service from the lease and decrements the counter
+func (l *Lease) delete(service string) {
+	if _, exists := l.services.Load(service); exists {
+		l.services.Delete(service)
+		l.cnt.Add(-1)
 	}
 }
 
@@ -109,8 +120,6 @@ func GetName(service *v1.Service) (string, string) {
 	return serviceLease, serviceLeaseID
 }
 
-// UsesCommon checks if service uses common lease feature.
-func UsesCommon(service *v1.Service) bool {
-	_, common := service.Annotations[kubevip.ServiceLease]
-	return common
+func namespacedName(service *v1.Service) string {
+	return fmt.Sprintf("%s/%s", service.Namespace, service.Name)
 }

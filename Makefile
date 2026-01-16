@@ -157,7 +157,7 @@ e2e-tests129-bgp:
 
 e2e-tests129: e2e-tests129-arp e2e-tests129-rt e2e-tests129-bgp
 
-service-tests: 
+service-tests:
 	$(MAKE) -C testing/e2e/e2e dockerLocal
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
 

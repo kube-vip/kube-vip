@@ -216,6 +216,12 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					}
 
 					go func() {
+						defer func() {
+							if svcCtx != nil {
+								svcCtx.IsWatched = false
+							}
+						}()
+
 						if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
 							// Add Endpoint or EndpointSlices watcher
 							var provider providers.Provider
@@ -240,6 +246,12 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 
 				go func() {
+					defer func() {
+						if svcCtx != nil {
+							svcCtx.IsWatched = false
+						}
+					}()
+
 					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 						// Add Endpoint watcher
 						var provider providers.Provider
@@ -256,7 +268,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// We're now watching this service
 				svcCtx.IsWatched = true
 			} else {
-
 				go func() {
 					for {
 						select {
@@ -271,10 +282,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 								if err != nil {
 									log.Error(err.Error())
 								}
+								log.Info("(svcs) restartable service watcher done", "uid", svc.UID)
 							}
 						}
 					}
-
 				}()
 			}
 		} else {

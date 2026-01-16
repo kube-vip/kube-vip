@@ -3,6 +3,9 @@ package servicecontext
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+
+	"github.com/kube-vip/kube-vip/pkg/lease"
 )
 
 type Context struct {
@@ -11,6 +14,8 @@ type Context struct {
 	IsActive           bool
 	IsWatched          bool
 	ConfiguredNetworks sync.Map
+	Lease              *lease.Lease
+	HasEndpoints       atomic.Bool
 }
 
 func New(ctx context.Context) *Context {
