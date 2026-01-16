@@ -2,12 +2,17 @@ package manager
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"syscall"
 	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
+	"github.com/vishvananda/netlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -28,15 +33,22 @@ func (sm *Manager) startWireguard(id string) error {
 		return err
 	}
 	// parse all the details needed for Wireguard
-	peerPublicKey := s.Data["peerPublicKey"]
-	peerEndpoint := s.Data["peerEndpoint"]
-	privateKey := s.Data["privateKey"]
-
-	// Configure the interface to join the Wireguard VPN
-	err = wireguard.ConfigureInterface(string(privateKey), string(peerPublicKey), string(peerEndpoint))
-	if err != nil {
-		return err
+	peerPublicKey := string(s.Data["peerPublicKey"])
+	peerEndpoint := string(s.Data["peerEndpoint"])
+	privateKey := string(s.Data["privateKey"])
+	allowedIPs := string(s.Data["allowedIPs"])
+	routes := string(s.Data["routes"])
+	cfg := wireguard.WGConfig{
+		PrivateKey:    privateKey,
+		PeerPublicKey: peerPublicKey,
+		PeerEndpoint:  peerEndpoint,
+		InterfaceName: "wg0",
+		Address:       sm.config.VIP,
+		KeepAlive:     time.Duration(5) * time.Second,
+		AllowedIPs:    strings.Split(allowedIPs, ","),
+		Routes:        strings.Split(routes, ","),
 	}
+	wg := wireguard.NewWireGuard(cfg)
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go func() {
@@ -63,13 +75,11 @@ func (sm *Manager) startWireguard(id string) error {
 
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
-	if sm.config.EnableServicesElection {
-		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
-		if err != nil {
-			return err
+	if sm.config.EnableControlPlane {
+		nodeIP := os.Getenv("NODE_IP")
+		if nodeIP == "" {
+			return fmt.Errorf("NODE_IP not set via Downward API")
 		}
-	} else {
 
 		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
@@ -100,10 +110,20 @@ func (sm *Manager) startWireguard(id string) error {
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
-					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
+					log.Info("started leading", "id", id)
+					err = wg.Up()
 					if err != nil {
-						log.Error(err.Error())
+						log.Error("could not start wireguard", "err", err)
+						_ = wg.Down()
 						panic("")
+					}
+
+					log.Info("starting dnat", "nodeIP", nodeIP, "vipIP", cfg.Address)
+					// if wireguard was successful, parse is already validated
+					addr, _ := netlink.ParseAddr(cfg.Address)
+					err = nftables.ApplyAPIServerDNAT(cfg.InterfaceName, addr.IP.String(), nodeIP, 6443, "controlplane", false)
+					if err != nil {
+						log.Error("could not apply DNAT rules", "err", err)
 					}
 				},
 				OnStoppedLeading: func() {
@@ -111,7 +131,15 @@ func (sm *Manager) startWireguard(id string) error {
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
 					log.Info("leader lost", "id", id)
-					sm.svcProcessor.Stop()
+					err = nftables.DeleteIngressChains(false, "controlplane")
+					if err != nil {
+						log.Error("could not delete DNAT ingress chains", "err", err)
+					}
+
+					err = wg.Down()
+					if err != nil {
+						log.Error(err.Error(), "id", id)
+					}
 
 					log.Error("lost leadership, restarting kube-vip")
 					panic("")
@@ -122,10 +150,13 @@ func (sm *Manager) startWireguard(id string) error {
 						// I just got the lock
 						return
 					}
+					// safety check
+					_ = wg.Down()
 					log.Info("new leader elected", "id", identity)
 				},
 			},
 		})
 	}
+
 	return nil
 }
