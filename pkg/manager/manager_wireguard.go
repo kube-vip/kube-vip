@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -14,16 +15,16 @@ import (
 )
 
 // Start will begin the Manager, which will start services and watch the configmap
-func (sm *Manager) startWireguard(id string) error {
+func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	var ns string
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
+	wgCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	log.Info("reading wireguard peer configuration from Kubernetes secret")
-	s, err := sm.clientSet.CoreV1().Secrets(sm.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})
+	s, err := sm.clientSet.CoreV1().Secrets(sm.config.Namespace).Get(wgCtx, "wireguard", metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -38,22 +39,10 @@ func (sm *Manager) startWireguard(id string) error {
 		return err
 	}
 
+	var closing atomic.Bool
+
 	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go func() {
-		for {
-			sig := <-sm.signalChan
-			switch sig {
-			case syscall.SIGUSR1:
-				log.Info("Received SIGUSR1, dumping configuration")
-				sm.dumpConfiguration()
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Info("Received termination, signaling shutdown")
-				// Cancel the context, which will in turn cancel the leadership
-				cancel()
-				return
-			}
-		}
-	}()
+	go sm.waitForShutdown(wgCtx, cancel, nil)
 
 	ns, err = returnNameSpace()
 	if err != nil {
@@ -65,12 +54,11 @@ func (sm *Manager) startWireguard(id string) error {
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
-		err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+		err = sm.svcProcessor.StartServicesWatchForLeaderElection(wgCtx)
 		if err != nil {
 			return err
 		}
 	} else {
-
 		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
@@ -86,7 +74,7 @@ func (sm *Manager) startWireguard(id string) error {
 		}
 
 		// start the leader election code loop
-		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		leaderelection.RunOrDie(wgCtx, leaderelection.LeaderElectionConfig{
 			Lock: lock,
 			// IMPORTANT: you MUST ensure that any code you have that
 			// is protected by the lease must terminate **before**
@@ -103,7 +91,9 @@ func (sm *Manager) startWireguard(id string) error {
 					err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
 					if err != nil {
 						log.Error(err.Error())
-						panic("")
+						if !closing.Load() {
+							sm.signalChan <- syscall.SIGINT
+						}
 					}
 				},
 				OnStoppedLeading: func() {
@@ -113,8 +103,10 @@ func (sm *Manager) startWireguard(id string) error {
 					log.Info("leader lost", "id", id)
 					sm.svcProcessor.Stop()
 
-					log.Error("lost leadership, restarting kube-vip")
-					panic("")
+					log.Error("lost services leadership, restarting kube-vip")
+					if !closing.Load() {
+						sm.signalChan <- syscall.SIGINT
+					}
 				},
 				OnNewLeader: func(identity string) {
 					// we're notified when new leader elected
@@ -127,5 +119,9 @@ func (sm *Manager) startWireguard(id string) error {
 			},
 		})
 	}
+
+	<-sm.shutdownChan
+	log.Info("Shutting down Kube-Vip")
+
 	return nil
 }

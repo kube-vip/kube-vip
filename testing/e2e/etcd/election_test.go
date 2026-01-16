@@ -42,7 +42,9 @@ func (t *testConfig) cleanup() {
 }
 
 var _ = Describe("kube-vip with etcd leader election", func() {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
+
 	test := &testConfig{}
 
 	AfterEach(func() {

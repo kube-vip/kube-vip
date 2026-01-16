@@ -25,7 +25,7 @@ import (
 
 // This file handles the watching of node annotations for configuration, it will exit once the annotations are
 // present
-func (sm *Manager) annotationsWatcher() error {
+func (sm *Manager) annotationsWatcher(ctx context.Context) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is waiting for annotation prefix to be present on this node", "prefix", sm.config.Annotations)
 
@@ -36,7 +36,7 @@ func (sm *Manager) annotationsWatcher() error {
 
 	// First we'll check the annotations for the node and if
 	// they aren't what are expected, we'll drop into the watch until they are
-	nodeList, err := sm.clientSet.CoreV1().Nodes().List(context.Background(), listOptions)
+	nodeList, err := sm.clientSet.CoreV1().Nodes().List(ctx, listOptions)
 	if err != nil {
 		return err
 	}
@@ -57,30 +57,21 @@ func (sm *Manager) annotationsWatcher() error {
 	// they're as needed
 	log.Warn(err.Error())
 
-	// TODO, will need refactoring as part of rikatz work
-	rw, err := watchtools.NewRetryWatcherWithContext(context.TODO(), node.ResourceVersion, &cache.ListWatch{
+	watcherCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	rw, err := watchtools.NewRetryWatcherWithContext(watcherCtx, node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.rwClientSet.CoreV1().Nodes().Watch(context.Background(), listOptions)
+			return sm.rwClientSet.CoreV1().Nodes().Watch(watcherCtx, listOptions)
 		},
 	})
+
 	if err != nil {
 		return fmt.Errorf("error creating annotations watcher: %s", err.Error())
 	}
 
-	exitFunction := make(chan struct{})
-	go func() {
-		select {
-		case <-sm.shutdownChan:
-			log.Debug("[annotations] shutdown called")
-			// Stop the retry watcher
-			rw.Stop()
-			return
-		case <-exitFunction:
-			log.Debug("[annotations] function ending")
-			// Stop the retry watcher
-			rw.Stop()
-			return
-		}
+	defer func() {
+		rw.Stop()
+		log.Debug("[annotations] watcher stopped")
 	}()
 
 	ch := rw.ResultChan()
@@ -103,7 +94,8 @@ func (sm *Manager) annotationsWatcher() error {
 			sm.config.BGPConfig = bgpConfig
 			sm.config.BGPPeerConfig = bgpPeer
 
-			rw.Stop()
+			log.Info("[annotations] exiting Annotations watcher - annotations found")
+			return nil
 		case watch.Deleted:
 			node, ok := event.Object.(*v1.Node)
 			if !ok {
@@ -130,10 +122,8 @@ func (sm *Manager) annotationsWatcher() error {
 		default:
 		}
 	}
-	close(exitFunction)
-	log.Info("Exiting Annotations watcher")
+	log.Info("[annotations] exiting annotations watcher")
 	return nil
-
 }
 
 // parseNodeAnnotations parses the annotations on the node and updates the configuration

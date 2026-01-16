@@ -2,6 +2,7 @@ package manager
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"testing"
@@ -36,7 +37,7 @@ func TestDumpConfiguration(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	mgr.dumpConfiguration()
+	mgr.dumpConfiguration(context.TODO())
 
 	w.Close()
 	os.Stdout = old

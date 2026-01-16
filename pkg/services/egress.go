@@ -135,7 +135,7 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
+func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -147,7 +147,7 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 	internalEgress := annotations[kubevip.EgressInternal]
 
 	if p.config.EgressPodCidr == "" || p.config.EgressServiceCidr == "" {
-		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs()
+		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs(ctx)
 	}
 
 	if discoverErr != nil {
@@ -331,12 +331,12 @@ func (p *Processor) configureEgress(vipIP, podIP, namespace, serviceUUID string,
 	return nil
 }
 
-func (p *Processor) AutoDiscoverCIDRs() (serviceCIDR, podCIDR string, err error) {
+func (p *Processor) AutoDiscoverCIDRs(ctx context.Context) (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
 	options := v1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
-	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(context.TODO(), options)
+	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(ctx, options)
 	if err != nil {
 		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
 	}

@@ -250,8 +250,11 @@ var kubeVipService = &cobra.Command{
 			return
 		}
 
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
-		err = mgr.Start()
+		err = mgr.Start(ctx)
 		if err != nil {
 			log.Error("manager start", "err", err)
 			return
@@ -299,9 +302,13 @@ var kubeVipManager = &cobra.Command{
 		// Welome messages
 		log.Info("kube-vip.io", "version", Release.Version, "build", Release.Build)
 
+		// create main manager context
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
-			go servePrometheusHTTPServer(cmd.Context(), PrometheusHTTPServerConfig{
+			go servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
 				Addr: initConfig.PrometheusHTTPServer,
 			})
 		}
@@ -387,7 +394,7 @@ var kubeVipManager = &cobra.Command{
 				log.Info("kube-vip bind", "interface", initConfig.Interface)
 
 				go func() {
-					if err := vip.MonitorDefaultInterface(context.TODO(), defaultIF); err != nil {
+					if err := vip.MonitorDefaultInterface(ctx, defaultIF); err != nil {
 
 						log.Error("interface monitor", "err", err)
 						return
@@ -417,7 +424,7 @@ var kubeVipManager = &cobra.Command{
 		prometheus.MustRegister(mgr.PrometheusCollector()...)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
-		err = mgr.Start()
+		err = mgr.Start(ctx)
 		if err != nil {
 			log.Error("start manager", "err", err)
 			return
@@ -464,6 +471,7 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 
 	log.Info("prometheus HTTP server stopped")
 
+	// create prometheus shutdown context (independent of other contexts)
 	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer func() {
 		cancel()

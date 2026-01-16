@@ -12,7 +12,7 @@ import (
 )
 
 // dumpConfiguration prints the current configuration to stdout when SIGUSR1 is received
-func (sm *Manager) dumpConfiguration() {
+func (sm *Manager) dumpConfiguration(ctx context.Context) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
@@ -29,7 +29,7 @@ func (sm *Manager) dumpConfiguration() {
 	sm.dumpConfigSection()
 	sm.dumpBGPSection()
 	sm.dumpARPSection()
-	sm.dumpServicesSection()
+	sm.dumpServicesSection(ctx)
 	sm.dumpNetworkInterfacesSection()
 	sm.dumpLeaderElectionSection()
 	sm.dumpRuntimeSection()
@@ -89,7 +89,7 @@ func (sm *Manager) dumpARPSection() {
 	fmt.Printf("\n")
 }
 
-func (sm *Manager) dumpServicesSection() {
+func (sm *Manager) dumpServicesSection(ctx context.Context) {
 	fmt.Printf("--- SERVICES CONFIGURATION ---\n")
 	fmt.Printf("Services Enabled: %t\n", sm.config.EnableServices)
 	if sm.config.EnableServices {
@@ -124,7 +124,7 @@ func (sm *Manager) dumpServicesSection() {
 			fmt.Println("--- KUBERNETES CONFIGURATION (SERVICES/ENDPOINTSLICES) ---")
 
 			fmt.Println("Service Configuration:")
-			svcList, err := sm.clientSet.CoreV1().Services(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+			svcList, err := sm.clientSet.CoreV1().Services(v1.NamespaceAll).List(ctx, metav1.ListOptions{})
 			if err != nil {
 				fmt.Println("Unable to retrieve all Services")
 			} else {
@@ -144,7 +144,7 @@ func (sm *Manager) dumpServicesSection() {
 			}
 
 			fmt.Println("EndpointSlice Configuration (note endpoint names have -XXXXX prefixed):")
-			epList, err := sm.clientSet.DiscoveryV1().EndpointSlices(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+			epList, err := sm.clientSet.DiscoveryV1().EndpointSlices(v1.NamespaceAll).List(ctx, metav1.ListOptions{})
 			if err != nil {
 				fmt.Println("Unable to retrieve all EndpointSlices")
 			} else {
