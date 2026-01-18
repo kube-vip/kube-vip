@@ -38,7 +38,6 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	peerEndpoint := string(s.Data["peerEndpoint"])
 	privateKey := string(s.Data["privateKey"])
 	allowedIPs := string(s.Data["allowedIPs"])
-	routes := string(s.Data["routes"])
 	cfg := wireguard.WGConfig{
 		PrivateKey:    privateKey,
 		PeerPublicKey: peerPublicKey,
@@ -47,7 +46,6 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 		Address:       sm.config.VIP,
 		KeepAlive:     time.Duration(5) * time.Second,
 		AllowedIPs:    strings.Split(allowedIPs, ","),
-		Routes:        strings.Split(routes, ","),
 	}
 	wg := wireguard.NewWireGuard(cfg)
 

@@ -21,7 +21,6 @@ type WGConfig struct {
 	AllowedIPs    []string // CIDRs allowed through tunnel
 	ListenPort    int
 	KeepAlive     time.Duration
-	Routes        []string // CIDRs to route via wg
 }
 
 type WireGuard struct {
@@ -93,6 +92,10 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to parse address: %s, %v", w.cfg.Address, err)
 	}
 
+	if err = netlink.LinkSetMTU(link, 1420); err != nil {
+		return fmt.Errorf("failed to set mtu", err)
+	}
+
 	err = netlink.AddrAdd(link, addr)
 	if err != nil {
 		return fmt.Errorf("could not add address to link: %v", err)
@@ -157,7 +160,7 @@ func (w *WireGuard) configurePeer() error {
 
 // AddRoutes creates the routes for the VIP/public IPs via the wg interface
 func (w *WireGuard) addRoutes() error {
-	for _, cidr := range w.cfg.Routes {
+	for _, cidr := range w.cfg.AllowedIPs {
 		_, dstNet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			return fmt.Errorf("invalid route CIDR %s: %v", cidr, err)
@@ -176,7 +179,7 @@ func (w *WireGuard) addRoutes() error {
 
 // RemoveRoutes deletes the previously added routes
 func (w *WireGuard) removeRoutes() error {
-	for _, cidr := range w.cfg.Routes {
+	for _, cidr := range w.cfg.AllowedIPs {
 		_, dstNet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			log.Error("invalid route CIDR, skipping", "cidr", cidr, "err", err)
