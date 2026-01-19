@@ -25,17 +25,17 @@ jobs:
         run: make dockerx86Local
       - name: Run Manifest generation tests
         run: make manifest-test
-      - name: Run ARP mode tests v1.29.0 onwards
-        run: E2E_KEEP_LOGS=true make e2e-tests129-arp
+      - name: Run ARP mode tests
+        run: E2E_KEEP_LOGS=true make e2e-tests-arp
         if: matrix.mode== 'arp'
-      - name: Run RT mode tests v1.29.0 onwards
-        run: E2E_KEEP_LOGS=true make e2e-tests129-rt
+      - name: Run RT mode tests
+        run: E2E_KEEP_LOGS=true make e2e-tests-rt
         if: matrix.mode== 'rt'
       - name: Get GoBGP binaries
         run: make get-gobgp
         if: matrix.mode== 'bgp'
-      - name: Run BGP mode tests v1.29.0 onwards
-        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests129-bgp
+      - name: Run BGP mode tests
+        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-bgp
         if: matrix.mode== 'bgp'
       - name: Change log directory permissions
         run: sudo chmod -R 755 /tmp/kube-vip-test-${{ matrix.mode }}*
