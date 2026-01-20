@@ -123,8 +123,16 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 		defer close(cluster.completed)
 	}
 
+	if cluster.stop == nil {
+		cluster.stop = make(chan bool, 1)
+	}
+
 	go func() {
-		<-signalChan
+		select {
+		case <-signalChan:
+		case <-cluster.stop:
+		}
+
 		log.Info("Received termination, signaling cluster shutdown")
 		// Cancel the leader context, which will in turn cancel the leadership
 		leaderCancel()
