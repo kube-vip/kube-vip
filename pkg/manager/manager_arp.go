@@ -29,15 +29,17 @@ func (sm *Manager) startARP(ctx context.Context, id string) error {
 	log.Info("Start ARP/NDP advertisement")
 	go sm.arpMgr.StartAdvertisement(arpCtx)
 
-	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go sm.waitForShutdown(arpCtx, cancel, cpCluster)
-
 	if sm.config.EnableControlPlane {
 		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
 		if err != nil {
 			return err
 		}
+	}
 
+	// Shutdown function that will wait on this signal, unless we call it ourselves
+	go sm.waitForShutdown(arpCtx, cancel, cpCluster)
+
+	if sm.config.EnableControlPlane {
 		clusterManager, err := initClusterManager(sm)
 		if err != nil {
 			return err
