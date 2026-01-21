@@ -148,7 +148,7 @@ e2e-tests-bgp: get-whoami
 
 e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
 
-service-tests: 
+service-tests:
 	$(MAKE) -C testing/e2e/e2e dockerLocal
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
 
