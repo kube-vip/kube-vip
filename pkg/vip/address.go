@@ -31,16 +31,18 @@ const (
 
 	DefaultMaskIPv4 = 32
 	DefaultMaskIPv6 = 128
+
+	NoLifetime = 0
 )
 
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
-	AddIP(precheck bool, skipDAD bool) (bool, error)
+	AddIP(precheck bool, skipDAD bool, minLiftime int) (bool, error)
 	AddRoute(precheck bool) error
 	DeleteIP() (bool, error)
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
-	IsSet() (bool, error)
+	IsSet() (*netlink.Addr, error)
 	IP() string
 	CIDR() string
 	IPisLinkLocal() bool
@@ -359,18 +361,18 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 // AddIP - Add an IP address to the interface
 // precheck: if true, check if the IP already exists before adding
 // skipDAD: if true, set IFA_F_NODAD flag for IPv6 addresses to skip Duplicate Address Detection
-func (configurator *network) AddIP(precheck bool, skipDAD bool) (bool, error) {
+func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime int) (bool, error) {
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
-	exists := false
+	var existing *netlink.Addr
 	var err error
 	if precheck {
-		if exists, err = configurator.IsSet(); err != nil {
+		if existing, err = configurator.IsSet(); err != nil {
 			return false, errors.Wrap(err, "could not check if address exists")
 		}
 	}
 
-	if exists {
+	if existing != nil && existing.ValidLft > minLifetime {
 		return false, nil
 	}
 
@@ -383,6 +385,7 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool) (bool, error) {
 		log.Debug("Setting IFA_F_NODAD flag for IPv6 address to skip DAD", "ip", configurator.address.IP.String())
 	}
 
+	log.Debug("replacing IP", "address", configurator.address)
 	if err := netlink.AddrReplace(configurator.link.Intf, configurator.address); err != nil {
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", configurator.link.Intf.Attrs().Name))
 	}
@@ -555,7 +558,7 @@ func (configurator *network) DeleteIP() (bool, error) {
 	}
 
 	// Nothing to delete
-	if !result {
+	if result == nil {
 		return false, nil
 	}
 
@@ -670,31 +673,31 @@ func addressHasDADFAILEDFlag(address netlink.Addr) bool {
 }
 
 // isSet - Check to see if VIP is set
-func (configurator *network) IsSet() (result bool, err error) {
+func (configurator *network) IsSet() (result *netlink.Addr, err error) {
 	var addresses []netlink.Addr
 
 	if configurator.address == nil {
-		return false, nil
+		return nil, nil
 	}
 
 	if configurator.address.Mask == nil {
-		return false, nil
+		return nil, nil
 	}
 
 	addresses, err = netlink.AddrList(configurator.link.Intf, 0)
 	if err != nil {
 		err = errors.Wrap(err, "could not list addresses")
 
-		return false, err
+		return nil, err
 	}
 
 	for _, address := range addresses {
 		if address.Equal(*configurator.address) {
-			return true, nil
+			return &address, nil
 		}
 	}
 
-	return false, nil
+	return nil, nil
 }
 
 // SetIP updates the IP that is used

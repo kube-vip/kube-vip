@@ -17,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 
 	log "log/slog"
 
@@ -179,7 +180,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 				log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
 				// Force add the VIPs (this will work even if they exist due to the precheck logic)
 				for i := range cluster.Network {
-					added, err := cluster.Network[i].AddIP(true, false)
+					added, err := cluster.Network[i].AddIP(true, false, vip.NoLifetime)
 					if err != nil {
 						log.Error("failed to ensure VIP on leader takeover", "vip", cluster.Network[i].IP(), "err", err)
 					} else if added {
