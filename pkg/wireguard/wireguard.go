@@ -92,14 +92,50 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to parse address: %s, %v", w.cfg.Address, err)
 	}
 
-	if err = netlink.LinkSetMTU(link, 1420); err != nil {
-		return fmt.Errorf("failed to set mtu", err)
-	}
-
 	err = netlink.AddrAdd(link, addr)
 	if err != nil {
-		return fmt.Errorf("could not add address to link: %v", err)
+		return fmt.Errorf("could not add address to link: %s, %v", w.cfg.Address, err)
 	}
+
+	if err = netlink.LinkSetMTU(link, 1420); err != nil {
+		return fmt.Errorf("failed to set mtu %w", err)
+	}
+
+	mask := uint32(0xffffffff)
+	err = netlink.RuleAdd(&netlink.Rule{
+		Table:  w.cfg.ListenPort,
+		Mark:   uint32(w.cfg.ListenPort),
+		Mask:   &mask,
+		Invert: true,
+		Family: netlink.FAMILY_V4,
+		Goto:   -1,
+	})
+	if err != nil {
+		return fmt.Errorf("could not add mark rule to link: %v", err)
+	}
+
+	err = netlink.RuleAdd(&netlink.Rule{
+		Table:             0,
+		SuppressPrefixlen: 0,
+		Goto:              -1,
+	})
+	if err != nil {
+		return fmt.Errorf("could not add rule suppress_prefixlength to main table %w", err)
+	}
+
+	defaultRouteNet := &net.IPNet{
+		IP:   net.IPv4(0, 0, 0, 0),
+		Mask: net.CIDRMask(0, 32),
+	}
+	err = netlink.RouteAdd(&netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Table:     w.cfg.ListenPort,
+		Dst:       defaultRouteNet, // (0.0.0.0/0 or ::/0)
+	})
+	if err != nil {
+		return fmt.Errorf("could not add table to link: %v", err)
+	}
+
 	w.linkIndex = &link.Attrs().Index
 	log.Info("created link", "interface", w.cfg.InterfaceName)
 	return nil
@@ -147,6 +183,7 @@ func (w *WireGuard) configurePeer() error {
 		ListenPort:   &w.cfg.ListenPort,
 		ReplacePeers: true,
 		Peers:        []wgtypes.PeerConfig{peer},
+		FirewallMark: &w.cfg.ListenPort,
 	}
 
 	if err = client.ConfigureDevice(w.cfg.InterfaceName, conf); err != nil {
@@ -163,7 +200,8 @@ func (w *WireGuard) addRoutes() error {
 	for _, cidr := range w.cfg.AllowedIPs {
 		_, dstNet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			return fmt.Errorf("invalid route CIDR %s: %v", cidr, err)
+			log.Error("invalid route CIDR, skipping", "cidr", cidr, "err", err)
+			continue
 		}
 		route := netlink.Route{
 			LinkIndex: *w.linkIndex,
@@ -202,6 +240,14 @@ func (w *WireGuard) removeRoutes() error {
 	return nil
 }
 
+func (w *WireGuard) removeRules() error {
+	netlink.RuleDel(&netlink.Rule{
+		Table: w.cfg.ListenPort,
+		Goto:  -1,
+	})
+	return nil
+}
+
 // Teardown deletes the interface entirely (called on leadership loss)
 func (w *WireGuard) teardown() error {
 	if w.client != nil {
@@ -213,12 +259,19 @@ func (w *WireGuard) teardown() error {
 	if err := w.removeRoutes(); err != nil {
 		return fmt.Errorf("failed to remove routes: %v", err)
 	}
-	if w.linkIndex != nil {
-		if err := netlink.LinkDel(&netlink.GenericLink{LinkAttrs: netlink.LinkAttrs{Index: *w.linkIndex}}); err != nil {
-			return fmt.Errorf("failed to delete wg interface: %v", err)
+
+	if link, err := netlink.LinkByName(w.cfg.InterfaceName); err == nil {
+		if err = netlink.LinkDel(link); err != nil {
+			log.Error("failed to delete link", "err", err)
 		}
-		w.linkIndex = nil
 	}
+	w.linkIndex = nil
+
+	err := w.removeRules()
+	if err != nil {
+		log.Error("failed to remove rules", "err", err)
+	}
+
 	log.Info("tear down complete", "interface", w.cfg.InterfaceName)
 	return nil
 }
