@@ -39,22 +39,15 @@ func NewWireGuard(cfg WGConfig) *WireGuard {
 func (w *WireGuard) Up() error {
 	log.Info("bringing up wireguard interface", "interface", w.cfg.InterfaceName)
 	if err := w.createInterface(); err != nil {
+		_ = w.teardown()
 		return err
 	}
 	if err := w.configurePeer(); err != nil {
-		tdErr := w.teardown()
-		if tdErr != nil {
-			err := fmt.Errorf("failed to teardown wireguard interface: %v", tdErr)
-			return err
-		}
+		_ = w.teardown()
 		return err
 	}
 	if err := w.addRoutes(); err != nil {
-		tdErr := w.teardown()
-		if tdErr != nil {
-			err := fmt.Errorf("failed to teardown wireguard interface: %v", tdErr)
-			return err
-		}
+		_ = w.teardown()
 		return err
 	}
 	return nil
@@ -121,19 +114,6 @@ func (w *WireGuard) createInterface() error {
 	})
 	if err != nil {
 		return fmt.Errorf("could not add rule suppress_prefixlength to main table %w", err)
-	}
-
-	defaultRouteNet := &net.IPNet{
-		IP:   net.IPv4(0, 0, 0, 0),
-		Mask: net.CIDRMask(0, 32),
-	}
-	err = netlink.RouteAdd(&netlink.Route{
-		LinkIndex: link.Attrs().Index,
-		Table:     w.cfg.ListenPort,
-		Dst:       defaultRouteNet, // (0.0.0.0/0 or ::/0)
-	})
-	if err != nil {
-		return fmt.Errorf("could not add table to link: %v", err)
 	}
 
 	w.linkIndex = &link.Attrs().Index
@@ -205,6 +185,7 @@ func (w *WireGuard) addRoutes() error {
 		}
 		route := netlink.Route{
 			LinkIndex: *w.linkIndex,
+			Table:     w.cfg.ListenPort,
 			Dst:       dstNet,
 		}
 		log.Info("Added route", "dst", dstNet.String())
@@ -224,16 +205,16 @@ func (w *WireGuard) removeRoutes() error {
 			continue
 		}
 		if w.linkIndex == nil {
-			log.Error("link index is nil, skipping route removal", "cidr", cidr)
 			continue
 		}
 		route := netlink.Route{
 			LinkIndex: *w.linkIndex,
 			Dst:       dstNet,
+			Table:     w.cfg.ListenPort,
 		}
 		err = netlink.RouteDel(&route) // best effort
 		if err != nil {
-			return fmt.Errorf("failed to remove route %s: %v", cidr, err)
+			log.Error("failed to remove route", "cidr", cidr, "err", err)
 		}
 	}
 	log.Info("routes removed", "interface", w.cfg.InterfaceName)
