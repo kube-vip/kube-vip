@@ -5,12 +5,15 @@ import (
 	"sync/atomic"
 	"fmt"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	"github.com/vishvananda/netlink"
@@ -38,6 +41,18 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	peerEndpoint := string(s.Data["peerEndpoint"])
 	privateKey := string(s.Data["privateKey"])
 	allowedIPs := string(s.Data["allowedIPs"])
+	listenPort := string(s.Data["listenPort"])
+	if listenPort == "" {
+		listenPort = "51820"
+	}
+	port, err := strconv.Atoi(listenPort)
+	if err != nil {
+		return fmt.Errorf("failed to convert listenPort to integer: %w", err)
+	}
+	IPs := make([]string, 0)
+	for ip := range strings.SplitSeq(allowedIPs, ",") {
+		IPs = append(IPs, strings.TrimSpace(ip))
+	}
 	cfg := wireguard.WGConfig{
 		PrivateKey:    privateKey,
 		PeerPublicKey: peerPublicKey,
@@ -45,9 +60,16 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 		InterfaceName: "wg0",
 		Address:       sm.config.VIP,
 		KeepAlive:     time.Duration(5) * time.Second,
-		AllowedIPs:    strings.Split(allowedIPs, ","),
+		AllowedIPs:    IPs,
+		ListenPort:    port,
 	}
 	wg := wireguard.NewWireGuard(cfg)
+	signalChan := make(chan os.Signal, 1)
+
+	// Add Notification for Userland interrupt
+	signal.Notify(signalChan, syscall.SIGINT)
+	// Add Notification for SIGTERM (sent from Kubernetes)
+	signal.Notify(signalChan, syscall.SIGTERM)
 
 	var closing atomic.Bool
 
@@ -107,13 +129,17 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 						}
 					}
 
-					log.Info("starting dnat", "nodeIP", nodeIP, "vipIP", cfg.Address)
 					// if wireguard was successful, parse is already validated
 					addr, _ := netlink.ParseAddr(cfg.Address)
-					err = nftables.ApplyAPIServerDNAT(cfg.InterfaceName, addr.IP.String(), nodeIP, 6443, "controlplane", false)
+					lb, err := loadbalancer.NewIPVSLB(addr.IP.String(), 6443, "local", 10, cfg.InterfaceName, cancel, signalChan)
+
 					if err != nil {
-						log.Error("could not apply DNAT rules", "err", err)
+						log.Error("could not start ipvs", "err", err)
+						_ = wg.Down()
+						panic("could not start wireguard")
 					}
+
+					lb.AddBackend(nodeIP, 6443)
 				},
 				OnStoppedLeading: func() {
 					// we can do cleanup here
@@ -129,6 +155,7 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 					if err != nil {
 						log.Error(err.Error(), "id", id)
 					}
+					// TODO tear down IPVS
 
 					log.Error("lost services leadership, restarting kube-vip")
 					if !closing.Load() {

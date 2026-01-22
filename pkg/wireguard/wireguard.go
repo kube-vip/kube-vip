@@ -94,6 +94,8 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to set mtu %w", err)
 	}
 
+	// add rule to consult our routing table for IP packets without a special firewall mark
+	// all packets coming wireguard get that special firewall mark by wireguard itself
 	mask := uint32(0xffffffff)
 	err = netlink.RuleAdd(&netlink.Rule{
 		Table:  w.cfg.ListenPort,
