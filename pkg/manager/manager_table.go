@@ -45,9 +45,6 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 		log.Debug("IPtables rules cleaned on startup")
 	}
 
-	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go sm.waitForShutdown(rtCtx, cancel, cpCluster)
-
 	if sm.config.EnableControlPlane {
 		log.Debug("initCluster for ControlPlane")
 		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
@@ -56,6 +53,12 @@ func (sm *Manager) startTableMode(ctx context.Context, id string) error {
 			return fmt.Errorf("cluster initialization error: %w", err)
 		}
 		log.Debug("init of ControlPlane successful")
+	}
+
+	// Shutdown function that will wait on this signal, unless we call it ourselves
+	go sm.waitForShutdown(rtCtx, cancel, cpCluster)
+
+	if sm.config.EnableControlPlane {
 		log.Debug("init ClusterManager")
 		clusterManager, err := initClusterManager(sm)
 		if err != nil {
