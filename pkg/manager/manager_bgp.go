@@ -59,15 +59,17 @@ func (sm *Manager) startBGP(ctx context.Context) error {
 		}
 	}()
 
-	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go sm.waitForShutdown(bgpCtx, cancel, cpCluster)
-
 	if sm.config.EnableControlPlane {
 		cpCluster, err = cluster.InitCluster(sm.config, false, sm.intfMgr, sm.arpMgr)
 		if err != nil {
 			return err
 		}
+	}
 
+	// Shutdown function that will wait on this signal, unless we call it ourselves
+	go sm.waitForShutdown(bgpCtx, cancel, cpCluster)
+
+	if sm.config.EnableControlPlane {
 		clusterManager, err := initClusterManager(sm)
 		if err != nil {
 			return err
