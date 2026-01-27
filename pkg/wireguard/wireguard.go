@@ -60,6 +60,11 @@ func (w *WireGuard) Down() error {
 
 // CreateInterface creates the wg interface in the current netns if it doesn't exist
 func (w *WireGuard) createInterface() error {
+	// Validate ListenPort is within valid range for uint32
+	if w.cfg.ListenPort < 0 || w.cfg.ListenPort > 65535 {
+		return fmt.Errorf("ListenPort %d is out of valid range (0-65535)", w.cfg.ListenPort)
+	}
+
 	genericLink := &netlink.GenericLink{
 		LinkAttrs: netlink.LinkAttrs{Name: w.cfg.InterfaceName},
 		LinkType:  "wireguard",
@@ -94,18 +99,13 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to set mtu %w", err)
 	}
 
-	// Validate ListenPort is within valid range for uint32
-	if w.cfg.ListenPort < 0 || w.cfg.ListenPort > 65535 {
-		return fmt.Errorf("ListenPort %d is out of valid range (0-65535)", w.cfg.ListenPort)
-	}
-	listenPortU32 := uint32(w.cfg.ListenPort)
-
 	// add rule to consult our routing table for IP packets without a special firewall mark
 	// all packets coming wireguard get that special firewall mark by wireguard itself
 	mask := uint32(0xffffffff)
 	err = netlink.RuleAdd(&netlink.Rule{
-		Table:  w.cfg.ListenPort,
-		Mark:   listenPortU32,
+		Table: w.cfg.ListenPort,
+		// the listen port range is already validated
+		Mark:   uint32(w.cfg.ListenPort), //nolint:all
 		Mask:   &mask,
 		Invert: true,
 		Family: netlink.FAMILY_V4,

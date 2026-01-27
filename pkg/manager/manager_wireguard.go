@@ -2,13 +2,13 @@ package manager
 
 import (
 	"context"
-	"sync/atomic"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
