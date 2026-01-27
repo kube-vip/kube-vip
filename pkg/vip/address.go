@@ -37,7 +37,7 @@ const (
 
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
-	AddIP(precheck bool, skipDAD bool, minLiftime int) (bool, error)
+	AddIP(precheck bool, skipDAD bool, minLifetime ...int) (bool, error)
 	AddRoute(precheck bool) error
 	DeleteIP() (bool, error)
 	DeleteRoute() error
@@ -361,7 +361,7 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 // AddIP - Add an IP address to the interface
 // precheck: if true, check if the IP already exists before adding
 // skipDAD: if true, set IFA_F_NODAD flag for IPv6 addresses to skip Duplicate Address Detection
-func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime int) (bool, error) {
+func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...int) (bool, error) {
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 	var existing *netlink.Addr
@@ -372,7 +372,13 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime int)
 		}
 	}
 
-	if existing != nil && existing.ValidLft > minLifetime {
+	lifetime := NoLifetime
+
+	if len(minLifetime) > 0 {
+		lifetime = minLifetime[0]
+	}
+
+	if existing != nil && existing.ValidLft > lifetime {
 		return false, nil
 	}
 

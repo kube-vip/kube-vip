@@ -169,7 +169,7 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 			log.Info("deleted and recreating address with NODAD flag to skip DAD", "IP", ipString, "interface", iface)
 			// Re-add immediately without DAD check since we're recovering from DADFAILED
 			// The AddIP function will set IFA_F_NODAD flag for IPv6 addresses when skipDAD=true
-			if _, err := instance.network.AddIP(false, true, vip.NoLifetime); err != nil {
+			if _, err := instance.network.AddIP(false, true); err != nil {
 				log.Error("failed to recreate address after DADFAILED", "IP", ipString, "interface", iface, "err", err)
 			} else {
 				log.Info("successfully recreated address after DADFAILED recovery", "IP", ipString, "interface", iface)
@@ -180,7 +180,7 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 	}
 
 	// Normal case: add IP with precheck and normal DAD process
-	if added, err := instance.network.AddIP(true, false, vip.NoLifetime); err != nil {
+	if added, err := instance.network.AddIP(true, false); err != nil {
 		log.Warn(err.Error())
 	} else if added {
 		log.Warn("Re-applied the VIP configuration", "ip", ipString, "interface", iface)

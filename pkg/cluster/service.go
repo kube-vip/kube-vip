@@ -82,7 +82,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 
 		if !c.EnableRoutingTable {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
-			if _, err = network.AddIP(false, false, vip.NoLifetime); err != nil {
+			if _, err = network.AddIP(false, false); err != nil {
 				log.Error(err.Error())
 			}
 		}
@@ -207,7 +207,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 					if entry.Check() {
 						log.Debug("entry.Check() true")
 						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
-						_, err = network.AddIP(true, false, vip.NoLifetime)
+						_, err = network.AddIP(true, false)
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
@@ -347,7 +347,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		}
 
 		// Normal VIP addition, use skipDAD=false for normal DAD process
-		if _, err = network.AddIP(false, false, vip.NoLifetime); err != nil {
+		if _, err = network.AddIP(false, false); err != nil {
 			log.Warn(err.Error())
 		} else {
 			log.Info("successful add IP")
