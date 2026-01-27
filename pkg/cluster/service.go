@@ -258,6 +258,14 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 		}, c.BackendHealthCheckInterval, stop)
 	}
 
+	if c.EnableARP {
+		arpWG.Wait()
+	}
+
+	if c.EnableBGP {
+		<-signalChan
+	}
+
 	return nil
 }
 
