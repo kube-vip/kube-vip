@@ -94,12 +94,18 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to set mtu %w", err)
 	}
 
+	// Validate ListenPort is within valid range for uint32
+	if w.cfg.ListenPort < 0 || w.cfg.ListenPort > 65535 {
+		return fmt.Errorf("ListenPort %d is out of valid range (0-65535)", w.cfg.ListenPort)
+	}
+	listenPortU32 := uint32(w.cfg.ListenPort)
+
 	// add rule to consult our routing table for IP packets without a special firewall mark
 	// all packets coming wireguard get that special firewall mark by wireguard itself
 	mask := uint32(0xffffffff)
 	err = netlink.RuleAdd(&netlink.Rule{
 		Table:  w.cfg.ListenPort,
-		Mark:   uint32(w.cfg.ListenPort),
+		Mark:   listenPortU32,
 		Mask:   &mask,
 		Invert: true,
 		Family: netlink.FAMILY_V4,
@@ -199,7 +205,7 @@ func (w *WireGuard) addRoutes() error {
 }
 
 // RemoveRoutes deletes the previously added routes
-func (w *WireGuard) removeRoutes() error {
+func (w *WireGuard) removeRoutes() {
 	for _, cidr := range w.cfg.AllowedIPs {
 		_, dstNet, err := net.ParseCIDR(cidr)
 		if err != nil {
@@ -220,15 +226,13 @@ func (w *WireGuard) removeRoutes() error {
 		}
 	}
 	log.Info("routes removed", "interface", w.cfg.InterfaceName)
-	return nil
 }
 
 func (w *WireGuard) removeRules() error {
-	netlink.RuleDel(&netlink.Rule{
+	return netlink.RuleDel(&netlink.Rule{
 		Table: w.cfg.ListenPort,
 		Goto:  -1,
 	})
-	return nil
 }
 
 // Teardown deletes the interface entirely (called on leadership loss)
@@ -239,9 +243,7 @@ func (w *WireGuard) teardown() error {
 		}
 		w.client = nil
 	}
-	if err := w.removeRoutes(); err != nil {
-		return fmt.Errorf("failed to remove routes: %v", err)
-	}
+	w.removeRoutes()
 
 	if link, err := netlink.LinkByName(w.cfg.InterfaceName); err == nil {
 		if err = netlink.LinkDel(link); err != nil {
