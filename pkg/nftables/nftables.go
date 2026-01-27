@@ -518,7 +518,8 @@ func ApplyAPIServerDNAT(
 	wgIf string,
 	vipIP string,
 	targetIP string,
-	port uint16,
+	sourcePort uint16,
+	targetPort uint16,
 	service string,
 	IPv6 bool,
 ) error {
@@ -537,8 +538,18 @@ func ApplyAPIServerDNAT(
 	dnatChain := GetDNATChain(IPv6, service)
 	inputChain := GetInputChain(IPv6, service)
 
+	// Create POSTROUTING chain for SNAT/masquerade
+	postroutingChain := &nftables.Chain{
+		Name:     fmt.Sprintf("kube_vip_postrouting_%s", service),
+		Table:    table,
+		Type:     nftables.ChainTypeNAT,
+		Hooknum:  nftables.ChainHookPostrouting,
+		Priority: nftables.ChainPriorityNATSource,
+	}
+
 	conn.AddChain(dnatChain)
 	conn.AddChain(inputChain)
+	conn.AddChain(postroutingChain)
 
 	if err := conn.Flush(); err != nil {
 		return err
@@ -573,7 +584,7 @@ func ApplyAPIServerDNAT(
 				Data:     []byte{unix.IPPROTO_TCP},
 			},
 
-			// dport
+			// dport == sourcePort (incoming port, e.g., 6443)
 			&expr.Payload{
 				DestRegister: 1,
 				Base:         expr.PayloadBaseTransportHeader,
@@ -583,17 +594,17 @@ func ApplyAPIServerDNAT(
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(port),
+				Data:     binaryutil.BigEndian.PutUint16(sourcePort),
 			},
 
-			// dnat target
+			// dnat to targetIP:targetPort (e.g., 10.43.0.1:443)
 			&expr.Immediate{
 				Register: 1,
 				Data:     ipToBytes(target, IPv6),
 			},
 			&expr.Immediate{
 				Register: 2,
-				Data:     binaryutil.BigEndian.PutUint16(port),
+				Data:     binaryutil.BigEndian.PutUint16(targetPort),
 			},
 			&expr.NAT{
 				Type:        expr.NATTypeDestNAT,
@@ -636,7 +647,7 @@ func ApplyAPIServerDNAT(
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(port),
+				Data:     binaryutil.BigEndian.PutUint16(sourcePort),
 			},
 
 			&expr.Verdict{Kind: expr.VerdictAccept},
@@ -644,6 +655,111 @@ func ApplyAPIServerDNAT(
 	}
 
 	conn.AddRule(inputRule)
+
+	/* ---------------- SNAT RULE FOR REPLIES ON WG0 ---------------- */
+
+	// SNAT replies going back out wg0 to appear from the VIP
+	snatRule := &nftables.Rule{
+		Table: table,
+		Chain: postroutingChain,
+		Exprs: []expr.Any{
+			// oifname == wgIf
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     append([]byte(wgIf), 0),
+			},
+
+			// tcp sport == target port
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{unix.IPPROTO_TCP},
+			},
+
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       0, // source port
+				Len:          2,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(targetPort),
+			},
+
+			// snat to VIP
+			&expr.Immediate{
+				Register: 1,
+				Data:     ipToBytes(vip, IPv6),
+			},
+			&expr.NAT{
+				Type:       expr.NATTypeSourceNAT,
+				Family:     ipFamily(IPv6),
+				RegAddrMin: 1,
+			},
+		},
+	}
+
+	conn.AddRule(snatRule)
+
+	/* ---------------- MASQUERADE RULE FOR TRAFFIC TO K8S SERVICE ---------------- */
+
+	// Masquerade traffic going to the Kubernetes API service so replies come back to us
+	masqueradeRule := &nftables.Rule{
+		Table: table,
+		Chain: postroutingChain,
+		Exprs: []expr.Any{
+			// oifname != wgIf (going out eth0 or other interface)
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpNeq,
+				Register: 1,
+				Data:     append([]byte(wgIf), 0),
+			},
+
+			// ip daddr == targetIP
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       16, // destination IP in IPv4 header
+				Len:          4,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     ipToBytes(target, IPv6),
+			},
+
+			// tcp dport == target port
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{unix.IPPROTO_TCP},
+			},
+
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       2, // destination port
+				Len:          2,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(targetPort),
+			},
+
+			// masquerade
+			&expr.Masq{},
+		},
+	}
+
+	conn.AddRule(masqueradeRule)
 
 	if err := conn.Flush(); err != nil {
 		return err
@@ -663,11 +779,13 @@ func DeleteIngressChains(IPv6 bool, service string) error {
 	chains := []string{
 		fmt.Sprintf(DNATChain, service),
 		fmt.Sprintf(InputChain, service),
+		fmt.Sprintf("kube_vip_postrouting_%s", service),
 	}
 
 	for _, name := range chains {
 		ch, err := conn.ListChain(table, name)
 		if err == nil && ch != nil {
+			slog.Info("[ingress]", "Deleting chain", name)
 			conn.DelChain(ch)
 		}
 	}

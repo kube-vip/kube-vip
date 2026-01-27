@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -13,10 +14,8 @@ import (
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
-	"github.com/vishvananda/netlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -85,9 +84,11 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableControlPlane {
-		nodeIP := os.Getenv("NODE_IP")
-		if nodeIP == "" {
-			return fmt.Errorf("NODE_IP not set via Downward API")
+		// Get Kubernetes service IP and port from environment
+		kubeAPIHost := os.Getenv("KUBERNETES_SERVICE_HOST")
+		kubeAPIPort := os.Getenv("KUBERNETES_SERVICE_PORT_HTTPS")
+		if kubeAPIHost == "" || kubeAPIPort == "" {
+			return fmt.Errorf("KUBERNETES_SERVICE_HOST or KUBERNETES_SERVICE_PORT_HTTPS not set")
 		}
 
 		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
@@ -129,33 +130,55 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 						}
 					}
 
-					// if wireguard was successful, parse is already validated
-					addr, _ := netlink.ParseAddr(cfg.Address)
-					lb, err := loadbalancer.NewIPVSLB(addr.IP.String(), 6443, "local", 10, cfg.InterfaceName, cancel, signalChan)
-
-					if err != nil {
-						log.Error("could not start ipvs", "err", err)
-						_ = wg.Down()
-						panic("could not start wireguard")
+					// Strip CIDR notation from VIP if present
+					vipIP := sm.config.VIP
+					if strings.Contains(vipIP, "/") {
+						ip, _, err := net.ParseCIDR(vipIP)
+						if err != nil {
+							log.Error("could not parse VIP CIDR", "err", err, "vip", vipIP)
+							_ = wg.Down()
+							panic("could not parse VIP CIDR")
+						}
+						vipIP = ip.String()
 					}
 
-					lb.AddBackend(nodeIP, 6443)
+					// Parse Kubernetes API port
+					kubeAPIPortInt, err := strconv.ParseUint(kubeAPIPort, 10, 16)
+					if err != nil {
+						log.Error("could not parse KUBERNETES_SERVICE_PORT_HTTPS", "err", err, "port", kubeAPIPort)
+						_ = wg.Down()
+						panic("could not parse KUBERNETES_SERVICE_PORT_HTTPS")
+					}
+
+					// Apply nftables DNAT rule to route traffic from wg0:6443 to Kubernetes API service
+					log.Info("applying nftables DNAT rule", "interface", "wg0", "vip", vipIP, "sourcePort", 6443, "kubeAPIHost", kubeAPIHost, "kubeAPIPort", kubeAPIPort)
+					err = nftables.ApplyAPIServerDNAT("wg0", vipIP, kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false)
+					if err != nil {
+						log.Error("could not apply nftables DNAT rule", "err", err)
+						_ = wg.Down()
+						panic("could not apply nftables DNAT rule")
+					}
+					log.Info("nftables DNAT rule applied successfully")
+
 				},
 				OnStoppedLeading: func() {
 					// we can do cleanup here
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
 					log.Info("leader lost", "id", id)
+
+					log.Info("deleting nftables DNAT chains")
 					err = nftables.DeleteIngressChains(false, "controlplane")
 					if err != nil {
 						log.Error("could not delete DNAT ingress chains", "err", err)
+					} else {
+						log.Info("nftables DNAT chains deleted successfully")
 					}
 
 					err = wg.Down()
 					if err != nil {
 						log.Error(err.Error(), "id", id)
 					}
-					// TODO tear down IPVS
 
 					log.Error("lost services leadership, restarting kube-vip")
 					if !closing.Load() {
