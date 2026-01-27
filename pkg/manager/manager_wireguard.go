@@ -15,6 +15,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -81,6 +82,12 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 		ns = sm.config.Namespace
 	}
 
+	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark"); err != nil {
+		return fmt.Errorf("net.ipv4.conf.all.src_valid_mark is disabled and could not be enabled %w", err)
+	}
+	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/route_localnet"); err != nil {
+		return fmt.Errorf("net.ipv4.conf.all.route_localnet is disabled and could not be enabled %w", err)
+	}
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if sm.config.EnableControlPlane {
