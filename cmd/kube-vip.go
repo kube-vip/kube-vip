@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -306,10 +307,14 @@ var kubeVipManager = &cobra.Command{
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
+		wg := sync.WaitGroup{}
+
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
-			go servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
-				Addr: initConfig.PrometheusHTTPServer,
+			wg.Go(func() {
+				servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
+					Addr: initConfig.PrometheusHTTPServer,
+				})
 			})
 		}
 
@@ -429,6 +434,10 @@ var kubeVipManager = &cobra.Command{
 			log.Error("start manager", "err", err)
 			return
 		}
+
+		cancel()
+
+		wg.Wait()
 	},
 }
 

@@ -59,7 +59,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
 
-	var arpWG sync.WaitGroup
+	var wg sync.WaitGroup
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
@@ -103,7 +103,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
-			go func() {
+			wg.Go(func() {
 				err = sm.NodeWatcher(ctx, lb, c.Port)
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
@@ -111,14 +111,15 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 						signalChan <- syscall.SIGINT
 					}
 				}
-			}()
+			})
 
 			loadbalancers = append(loadbalancers, lb)
 		}
 
 		if c.EnableARP {
-			arpWG.Add(1)
-			go cluster.layer2Update(ctx, network, c, &arpWG)
+			wg.Go(func() {
+				cluster.layer2Update(ctx, network, c)
+			})
 		}
 	}
 
@@ -182,10 +183,10 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 		stop := make(chan struct{})
 
 		// will wait for system interrupt and will send stop signal to backend watch
-		go func() {
+		wg.Go(func() {
 			<-signalChan
 			stop <- struct{}{}
-		}()
+		})
 
 		backend.Watch(func() {
 			for i := range cluster.Network {
@@ -259,13 +260,11 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 		}, c.BackendHealthCheckInterval, stop)
 	}
 
-	if c.EnableARP {
-		arpWG.Wait()
-	}
-
 	if c.EnableBGP {
 		<-signalChan
 	}
+
+	wg.Wait()
 
 	return nil
 }
@@ -293,16 +292,21 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int) error {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int, lbWg *sync.WaitGroup) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
 	ctxArp, cancelArp := context.WithCancel(ctx)
 
-	cluster.stop = make(chan bool, 1)
-	cluster.completed = make(chan bool, 1)
+	if cluster.stop == nil {
+		cluster.stop = make(chan bool, 1)
+	}
 
-	var arpWG sync.WaitGroup
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+	}
+
+	wg := sync.WaitGroup{}
 
 	log.Debug("StartLoadBalancerService", "networks", len(cluster.Network))
 	for i := range cluster.Network {
@@ -355,8 +359,9 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		}
 
 		if c.EnableARP {
-			arpWG.Add(1)
-			go cluster.layer2Update(ctxArp, network, c, &arpWG)
+			wg.Go(func() {
+				cluster.layer2Update(ctxArp, network, c)
+			})
 		}
 
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
@@ -369,7 +374,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		}
 	}
 
-	go func() {
+	lbWg.Go(func() {
 		for i := range cluster.Network {
 			network := cluster.Network[i]
 
@@ -388,7 +393,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		// Stop the Arp context if it is running
 		cancelArp()
 
-		arpWG.Wait() // wait for all cluster ARP/NDP to be finished
+		wg.Wait() // wait for all cluster ARP/NDP to be finished
 
 		log.Info("[LOADBALANCER] Stopping load balancers", "name", name)
 
@@ -443,14 +448,13 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		}
 
 		close(cluster.completed)
-	}()
+	})
 
 	return nil
 }
 
 // Layer2Update, handles the creation of the
-func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config, arpWG *sync.WaitGroup) {
-	defer arpWG.Done()
+func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c *kubevip.Config) {
 	var ndp *vip.NdpResponder
 	var err error
 	ipString := network.IP()

@@ -20,6 +20,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/manager/worker"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
@@ -79,6 +80,9 @@ type Manager struct {
 
 	// Will be used for leaderelection when required
 	electionMgr *election.Manager
+
+	// Will handle leases
+	leaseMgr *lease.Manager
 }
 
 // New will create a new managing object
@@ -217,8 +221,10 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		return nil, fmt.Errorf("creating election manager: %w", err)
 	}
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
-		shutdownChan, intfMgr, arpMgr, nodeLabelManager, electionMgr)
+	leaseMgr := lease.NewManager()
+
+	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan,
+		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr)
 
 	return &Manager{
 		clientSet:   clientset,
@@ -245,6 +251,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		bgpServer:        bgpServer,
 		nodeLabelManager: nodeLabelManager,
 		electionMgr:      electionMgr,
+		leaseMgr:         leaseMgr,
 	}, nil
 }
 
@@ -328,7 +335,6 @@ func (sm *Manager) Start(ctx context.Context) error {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startMode(ctx context.Context, id string) error {
-	var cpCluster *cluster.Cluster
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
@@ -338,7 +344,7 @@ func (sm *Manager) startMode(ctx context.Context, id string) error {
 
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.signalChan,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
-		sm.electionMgr)
+		sm.electionMgr, sm.leaseMgr)
 
 	log.Info("starting Kube-vip Manager", "mode", w.Name())
 	if err := w.Configure(modeCtx); err != nil {
@@ -352,11 +358,17 @@ func (sm *Manager) startMode(ctx context.Context, id string) error {
 		}
 	}
 
+	wg := sync.WaitGroup{}
+
 	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go sm.waitForShutdown(modeCtx, cancel, cpCluster)
+	wg.Go(func() {
+		sm.waitForShutdown(modeCtx, cancel, w.GetCPCluster())
+	})
 
 	if sm.config.EnableControlPlane {
-		go w.StartControlPlane(modeCtx, sm.electionMgr, id, sm.config.LeaseName)
+		wg.Go(func() {
+			w.StartControlPlane(modeCtx, id, sm.config.LeaseName)
+		})
 	}
 
 	if sm.config.EnableServices {
@@ -367,8 +379,10 @@ func (sm *Manager) startMode(ctx context.Context, id string) error {
 		}
 	}
 
+	wg.Wait()
+
 	<-sm.shutdownChan
-	log.Info("Shutting down Kube-Vip")
+	log.Info("shutting down kube-vip")
 
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	api "github.com/osrg/gobgp/v3/api"
@@ -31,7 +32,7 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	bgpServer *bgp.Server, bgpSessionInfoGauge *prometheus.GaugeVec,
-	electionMgr *election.Manager) *BGP {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *BGP {
 	return &BGP{
 		Common: Common{
 			arpMgr:       arpMgr,
@@ -43,6 +44,7 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 			mutex:        mutex,
 			clientSet:    clientSet,
 			electionMgr:  electionMgr,
+			leaseMgr:     leaseMgr,
 		},
 		bgpServer:           bgpServer,
 		bgpSessionInfoGauge: bgpSessionInfoGauge,
@@ -82,12 +84,12 @@ func (b *BGP) Configure(ctx context.Context) error {
 	return nil
 }
 
-func (b *BGP) StartControlPlane(ctx context.Context, electionManager *election.Manager, _, _ string) {
+func (b *BGP) StartControlPlane(ctx context.Context, _, _ string) {
 	var err error
 	if b.config.EnableLeaderElection {
-		err = b.cpCluster.StartCluster(ctx, b.config, electionManager, b.bgpServer)
+		err = b.cpCluster.StartCluster(ctx, b.config, b.electionMgr, b.bgpServer, b.leaseMgr)
 	} else {
-		err = b.cpCluster.StartVipService(ctx, b.config, electionManager, b.bgpServer)
+		err = b.cpCluster.StartVipService(ctx, b.config, b.electionMgr, b.bgpServer)
 	}
 	if err != nil {
 		log.Error("Control Plane", "err", err)

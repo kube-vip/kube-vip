@@ -67,8 +67,8 @@ func (t *Table) Configure(ctx context.Context) error {
 	return nil
 }
 
-func (t *Table) StartControlPlane(ctx context.Context, electionManager *election.Manager, _, _ string) {
-	if err := t.cpCluster.StartVipService(ctx, t.config, electionManager, nil); err != nil {
+func (t *Table) StartControlPlane(ctx context.Context, _, _ string) {
+	if err := t.cpCluster.StartVipService(ctx, t.config, t.electionMgr, nil); err != nil {
 		log.Error("Control Plane", "err", err)
 		// Trigger the shutdown of this manager instance
 		if !t.closing.Load() {

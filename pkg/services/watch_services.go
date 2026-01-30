@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	log "log/slog"
 
@@ -50,8 +51,11 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 	if err != nil {
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
+
 	exitFunction := make(chan struct{})
-	go func() {
+
+	wg := sync.WaitGroup{}
+	wg.Go(func() {
 		select {
 		case <-p.shutdownChan:
 			log.Debug("(svcs) shutdown called")
@@ -64,7 +68,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 			rw.Stop()
 			return
 		}
-	}()
+	})
 	ch := rw.ResultChan()
 
 	// Used for tracking an active endpoint / pod
@@ -106,8 +110,12 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		default:
 		}
 	}
+
 	close(exitFunction)
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
+
+	wg.Wait()
+
 	return nil
 }
 

@@ -130,7 +130,7 @@ func runEtcdLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
 }
 
 type Actions interface {
-	OnStartedLeading(ctx context.Context)
+	OnStartedLeading(ctx context.Context) error
 	OnStoppedLeading()
 	OnNewLeader(identity string)
 }

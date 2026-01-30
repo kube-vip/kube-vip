@@ -16,6 +16,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/services"
@@ -34,7 +35,7 @@ type WireGuard struct {
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager) *WireGuard {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *WireGuard {
 	return &WireGuard{
 		Common: Common{
 			arpMgr:       arpMgr,
@@ -46,6 +47,7 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 			mutex:        mutex,
 			clientSet:    clientSet,
 			electionMgr:  electionMgr,
+			leaseMgr:     leaseMgr,
 		},
 	}
 }
@@ -98,8 +100,8 @@ func (w *WireGuard) InitControlPlane() error {
 	return nil
 }
 
-func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *election.Manager, id, leaseName string) {
-	runGlobalElection(ctx, w, leaseName, w.config, id, electionManager)
+func (w *WireGuard) StartControlPlane(ctx context.Context, id, leaseName string) {
+	w.runGlobalElection(ctx, w, id, leaseName)
 }
 
 func (w *WireGuard) ConfigureServices() {
@@ -115,7 +117,7 @@ func (w *WireGuard) Name() string {
 	return "WireGuard"
 }
 
-func (w *WireGuard) OnStartedLeading(ctx context.Context) {
+func (w *WireGuard) OnStartedLeading(ctx context.Context) error {
 	log.Info("started leading", "id", w.id)
 	err := w.wg.Up()
 	if err != nil {
@@ -124,6 +126,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		if !w.closing.Load() {
 			w.signalChan <- syscall.SIGINT
 		}
+		return err
 	}
 
 	// Strip CIDR notation from VIP if present
@@ -136,6 +139,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 			if !w.closing.Load() {
 				w.signalChan <- syscall.SIGINT
 			}
+			return err
 		}
 		vipIP = ip.String()
 	}
@@ -148,6 +152,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		if !w.closing.Load() {
 			w.signalChan <- syscall.SIGINT
 		}
+		return err
 	}
 
 	// Apply nftables DNAT rule to route traffic from wg0:6443 to Kubernetes API service
@@ -159,8 +164,10 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		if !w.closing.Load() {
 			w.signalChan <- syscall.SIGINT
 		}
+		return err
 	}
 	log.Info("nftables DNAT rule applied successfully")
+	return nil
 }
 
 func (w *WireGuard) OnStoppedLeading() {

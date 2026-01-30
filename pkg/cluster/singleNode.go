@@ -20,8 +20,13 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 
 	log.Info("This node is assuming leadership of the cluster")
 
-	cluster.stop = make(chan bool, 1)
-	cluster.completed = make(chan bool, 1)
+	if cluster.stop == nil {
+		cluster.stop = make(chan bool, 1)
+	}
+
+	if cluster.completed == nil {
+		cluster.completed = make(chan bool, 1)
+	}
 
 	for i := range cluster.Network {
 		if !disableVIP {
@@ -71,11 +76,11 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	return nil
 }
 
-func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, sm *election.Manager, bgp *bgp.Server) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager, bgp *bgp.Server) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	clusterCtx, clusterCancel := context.WithCancel(ctx)
 	defer clusterCancel()
 
-	return cluster.vipService(clusterCtx, c, sm, bgp, nil)
+	return cluster.vipService(clusterCtx, c, em, bgp, nil)
 }
