@@ -1387,7 +1387,7 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 	for _, node := range nodes.Items {
 		expected := node.Name == container
 		for _, addr := range lbAddresses {
-			checkIPAddress(addr, node.Name, expected)
+			Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
 		}
 	}
 
@@ -1408,9 +1408,9 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		for _, addr := range lbAddresses {
 			for _, node := range nodes.Items {
 				if node.Name == container {
-					checkIPAddress(addr, node.Name, expected)
+					Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
 				} else {
-					checkIPAddress(addr, node.Name, false)
+					Expect(checkIPAddress(addr, node.Name, false)).To(BeTrue())
 				}
 			}
 		}
