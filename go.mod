@@ -15,7 +15,7 @@ require (
 	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d
 	github.com/jpillora/backoff v1.0.0
 	github.com/mdlayher/ndp v1.1.0
-	github.com/onsi/ginkgo/v2 v2.28.0
+	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/osrg/gobgp/v3 v3.37.0
 	github.com/pkg/errors v0.9.1
