@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/services"
@@ -29,8 +29,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
-
-const plunderLock = "plndr-svcs-lock"
 
 // Manager degines the manager of the load-balancing services
 type Manager struct {
@@ -77,6 +75,9 @@ type Manager struct {
 
 	// This variable reports if manager is being closed
 	closing atomic.Bool
+
+	// Will handle leases
+	leaseMgr *lease.Manager
 }
 
 // New will create a new managing object
@@ -210,7 +211,9 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		}
 	}
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan, intfMgr, arpMgr, nodeLabelManager)
+	leaseMgr := lease.NewManager()
+
+	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet, shutdownChan, intfMgr, arpMgr, nodeLabelManager, leaseMgr)
 
 	return &Manager{
 		clientSet:   clientset,
@@ -236,6 +239,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		arpMgr:           arpMgr,
 		bgpServer:        bgpServer,
 		nodeLabelManager: nodeLabelManager,
+		leaseMgr:         leaseMgr,
 	}, nil
 }
 
@@ -336,16 +340,6 @@ func (sm *Manager) Start(ctx context.Context) error {
 
 	log.Error("prematurely exiting Load-balancer as no modes [ARP/BGP/Wireguard] are enabled")
 	return nil
-}
-
-func returnNameSpace() (string, error) {
-	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
-			return ns, nil
-		}
-		return "", err
-	}
-	return "", fmt.Errorf("unable to find Namespace")
 }
 
 func (sm *Manager) parseAnnotations(ctx context.Context) error {

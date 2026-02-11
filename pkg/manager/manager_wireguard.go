@@ -14,6 +14,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
@@ -24,7 +25,6 @@ import (
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startWireguard(ctx context.Context, id string) error {
-	var ns string
 	var err error
 
 	// use a Go context so we can tell the leaderelection code when we
@@ -76,12 +76,6 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	go sm.waitForShutdown(wgCtx, cancel, nil)
 
-	ns, err = returnNameSpace()
-	if err != nil {
-		log.Warn("unable to auto-detect namespace", "dropping to", sm.config.Namespace)
-		ns = sm.config.Namespace
-	}
-
 	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark"); err != nil {
 		return fmt.Errorf("net.ipv4.conf.all.src_valid_mark is disabled and could not be enabled %w", err)
 	}
@@ -98,12 +92,99 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 			return fmt.Errorf("KUBERNETES_SERVICE_HOST or KUBERNETES_SERVICE_PORT_HTTPS not set")
 		}
 
-		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
+		ns, leaseName := lease.NamespaceName(sm.config.LeaseName, sm.config)
+
+		log.Info("beginning services leadership", "namespace", ns, "lock name", sm.config.LeaseName, "id", id)
+
+		leaseID := fmt.Sprintf("%s/%s", ns, sm.config.LeaseName)
+		objectName := fmt.Sprintf("%s-cp", leaseID)
+
+		objLease, newLease, sharedLease := sm.leaseMgr.Add(leaseID, objectName)
+
+		// this service was already processed so we do not need to do anything
+		if !newLease {
+			log.Debug("this election was already done, waiting for it to finish", "lease", leaseName)
+			// Wait for either the service context or lease context to be done
+			select {
+			case <-ctx.Done():
+				// Service was deleted
+				sm.leaseMgr.Delete(leaseID, objectName)
+			case <-objLease.Ctx.Done():
+				// Leader election ended (leadership lost or context cancelled)
+			}
+			return nil
+		}
+
+		// Start a goroutine that will delete the lease when the service context is cancelled.
+		// This is important for proper cleanup when a service is deleted - it ensures that
+		// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
+		// Without this, RunOrDie would continue running until leadership is naturally lost.
+		go func() {
+			<-ctx.Done()
+			sm.leaseMgr.Delete(leaseID, objectName)
+		}()
+
+		// this object is sharing lease with another object
+		if sharedLease {
+			log.Debug("this election was already done, shared lease", "lease", leaseName)
+			// wait for leader election to start or context to be done
+			select {
+			case <-objLease.Started:
+			case <-objLease.Ctx.Done():
+				// Lease was cancelled (e.g., leader election ended), return immediately
+				// This allows the restart loop to create a fresh lease
+				log.Debug("lease context cancelled before leader election started", "lease", leaseName)
+				return nil
+			}
+
+			err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
+			if err != nil {
+				log.Error("service watcher", "err", err)
+				if !sm.closing.Load() {
+					sm.signalChan <- syscall.SIGINT
+				}
+				objLease.Cancel()
+			}
+
+			log.Debug("waiting for context to finish", "lease", leaseName)
+			// Block until context is cancelled
+			<-ctx.Done()
+
+			log.Debug("waiting for lease to finish", "lease", leaseName)
+			// wait for leaderelection to be finished
+			<-objLease.Ctx.Done()
+
+			// we can do cleanup here
+			sm.mutex.Lock()
+			defer sm.mutex.Unlock()
+			log.Info("leader lost", "lease", leaseName)
+			sm.svcProcessor.Stop()
+
+			log.Error("lost services leadership, restarting kube-vip")
+			if !sm.closing.Load() {
+				sm.signalChan <- syscall.SIGINT
+			}
+
+			return nil
+		}
+
+		// For new leases (not shared), ensure cleanup when the leader election ends
+		// This is critical for the restartable service watcher to be able to restart
+		// the leader election after leadership loss
+		defer func() {
+			// Delete the lease from the manager so subsequent calls can create a fresh lease
+			// This handles the case where leader election ends due to:
+			// 1. Leadership loss (e.g., network timeout)
+			// 2. Context cancellation
+			// 3. Any other reason RunOrDie returns
+			sm.leaseMgr.Delete(leaseID, objectName)
+		}()
+
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
-				Name:      plunderLock,
+				Name:      sm.config.LeaseName,
 				Namespace: ns,
 			},
 			Client: sm.clientSet.CoordinationV1(),
@@ -127,6 +208,7 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 			RetryPeriod:     time.Duration(sm.config.RetryPeriod) * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
+					close(objLease.Started)
 					log.Info("started leading", "id", id)
 					err = wg.Up()
 					if err != nil {
