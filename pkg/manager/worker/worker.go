@@ -18,12 +18,13 @@ import (
 )
 
 type Worker interface {
-	Configure(context.Context) error
+	Configure(context.Context, *sync.WaitGroup) error
 	InitControlPlane() error
 	StartControlPlane(context.Context, *election.Manager)
 	ConfigureServices()
 	StartServices(ctx context.Context) error
 	Name() string
+	Cleanup()
 }
 
 func New(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,

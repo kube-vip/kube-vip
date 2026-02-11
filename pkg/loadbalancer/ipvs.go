@@ -59,7 +59,8 @@ type IPVSLoadBalancer struct {
 	family              ipvs.AddressFamily
 }
 
-func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string, leaderCancel context.CancelFunc, signal chan os.Signal) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string,
+	leaderCancel context.CancelFunc, signal chan os.Signal, wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
 	log.Info("Starting IPVS LoadBalancer", "address", address)
 
 	// Create IPVS client
@@ -148,7 +149,9 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		family:              family,
 	}
 
-	go lb.healthCheck()
+	wg.Go(func() {
+		lb.healthCheck()
+	})
 
 	// Return our created load-balancer
 	return lb, nil

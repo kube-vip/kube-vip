@@ -34,8 +34,10 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 	}
 	// Initialise the Cluster structure
 	newCluster := &Cluster{
-		Network: networks,
-		arpMgr:  arpMgr,
+		Network:   networks,
+		arpMgr:    arpMgr,
+		completed: make(chan bool),
+		stop:      make(chan bool),
 	}
 
 	log.Debug("service security", "enabled", c.EnableServiceSecurity)

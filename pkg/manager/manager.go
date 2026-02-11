@@ -273,6 +273,9 @@ func (sm *Manager) Start(ctx context.Context) error {
 	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
 	sm.shutdownChan = make(chan struct{})
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	// HealthCheck
 	if sm.config.HealthCheckPort != 0 {
 		if sm.config.HealthCheckPort < 1024 {
@@ -281,7 +284,7 @@ func (sm *Manager) Start(ctx context.Context) error {
 		http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "OK")
 		})
-		go func() {
+		wg.Go(func() {
 			server := &http.Server{
 				Addr:              fmt.Sprintf(":%d", sm.config.HealthCheckPort),
 				ReadHeaderTimeout: 3 * time.Second,
@@ -290,7 +293,7 @@ func (sm *Manager) Start(ctx context.Context) error {
 			if err != nil {
 				log.Error("healthcheck", "unable to start", err)
 			}
-		}()
+		})
 	}
 
 	// on exit, clean up the node labels
@@ -317,7 +320,9 @@ func (sm *Manager) Start(ctx context.Context) error {
 				}
 			}
 			// TODO: It would be nice to run the UPNP refresh only on the leader.
-			go sm.svcProcessor.RefreshUPNPForwards(ctx)
+			wg.Go(func() {
+				sm.svcProcessor.RefreshUPNPForwards(ctx)
+			})
 		}
 	}
 
@@ -338,6 +343,12 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	var cpCluster *cluster.Cluster
 	var err error
 
+	wg := sync.WaitGroup{}
+	defer func() {
+		wg.Wait()
+		log.Info("Shutting down Kube-Vip")
+	}()
+
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	modeCtx, cancel := context.WithCancel(ctx)
@@ -348,9 +359,10 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		sm.electionMgr, sm.leaseMgr)
 
 	log.Info("starting Kube-vip Manager", "mode", w.Name())
-	if err := w.Configure(modeCtx); err != nil {
+	if err := w.Configure(modeCtx, &wg); err != nil {
 		return fmt.Errorf("failed to configure %s mode: %w", w.Name(), err)
 	}
+	defer w.Cleanup()
 
 	if sm.config.EnableControlPlane {
 		err = w.InitControlPlane()
@@ -360,10 +372,14 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	}
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
-	go sm.waitForShutdown(modeCtx, cancel, cpCluster)
+	wg.Go(func() {
+		sm.waitForShutdown(modeCtx, cancel, cpCluster)
+	})
 
 	if sm.config.EnableControlPlane {
-		go w.StartControlPlane(modeCtx, sm.electionMgr)
+		wg.Go(func() {
+			w.StartControlPlane(modeCtx, sm.electionMgr)
+		})
 	}
 
 	if sm.config.EnableServices {
@@ -375,7 +391,6 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	}
 
 	<-sm.shutdownChan
-	log.Info("Shutting down Kube-Vip")
 
 	return nil
 }
