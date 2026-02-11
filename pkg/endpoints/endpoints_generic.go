@@ -70,7 +70,10 @@ func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service
 
 		*lastKnownGoodEndpoint = "" // reset endpoint
 		if g.config.EnableServicesElection || g.config.EnableLeaderElection {
-			g.leaseMgr.Delete(service)
+			leaseNamespace, leaseName := lease.ServiceName(service)
+			id := lease.NewID(g.config.LeaderElectionType, leaseNamespace, leaseName)
+			objectName := lease.ServiceNamespacedName(service)
+			g.leaseMgr.Delete(id, objectName)
 		}
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/services"
@@ -34,19 +35,10 @@ type WireGuard struct {
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager) *WireGuard {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *WireGuard {
 	return &WireGuard{
-		Common: Common{
-			arpMgr:       arpMgr,
-			intfMgr:      intfMgr,
-			config:       config,
-			closing:      closing,
-			signalChan:   signalChan,
-			svcProcessor: svcProcessor,
-			mutex:        mutex,
-			clientSet:    clientSet,
-			electionMgr:  electionMgr,
-		},
+		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 	}
 }
 
@@ -98,15 +90,15 @@ func (w *WireGuard) InitControlPlane() error {
 	return nil
 }
 
-func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *election.Manager, id, leaseName string) {
-	runGlobalElection(ctx, w, leaseName, w.config, id, electionManager)
+func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
+	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager)
 }
 
 func (w *WireGuard) ConfigureServices() {
 	// NOT IMPLEMENTED
 }
 
-func (w *WireGuard) StartServices(ctx context.Context, id string) error {
+func (w *WireGuard) StartServices(ctx context.Context) error {
 	// NOT IMPLEMENTED
 	return nil
 }
@@ -116,7 +108,7 @@ func (w *WireGuard) Name() string {
 }
 
 func (w *WireGuard) OnStartedLeading(ctx context.Context) {
-	log.Info("started leading", "id", w.id)
+	log.Info("started leading", "id", w.config.NodeName)
 	err := w.wg.Up()
 	if err != nil {
 		log.Error("could not start wireguard", "err", err)
@@ -167,7 +159,7 @@ func (w *WireGuard) OnStoppedLeading() {
 	// we can do cleanup here
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	log.Info("leader lost", "id", w.id)
+	log.Info("leader lost", "id", w.config.NodeName)
 
 	log.Info("deleting nftables DNAT chains")
 	err := nftables.DeleteIngressChains(false, "controlplane")
@@ -179,7 +171,7 @@ func (w *WireGuard) OnStoppedLeading() {
 
 	err = w.wg.Down()
 	if err != nil {
-		log.Error(err.Error(), "id", w.id)
+		log.Error(err.Error(), "id", w.config.NodeName)
 	}
 
 	log.Error("lost leadership, restarting kube-vip")
@@ -190,7 +182,7 @@ func (w *WireGuard) OnStoppedLeading() {
 
 func (w *WireGuard) OnNewLeader(identity string) {
 	// we're notified when new leader elected
-	if identity == w.id {
+	if identity == w.config.NodeName {
 		// I just got the lock
 		return
 	}

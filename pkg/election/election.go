@@ -12,6 +12,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -81,13 +82,13 @@ func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) {
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:        run.LeaseName,
-			Namespace:   run.Namespace,
+			Name:        run.LeaseID.Name(),
+			Namespace:   run.LeaseID.Namespace(),
 			Annotations: run.LeaseAnnotations,
 		},
 		Client: run.Mgr.KubernetesClient.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: run.LeaseID,
+			Identity: run.Config.NodeName,
 		},
 	}
 
@@ -115,8 +116,8 @@ func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) {
 func runEtcdLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
 	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.Mgr.EtcdClient},
-		Name:                 run.LeaseName,
-		MemberID:             run.LeaseID,
+		Name:                 run.LeaseID.NamespacedName(),
+		MemberID:             run.Config.NodeName,
 		LeaseDurationSeconds: int64(run.Config.LeaseDuration),
 		Callbacks: etcd.LeaderCallbacks{
 			OnStartedLeading: run.OnStartedLeading,
@@ -137,9 +138,7 @@ type Actions interface {
 
 type RunConfig struct {
 	Config           *kubevip.Config
-	LeaseID          string
-	LeaseName        string
-	Namespace        string
+	LeaseID          lease.ID
 	Mgr              *Manager
 	LeaseAnnotations map[string]string
 

@@ -1071,6 +1071,21 @@ func createTestDS(ctx context.Context, name, namespace string, client kubernetes
 
 	_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &d, metav1.CreateOptions{})
 	Expect(err).ToNot(HaveOccurred())
+
+	Eventually(func() error {
+		return dsStarted(ctx, name, namespace, client)
+	}, "300s").Should(Succeed())
+}
+
+func dsStarted(ctx context.Context, name, namespace string, client kubernetes.Interface) error {
+	ds, err := client.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if ds.Status.NumberReady != ds.Status.DesiredNumberScheduled {
+		return fmt.Errorf("not all DS pods are ready")
+	}
+	return nil
 }
 
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,

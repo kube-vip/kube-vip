@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -25,30 +26,21 @@ type ARP struct {
 func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager) *ARP {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *ARP {
 	return &ARP{
-		Common: Common{
-			arpMgr:       arpMgr,
-			intfMgr:      intfMgr,
-			config:       config,
-			closing:      closing,
-			signalChan:   signalChan,
-			svcProcessor: svcProcessor,
-			mutex:        mutex,
-			clientSet:    clientSet,
-			electionMgr:  electionMgr,
-		},
+		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 	}
 }
 
 func (a *ARP) Configure(ctx context.Context) error {
-	log.Info("Start ARP/NDP advertisement")
+	log.Info("Start ARP/NDP advertisement Global")
 	go a.arpMgr.StartAdvertisement(ctx)
 	return nil
 }
 
-func (a *ARP) StartControlPlane(ctx context.Context, electionManager *election.Manager, _, _ string) {
-	err := a.cpCluster.StartCluster(ctx, a.config, electionManager, nil)
+func (a *ARP) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
+	err := a.cpCluster.StartCluster(ctx, a.config, electionManager, nil, a.leaseMgr)
 	if err != nil {
 		log.Error("starting control plane", "err", err)
 	}
@@ -66,7 +58,7 @@ func (a *ARP) ConfigureServices() {
 	}
 }
 
-func (a *ARP) StartServices(ctx context.Context, id string) error {
+func (a *ARP) StartServices(ctx context.Context) error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if a.config.EnableServicesElection {
@@ -74,7 +66,7 @@ func (a *ARP) StartServices(ctx context.Context, id string) error {
 			return err
 		}
 	} else {
-		a.GlobalLeader(ctx, id, a.config.ServicesLeaseName)
+		a.GlobalLeader(ctx, a.config.ServicesLeaseName)
 	}
 	return nil
 }
