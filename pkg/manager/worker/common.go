@@ -83,6 +83,10 @@ func (c *Common) ServicesNoLeader(ctx context.Context) error {
 	return nil
 }
 
+func (c *Common) Cleanup() {
+	// NOT IMPLEMENTED
+}
+
 func (c *Common) OnStartedLeading(ctx context.Context) {
 	err := c.svcProcessor.ServicesWatcher(ctx, c.svcProcessor.SyncServices)
 	if err != nil {

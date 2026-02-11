@@ -3,6 +3,7 @@ package vip
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -14,7 +15,7 @@ import (
 // for the dDNSHostName
 // will return the IP allocated
 type DDNSManager interface {
-	Start(ctx context.Context) (string, error)
+	Start(ctx context.Context, wg *sync.WaitGroup) (string, error)
 }
 
 type ddnsManager struct {
@@ -32,7 +33,7 @@ func NewDDNSManager(network Network, backoffAttempts uint) DDNSManager {
 
 // Start will start the dhcpclient routine to keep the lease
 // and return the IP it got from DHCP
-func (ddns *ddnsManager) Start(ctx context.Context) (string, error) {
+func (ddns *ddnsManager) Start(ctx context.Context, wg *sync.WaitGroup) (string, error) {
 	client, err := NewDHCPClient(ddns.network, ddns.backoffAttempts)
 	if err != nil {
 		return "", fmt.Errorf("unable to create DHCP client: %w", err)
@@ -40,11 +41,11 @@ func (ddns *ddnsManager) Start(ctx context.Context) (string, error) {
 
 	client.WithHostName(ddns.network.DDNSHostName())
 
-	go func() {
+	wg.Go(func() {
 		if err := client.Start(ctx); err != nil {
 			log.Error("[ddns] DHCP client error: %w")
 		}
-	}()
+	})
 
 	log.Info("waiting for ip from dhcp")
 	ip, timeout := "", time.After(1*time.Minute)
@@ -68,18 +69,20 @@ func (ddns *ddnsManager) Start(ctx context.Context) (string, error) {
 	// start a go routine to stop dhclient when lose leader election
 	// also to keep read the ip from channel
 	// so onbound function is unblocked to send the ip
-	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("stop dhclient for ddns")
-				client.Stop()
-				return
-			case ip := <-client.IPChannel():
-				log.Info("got address from dhcp", "ip", ip)
+	wg.Go(func() {
+		func(ctx context.Context) {
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("stop dhclient for ddns")
+					client.Stop()
+					return
+				case ip := <-client.IPChannel():
+					log.Info("got address from dhcp", "ip", ip)
+				}
 			}
-		}
-	}(ctx)
+		}(ctx)
+	})
 
 	return ip, nil
 }

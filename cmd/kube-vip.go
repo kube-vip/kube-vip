@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -302,14 +303,19 @@ var kubeVipManager = &cobra.Command{
 		// Welome messages
 		log.Info("kube-vip.io", "version", Release.Version, "build", Release.Build)
 
+		wg := sync.WaitGroup{}
+		defer wg.Wait()
+
 		// create main manager context
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
-			go servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
-				Addr: initConfig.PrometheusHTTPServer,
+			wg.Go(func() {
+				servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
+					Addr: initConfig.PrometheusHTTPServer,
+				})
 			})
 		}
 
@@ -393,13 +399,13 @@ var kubeVipManager = &cobra.Command{
 				initConfig.Interface = defaultIF.Name
 				log.Info("kube-vip bind", "interface", initConfig.Interface)
 
-				go func() {
+				wg.Go(func() {
 					if err := vip.MonitorDefaultInterface(ctx, defaultIF); err != nil {
 
 						log.Error("interface monitor", "err", err)
 						return
 					}
-				}()
+				})
 			}
 		}
 		// Perform a check on the state of the interface
@@ -458,18 +464,18 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 		ReadHeaderTimeout: 2 * time.Second,
 	}
 
-	go func() {
+	wg := sync.WaitGroup{}
+
+	wg.Go(func() {
 		if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("prometheus HTTP server", "err", err)
 			return
 		}
-	}()
+	})
 
 	log.Info("prometheus HTTP server started")
 
 	<-ctx.Done()
-
-	log.Info("prometheus HTTP server stopped")
 
 	// create prometheus shutdown context (independent of other contexts)
 	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -485,6 +491,10 @@ func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerC
 	if err == http.ErrServerClosed {
 		err = nil
 	}
+
+	log.Info("prometheus HTTP server stopped")
+
+	wg.Wait()
 }
 
 func GenerateCidrRange(address string, dnsMode string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -169,12 +170,19 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 		return fmt.Errorf("error creating label watcher: %s", err.Error())
 	}
 
-	go func() {
-		<-em.SignalChan
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	wg.Go(func() {
+		select {
+		case <-em.SignalChan:
+		case <-ctx.Done():
+		}
+
 		log.Info("Received termination, signaling shutdown")
 		// Cancel the context
 		rw.Stop()
-	}()
+	})
 
 	ch := rw.ResultChan()
 	// defer rw.Stop()
