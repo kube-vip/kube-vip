@@ -27,8 +27,8 @@ func getSvcID(svc *v1.Service) ID {
 	return id
 }
 
-func getSvcData(svc *v1.Service) (ID, string) {
-	return getSvcID(svc), ServiceNamespacedName(svc)
+func getSvcData(svc *v1.Service) (context.Context, ID) {
+	return context.TODO(), getSvcID(svc)
 }
 
 const serviceLeaseAnnotation = kubevip.ServiceLease
@@ -38,26 +38,25 @@ func TestManager_Add_NewLease(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("test-svc", "default", nil)
 
-	lease, isNew, isShared := mgr.Add(getSvcData(svc))
+	leaseID := mgr.Add(getSvcData(svc))
+	isNew := leaseID.Add(ServiceNamespacedName(svc))
 
 	if !isNew {
 		t.Error("expected isNew to be true for first Add")
 	}
-	if lease == nil {
+	if leaseID == nil {
 		t.Fatal("expected lease to be non-nil")
 	}
-	if lease.Ctx == nil {
+	if leaseID.Ctx == nil {
 		t.Error("expected lease context to be non-nil")
 	}
-	if lease.Cancel == nil {
+	if leaseID.Cancel == nil {
 		t.Error("expected lease cancel func to be non-nil")
 	}
-	if lease.Started == nil {
+	if leaseID.Started == nil {
 		t.Error("expected lease Started channel to be non-nil")
 	}
-	if isShared {
-		t.Error("expected isShared to be false for first Add")
-	}
+
 }
 
 // TestManager_Add_ExistingLease tests adding a service with an existing lease
@@ -65,8 +64,11 @@ func TestManager_Add_ExistingLease(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("test-svc", "default", nil)
 
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	leaseID1 := mgr.Add(getSvcData(svc))
+	isNew1 := leaseID1.Add(ServiceNamespacedName(svc))
+
+	leaseID2 := mgr.Add(getSvcData(svc))
+	isNew2 := leaseID2.Add(ServiceNamespacedName(svc))
 
 	if !isNew1 {
 		t.Error("expected first Add to return isNew=true")
@@ -74,14 +76,8 @@ func TestManager_Add_ExistingLease(t *testing.T) {
 	if isNew2 {
 		t.Error("expected second Add to return isNew=false")
 	}
-	if lease1 != lease2 {
+	if leaseID1 != leaseID2 {
 		t.Error("expected same lease to be returned for same service")
-	}
-	if isShared1 {
-		t.Error("expected isShared to be false for first Add")
-	}
-	if !isShared2 {
-		t.Error("expected isShared to be true for first Add")
 	}
 }
 
@@ -90,24 +86,24 @@ func TestManager_Delete_DecrementCounter(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("test-svc", "default", nil)
 
-	// Add twice (simulating two services sharing the lease)
-	mgr.Add(getSvcData(svc))
-	mgr.Add(getSvcData(svc))
+	// Add twice (simulating adding same service twice)
+	objectName := ServiceNamespacedName(svc)
 
-	// Delete once - should not remove the lease
-	mgr.Delete(getSvcData(svc))
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	_ = lease1.Add(objectName)
+
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	_ = lease2.Add(objectName)
+
+	// Delete once - should remove the lease
+
+	mgr.Delete(leaseID1, objectName)
 
 	lease := mgr.Get(getSvcID(svc))
 	if lease != nil {
 		t.Error("expected lease to be removed after first delete if same service was processed twice")
-	}
-
-	// Delete again - should remove the lease
-	mgr.Delete(getSvcData(svc))
-
-	lease = mgr.Get(getSvcID(svc))
-	if lease != nil {
-		t.Error("expected lease to be removed")
 	}
 }
 
@@ -116,22 +112,26 @@ func TestManager_Delete_CancelsContext(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("test-svc", "default", nil)
 
-	lease, _, _ := mgr.Add(getSvcData(svc))
+	objectName := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	_ = lease1.Add(objectName)
 
 	// Verify context is not cancelled
 	select {
-	case <-lease.Ctx.Done():
+	case <-lease1.Ctx.Done():
 		t.Fatal("expected context to not be cancelled initially")
 	default:
 		// Expected
 	}
 
 	// Delete the lease
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName)
 
 	// Verify context is cancelled
 	select {
-	case <-lease.Ctx.Done():
+	case <-lease1.Ctx.Done():
 		// Expected
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected context to be cancelled after delete")
@@ -143,12 +143,17 @@ func TestManager_Add_AfterDelete_CreatesNewLease(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("test-svc", "default", nil)
 
-	// Add and delete
-	lease1, _, _ := mgr.Add(getSvcData(svc))
-	mgr.Delete(getSvcData(svc))
+	objectName := ServiceNamespacedName(svc)
 
-	// Add again - should create new lease
-	lease2, isNew, _ := mgr.Add(getSvcData(svc))
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	_ = lease1.Add(objectName)
+
+	mgr.Delete(leaseID1, objectName)
+
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew := lease2.Add(objectName)
 
 	if !isNew {
 		t.Error("expected isNew to be true after delete and re-add")
@@ -164,8 +169,17 @@ func TestManager_Add_DifferentServices(t *testing.T) {
 	svc1 := createTestService("svc1", "default", nil)
 	svc2 := createTestService("svc2", "default", nil)
 
-	lease1, isNew1, _ := mgr.Add(getSvcData(svc1))
-	lease2, isNew2, _ := mgr.Add(getSvcData(svc2))
+	objectName1 := ServiceNamespacedName(svc1)
+
+	ctx1, leaseID1 := getSvcData(svc1)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
+	objectName2 := ServiceNamespacedName(svc2)
+
+	ctx2, leaseID2 := getSvcData(svc2)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName2)
 
 	if !isNew1 || !isNew2 {
 		t.Error("expected both adds to return isNew=true")
@@ -181,8 +195,17 @@ func TestManager_Add_SameNameDifferentNamespace(t *testing.T) {
 	svc1 := createTestService("test-svc", "namespace1", nil)
 	svc2 := createTestService("test-svc", "namespace2", nil)
 
-	lease1, isNew1, _ := mgr.Add(getSvcData(svc1))
-	lease2, isNew2, _ := mgr.Add(getSvcData(svc2))
+	objectName1 := ServiceNamespacedName(svc1)
+
+	ctx1, leaseID1 := getSvcData(svc1)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
+	objectName2 := ServiceNamespacedName(svc2)
+
+	ctx2, leaseID2 := getSvcData(svc2)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName2)
 
 	if !isNew1 || !isNew2 {
 		t.Error("expected both adds to return isNew=true")
@@ -200,27 +223,24 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	const numGoroutines = 100
 
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+
 	// Concurrent adds
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			mgr.Add(getSvcData(svc))
+			lease1.Add(objectName1)
 		}()
 	}
 	wg.Wait()
 
-	// Concurrent deletes
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			mgr.Delete(getSvcData(svc))
-		}()
-	}
-	wg.Wait()
+	mgr.Delete(leaseID1, objectName1)
 
-	// After all deletes, lease should be gone
+	// After alonel deletes, lease should be gone
 	lease := mgr.Get(getSvcID(svc))
 	if lease != nil {
 		t.Error("expected lease to be removed after all concurrent deletes")
@@ -317,7 +337,7 @@ func TestGetName_WithAnnotationAndOverriddenNamespace(t *testing.T) {
 }
 
 // TestGetName_WithoutAnnotation_Etcd tests with no annotation
-func TestGetName_WithoutAnnotation_etcd(t *testing.T) {
+func TestGetName_WithoutAnnotation_Etcd(t *testing.T) {
 	svc := createTestService("my-service", "my-namespace", nil)
 
 	namespace, name := ServiceName(svc)
@@ -386,13 +406,14 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 	mgr := NewManager()
 	svc := createTestService("traefik", "traefik", nil)
 
-	// Simulate first leader election start
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
 	if !isNew1 {
 		t.Fatal("expected first add to return isNew=true")
-	}
-	if isShared1 {
-		t.Fatal("expected first add to return isShared=false")
 	}
 
 	// Simulate leadership acquired - close Started channel
@@ -400,7 +421,7 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 
 	// Simulate leadership lost - the leader election function should delete the lease
 	// This is the fix: delete the lease when RunOrDie returns
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 
 	// Verify lease is removed
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -408,12 +429,11 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 	}
 
 	// Simulate restartable service watcher calling StartServicesLeaderElection again
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
 	if !isNew2 {
 		t.Fatal("expected second add after delete to return isNew=true")
-	}
-	if isShared2 {
-		t.Fatal("expected second add after delete to return isShared2=false")
 	}
 
 	// Verify we got a new lease with a fresh Started channel
@@ -443,37 +463,40 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 	svc2 := createTestService("svc2", "default", sharedLeaseAnnotations)
 
 	// First service gets a new lease
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc1))
+	objectName1 := ServiceNamespacedName(svc1)
+
+	ctx1, leaseID1 := getSvcData(svc1)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
 	if !isNew1 {
 		t.Error("expected first add to return isNew=true")
-	}
-	if isShared1 {
-		t.Error("expected first add to return isShared=false")
 	}
 
 	// Simulate first service starting leadership
 	close(lease1.Started)
 
+	objectName2 := ServiceNamespacedName(svc2)
+
+	ctx2, leaseID2 := getSvcData(svc2)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease2.Add(objectName2)
+
 	// Second service should get the same lease
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc2))
 	if !isNew2 {
 		t.Error("expected second add with same lease name to return isNew=true")
-	}
-	if !isShared2 {
-		t.Error("expected second add with same lease name to return isShared=true")
 	}
 	if lease1 != lease2 {
 		t.Error("expected same lease for services with same lease annotation")
 	}
 
 	// Delete first service - lease should still exist
-	mgr.Delete(getSvcData(svc1))
+	mgr.Delete(leaseID1, objectName1)
 	if mgr.Get(getSvcID(svc1)) == nil {
 		t.Error("expected lease to still exist after first delete")
 	}
 
 	// Delete second service - lease should be removed
-	mgr.Delete(getSvcData(svc2))
+	mgr.Delete(leaseID2, objectName2)
 	if mgr.Get(getSvcID(svc2)) != nil {
 		t.Error("expected lease to be removed after all services deleted")
 	}
@@ -487,12 +510,13 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 	svc := createTestService("traefik", "traefik", nil)
 
 	// Simulate first leader election start
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
 	if !isNew1 {
 		t.Fatal("expected first add to return isNew=true")
-	}
-	if isShared1 {
-		t.Fatal("expected first add to return isShared=false")
 	}
 
 	// Simulate leadership acquired - close Started channel
@@ -500,12 +524,12 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 
 	// Simulate a second goroutine calling Add BEFORE the first goroutine's defer deletes the lease
 	// This is the race condition scenario
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
+
 	if isNew2 {
 		t.Error("expected second add before delete to return isNew=false")
-	}
-	if !isShared2 {
-		t.Error("expected second add before delete to return isShared=true")
 	}
 	if lease1 != lease2 {
 		t.Error("expected same lease to be returned")
@@ -520,7 +544,7 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 	}
 
 	// Now the first goroutine's defer deletes the lease
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 
 	// The lease should not still exist because same service was processed twice, so we do not increment the counter
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -528,7 +552,7 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 	}
 
 	// Second delete does nothing
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID2, objectName1)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to not exist")
 	}
@@ -541,53 +565,52 @@ func TestManager_NonCommonLease_MultipleAdds(t *testing.T) {
 	svc := createTestService("traefik", "traefik", nil) // No common lease annotation
 
 	// First Add
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
 	if !isNew1 {
 		t.Error("expected first add to return isNew=true")
-	}
-	if isShared1 {
-		t.Error("expected first add to return isShared=false")
 	}
 
 	// Close Started to simulate leadership acquired
 	close(lease1.Started)
 
 	// Second Add (simulating another goroutine or restart attempt)
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
 	if isNew2 {
 		t.Error("expected second add to return isNew=false")
-	}
-	if !isShared2 {
-		t.Error("expected second add to return isShared=true")
 	}
 	if lease1 != lease2 {
 		t.Error("expected same lease")
 	}
 
 	// Third Add
-	lease3, isNew3, isShared3 := mgr.Add(getSvcData(svc))
+	ctx3, leaseID3 := getSvcData(svc)
+	lease3 := mgr.Add(ctx3, leaseID3)
+	isNew3 := lease1.Add(objectName1)
 	if isNew3 {
 		t.Error("expected third add to return isNew=false")
-	}
-	if !isShared3 {
-		t.Error("expected third add to return isShared=true")
 	}
 	if lease1 != lease3 {
 		t.Error("expected same lease")
 	}
 
 	// Need one delete to remove the lease, another delete runs do nothing
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
 
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID2, objectName1)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
 
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID3, objectName1)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
@@ -601,21 +624,22 @@ func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
 	svc := createTestService("traefik", "traefik", nil)
 
 	// First Add
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
 	if !isNew1 {
 		t.Fatal("expected first add to return isNew=true")
 	}
-	if isShared1 {
-		t.Fatal("expected first add to return isShared=false")
-	}
 
-	// Second Add before Started is closed
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
+
 	if isNew2 {
 		t.Error("expected second add to return isNew=false")
-	}
-	if !isShared2 {
-		t.Error("expected second add to return isShared=true")
 	}
 
 	// Verify Started is not closed yet
@@ -638,8 +662,8 @@ func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
 	}
 
 	// Delete should still work
-	mgr.Delete(getSvcData(svc))
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID2, objectName1)
 
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be removed")
@@ -653,13 +677,17 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 	svc := createTestService("traefik", "traefik", nil)
 
 	// First Add
-	lease1, _, _ := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	_ = lease1.Add(objectName1)
 
 	// Cancel context before Started is closed
 	lease1.Cancel()
 
 	// Delete the lease
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 
 	// Verify lease is gone
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -667,12 +695,12 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 	}
 
 	// Add again - should create new lease
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
+
 	if !isNew2 {
 		t.Error("expected new lease after delete")
-	}
-	if isShared2 {
-		t.Error("expected add after to return isShared=false")
 	}
 
 	// Verify new lease has fresh context and Started channel
@@ -700,12 +728,14 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 	svc := createTestService("egress-service", "default", nil) // Non-common lease
 
 	// First Add - simulates the first leader election starting
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
 	if !isNew1 {
 		t.Fatal("expected first add to return isNew=true")
-	}
-	if isShared1 {
-		t.Fatal("expected first add to return isShared=false")
 	}
 
 	// Simulate leadership acquired
@@ -713,13 +743,14 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 
 	// Second Add - simulates another goroutine trying to start leader election
 	// This should return isNew=false
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease1.Add(objectName1)
+
 	if isNew2 {
 		t.Error("expected second add to return isNew=false")
 	}
-	if !isShared2 {
-		t.Error("expected second add to return isShared=true")
-	}
+
 	if lease1 != lease2 {
 		t.Error("expected same lease to be returned")
 	}
@@ -757,11 +788,11 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 	}
 
 	// Now simulate the first leader election ending (defer deletes the lease)
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 
 	// The lease context should now be cancelled (because counter went to 0)
 	// But we added twice, so we need to delete twice
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID2, objectName1)
 
 	// Now the goroutine should have completed
 	select {
@@ -786,13 +817,16 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 	svc := createTestService("egress-service", "default", nil) // Non-common lease
 
 	// First Add - leader election starts
-	lease1, isNew1, isShared1 := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	isNew1 := lease1.Add(objectName1)
+
 	if !isNew1 {
 		t.Fatal("expected first add to return isNew=true")
 	}
-	if isShared1 {
-		t.Fatal("expected first add to return isShared1=false")
-	}
+
 	close(lease1.Started)
 
 	// Track how many times Add is called in a tight loop
@@ -803,22 +837,21 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 
 	go func() {
 		for i := 0; i < 100; i++ {
-			lease, isNew, isShared := mgr.Add(getSvcData(svc))
+			objectName1 := ServiceNamespacedName(svc)
+
+			ctxTmp, leaseIDTmp := getSvcData(svc)
+			leaseTmp := mgr.Add(ctxTmp, leaseIDTmp)
+			isNewTmp := leaseTmp.Add(objectName1)
 			addCount++
-			if isNew {
+			if isNewTmp {
 				// This shouldn't happen while the first lease exists
 				t.Error("unexpected isNew=true")
-				break
-			}
-			if !isShared {
-				// This shouldn't happen while the first lease exists
-				t.Error("unexpected isShared=false")
 				break
 			}
 			// In the fixed code, we would block here on lease.Ctx.Done()
 			// For this test, we just verify that isNew=false is returned
 			// and the same lease is returned each time
-			if lease != lease1 {
+			if leaseTmp != lease1 {
 				t.Error("expected same lease")
 				break
 			}
@@ -839,7 +872,7 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 		t.Errorf("expected 100 adds, got %d", addCount)
 	}
 
-	mgr.Delete(getSvcData(svc))
+	mgr.Delete(leaseID1, objectName1)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be removed after first delete")
 	}
@@ -853,16 +886,19 @@ func TestManager_NonCommonLease_ServiceContextCancellation(t *testing.T) {
 	svc := createTestService("egress-service", "default", nil)
 
 	// First Add - leader election starts
-	lease1, _, _ := mgr.Add(getSvcData(svc))
+	objectName1 := ServiceNamespacedName(svc)
+
+	ctx1, leaseID1 := getSvcData(svc)
+	lease1 := mgr.Add(ctx1, leaseID1)
+	_ = lease1.Add(objectName1)
 	close(lease1.Started)
 
 	// Second Add - returns isNew=false
-	lease2, isNew2, isShared2 := mgr.Add(getSvcData(svc))
+	ctx2, leaseID2 := getSvcData(svc)
+	lease2 := mgr.Add(ctx2, leaseID2)
+	isNew2 := lease2.Add(objectName1)
 	if isNew2 {
 		t.Error("expected isNew=false")
-	}
-	if !isShared2 {
-		t.Error("expected isShared=true")
 	}
 
 	// Create a simulated service context

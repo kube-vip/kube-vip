@@ -34,16 +34,15 @@ func NewManager() *Manager {
 // If object is new but not shared, we should start leaderelection and sync it
 // If object is new and shared, we should only sync it as the leaderelection should be already handled
 // If object is not new we should do nothing
-func (m *Manager) Add(id ID, objectName string) (lease *Lease, isNewObject bool, isSharedLease bool) {
+func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if _, isSharedLease = m.leases[id.NamespacedName()]; !isSharedLease {
-		ctx, cancel := context.WithCancel(context.Background())
-		m.leases[id.NamespacedName()] = newLease(ctx, cancel)
+	if _, exists := m.leases[id.NamespacedName()]; !exists {
+		leaseCtx, leaseCancel := context.WithCancel(ctx)
+		m.leases[id.NamespacedName()] = newLease(leaseCtx, leaseCancel)
 	}
-	lease = m.leases[id.NamespacedName()]
-	isNewObject = m.leases[id.NamespacedName()].add(objectName)
-	return
+
+	return m.leases[id.NamespacedName()]
 }
 
 // Delete removes the lease and cancels it if the lease counter equals 0.
@@ -72,29 +71,29 @@ func (m *Manager) Get(id ID) *Lease {
 
 // Lease holds lease data.
 type Lease struct {
-	Lock     sync.Mutex
 	Ctx      context.Context
 	Cancel   context.CancelFunc
 	Started  chan any
 	services sync.Map
 	cnt      atomic.Int64
+	Elected  atomic.Bool
+	Mtx      sync.Mutex
+	locked   bool
 }
 
 func newLease(ctx context.Context, cancel context.CancelFunc) *Lease {
 	return &Lease{
-		Ctx:      ctx,
-		Cancel:   cancel,
-		Started:  make(chan any),
-		services: sync.Map{},
-		cnt:      atomic.Int64{},
+		Ctx:     ctx,
+		Cancel:  cancel,
+		Started: make(chan any),
 	}
 }
 
-// add adds the service to the lease and increments counter
-// it will return true if service was added
-func (l *Lease) add(service string) bool {
-	if _, exists := l.services.Load(service); !exists {
-		l.services.Store(service, true)
+// Add adds the object to the lease and increments counter
+// it will return true if object was added
+func (l *Lease) Add(name string) bool {
+	if _, exists := l.services.Load(name); !exists {
+		l.services.Store(name, true)
 		l.cnt.Add(1)
 		return true
 	}
@@ -106,6 +105,18 @@ func (l *Lease) delete(service string) {
 	if _, exists := l.services.Load(service); exists {
 		l.services.Delete(service)
 		l.cnt.Add(-1)
+	}
+}
+
+func (l *Lease) Lock() {
+	l.Mtx.Lock()
+	l.locked = true
+}
+
+func (l *Lease) Unlock() {
+	if l.locked {
+		l.locked = false
+		l.Mtx.Unlock()
 	}
 }
 

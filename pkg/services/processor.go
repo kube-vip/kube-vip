@@ -201,7 +201,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
 		if svcCtx == nil {
-			svcCtx = servicecontext.New(ctx)
+			ns, name := lease.ServiceName(svc)
+			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+			lease := p.leaseMgr.Add(ctx, leaseID)
+			svcCtx = servicecontext.New(lease.Ctx)
 			p.svcMap.Store(svc.UID, svcCtx)
 		}
 

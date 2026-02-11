@@ -126,10 +126,13 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	ns, leaseName := lease.NamespaceName(leaseName, config)
 
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)
-
 	objectName := lease.ObjectName(leaseID, "svcs0")
 
-	objLease, isNew, isSharedLease := c.leaseMgr.Add(leaseID, objectName)
+	// objLease, isNew, isSharedLease := c.leaseMgr.Add(leaseID, objectName)
+
+	objLease := c.leaseMgr.Add(ctx, leaseID)
+	isNew := objLease.Add(objectName)
+
 	// this service was already processed so we do not need to do anything
 	if !isNew {
 		log.Debug("this election was already done, waiting for it to finish", "lease", c.config.ServicesLeaseName)
@@ -144,7 +147,14 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		return
 	}
 
-	if isSharedLease {
+	objLease.Lock()
+
+	defer func() {
+		objLease.Unlock()
+	}()
+
+	if objLease.Elected.Load() {
+		objLease.Unlock()
 		log.Debug("this election was already done, shared lease", "lease", leaseID.Name())
 
 		// wait for leader election to start or context to be done
@@ -192,11 +202,16 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		LeaseAnnotations: map[string]string{},
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
+			objLease.Elected.Store(true)
+			objLease.Unlock()
 			close(objLease.Started)
 			a.OnStartedLeading(ctx)
 		},
-		OnStoppedLeading: a.OnStoppedLeading,
-		OnNewLeader:      a.OnNewLeader,
+		OnStoppedLeading: func() {
+			objLease.Elected.Store(false)
+			a.OnStoppedLeading()
+		},
+		OnNewLeader: a.OnNewLeader,
 	}
 
 	if err := election.RunOrDie(ctx, run, config); err != nil {
