@@ -27,6 +27,9 @@ type endpointWorker interface {
 func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance, leaseMgr *lease.Manager) endpointWorker {
 	generic := newGeneric(config, provider, instances, leaseMgr)
 
+	if config.EnableWireguard {
+		return newWireguardWorker(config, provider, bgpServer, instances, leaseMgr)
+	}
 	if config.EnableRoutingTable {
 		return newRoutingTable(generic)
 	}

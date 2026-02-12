@@ -20,6 +20,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -57,6 +58,9 @@ type Processor struct {
 	nodeLabelManager labelManager
 
 	electionMgr *election.Manager
+
+	// TunnelMgr manages multiple WireGuard tunnels (one per service VIP)
+	TunnelMgr *wireguard.TunnelManager
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -94,6 +98,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		leaseMgr:         leaseMgr,
 		nodeLabelManager: nodeLabelManager,
 		electionMgr:      electionMgr,
+		TunnelMgr:        wireguard.NewTunnelManager(),
 	}
 }
 
