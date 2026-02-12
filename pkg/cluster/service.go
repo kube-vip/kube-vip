@@ -83,7 +83,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *M
 		if !c.EnableRoutingTable {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			if _, err = network.AddIP(false, false); err != nil {
-				log.Error(err.Error())
+				return fmt.Errorf("failed to add IP address %s: %w", network.IP(), err)
 			}
 		}
 
