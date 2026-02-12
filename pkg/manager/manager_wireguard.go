@@ -24,6 +24,8 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
+const controlPlaneLock = "plndr-cp-lock"
+
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 	var ns string
@@ -92,12 +94,12 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 			return fmt.Errorf("KUBERNETES_SERVICE_HOST or KUBERNETES_SERVICE_PORT_HTTPS not set")
 		}
 
-		log.Info("beginning services leadership", "namespace", ns, "lock name", plunderLock, "id", id)
+		log.Info("beginning controlplane leadership", "namespace", ns, "lock name", controlPlaneLock, "id", id)
 		// we use the Lease lock type since edits to Leases are less common
 		// and fewer objects in the cluster watch "all Leases".
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
-				Name:      plunderLock,
+				Name:      controlPlaneLock,
 				Namespace: ns,
 			},
 			Client: sm.clientSet.CoordinationV1(),
@@ -189,12 +191,34 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 					}
 					log.Info("nftables DNAT rule applied successfully")
 
+					// Start services watcher if services are enabled
+					if sm.config.EnableServices {
+						log.Info("starting services watcher for control plane leader")
+						if sm.config.EnableServicesElection {
+							err = sm.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+						} else {
+							err = sm.svcProcessor.ServicesWatcher(ctx, sm.svcProcessor.SyncServices)
+						}
+						if err != nil {
+							log.Error("service watcher", "err", err)
+							_ = tunnelMgr.TearDownAllTunnels()
+							if !closing.Load() {
+								sm.signalChan <- syscall.SIGINT
+							}
+						}
+					}
+
 				},
 				OnStoppedLeading: func() {
 					// we can do cleanup here
 					sm.mutex.Lock()
 					defer sm.mutex.Unlock()
-					log.Info("leader lost", "id", id)
+					log.Info("control plane leader lost", "id", id)
+
+					// Stop services if running
+					if sm.config.EnableServices {
+						sm.svcProcessor.Stop()
+					}
 
 					log.Info("deleting nftables DNAT chains")
 					err = nftables.DeleteIngressChains(false, "controlplane")
@@ -204,12 +228,13 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 						log.Info("nftables DNAT chains deleted successfully")
 					}
 
-					err = tunnelMgr.TearDownTunnelForVIP(sm.config.VIP)
+					// Tear down all tunnels (control plane + services)
+					err = tunnelMgr.TearDownAllTunnels()
 					if err != nil {
-						log.Error("failed to tear down control plane tunnel", "vip", sm.config.VIP, "err", err)
+						log.Error("failed to tear down tunnels", "err", err)
 					}
 
-					log.Error("lost services leadership, restarting kube-vip")
+					log.Error("lost control plane leadership, restarting kube-vip")
 					if !closing.Load() {
 						sm.signalChan <- syscall.SIGINT
 					}
@@ -226,9 +251,7 @@ func (sm *Manager) startWireguard(ctx context.Context, id string) error {
 				},
 			},
 		})
-	}
-
-	if sm.config.EnableServices {
+	} else if sm.config.EnableServices {
 		// This will tidy any dangling kube-vip iptables rules
 		if sm.config.EgressClean {
 			vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
