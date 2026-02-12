@@ -1244,10 +1244,15 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	}
 
 	By(withTimestamp("loading local docker image to kind cluster"))
-	e2e.LoadDockerImageToKind(logger, manifestValues.ImagePath, clusterName)
+	Expect(e2e.LoadDockerImageToKind(logger, manifestValues.ImagePath, clusterName)).To(Succeed())
 
 	By(withTimestamp("loading traefik/whoami image to kind cluster"))
-	e2e.LoadDockerImageToKind(logger, "ghcr.io/traefik/whoami:v1.11", clusterName)
+	if err := e2e.LoadDockerImageToKind(logger, "ghcr.io/traefik/whoami:v1.11", clusterName); err != nil {
+		By(withTimestamp(fmt.Sprintf(
+			"failed to load image ghcr.io/traefik/whoami:v1.11 into kind cluster, image will be downloaded after pod deployment, error: %s",
+			err.Error(),
+		)))
+	}
 
 	return clusterName, client, cfg
 }
