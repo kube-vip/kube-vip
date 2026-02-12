@@ -51,10 +51,10 @@ func NodeIPv4(node nodes.Node) string {
 	return ip
 }
 
-func LoadDockerImageToKind(logger kindlog.Logger, imagePath, clusterName string) {
+func LoadDockerImageToKind(logger kindlog.Logger, imagePath, clusterName string) error {
 	loadImageCmd := load.NewCommand(logger, cmd.StandardIOStreams())
 	loadImageCmd.SetArgs([]string{"--name", clusterName, imagePath})
-	Expect(loadImageCmd.Execute()).To(Succeed())
+	return loadImageCmd.Execute()
 }
 
 func RunInNode(node nodes.Node, command string, args ...string) {
