@@ -163,7 +163,7 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 
 	for x := range newService.VIPConfigs {
 		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, svc.Name, p.CountRouteReferences); err != nil {
+		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, svc.Name, p.CountRouteReferences, &p.loadbalancersWg); err != nil {
 			return fmt.Errorf("failed to start lb: %w", err)
 		}
 	}

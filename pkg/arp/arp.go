@@ -83,8 +83,9 @@ func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 		if i.counter > 1 {
 			i.counter--
 		} else {
-			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name())
+			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name(), "ip", instance.network.IP())
 			if deleteIP {
+				log.Debug("[ARP manager] deleting ARP/NDP instance IP", "name", instance.Name(), "ip", instance.network.IP())
 				if _, err := instance.network.DeleteIP(); err != nil {
 					log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
 				}
