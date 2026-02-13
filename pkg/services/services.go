@@ -434,9 +434,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 	// Clean up WireGuard DNAT rules if WireGuard is enabled
 	if p.config.EnableWireguard {
 		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name)
-		if err := p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot); err != nil {
-			log.Warn("[service] failed to delete WireGuard DNAT", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "err", err)
-		}
+		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
 	}
 
 	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))

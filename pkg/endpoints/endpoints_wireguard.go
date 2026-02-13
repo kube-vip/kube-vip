@@ -92,9 +92,9 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 		}
 
 		// Determine target port (use TargetPort if set, otherwise use Port)
-		targetPort := uint16(port.Port)
+		targetPort := port.Port
 		if port.TargetPort.IntVal != 0 {
-			targetPort = uint16(port.TargetPort.IntVal)
+			targetPort = port.TargetPort.IntVal
 		}
 
 		for _, vip := range serviceIPs {
@@ -118,8 +118,8 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				wgInterface,
 				vipAddr,
 				targetIP,
-				uint16(port.Port),
-				targetPort,
+				uint16(port.Port),  //nolint:gosec // Port range validated by Kubernetes
+				uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
 				portServiceID,
 				isIPv6,
 			)

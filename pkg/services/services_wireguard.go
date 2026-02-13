@@ -108,9 +108,9 @@ func (p *Processor) setupServiceWireguardTunnel(ctx context.Context, svc *v1.Ser
 		}
 
 		// Determine the actual target port
-		actualTargetPort := uint16(targetPort)
+		actualTargetPort := targetPort
 		if port.NodePort != 0 && p.config.EnableServicesElection {
-			actualTargetPort = uint16(port.NodePort)
+			actualTargetPort = port.NodePort
 		}
 
 		// Create unique service identifier including port to handle multiple ports
@@ -130,8 +130,8 @@ func (p *Processor) setupServiceWireguardTunnel(ctx context.Context, svc *v1.Ser
 			tunnelConfig.InterfaceName,
 			vipAddr,
 			targetEndpoint,
-			uint16(port.Port),
-			actualTargetPort,
+			uint16(port.Port),        //nolint:gosec // Port range validated by Kubernetes
+			uint16(actualTargetPort), //nolint:gosec // Port range validated by Kubernetes
 			portServiceID,
 			isIPv6,
 		)
@@ -156,9 +156,9 @@ func (p *Processor) setupServiceWireguardTunnel(ctx context.Context, svc *v1.Ser
 }
 
 // deleteServiceWireguard removes nftables DNAT rules and tears down WireGuard tunnel for a service
-func (p *Processor) deleteServiceWireguard(ctx context.Context, svc *v1.Service) error {
+func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 	if !p.config.EnableWireguard {
-		return nil
+		return
 	}
 
 	serviceID := fmt.Sprintf("%s_%s", svc.Namespace, svc.Name)
@@ -235,8 +235,6 @@ func (p *Processor) deleteServiceWireguard(ctx context.Context, svc *v1.Service)
 	log.Info("[wireguard] DNAT rules deleted and tunnels torn down for service",
 		"namespace", svc.Namespace,
 		"name", svc.Name)
-
-	return nil
 }
 
 // getServiceTargetEndpoint determines the target endpoint for a service
