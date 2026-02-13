@@ -77,7 +77,7 @@ func (sm *Manager) startBGP(ctx context.Context) error {
 
 		go func() {
 			if sm.config.EnableLeaderElection {
-				err = cpCluster.StartCluster(bgpCtx, sm.config, clusterManager, sm.bgpServer)
+				err = cpCluster.StartCluster(bgpCtx, sm.config, clusterManager, sm.bgpServer, sm.leaseMgr)
 			} else {
 				err = cpCluster.StartVipService(bgpCtx, sm.config, clusterManager, sm.bgpServer)
 			}

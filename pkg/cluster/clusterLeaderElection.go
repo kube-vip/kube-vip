@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
@@ -93,20 +94,36 @@ func NewManager(path string, inCluster bool, port int) (*Manager, error) {
 }
 
 // StartCluster - Begins a running instance of the Leader Election cluster
-func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server) error {
+func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
+	sm *Manager, bgpServer *bgp.Server, leaseMgr *lease.Manager) error {
 	var err error
 
-	log.Info("cluster membership", "namespace", c.Namespace, "lock", c.LeaseName, "id", c.NodeName)
+	ns, leaseName := lease.NamespaceName(c.LeaseName, c)
 
-	// use a Go context so we can tell the leaderelection code when we
-	// want to step down
-	leaderCtx, leaderCancel := context.WithCancel(ctx)
-	defer leaderCancel()
+	log.Info("cluster membership", "namespace", ns, "lock", leaseName, "id", c.NodeName)
 
-	// use a Go context so we can tell the arp loop code when we
-	// want to step down
-	clusterCtx, clusterCancel := context.WithCancel(ctx)
-	defer clusterCancel()
+	leaseID := fmt.Sprintf("%s/%s", ns, leaseName)
+	objectName := fmt.Sprintf("%s-cp", leaseID)
+	objLease, newLease, sharedLease := leaseMgr.Add(leaseID, objectName)
+
+	if !newLease {
+		log.Debug("this election was alreadty done, waiting for it to finish", "lease", leaseName)
+		select {
+		case <-ctx.Done():
+		case <-objLease.Ctx.Done():
+		}
+		leaseMgr.Delete(leaseID, objectName)
+		return nil
+	}
+
+	// Start a goroutine that will delete the lease when the service context is cancelled.
+	// This is important for proper cleanup when a service is deleted - it ensures that
+	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
+	// Without this, RunOrDie would continue running until leadership is naturally lost.
+	go func() {
+		<-ctx.Done()
+		leaseMgr.Delete(leaseID, objectName)
+	}()
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
@@ -134,8 +151,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 		}
 
 		log.Info("Received termination, signaling cluster shutdown")
-		// Cancel the leader context, which will in turn cancel the leadership
-		leaderCancel()
+		objLease.Cancel()
 	}()
 
 	// (attempt to) Remove the virtual IP, in case it already exists
@@ -169,11 +185,95 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 		}
 	}
 
+	// this object is sharing lease with another object
+	if sharedLease {
+		log.Debug("this election was alreadty done, shared lease", "lease", leaseName)
+		// wait for leader election to start or context to be done
+		select {
+		case <-objLease.Started:
+		case <-objLease.Ctx.Done():
+			// Lease was cancelled (e.g., leader election ended), return immediately
+			// This allows the restart loop to create a fresh lease
+			log.Debug("lease context cancelled before leader election started", "lease", leaseName)
+			return fmt.Errorf("lease %q context cancelled before leader election started", leaseName)
+		}
+
+		// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
+		if c.PreserveVIPOnLeadershipLoss {
+			log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
+			// Force add the VIPs (this will work even if they exist due to the precheck logic)
+			for i := range cluster.Network {
+				added, err := cluster.Network[i].AddIP(true, false)
+				if err != nil {
+					log.Error("failed to ensure VIP on leader takeover", "vip", cluster.Network[i].IP(), "err", err)
+				} else if added {
+					log.Info("took over VIP as new leader", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				} else {
+					log.Info("VIP already configured on interface", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				}
+			}
+		}
+
+		// Start ARP advertisements now that we have leadership
+		log.Info("Start ARP/NDP advertisement")
+		go cluster.arpMgr.StartAdvertisement(ctx)
+
+		// As we're leading lets start the vip service
+		err := cluster.vipService(ctx, c, sm, bgpServer, objLease.Cancel)
+		if err != nil {
+			log.Error("starting VIP service on leader", "err", err)
+			signalChan <- syscall.SIGINT
+		}
+
+		log.Debug("cluster waiting for leader context done", "lease", leaseName)
+		// wait for leaderelection to be finished
+		<-objLease.Ctx.Done()
+
+		// Handle VIP cleanup based on configuration
+		if c.PreserveVIPOnLeadershipLoss {
+			// For IPv6, we must remove VIPs immediately to avoid DAD failures on the new leader
+			// IPv6 Duplicate Address Detection will fail if the new leader tries to add an IP that is still present on this node's interface
+			// We need to check each VIP individually and only remove IPv6 VIPs
+			for i := range cluster.Network {
+				if utils.IsIPv6(cluster.Network[i].IP()) {
+					log.Info("Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
+					deleted, err := cluster.Network[i].DeleteIP()
+					if err != nil {
+						log.Warn("delete VIP", "err", err)
+					}
+					if deleted {
+						log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+					}
+				} else {
+					log.Info("Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
+				}
+			}
+		} else {
+			// Legacy behavior: delete VIP addresses on leadership loss
+			log.Info("Deleting VIP addresses on leadership loss (legacy behavior)")
+			for i := range cluster.Network {
+				log.Info("Deleting VIP addresses on leadership loss (legacy behavior)", "i", i, "IP", cluster.Network[i].IP())
+				deleted, err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warn("delete VIP", "err", err)
+				}
+				if deleted {
+					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				}
+			}
+		}
+
+		return nil
+	}
+
 	run := &runConfig{
-		config:  c,
-		leaseID: c.NodeName,
-		sm:      sm,
-		onStartedLeading: func(context.Context) { //nolint TODO: potential clean code
+		config:    c,
+		leaseID:   c.NodeName,
+		leaseName: leaseName,
+		namespace: ns,
+		sm:        sm,
+		onStartedLeading: func(context.Context) {
+			close(objLease.Started)
 			// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
 			if c.PreserveVIPOnLeadershipLoss {
 				log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
@@ -192,10 +292,10 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 
 			// Start ARP advertisements now that we have leadership
 			log.Info("Start ARP/NDP advertisement")
-			go cluster.arpMgr.StartAdvertisement(clusterCtx)
+			go cluster.arpMgr.StartAdvertisement(objLease.Ctx)
 
 			// As we're leading lets start the vip service
-			err := cluster.vipService(clusterCtx, c, sm, bgpServer, leaderCancel)
+			err := cluster.vipService(objLease.Ctx, c, sm, bgpServer, objLease.Cancel)
 			if err != nil {
 				log.Error("starting VIP service on leader", "err", err)
 				signalChan <- syscall.SIGINT
@@ -204,9 +304,6 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 		onStoppedLeading: func() {
 			// we can do cleanup here
 			log.Info("This node is becoming a follower within the cluster")
-
-			// Stop the cluster context if it is running
-			clusterCancel()
 
 			// Stop the BGP server
 			if bgpServer != nil {
@@ -239,6 +336,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 				// Legacy behavior: delete VIP addresses on leadership loss
 				log.Info("Deleting VIP addresses on leadership loss (legacy behavior)")
 				for i := range cluster.Network {
+					log.Info("Deleting VIP addresses on leadership loss (legacy behavior)", "i", i, "IP", cluster.Network[i].IP())
 					deleted, err := cluster.Network[i].DeleteIP()
 					if err != nil {
 						log.Warn("delete VIP", "err", err)
@@ -277,9 +375,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 
 	switch c.LeaderElectionType {
 	case "kubernetes", "":
-		cluster.runKubernetesLeaderElectionOrDie(leaderCtx, run)
+		cluster.runKubernetesLeaderElectionOrDie(objLease.Ctx, run)
 	case "etcd":
-		if err := cluster.runEtcdLeaderElectionOrDie(leaderCtx, run); err != nil {
+		if err := cluster.runEtcdLeaderElectionOrDie(objLease.Ctx, run); err != nil {
 			return err
 		}
 	default:
@@ -290,9 +388,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config, sm 
 }
 
 type runConfig struct {
-	config  *kubevip.Config
-	leaseID string
-	sm      *Manager
+	config    *kubevip.Config
+	leaseID   string
+	leaseName string
+	namespace string
+	sm        *Manager
 
 	// onStartedLeading is called when this member starts leading.
 	onStartedLeading func(context.Context)
@@ -309,8 +409,8 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:        run.config.LeaseName,
-			Namespace:   run.config.Namespace,
+			Name:        run.leaseName,
+			Namespace:   run.namespace,
 			Annotations: run.config.LeaseAnnotations,
 		},
 		Client: run.sm.KubernetesClient.CoordinationV1(),
@@ -343,7 +443,7 @@ func (cluster *Cluster) runKubernetesLeaderElectionOrDie(ctx context.Context, ru
 func (cluster *Cluster) runEtcdLeaderElectionOrDie(ctx context.Context, run *runConfig) error {
 	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.sm.EtcdClient},
-		Name:                 run.config.LeaseName,
+		Name:                 fmt.Sprintf("%s-%s", run.namespace, run.leaseName),
 		MemberID:             run.leaseID,
 		LeaseDurationSeconds: int64(run.config.LeaseDuration),
 		Callbacks: etcd.LeaderCallbacks{
