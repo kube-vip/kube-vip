@@ -6,6 +6,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
@@ -70,7 +71,7 @@ func (cluster *Cluster) StartSingleNode(c *kubevip.Config, disableVIP bool) erro
 	return nil
 }
 
-func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, sm *Manager, bgp *bgp.Server) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, sm *election.Manager, bgp *bgp.Server) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	clusterCtx, clusterCancel := context.WithCancel(ctx)
