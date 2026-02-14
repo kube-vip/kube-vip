@@ -86,8 +86,15 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 
 	// Update DNAT rules for each port
 	for _, port := range service.Spec.Ports {
-		if port.Protocol != v1.ProtocolTCP {
-			log.Warn("[wireguard] skipping non-TCP port", "service", service.Name, "port", port.Port, "protocol", port.Protocol)
+		// Determine protocol
+		var protocol string
+		switch port.Protocol {
+		case v1.ProtocolTCP:
+			protocol = "TCP"
+		case v1.ProtocolUDP:
+			protocol = "UDP"
+		default:
+			log.Warn("[wireguard] skipping unsupported protocol", "service", service.Name, "port", port.Port, "protocol", port.Protocol)
 			continue
 		}
 
@@ -114,7 +121,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				"chainID", portServiceID)
 
 			// Apply the DNAT rule
-			err := nftables.ApplyAPIServerDNAT(
+			err := nftables.ApplyDNAT(
 				wgInterface,
 				vipAddr,
 				targetIP,
@@ -122,6 +129,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
 				portServiceID,
 				isIPv6,
+				protocol,
 			)
 			if err != nil {
 				log.Error("[wireguard] failed to update DNAT rule",
@@ -154,7 +162,7 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 
 	// Delete DNAT chains for each port
 	for _, port := range service.Spec.Ports {
-		if port.Protocol != v1.ProtocolTCP {
+		if port.Protocol != v1.ProtocolTCP && port.Protocol != v1.ProtocolUDP {
 			continue
 		}
 

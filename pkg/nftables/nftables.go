@@ -514,7 +514,7 @@ func GetInputChain(IPv6 bool, service string) *nftables.Chain {
 	}
 }
 
-func ApplyAPIServerDNAT(
+func ApplyDNAT(
 	wgIf string,
 	vipIP string,
 	targetIP string,
@@ -522,6 +522,7 @@ func ApplyAPIServerDNAT(
 	targetPort uint16,
 	service string,
 	IPv6 bool,
+	protocol string,
 ) error {
 
 	conn, err := nftables.New()
@@ -561,6 +562,17 @@ func ApplyAPIServerDNAT(
 		return fmt.Errorf("invalid vip or target ip")
 	}
 
+	// Determine protocol number
+	var protoNum byte
+	switch protocol {
+	case "TCP":
+		protoNum = unix.IPPROTO_TCP
+	case "UDP":
+		protoNum = unix.IPPROTO_UDP
+	default:
+		return fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+
 	/* ---------------- DNAT RULE ---------------- */
 
 	dnatRule := &nftables.Rule{
@@ -576,12 +588,12 @@ func ApplyAPIServerDNAT(
 				Data:     append([]byte(wgIf), 0),
 			},
 
-			// tcp
+			// protocol (tcp or udp)
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     []byte{unix.IPPROTO_TCP},
+				Data:     []byte{protoNum},
 			},
 
 			// dport == sourcePort (incoming port, e.g., 6443)
@@ -635,7 +647,7 @@ func ApplyAPIServerDNAT(
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     []byte{unix.IPPROTO_TCP},
+				Data:     []byte{protoNum},
 			},
 
 			&expr.Payload{
@@ -671,12 +683,12 @@ func ApplyAPIServerDNAT(
 				Data:     append([]byte(wgIf), 0),
 			},
 
-			// tcp sport == target port
+			// protocol (tcp or udp) sport == target port
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     []byte{unix.IPPROTO_TCP},
+				Data:     []byte{protoNum},
 			},
 
 			&expr.Payload{
@@ -734,12 +746,12 @@ func ApplyAPIServerDNAT(
 				Data:     ipToBytes(target, IPv6),
 			},
 
-			// tcp dport == target port
+			// protocol (tcp or udp) dport == target port
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     []byte{unix.IPPROTO_TCP},
+				Data:     []byte{protoNum},
 			},
 
 			&expr.Payload{
