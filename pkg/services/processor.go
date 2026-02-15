@@ -10,6 +10,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
@@ -54,6 +55,8 @@ type Processor struct {
 
 	// nodeLabelManager is the manager for the node labels
 	nodeLabelManager labelManager
+
+	electionMgr *election.Manager
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -64,7 +67,8 @@ type labelManager interface {
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset, shutdownChan chan struct{},
-	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager) *Processor {
+	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager,
+	electionMgr *election.Manager) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
@@ -89,6 +93,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		arpMgr:           arpMgr,
 		leaseMgr:         lease.NewManager(),
 		nodeLabelManager: nodeLabelManager,
+		electionMgr:      electionMgr,
 	}
 }
 

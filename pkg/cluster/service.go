@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -29,7 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
+func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *election.Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc) error {
 	var err error
 
 	// listen for interrupts or the Linux SIGTERM signal and cancel
