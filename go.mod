@@ -34,8 +34,8 @@ require (
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.10
-	k8s.io/api v0.35.0
-	k8s.io/apimachinery v0.35.0
+	k8s.io/api v0.35.1
+	k8s.io/apimachinery v0.35.1
 	k8s.io/client-go v0.35.0
 	k8s.io/klog/v2 v2.130.1
 	sigs.k8s.io/kind v0.31.0
