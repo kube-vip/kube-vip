@@ -1,0 +1,14 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: kube-vip
+build:
+  local:
+    useBuildkit: true
+  artifacts:
+    - image: ghcr.io/kube-vip/kube-vip
+      docker:
+        dockerfile: Dockerfile
+manifests:
+  rawYaml:
+    - testing/kind/kube-vip-egress.yaml
