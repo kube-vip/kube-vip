@@ -11,4 +11,4 @@ build:
         dockerfile: Dockerfile
 manifests:
   rawYaml:
-    - testing/kind/kube-vip-egress.yaml
+    - testing/kind/kube-vip-skaffold.yaml

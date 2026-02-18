@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-vip-ds
+  name: kube-vip-ds
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-vip-ds
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kube-vip-ds
+    spec:
+      containers:
+        - args:
+            - manager
+          env:
+            - name: vip_arp
+              value: "true"
+            - name: port
+              value: "6443"
+            - name: vip_nodename
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: vip_interface
+              value: eth0
+            - name: dns_mode
+              value: first
+            - name: svc_enable
+              value: "true"
+            - name: svc_leasename
+              value: plndr-svcs-lock
+            - name: svc_election
+              value: "true"
+            - name: vip_address
+            - name: prometheus_server
+              value: :2112
+            - name: enable_endpointslices
+              value: "true"
+            - name: EGRESS_CLEAN
+              value: "true"
+            - name: egress_withnftables
+              value: "true"
+          image: ghcr.io/kube-vip/kube-vip
+          imagePullPolicy: IfNotPresent
+          name: kube-vip
+          resources: {}
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+      hostNetwork: true
+      serviceAccountName: kube-vip
+  updateStrategy: {}
