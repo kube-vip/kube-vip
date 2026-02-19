@@ -66,6 +66,17 @@ Thanks for taking the time to join our community and start contributing! We welc
 
 :warning: This project has issue compiling on MacOS, please compile it on linux distribution
 
+Additionally it is now relatively easy and quick to develop with [skaffold](https://skaffold.dev/), and the `skaffold.yaml` exists within the root folder of the gir repository.
+
+### Set up a kind development environment
+
+1. `kind create cluster --config ./testing/kind.yaml`
+2. `kubectl apply -f https://kube-vip.io/manifests/rbac.yaml`
+3. Create a load balancer range `configMap` from the kind cluster
+4. Apply the CCM manifest
+5. Start skaffold with `skaffold dev`
+6. Start developing and see changes applied in real-time.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=kube-vip/kube-vip&type=Date)](https://star-history.com/#kube-vip/kube-vip&Date)
