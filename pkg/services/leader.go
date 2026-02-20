@@ -41,7 +41,11 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return fmt.Errorf("no context context for service %q with UID %q: nil context", service.Name, service.UID)
 	}
 
-	svcLease, newService, sharedLease := p.leaseMgr.Add(service)
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+	objectName := lease.ServiceNamespacedName(service)
+
+	svcLease, newService, sharedLease := p.leaseMgr.Add(id, objectName)
 
 	// this service was already processed so we do not need to do anything
 	if !newService {
@@ -50,7 +54,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		select {
 		case <-svcCtx.Ctx.Done():
 			// Service was deleted
-			p.leaseMgr.Delete(service)
+			p.leaseMgr.Delete(id, objectName)
 		case <-svcLease.Ctx.Done():
 			// Leader election ended (leadership lost or context cancelled)
 		}
@@ -63,7 +67,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	// Without this, RunOrDie would continue running until leadership is naturally lost.
 	go func() {
 		<-svcCtx.Ctx.Done()
-		p.leaseMgr.Delete(service)
+		p.leaseMgr.Delete(id, objectName)
 	}()
 
 	// this service is sharing lease with another service
@@ -116,17 +120,14 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		// 1. Leadership loss (e.g., network timeout)
 		// 2. Context cancellation
 		// 3. Any other reason RunOrDie returns
-		p.leaseMgr.Delete(service)
+		p.leaseMgr.Delete(id, objectName)
 	}()
 
-	serviceLease, _ := lease.GetName(service)
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 
 	run := election.RunConfig{
 		Config:           p.config,
-		LeaseID:          p.config.NodeName,
-		LeaseName:        serviceLease,
-		Namespace:        service.Namespace,
+		LeaseID:          id,
 		Mgr:              p.electionMgr,
 		LeaseAnnotations: map[string]string{},
 
@@ -151,6 +152,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			}
 			// Mark this service is inactive
 			svcCtx.IsActive = false
+			svcLease.Cancel()
 		},
 		OnNewLeader: func(identity string) {
 			// we're notified when new leader elected

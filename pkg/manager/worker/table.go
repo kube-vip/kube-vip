@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -29,19 +30,10 @@ type Table struct {
 func NewTable(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager) *Table {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *Table {
 	return &Table{
-		Common: Common{
-			arpMgr:       arpMgr,
-			intfMgr:      intfMgr,
-			config:       config,
-			closing:      closing,
-			signalChan:   signalChan,
-			svcProcessor: svcProcessor,
-			mutex:        mutex,
-			clientSet:    clientSet,
-			electionMgr:  electionMgr,
-		},
+		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 	}
 }
 
@@ -67,7 +59,7 @@ func (t *Table) Configure(ctx context.Context) error {
 	return nil
 }
 
-func (t *Table) StartControlPlane(ctx context.Context, electionManager *election.Manager, _, _ string) {
+func (t *Table) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
 	if err := t.cpCluster.StartVipService(ctx, t.config, electionManager, nil); err != nil {
 		log.Error("Control Plane", "err", err)
 		// Trigger the shutdown of this manager instance
@@ -83,7 +75,7 @@ func (t *Table) ConfigureServices() {
 	// No configuration required
 }
 
-func (t *Table) StartServices(ctx context.Context, id string) error {
+func (t *Table) StartServices(ctx context.Context) error {
 	log.Debug("starting Services")
 
 	if t.config.EnableServicesElection {
@@ -91,7 +83,7 @@ func (t *Table) StartServices(ctx context.Context, id string) error {
 			return err
 		}
 	} else if t.config.EnableLeaderElection {
-		t.GlobalLeader(ctx, id, t.config.ServicesLeaseName)
+		t.GlobalLeader(ctx, t.config.ServicesLeaseName)
 	} else {
 		if err := t.ServicesNoLeader(ctx); err != nil {
 			return err

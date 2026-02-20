@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	api "github.com/osrg/gobgp/v3/api"
@@ -31,19 +32,10 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	bgpServer *bgp.Server, bgpSessionInfoGauge *prometheus.GaugeVec,
-	electionMgr *election.Manager) *BGP {
+	electionMgr *election.Manager, leaseMgr *lease.Manager) *BGP {
 	return &BGP{
-		Common: Common{
-			arpMgr:       arpMgr,
-			intfMgr:      intfMgr,
-			config:       config,
-			closing:      closing,
-			signalChan:   signalChan,
-			svcProcessor: svcProcessor,
-			mutex:        mutex,
-			clientSet:    clientSet,
-			electionMgr:  electionMgr,
-		},
+		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 		bgpServer:           bgpServer,
 		bgpSessionInfoGauge: bgpSessionInfoGauge,
 	}
@@ -82,10 +74,10 @@ func (b *BGP) Configure(ctx context.Context) error {
 	return nil
 }
 
-func (b *BGP) StartControlPlane(ctx context.Context, electionManager *election.Manager, _, _ string) {
+func (b *BGP) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
 	var err error
 	if b.config.EnableLeaderElection {
-		err = b.cpCluster.StartCluster(ctx, b.config, electionManager, b.bgpServer)
+		err = b.cpCluster.StartCluster(ctx, b.config, electionManager, b.bgpServer, b.leaseMgr)
 	} else {
 		err = b.cpCluster.StartVipService(ctx, b.config, electionManager, b.bgpServer)
 	}
@@ -102,7 +94,7 @@ func (b *BGP) ConfigureServices() {
 	// No configuration required
 }
 
-func (b *BGP) StartServices(ctx context.Context, id string) error {
+func (b *BGP) StartServices(ctx context.Context) error {
 	if b.config.EnableServicesElection {
 		if err := b.PerServiceLeader(ctx); err != nil {
 			return err
