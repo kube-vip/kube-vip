@@ -6,7 +6,7 @@ require (
 	github.com/cloudflare/ipvs v0.11.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/florianl/go-conntrack v0.5.0
+	github.com/florianl/go-conntrack v0.6.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.20.7
 	github.com/google/nftables v0.3.0
