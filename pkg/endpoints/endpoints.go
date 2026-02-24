@@ -14,6 +14,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -27,13 +28,13 @@ type Processor struct {
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager) *Processor {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *Processor {
 	return &Processor{
 		config:    config,
 		provider:  provider,
 		bgpServer: bgpServer,
 		instances: instances,
-		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr),
+		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr),
 	}
 }
 
@@ -78,7 +79,10 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		}
 
 		// There are local endpoints available on the node
-		if !p.config.EnableServicesElection && !p.config.EnableLeaderElection {
+		// Process immediately if:
+		// - No services/leader election is enabled, OR
+		// - WireGuard is enabled (it always needs immediate DNAT rule updates)
+		if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}

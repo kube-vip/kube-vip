@@ -3,19 +3,18 @@ package services
 import (
 	"context"
 	"fmt"
-	"net"
 	"strings"
 
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// addServiceWireguard configures a WireGuard tunnel and nftables DNAT rules for a service
-// Each service gets its own WireGuard tunnel based on its VIP
-func (p *Processor) addServiceWireguard(ctx context.Context, svc *v1.Service) error {
+// addServiceWireguard configures a WireGuard tunnel for a service
+// The tunnel is brought up here, but DNAT rules are configured by the endpoint watcher
+// via wireguardWorker.processInstance() when endpoints become available
+func (p *Processor) addServiceWireguard(_ context.Context, svc *v1.Service) error {
 	if !p.config.EnableWireguard {
 		return nil
 	}
@@ -30,9 +29,10 @@ func (p *Processor) addServiceWireguard(ctx context.Context, svc *v1.Service) er
 		return fmt.Errorf("no service IPs found for service %s/%s", svc.Namespace, svc.Name)
 	}
 
-	// For each VIP, set up the WireGuard tunnel and DNAT rules
+	// For each VIP, bring up the WireGuard tunnel
+	// DNAT rules will be configured by the endpoint watcher when endpoints are available
 	for _, vip := range serviceIPs {
-		if err := p.setupServiceWireguardTunnel(ctx, svc, vip); err != nil {
+		if err := p.setupServiceWireguardTunnel(svc, vip); err != nil {
 			log.Error("[wireguard] failed to setup tunnel for VIP",
 				"service", svc.Name,
 				"namespace", svc.Namespace,
@@ -46,8 +46,9 @@ func (p *Processor) addServiceWireguard(ctx context.Context, svc *v1.Service) er
 	return nil
 }
 
-// setupServiceWireguardTunnel sets up the WireGuard tunnel and DNAT rules for a single VIP
-func (p *Processor) setupServiceWireguardTunnel(ctx context.Context, svc *v1.Service, vip string) error {
+// setupServiceWireguardTunnel brings up the WireGuard tunnel for a single VIP
+// DNAT rules are NOT configured here - they are handled by the endpoint watcher
+func (p *Processor) setupServiceWireguardTunnel(svc *v1.Service, vip string) error {
 	// Check if we have a tunnel configuration for this VIP
 	if !p.TunnelMgr.HasConfigForVIP(vip) {
 		return fmt.Errorf("no WireGuard tunnel configuration found for VIP %s", vip)
@@ -70,95 +71,8 @@ func (p *Processor) setupServiceWireguardTunnel(ctx context.Context, svc *v1.Ser
 		"vip", vip,
 		"interface", tunnelConfig.InterfaceName)
 
-	// Get the target endpoint for this service
-	targetEndpoint, targetPort, err := p.getServiceTargetEndpoint(ctx, svc)
-	if err != nil {
-		return fmt.Errorf("failed to get target endpoint for service %s/%s: %w", svc.Namespace, svc.Name, err)
-	}
-
-	// Create a unique service identifier for nftables chains
-	serviceID := fmt.Sprintf("%s_%s", svc.Namespace, svc.Name)
-	serviceID = sanitizeServiceID(serviceID)
-
-	log.Info("[wireguard] configuring DNAT rules for service",
-		"namespace", svc.Namespace,
-		"name", svc.Name,
-		"vip", vip,
-		"interface", tunnelConfig.InterfaceName,
-		"target", targetEndpoint,
-		"targetPort", targetPort)
-
-	// Apply DNAT rules for each service port
-	for _, port := range svc.Spec.Ports {
-		// Determine protocol
-		var protocol string
-		switch port.Protocol {
-		case v1.ProtocolTCP:
-			protocol = "TCP"
-		case v1.ProtocolUDP:
-			protocol = "UDP"
-		default:
-			log.Warn("[wireguard] skipping unsupported protocol", "service", svc.Name, "port", port.Port, "protocol", port.Protocol)
-			continue
-		}
-
-		isIPv6 := strings.Contains(vip, ":")
-
-		// Strip CIDR notation if present
-		vipAddr := stripCIDR(vip)
-
-		// Parse VIP to ensure it's valid
-		vipIP := net.ParseIP(vipAddr)
-		if vipIP == nil {
-			log.Error("[wireguard] invalid VIP", "vip", vipAddr)
-			continue
-		}
-
-		// Determine the actual target port
-		actualTargetPort := targetPort
-		if port.NodePort != 0 && p.config.EnableServicesElection {
-			actualTargetPort = port.NodePort
-		}
-
-		// Create unique service identifier including port to handle multiple ports
-		portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
-
-		log.Debug("[wireguard] applying DNAT rule",
-			"service", svc.Name,
-			"vip", vipAddr,
-			"interface", tunnelConfig.InterfaceName,
-			"sourcePort", port.Port,
-			"target", targetEndpoint,
-			"targetPort", actualTargetPort,
-			"chainID", portServiceID)
-
-		// Apply the DNAT rule using nftables
-		err := nftables.ApplyDNAT(
-			tunnelConfig.InterfaceName,
-			vipAddr,
-			targetEndpoint,
-			uint16(port.Port),        //nolint:gosec // Port range validated by Kubernetes
-			uint16(actualTargetPort), //nolint:gosec // Port range validated by Kubernetes
-			portServiceID,
-			isIPv6,
-			protocol,
-		)
-		if err != nil {
-			log.Error("[wireguard] failed to apply DNAT rule",
-				"service", svc.Name,
-				"vip", vipAddr,
-				"port", port.Port,
-				"err", err)
-			continue
-		}
-
-		log.Info("[wireguard] DNAT rule applied successfully",
-			"service", svc.Name,
-			"vip", vipAddr,
-			"interface", tunnelConfig.InterfaceName,
-			"port", port.Port,
-			"target", fmt.Sprintf("%s:%d", targetEndpoint, actualTargetPort))
-	}
+	// DNAT rules will be configured by wireguardWorker.processInstance()
+	// when the endpoint watcher detects available endpoints
 
 	return nil
 }
@@ -243,44 +157,6 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 	log.Info("[wireguard] DNAT rules deleted and tunnels torn down for service",
 		"namespace", svc.Namespace,
 		"name", svc.Name)
-}
-
-// getServiceTargetEndpoint determines the target endpoint for a service
-func (p *Processor) getServiceTargetEndpoint(ctx context.Context, svc *v1.Service) (string, int32, error) {
-	// Get endpoints for this service
-	endpoints, err := p.clientSet.CoreV1().Endpoints(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get endpoints: %w", err)
-	}
-
-	if len(endpoints.Subsets) == 0 {
-		return "", 0, fmt.Errorf("no endpoint subsets found")
-	}
-
-	// Find first available endpoint
-	for _, subset := range endpoints.Subsets {
-		if len(subset.Addresses) == 0 {
-			continue
-		}
-
-		if len(subset.Ports) == 0 {
-			continue
-		}
-
-		// For ExternalTrafficPolicy=Local, filter by node
-		if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-			for _, addr := range subset.Addresses {
-				if addr.NodeName != nil && *addr.NodeName == p.config.NodeName {
-					return addr.IP, subset.Ports[0].Port, nil
-				}
-			}
-		} else {
-			// Use first available endpoint for Cluster policy
-			return subset.Addresses[0].IP, subset.Ports[0].Port, nil
-		}
-	}
-
-	return "", 0, fmt.Errorf("no suitable endpoints found")
 }
 
 // fetchServiceIPs extracts IP addresses from the service

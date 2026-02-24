@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -23,16 +24,18 @@ type wireguardWorker struct {
 	bgpServer *bgp.Server
 	instances *[]*instance.Instance
 	leaseMgr  *lease.Manager
+	tunnelMgr *wireguard.TunnelManager
 }
 
 func newWireguardWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager) *wireguardWorker {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *wireguardWorker {
 	return &wireguardWorker{
 		config:    config,
 		provider:  provider,
 		bgpServer: bgpServer,
 		instances: instances,
 		leaseMgr:  leaseMgr,
+		tunnelMgr: tunnelMgr,
 	}
 }
 
@@ -42,7 +45,15 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	log.Debug("[wireguard] processing instance for endpoint change", "service", service.Name, "namespace", service.Namespace)
 
 	// Get the target endpoint for this service
-	endpoints, err := w.provider.GetLocalEndpoints(w.config.NodeName, w.config)
+	// For ExternalTrafficPolicy=Local, only use local endpoints
+	// For ExternalTrafficPolicy=Cluster, use all endpoints
+	var endpoints []string
+	var err error
+	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+		endpoints, err = w.provider.GetLocalEndpoints(w.config.NodeName, w.config)
+	} else {
+		endpoints, err = w.provider.GetAllEndpoints()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get endpoints: %w", err)
 	}
@@ -67,12 +78,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	serviceIPs, err := fetchServiceIPs(service)
 	if err != nil {
 		return fmt.Errorf("failed to get service IPs: %w", err)
-	}
-
-	// Get WireGuard interface name
-	wgInterface := w.config.Interface
-	if wgInterface == "" {
-		wgInterface = "wg0"
 	}
 
 	// Create service identifier
@@ -110,11 +115,20 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 			// Strip CIDR notation if present
 			vipAddr := stripCIDR(vip)
 
+			// Get WireGuard interface name from TunnelManager for this VIP
+			wgInterface := "wg0" // default fallback
+			if w.tunnelMgr != nil {
+				if tunnelConfig := w.tunnelMgr.GetConfigForVIP(vipAddr); tunnelConfig != nil {
+					wgInterface = tunnelConfig.InterfaceName
+				}
+			}
+
 			portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
 
 			log.Debug("[wireguard] updating DNAT rule",
 				"service", service.Name,
 				"vip", vipAddr,
+				"interface", wgInterface,
 				"sourcePort", port.Port,
 				"target", targetIP,
 				"targetPort", targetPort,
@@ -198,9 +212,17 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 	}
 }
 
-// getEndpoints retrieves the list of local endpoints for a service
+// getEndpoints retrieves the list of endpoints for a service
+// For ExternalTrafficPolicy=Local, only local endpoints are returned
+// For ExternalTrafficPolicy=Cluster, all endpoints are returned
 func (w *wireguardWorker) getEndpoints(service *v1.Service, id string) ([]string, error) {
-	endpoints, err := w.provider.GetLocalEndpoints(id, w.config)
+	var endpoints []string
+	var err error
+	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+		endpoints, err = w.provider.GetLocalEndpoints(id, w.config)
+	} else {
+		endpoints, err = w.provider.GetAllEndpoints()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("[wireguard] failed to get endpoints: %w", err)
 	}

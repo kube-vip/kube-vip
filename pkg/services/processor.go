@@ -213,7 +213,39 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			p.svcMap.Store(svc.UID, svcCtx)
 		}
 
-		if p.config.EnableServicesElection || // Service Election
+		// WireGuard services always need endpoint watching for DNAT rule updates
+		// This is independent of leader election settings (which are for control plane HA)
+		if p.config.EnableWireguard && !svcCtx.IsWatched {
+			// Call serviceFunc first to set up the WireGuard tunnel
+			err = serviceFunc(svcCtx, svc)
+			if err != nil {
+				log.Error(err.Error())
+				if errors.Is(err, &utils.PanicError{}) {
+					return false, err
+				}
+			}
+
+			go func() {
+				defer func() {
+					if svcCtx != nil {
+						svcCtx.IsWatched = false
+					}
+				}()
+
+				// Start endpoint watcher for WireGuard services (uses EndpointSlices by default)
+				var provider providers.Provider
+				if p.config.EnableEndpoints {
+					provider = providers.NewEndpoints()
+				} else {
+					provider = providers.NewEndpointslices()
+				}
+				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
+					log.Error(err.Error())
+				}
+			}()
+
+			svcCtx.IsWatched = true
+		} else if p.config.EnableServicesElection || // Service Election
 			((p.config.EnableRoutingTable || p.config.EnableBGP) && // Routing table mode or BGP
 				(!p.config.EnableLeaderElection && !p.config.EnableServicesElection)) { // No leaderelection or services election
 
