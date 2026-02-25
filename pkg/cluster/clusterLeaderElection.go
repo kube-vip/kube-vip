@@ -28,7 +28,8 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	log.Info("cluster membership", "namespace", leaseID.Namespace(), "lock", leaseID.Name(), "id", c.NodeName)
 
 	objectName := lease.ObjectName(leaseID, "cp")
-	objLease, newLease, sharedLease := leaseMgr.Add(leaseID, objectName)
+	objLease := leaseMgr.Add(ctx, leaseID)
+	isNew := objLease.Add(objectName)
 
 	// Start a goroutine that will delete the lease when the service context is cancelled.
 	// This is important for proper cleanup when a service is deleted - it ensures that
@@ -39,7 +40,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		leaseMgr.Delete(leaseID, objectName)
 	}()
 
-	if !newLease {
+	if !isNew {
 		log.Debug("this election was already done, waiting for it to finish", "lease", leaseName)
 		<-objLease.Ctx.Done()
 		return nil
@@ -106,8 +107,14 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		}
 	}
 
+	objLease.Lock()
+
+	defer func() {
+		objLease.Unlock()
+	}()
+
 	// this object is sharing lease with another object
-	if sharedLease {
+	if objLease.Elected.Load() {
 		log.Debug("this election was already done, shared lease", "lease", leaseName)
 		// wait for leader election to start or context to be done
 		select {
@@ -119,7 +126,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			return fmt.Errorf("lease %q context cancelled before leader election started", leaseName)
 		}
 
-		cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, sharedLease)
+		cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, true)
 
 		log.Debug("cluster waiting for leader context done", "lease", leaseName)
 		// wait for leaderelection to be finished
@@ -136,9 +143,10 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		LeaseAnnotations: c.LeaseAnnotations,
 		Mgr:              em,
 		OnStartedLeading: func(context.Context) { //nolint TODO: potential clean code
-			cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, sharedLease)
+			cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, false)
 		},
 		OnStoppedLeading: func() {
+			objLease.Elected.Store(false)
 			cluster.OnStoppedLeading(c, objLease, bgpServer, signalChan)
 		},
 		OnNewLeader: func(identity string) {
@@ -156,6 +164,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 
 func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Lease,
 	em *election.Manager, bgpServer *bgp.Server, signalChan chan os.Signal, isShared bool) {
+	objLease.Elected.Store(true)
+	objLease.Unlock()
+
 	// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
 	if !isShared {
 		close(objLease.Started)
