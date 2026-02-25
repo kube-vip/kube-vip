@@ -3,11 +3,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -20,7 +20,7 @@ func (p *Processor) addServiceWireguard(_ context.Context, svc *v1.Service) erro
 	}
 
 	// Get service VIPs
-	serviceIPs, err := p.fetchServiceIPs(svc)
+	serviceIPs, err := utils.FetchServiceIPs(svc)
 	if err != nil {
 		return fmt.Errorf("failed to get service IPs for %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
@@ -31,6 +31,8 @@ func (p *Processor) addServiceWireguard(_ context.Context, svc *v1.Service) erro
 
 	// For each VIP, bring up the WireGuard tunnel
 	// DNAT rules will be configured by the endpoint watcher when endpoints are available
+	var successCount int
+	var lastErr error
 	for _, vip := range serviceIPs {
 		if err := p.setupServiceWireguardTunnel(svc, vip); err != nil {
 			log.Error("[wireguard] failed to setup tunnel for VIP",
@@ -38,9 +40,15 @@ func (p *Processor) addServiceWireguard(_ context.Context, svc *v1.Service) erro
 				"namespace", svc.Namespace,
 				"vip", vip,
 				"err", err)
+			lastErr = err
 			// Continue with other VIPs even if one fails
 			continue
 		}
+		successCount++
+	}
+
+	if successCount == 0 {
+		return fmt.Errorf("failed to setup WireGuard tunnel for any VIP in service %s/%s: %w", svc.Namespace, svc.Name, lastErr)
 	}
 
 	return nil
@@ -84,7 +92,7 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 	}
 
 	serviceID := fmt.Sprintf("%s_%s", svc.Namespace, svc.Name)
-	serviceID = sanitizeServiceID(serviceID)
+	serviceID = utils.SanitizeServiceID(serviceID)
 
 	log.Info("[wireguard] deleting DNAT rules and tunnel for service",
 		"namespace", svc.Namespace,
@@ -92,7 +100,7 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 		"serviceID", serviceID)
 
 	// Get service IPs
-	serviceIPs, _ := p.fetchServiceIPs(svc)
+	serviceIPs, _ := utils.FetchServiceIPs(svc)
 
 	// Delete DNAT chains for each port
 	for _, port := range svc.Spec.Ports {
@@ -106,7 +114,9 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 		hasIPv4 := false
 		hasIPv6 := false
 		for _, vip := range serviceIPs {
-			if strings.Contains(vip, ":") {
+			// Strip CIDR notation before checking IP version
+			addr := utils.StripCIDR(vip)
+			if utils.IsIPv6(addr) {
 				hasIPv6 = true
 			} else {
 				hasIPv4 = true
@@ -157,67 +167,4 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 	log.Info("[wireguard] DNAT rules deleted and tunnels torn down for service",
 		"namespace", svc.Namespace,
 		"name", svc.Name)
-}
-
-// fetchServiceIPs extracts IP addresses from the service
-func (p *Processor) fetchServiceIPs(svc *v1.Service) ([]string, error) {
-	var ips []string
-
-	// Check for loadBalancerIPs annotation first (new style)
-	if loadBalancerIPs, ok := svc.Annotations["kube-vip.io/loadbalancerIPs"]; ok {
-		for _, ip := range strings.Split(loadBalancerIPs, ",") {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				ips = append(ips, ip)
-			}
-		}
-	}
-
-	// Fallback to spec.LoadBalancerIP (deprecated but still used)
-	if len(ips) == 0 && svc.Spec.LoadBalancerIP != "" {
-		ips = append(ips, svc.Spec.LoadBalancerIP)
-	}
-
-	// Check status.loadBalancer.ingress as well
-	if len(ips) == 0 {
-		for _, ingress := range svc.Status.LoadBalancer.Ingress {
-			if ingress.IP != "" {
-				ips = append(ips, ingress.IP)
-			}
-		}
-	}
-
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("no IPs found for service")
-	}
-
-	return ips, nil
-}
-
-// sanitizeServiceID sanitizes a service ID to be valid for nftables chain names
-func sanitizeServiceID(id string) string {
-	var result strings.Builder
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			result.WriteRune(r)
-		} else {
-			result.WriteRune('_')
-		}
-	}
-	sanitized := result.String()
-
-	// Ensure it doesn't exceed nftables name length limit
-	if len(sanitized) > 50 {
-		sanitized = sanitized[:50]
-	}
-
-	return sanitized
-}
-
-// stripCIDR removes CIDR notation from an IP address
-func stripCIDR(ip string) string {
-	if idx := strings.Index(ip, "/"); idx >= 0 {
-		return ip[:idx]
-	}
-	return ip
 }

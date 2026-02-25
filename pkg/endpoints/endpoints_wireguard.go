@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 )
@@ -75,13 +76,13 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	targetIP := endpoints[0]
 
 	// Get service VIPs
-	serviceIPs, err := fetchServiceIPs(service)
+	serviceIPs, err := utils.FetchServiceIPs(service)
 	if err != nil {
 		return fmt.Errorf("failed to get service IPs: %w", err)
 	}
 
 	// Create service identifier
-	serviceID := sanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
+	serviceID := utils.SanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
 
 	log.Info("[wireguard] updating DNAT rules for endpoint change",
 		"service", service.Name,
@@ -113,15 +114,24 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 			isIPv6 := isIPv6Address(vip)
 
 			// Strip CIDR notation if present
-			vipAddr := stripCIDR(vip)
+			vipAddr := utils.StripCIDR(vip)
 
 			// Get WireGuard interface name from TunnelManager for this VIP
-			wgInterface := "wg0" // default fallback
-			if w.tunnelMgr != nil {
-				if tunnelConfig := w.tunnelMgr.GetConfigForVIP(vipAddr); tunnelConfig != nil {
-					wgInterface = tunnelConfig.InterfaceName
-				}
+			if w.tunnelMgr == nil {
+				log.Error("[wireguard] TunnelManager not configured; cannot update DNAT rules",
+					"service", service.Name,
+					"namespace", service.Namespace)
+				return fmt.Errorf("TunnelManager not configured")
 			}
+			tunnelConfig := w.tunnelMgr.GetConfigForVIP(vipAddr)
+			if tunnelConfig == nil {
+				log.Error("[wireguard] WireGuard interface name not configured; cannot update DNAT rules",
+					"service", service.Name,
+					"namespace", service.Namespace,
+					"vip", vipAddr)
+				return fmt.Errorf("wireguard interface name not configured for VIP %s", vipAddr)
+			}
+			wgInterface := tunnelConfig.InterfaceName
 
 			portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
 
@@ -169,10 +179,10 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	log.Info("[wireguard] clearing DNAT rules (no endpoints)", "service", service.Name, "namespace", service.Namespace)
 
-	serviceID := sanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
+	serviceID := utils.SanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
 
 	// Get service IPs to determine IPv4 vs IPv6
-	serviceIPs, _ := fetchServiceIPs(service)
+	serviceIPs, _ := utils.FetchServiceIPs(service)
 
 	// Delete DNAT chains for each port
 	for _, port := range service.Spec.Ports {
@@ -277,116 +287,8 @@ func (w *wireguardWorker) setInstanceEndpointsStatus(service *v1.Service, endpoi
 	return nil
 }
 
-// Helper functions
-
-func fetchServiceIPs(service *v1.Service) ([]string, error) {
-	var ips []string
-
-	// Check for loadBalancerIPs annotation first (new style)
-	if loadBalancerIPs, ok := service.Annotations["kube-vip.io/loadbalancerIPs"]; ok {
-		for _, ip := range splitAndTrim(loadBalancerIPs, ",") {
-			if ip != "" {
-				ips = append(ips, ip)
-			}
-		}
-	}
-
-	// Fallback to spec.LoadBalancerIP (deprecated but still used)
-	if len(ips) == 0 && service.Spec.LoadBalancerIP != "" {
-		ips = append(ips, service.Spec.LoadBalancerIP)
-	}
-
-	// Check status.loadBalancer.ingress as well
-	if len(ips) == 0 {
-		for _, ingress := range service.Status.LoadBalancer.Ingress {
-			if ingress.IP != "" {
-				ips = append(ips, ingress.IP)
-			}
-		}
-	}
-
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("no IPs found for service")
-	}
-
-	return ips, nil
-}
-
-func sanitizeServiceID(id string) string {
-	result := ""
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			result += string(r)
-		} else {
-			result += "_"
-		}
-	}
-
-	// Ensure it doesn't exceed nftables name length limit
-	if len(result) > 50 {
-		result = result[:50]
-	}
-
-	return result
-}
-
 func isIPv6Address(ip string) bool {
-	return len(ip) > 0 && (ip[0] == ':' || containsChar(ip, ':'))
-}
-
-func stripCIDR(ip string) string {
-	if idx := indexChar(ip, '/'); idx >= 0 {
-		return ip[:idx]
-	}
-	return ip
-}
-
-func splitAndTrim(s, sep string) []string {
-	var result []string
-	current := ""
-	for _, c := range s {
-		if string(c) == sep {
-			trimmed := trim(current)
-			if trimmed != "" {
-				result = append(result, trimmed)
-			}
-			current = ""
-		} else {
-			current += string(c)
-		}
-	}
-	if trimmed := trim(current); trimmed != "" {
-		result = append(result, trimmed)
-	}
-	return result
-}
-
-func trim(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
-}
-
-func containsChar(s string, c rune) bool {
-	for _, r := range s {
-		if r == c {
-			return true
-		}
-	}
-	return false
-}
-
-func indexChar(s string, c rune) int {
-	for i, r := range s {
-		if r == c {
-			return i
-		}
-	}
-	return -1
+	// Strip CIDR notation if present before checking
+	addr := utils.StripCIDR(ip)
+	return utils.IsIPv6(addr)
 }

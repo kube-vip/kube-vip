@@ -3,12 +3,12 @@ package wireguard
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -30,16 +30,18 @@ type TunnelConfig struct {
 
 // TunnelManager manages multiple WireGuard tunnels
 type TunnelManager struct {
-	mu      sync.RWMutex
-	tunnels map[string]*WireGuard    // key: VIP (without CIDR), value: WireGuard instance
-	configs map[string]*TunnelConfig // key: VIP (without CIDR), value: TunnelConfig
+	mu       sync.RWMutex
+	tunnels  map[string]*WireGuard    // key: VIP (without CIDR), value: WireGuard instance
+	configs  map[string]*TunnelConfig // key: VIP (without CIDR), value: TunnelConfig
+	refCount map[string]int           // key: VIP (without CIDR), value: number of consumers using the tunnel
 }
 
 // NewTunnelManager creates a new tunnel manager
 func NewTunnelManager() *TunnelManager {
 	return &TunnelManager{
-		tunnels: make(map[string]*WireGuard),
-		configs: make(map[string]*TunnelConfig),
+		tunnels:  make(map[string]*WireGuard),
+		configs:  make(map[string]*TunnelConfig),
+		refCount: make(map[string]int),
 	}
 }
 
@@ -93,12 +95,11 @@ func (tm *TunnelManager) parseTunnelConfig(data []byte) error {
 		return fmt.Errorf("no tunnel configurations found in secret")
 	}
 
-	// Assign interface names and add to manager
-	interfaceIndex := 0
+	// Use the tunnel name from the YAML key as the interface name
+	// This ensures deterministic interface naming across restarts
 	for name, config := range tunnelsMap {
 		config.Name = name
-		config.InterfaceName = fmt.Sprintf("wg%d", interfaceIndex)
-		interfaceIndex++
+		config.InterfaceName = name
 
 		if err := tm.addTunnelConfig(config); err != nil {
 			return fmt.Errorf("invalid tunnel config %s: %w", name, err)
@@ -124,12 +125,12 @@ func (tm *TunnelManager) addTunnelConfig(config *TunnelConfig) error {
 	if config.PeerEndpoint == "" {
 		return fmt.Errorf("peerEndpoint is required")
 	}
-	if config.ListenPort == 0 {
-		return fmt.Errorf("listenPort is required")
+	if config.ListenPort < 1 || config.ListenPort > 65535 {
+		return fmt.Errorf("listenPort must be between 1 and 65535")
 	}
 
 	// Extract VIP without CIDR for indexing
-	vipKey := stripCIDR(config.VIP)
+	vipKey := utils.StripCIDR(config.VIP)
 
 	// Check for duplicate VIP
 	if _, exists := tm.configs[vipKey]; exists {
@@ -152,7 +153,7 @@ func (tm *TunnelManager) GetTunnelForVIP(vip string) *WireGuard {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	vipKey := stripCIDR(vip)
+	vipKey := utils.StripCIDR(vip)
 	return tm.tunnels[vipKey]
 }
 
@@ -161,20 +162,23 @@ func (tm *TunnelManager) GetConfigForVIP(vip string) *TunnelConfig {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	vipKey := stripCIDR(vip)
+	vipKey := utils.StripCIDR(vip)
 	return tm.configs[vipKey]
 }
 
-// BringUpTunnelForVIP creates and brings up a WireGuard tunnel for the given VIP
+// BringUpTunnelForVIP creates and brings up a WireGuard tunnel for the given VIP.
+// If the tunnel is already up, it increments the reference count.
+// Multiple consumers (control plane, services) can share the same VIP tunnel.
 func (tm *TunnelManager) BringUpTunnelForVIP(vip string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	vipKey := stripCIDR(vip)
+	vipKey := utils.StripCIDR(vip)
 
-	// Check if already up
+	// Check if already up - increment reference count
 	if _, exists := tm.tunnels[vipKey]; exists {
-		log.Debug("tunnel already up", "vip", vip)
+		tm.refCount[vipKey]++
+		log.Debug("tunnel already up, incremented reference count", "vip", vip, "refCount", tm.refCount[vipKey])
 		return nil
 	}
 
@@ -203,6 +207,7 @@ func (tm *TunnelManager) BringUpTunnelForVIP(vip string) error {
 	}
 
 	tm.tunnels[vipKey] = wg
+	tm.refCount[vipKey] = 1
 	log.Info("brought up WireGuard tunnel",
 		"vip", vip,
 		"interface", config.InterfaceName,
@@ -211,12 +216,14 @@ func (tm *TunnelManager) BringUpTunnelForVIP(vip string) error {
 	return nil
 }
 
-// TearDownTunnelForVIP tears down the WireGuard tunnel for the given VIP
+// TearDownTunnelForVIP decrements the reference count for the given VIP tunnel.
+// The tunnel is only torn down when the reference count reaches zero.
+// This allows multiple consumers (control plane, services) to share the same VIP tunnel.
 func (tm *TunnelManager) TearDownTunnelForVIP(vip string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	vipKey := stripCIDR(vip)
+	vipKey := utils.StripCIDR(vip)
 
 	wg, exists := tm.tunnels[vipKey]
 	if !exists {
@@ -224,18 +231,28 @@ func (tm *TunnelManager) TearDownTunnelForVIP(vip string) error {
 		return nil
 	}
 
+	// Decrement reference count
+	tm.refCount[vipKey]--
+	if tm.refCount[vipKey] > 0 {
+		log.Debug("tunnel still in use, decremented reference count", "vip", vip, "refCount", tm.refCount[vipKey])
+		return nil
+	}
+
+	// Reference count is zero, tear down the tunnel
 	if err := wg.Down(); err != nil {
 		log.Error("failed to tear down tunnel", "vip", vip, "err", err)
 		// Continue to remove from map even if teardown failed
 	}
 
 	delete(tm.tunnels, vipKey)
+	delete(tm.refCount, vipKey)
 	log.Info("tore down WireGuard tunnel", "vip", vip)
 
 	return nil
 }
 
-// TearDownAllTunnels tears down all active tunnels
+// TearDownAllTunnels tears down all active tunnels regardless of reference count.
+// This is typically called during shutdown.
 func (tm *TunnelManager) TearDownAllTunnels() error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -249,6 +266,7 @@ func (tm *TunnelManager) TearDownAllTunnels() error {
 	}
 
 	tm.tunnels = make(map[string]*WireGuard)
+	tm.refCount = make(map[string]int)
 	log.Info("tore down all WireGuard tunnels")
 
 	if len(errors) > 0 {
@@ -256,6 +274,16 @@ func (tm *TunnelManager) TearDownAllTunnels() error {
 	}
 
 	return nil
+}
+
+// GetRefCount returns the current reference count for a VIP tunnel.
+// Returns 0 if the tunnel doesn't exist.
+func (tm *TunnelManager) GetRefCount(vip string) int {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	vipKey := utils.StripCIDR(vip)
+	return tm.refCount[vipKey]
 }
 
 // ListActiveTunnels returns a list of VIPs with active tunnels
@@ -289,18 +317,7 @@ func (tm *TunnelManager) HasConfigForVIP(vip string) bool {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	vipKey := stripCIDR(vip)
+	vipKey := utils.StripCIDR(vip)
 	_, exists := tm.configs[vipKey]
 	return exists
-}
-
-// Helper functions
-
-// stripCIDR removes CIDR notation from an IP address
-// Example: "10.0.0.100/24" -> "10.0.0.100"
-func stripCIDR(ip string) string {
-	if idx := strings.Index(ip, "/"); idx >= 0 {
-		return ip[:idx]
-	}
-	return ip
 }
