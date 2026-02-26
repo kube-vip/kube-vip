@@ -16,24 +16,30 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 )
 
 type Processor struct {
-	config    *kubevip.Config
-	provider  providers.Provider
-	bgpServer *bgp.Server
-	worker    endpointWorker
-	instances *[]*instance.Instance
+	config           *kubevip.Config
+	provider         providers.Provider
+	bgpServer        *bgp.Server
+	worker           endpointWorker
+	instances        *[]*instance.Instance
+	clientSet        *kubernetes.Clientset
+	egressUpdateFunc func(context.Context, *v1.Service) error
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager) *Processor {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, clientSet *kubernetes.Clientset,
+	egressUpdateFunc func(context.Context, *v1.Service) error) *Processor {
 	return &Processor{
-		config:    config,
-		provider:  provider,
-		bgpServer: bgpServer,
-		instances: instances,
-		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr),
+		config:           config,
+		provider:         provider,
+		bgpServer:        bgpServer,
+		instances:        instances,
+		clientSet:        clientSet,
+		egressUpdateFunc: egressUpdateFunc,
+		worker:           newEndpointWorker(config, provider, bgpServer, instances, leaseMgr),
 	}
 }
 
@@ -146,11 +152,71 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
 		ip := net.ParseIP(*lastKnownGoodEndpoint)
-		activeEndpointAnnotation := kubevip.ActiveEndpoint
-		if ip.To4() == nil && !p.config.EnableEndpoints {
-			activeEndpointAnnotation = kubevip.ActiveEndpointIPv6
+
+		// Store old values from ServiceSnapshot to detect if annotation actually changed
+		// We use the ServiceSnapshot instead of the service parameter because the service parameter
+		// may have stale annotations if the last update failed
+		var oldEndpoint, oldEndpointIPv6 string
+		if p.instances != nil {
+			serviceInstance := instance.FindServiceInstance(service, *p.instances)
+			if serviceInstance != nil {
+				oldEndpoint = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+				oldEndpointIPv6 = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+			}
 		}
-		service.Annotations[activeEndpointAnnotation] = *lastKnownGoodEndpoint
+		// Fall back to service annotations if we couldn't find the instance
+		if oldEndpoint == "" && oldEndpointIPv6 == "" {
+			oldEndpoint = service.Annotations[kubevip.ActiveEndpoint]
+			oldEndpointIPv6 = service.Annotations[kubevip.ActiveEndpointIPv6]
+		}
+
+		// Determine which annotation to update based on IP version
+		var endpoint, endpointIPv6 string
+		if ip.To4() == nil && !p.config.EnableEndpoints {
+			// IPv6
+			endpointIPv6 = *lastKnownGoodEndpoint
+			endpoint = oldEndpoint // Preserve existing IPv4 if any
+		} else {
+			// IPv4
+			endpoint = *lastKnownGoodEndpoint
+			endpointIPv6 = oldEndpointIPv6 // Preserve existing IPv6 if any
+		}
+
+		// Check if annotation actually changed
+		annotationChanged := (oldEndpoint != endpoint) || (oldEndpointIPv6 != endpointIPv6)
+		if !annotationChanged {
+			return // Nothing to do
+		}
+
+		// Persist to Kubernetes
+		ctx := context.Background()
+		var provider providers.Provider
+		if p.config.EnableEndpoints {
+			provider = providers.NewEndpoints()
+		} else {
+			provider = providers.NewEndpointslices()
+		}
+
+		if err := provider.UpdateServiceAnnotation(ctx, endpoint, endpointIPv6, service, p.clientSet); err != nil {
+			log.Warn("failed to update service annotation", "service", service.Name, "namespace", service.Namespace, "err", err)
+			return
+		}
+
+		log.Debug("updated active endpoint annotation", "service", service.Name, "namespace", service.Namespace, "endpoint", *lastKnownGoodEndpoint)
+
+		// Trigger egress reconfiguration
+		// For services with leader election, the service watcher doesn't process Modified events
+		// after initial setup, so we need to directly call the update function
+		if p.egressUpdateFunc != nil {
+			// Create a copy of service with updated annotations
+			svcCopy := service.DeepCopy()
+			svcCopy.Annotations[kubevip.ActiveEndpoint] = endpoint
+			svcCopy.Annotations[kubevip.ActiveEndpointIPv6] = endpointIPv6
+
+			if err := p.egressUpdateFunc(ctx, svcCopy); err != nil {
+				log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
+			}
+		}
 	}
 }
 
