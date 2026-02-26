@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	log "log/slog"
 
@@ -25,7 +26,6 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 				for i := range cluster.Network {
 					_ = cluster.Network[i].DeleteRoute()
 				}
-				cluster.Stop()
 			}
 		}
 	}
@@ -36,7 +36,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, service *v1.Service) error {
+func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, _ *sync.WaitGroup) error {
 	if svcCtx == nil {
 		return fmt.Errorf("no context context for service %q with UID %q: nil context", service.Name, service.UID)
 	}
@@ -72,14 +72,17 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		svcLease.Unlock()
 	}()
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	// Start a goroutine that will delete the lease when the service context is cancelled.
 	// This is important for proper cleanup when a service is deleted - it ensures that
 	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
 	// Without this, RunOrDie would continue running until leadership is naturally lost.
-	go func() {
+	wg.Go(func() {
 		<-svcCtx.Ctx.Done()
 		p.leaseMgr.Delete(id, objectName)
-	}()
+	})
 
 	// this service is sharing lease with another service
 	if svcLease.Elected.Load() {
@@ -97,7 +100,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 		// Common lease handling: sync the service and wait for context cancellation
 		if !svcCtx.IsActive {
-			if err := p.SyncServices(svcCtx, service); err != nil {
+			if err := p.SyncServices(svcCtx, service, &wg); err != nil {
 				log.Error("service sync", "err", err, "uid", service.UID)
 				svcLease.Cancel()
 			}
@@ -150,7 +153,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// Mark this service as active (as we've started leading)
 			// we run this in background as it's blocking
 			svcCtx.IsActive = true
-			if err := p.SyncServices(svcCtx, service); err != nil {
+			if err := p.SyncServices(svcCtx, service, &wg); err != nil {
 				log.Error("service sync", "uid", service.UID, "err", err)
 				svcLease.Cancel()
 			}

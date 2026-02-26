@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	log "log/slog"
 
@@ -20,7 +21,7 @@ import (
 )
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servicecontext.Context, *v1.Service) error) error {
+func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error) error {
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -51,20 +52,26 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
 	exitFunction := make(chan struct{})
-	go func() {
+
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	wg.Go(func() {
 		select {
 		case <-p.shutdownChan:
 			log.Debug("(svcs) shutdown called")
 			// Stop the retry watcher
 			rw.Stop()
+			p.Stop()
 			return
 		case <-exitFunction:
 			log.Debug("(svcs) function ending")
 			// Stop the retry watcher
 			rw.Stop()
+			p.Stop()
 			return
 		}
-	}()
+	})
 	ch := rw.ResultChan()
 
 	// Used for tracking an active endpoint / pod
@@ -74,7 +81,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			restart, err := p.AddOrModify(ctx, event, serviceFunc)
+			restart, err := p.AddOrModify(ctx, event, serviceFunc, &wg)
 			if restart {
 				break
 			}

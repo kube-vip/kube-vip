@@ -41,7 +41,7 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	}
 }
 
-func (b *BGP) Configure(ctx context.Context) error {
+func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	var err error
 	if b.bgpServer == nil {
 		b.bgpServer, err = bgp.NewBGPServer(b.config.BGPConfig)
@@ -72,6 +72,13 @@ func (b *BGP) Configure(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (b *BGP) Cleanup() {
+	// Defer a function to check if the bgpServer has been created and if so attempt to close it
+	if b.bgpServer != nil {
+		b.bgpServer.Close()
+	}
 }
 
 func (b *BGP) StartControlPlane(ctx context.Context, electionManager *election.Manager) {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"sync"
 
 	log "log/slog"
 
@@ -22,8 +23,11 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
 	}
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	exitFunction := make(chan struct{})
-	go func() {
+	wg.Go(func() {
 		select {
 		case <-svcCtx.Ctx.Done():
 			log.Debug("context cancelled", "provider", provider.GetLabel())
@@ -45,7 +49,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			svcCtx.Cancel()
 			return
 		}
-	}()
+	})
 
 	ch := rw.ResultChan()
 
@@ -57,7 +61,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		switch event.Type {
 
 		case watch.Added, watch.Modified:
-			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection)
+			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection, &wg)
 			if restart {
 				continue
 			} else if err != nil {

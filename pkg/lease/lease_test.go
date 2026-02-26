@@ -228,19 +228,25 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	ctx1, leaseID1 := getSvcData(svc)
 	lease1 := mgr.Add(ctx1, leaseID1)
 
+	added := lease1.Add(objectName1)
+	if !added {
+		t.Error("expected lease to be added")
+	}
+
 	// Concurrent adds
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			lease1.Add(objectName1)
-		}()
+	for range numGoroutines {
+		wg.Go(func() {
+			added := lease1.Add(objectName1)
+			if added {
+				t.Error("expected lease to already exist")
+			}
+		})
 	}
 	wg.Wait()
 
 	mgr.Delete(leaseID1, objectName1)
 
-	// After alonel deletes, lease should be gone
+	// After a one delete, lease should be gone
 	lease := mgr.Get(getSvcID(svc))
 	if lease != nil {
 		t.Error("expected lease to be removed after all concurrent deletes")

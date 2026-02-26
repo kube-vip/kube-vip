@@ -108,7 +108,7 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 		LeaseDurationSeconds: 1,
 	}
 
-	member1Ctx, _ := context.WithCancel(ctx)
+	member1Ctx, cancelMember1 := context.WithCancel(ctx)
 	member2Ctx, cancelMember2 := context.WithCancel(ctx)
 
 	config1 := configBase
@@ -124,6 +124,7 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 		log.Println("Losing the leadership on purpose by stopping renewing the lease")
 		g.Expect(cliMember1.Lease.Close()).To(Succeed())
 		log.Println("Member1 leases closed")
+		cancelMember1()
 	}
 
 	config2 := configBase
@@ -152,6 +153,7 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	}()
 
 	wg.Wait()
+
 }
 
 func baseCallbacksForName(name string) etcd.LeaderCallbacks {

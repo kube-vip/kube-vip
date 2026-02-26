@@ -42,7 +42,7 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	}
 }
 
-func (w *WireGuard) Configure(ctx context.Context) error {
+func (w *WireGuard) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	log.Info("reading wireguard peer configuration from Kubernetes secret")
 	s, err := w.clientSet.CoreV1().Secrets(w.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})
 	if err != nil {
