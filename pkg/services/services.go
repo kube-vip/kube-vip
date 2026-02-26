@@ -35,6 +35,7 @@ type ServiceInstanceAction string
 const (
 	ActionDelete ServiceInstanceAction = "delete"
 	ActionAdd    ServiceInstanceAction = "add"
+	ActionUpdate ServiceInstanceAction = "update"
 	ActionNone   ServiceInstanceAction = "none"
 
 	// Default UPNP lease requested is 3600 seconds.
@@ -68,6 +69,11 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service) e
 		if err := p.nodeLabelManager.AddLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding label to node: %w", err)
 		}
+	case ActionUpdate:
+		log.Debug("[service] update egress", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		if err := p.updateEgressConfiguration(ctx.Ctx, svc); err != nil {
+			return fmt.Errorf("error updating egress config %s/%s: %w", svc.Namespace, svc.Name, err)
+		}
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	}
@@ -86,6 +92,38 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 
 	for _, instance := range p.ServiceInstances {
 		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
+			log.Debug("[DEBUG] found matching service instance", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
+
+			// Check if egress endpoint annotations have changed FIRST, before other delete checks
+			// This ensures we don't accidentally delete a service when only the pod IP changed
+			if svc.Annotations[kubevip.Egress] == "true" {
+				// Compare the stored ActiveEndpoint annotations with current service annotations
+				storedActiveEndpoint := instance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+				currentActiveEndpoint := svc.Annotations[kubevip.ActiveEndpoint]
+				storedActiveEndpointIPv6 := instance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+				currentActiveEndpointIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
+
+				log.Debug("[DEBUG] egress check",
+					"service", svc.Name,
+					"namespace", svc.Namespace,
+					"stored_ipv4", storedActiveEndpoint,
+					"current_ipv4", currentActiveEndpoint,
+					"stored_ipv6", storedActiveEndpointIPv6,
+					"current_ipv6", currentActiveEndpointIPv6,
+					"equal", storedActiveEndpoint == currentActiveEndpoint && storedActiveEndpointIPv6 == currentActiveEndpointIPv6)
+
+				if storedActiveEndpoint != currentActiveEndpoint || storedActiveEndpointIPv6 != currentActiveEndpointIPv6 {
+					log.Info("egress active endpoint changed, will reconfigure SNAT rules",
+						"service", svc.Name,
+						"namespace", svc.Namespace,
+						"old_ipv4", storedActiveEndpoint,
+						"new_ipv4", currentActiveEndpoint,
+						"old_ipv6", storedActiveEndpointIPv6,
+						"new_ipv6", currentActiveEndpointIPv6)
+					return ActionUpdate // Use targeted update instead of delete + add
+				}
+			}
+
 			for _, address := range addresses {
 				// handle the case where the service instance needs to be deleted
 				if instance.IsDHCPv4 {
@@ -424,6 +462,101 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 
 	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
+	return nil
+}
+
+func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	i := instance.FindServiceInstance(svc, p.ServiceInstances)
+	if i == nil {
+		return fmt.Errorf("service instance not found for %s/%s", svc.Namespace, svc.Name)
+	}
+
+	oldIPv4 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+	newIPv4 := svc.Annotations[kubevip.ActiveEndpoint]
+	oldIPv6 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+	newIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
+
+	// Skip update if endpoints haven't changed
+	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 {
+		return nil
+	}
+
+	log.Info("[service] updating egress configuration",
+		"service", svc.Name,
+		"namespace", svc.Namespace,
+		"old_ipv4", oldIPv4,
+		"new_ipv4", newIPv4,
+		"old_ipv6", oldIPv6,
+		"new_ipv6", newIPv6)
+
+	// Remove old egress rules if they exist
+	if oldIPv4 != "" || oldIPv6 != "" {
+		oldEndpoint := oldIPv4
+		if oldEndpoint == "" {
+			oldEndpoint = oldIPv6
+		}
+		serviceIPs, _ := instance.FetchServiceAddresses(i.ServiceSnapshot)
+		for _, serviceIP := range serviceIPs {
+			if err := egress.Teardown(
+				oldEndpoint,
+				serviceIP,
+				i.ServiceSnapshot.Namespace,
+				string(i.ServiceSnapshot.UID),
+				i.ServiceSnapshot.Annotations,
+				p.config.EgressWithNftables,
+			); err != nil {
+				log.Warn("[service] removing old egress rules", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			}
+		}
+	}
+
+	// Apply new egress rules with updated endpoint
+	serviceIPs, _ := instance.FetchServiceAddresses(svc)
+	errList := []error{}
+
+	// Check if egress should be IPv6
+	if svc.Annotations[kubevip.EgressIPv6] == "true" {
+		// Does the service have an active IPv6 endpoint
+		if newIPv6 != "" {
+			for _, serviceIP := range serviceIPs {
+				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
+					podIP := newIPv6
+					err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
+					if err != nil {
+						errList = append(errList, err)
+						log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					}
+				}
+			}
+		}
+	} else if newIPv4 != "" { // Not expected to be IPv6, so should be an IPv4 address
+		for _, serviceIP := range serviceIPs {
+			podIPs := newIPv4
+			if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
+				podIPs = newIPv6
+			}
+			err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
+			if err != nil {
+				errList = append(errList, err)
+				log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			}
+		}
+	}
+
+	if len(errList) > 0 {
+		return fmt.Errorf("errors configuring egress: %v", errList)
+	}
+
+	// Update the service snapshot to reflect the new state
+	// NOTE: Do NOT call UpdateServiceAnnotation here - the annotation was already updated
+	// by the endpoint processor, which is why we're being called in the first place.
+	// Calling it again would create an infinite loop of Modified events.
+	i.ServiceSnapshot = svc.DeepCopy()
+
+	log.Info("[service] egress configuration updated successfully", "service", svc.Name, "namespace", svc.Namespace)
 	return nil
 }
 
