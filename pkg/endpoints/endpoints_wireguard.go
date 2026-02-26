@@ -104,11 +104,9 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 			continue
 		}
 
-		// Determine target port (use TargetPort if set, otherwise use Port)
-		targetPort := port.Port
-		if port.TargetPort.IntVal != 0 {
-			targetPort = port.TargetPort.IntVal
-		}
+		// Determine target port (resolve named ports if necessary)
+		targetPort := w.provider.ResolvePort(port)
+		log.Info("[wireguard] resolved port", "service", service.Name, "servicePort", port.Port, "targetPort", targetPort, "targetPortName", port.TargetPort.StrVal)
 
 		for _, vip := range serviceIPs {
 			isIPv6 := isIPv6Address(vip)
@@ -135,7 +133,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 
 			portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
 
-			log.Debug("[wireguard] updating DNAT rule",
+			log.Info("[wireguard] applying DNAT rule",
 				"service", service.Name,
 				"vip", vipAddr,
 				"interface", wgInterface,
