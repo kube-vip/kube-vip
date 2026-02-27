@@ -229,7 +229,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	leaseMgr := lease.NewManager()
 
 	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
-		shutdownChan, intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr)
+		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr)
 
 	return &Manager{
 		clientSet:   clientset,

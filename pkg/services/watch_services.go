@@ -58,9 +58,8 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 
 	wg.Go(func() {
 		select {
-		case <-p.shutdownChan:
-			log.Debug("(svcs) shutdown called")
-			// Stop the retry watcher
+		case <-ctx.Done():
+			log.Debug("(svcs) context cancelled")
 			rw.Stop()
 			p.Stop()
 			return

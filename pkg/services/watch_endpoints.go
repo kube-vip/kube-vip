@@ -34,13 +34,6 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			// Stop the retry watcher
 			rw.Stop()
 			return
-		case <-p.shutdownChan:
-			log.Debug("shutdown called", "provider", provider.GetLabel())
-			// Stop the retry watcher
-			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			svcCtx.Cancel()
-			return
 		case <-exitFunction:
 			log.Debug("function ending", "provider", provider.GetLabel())
 			// Stop the retry watcher
