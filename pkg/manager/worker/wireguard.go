@@ -4,30 +4,30 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
-	"net"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/services"
+	"github.com/kube-vip/kube-vip/pkg/sysctl"
+	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
 type WireGuard struct {
 	Common
-	wg          *wireguard.WireGuard
+	tunnelMgr   *wireguard.TunnelManager
 	kubeAPIHost string
 	kubeAPIPort string
 }
@@ -43,39 +43,23 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 }
 
 func (w *WireGuard) Configure(ctx context.Context) error {
-	log.Info("reading wireguard peer configuration from Kubernetes secret")
-	s, err := w.clientSet.CoreV1().Secrets(w.config.Namespace).Get(ctx, "wireguard", metav1.GetOptions{})
+	log.Info("reading wireguard tunnel configurations from Kubernetes secret")
+	tunnelMgr := wireguard.NewTunnelManager()
+	err := tunnelMgr.LoadConfigurationsFromSecret(ctx, w.clientSet, w.config.Namespace, "wireguard")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load WireGuard tunnel configurations: %w", err)
 	}
-	// parse all the details needed for Wireguard
-	peerPublicKey := string(s.Data["peerPublicKey"])
-	peerEndpoint := string(s.Data["peerEndpoint"])
-	privateKey := string(s.Data["privateKey"])
-	allowedIPs := string(s.Data["allowedIPs"])
-	listenPort := string(s.Data["listenPort"])
-	if listenPort == "" {
-		listenPort = "51820"
+
+	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark"); err != nil {
+		return fmt.Errorf("net.ipv4.conf.all.src_valid_mark is disabled and could not be enabled %w", err)
 	}
-	port, err := strconv.Atoi(listenPort)
-	if err != nil {
-		return fmt.Errorf("failed to convert listenPort to integer: %w", err)
+	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/route_localnet"); err != nil {
+		return fmt.Errorf("net.ipv4.conf.all.route_localnet is disabled and could not be enabled %w", err)
 	}
-	IPs := make([]string, 0)
-	for ip := range strings.SplitSeq(allowedIPs, ",") {
-		IPs = append(IPs, strings.TrimSpace(ip))
-	}
-	cfg := wireguard.WGConfig{
-		PrivateKey:    privateKey,
-		PeerPublicKey: peerPublicKey,
-		PeerEndpoint:  peerEndpoint,
-		InterfaceName: "wg0",
-		Address:       w.config.VIP,
-		KeepAlive:     time.Duration(5) * time.Second,
-		AllowedIPs:    IPs,
-		ListenPort:    port,
-	}
-	w.wg = wireguard.NewWireGuard(cfg)
+
+	w.tunnelMgr = tunnelMgr
+	configuredVIPs := tunnelMgr.ListConfiguredTunnels()
+	log.Info("loaded WireGuard tunnel configurations", "vips", configuredVIPs)
 
 	return nil
 }
@@ -91,15 +75,28 @@ func (w *WireGuard) InitControlPlane() error {
 }
 
 func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
+	if !w.tunnelMgr.HasConfigForVIP(w.config.VIP) {
+		log.Error("no WireGuard tunnel configuration found for control plane VIP", "vip", w.config.VIP)
+		return
+	}
 	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager)
 }
 
 func (w *WireGuard) ConfigureServices() {
-	// NOT IMPLEMENTED
+	w.svcProcessor.TunnelMgr = w.tunnelMgr
 }
 
 func (w *WireGuard) StartServices(ctx context.Context) error {
-	// NOT IMPLEMENTED
+	if w.config.EgressClean {
+		vip.ClearIPTables(w.config.EgressWithNftables, w.config.ServiceNamespace, iptables.ProtocolIPv4)
+	}
+	if w.config.EnableServicesElection {
+		log.Info("beginning watching services, leaderelection will happen for every service")
+		err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -108,48 +105,65 @@ func (w *WireGuard) Name() string {
 }
 
 func (w *WireGuard) OnStartedLeading(ctx context.Context) {
-	log.Info("started leading", "id", w.config.NodeName)
-	err := w.wg.Up()
+	// Bring up the WireGuard tunnel for control plane VIP
+	err := w.tunnelMgr.BringUpTunnelForVIP(w.config.VIP)
 	if err != nil {
-		log.Error("could not start wireguard", "err", err)
-		_ = w.wg.Down()
+		log.Error("could not start wireguard tunnel for control plane", "vip", w.config.VIP, "err", err)
+		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
 		if !w.closing.Load() {
 			w.signalChan <- syscall.SIGINT
 		}
+		return
+	}
+
+	// Get the tunnel to access its configuration
+	wg := w.tunnelMgr.GetTunnelForVIP(w.config.VIP)
+	if wg == nil {
+		log.Error("failed to get wireguard tunnel after bringing up", "vip", w.config.VIP)
+		if !w.closing.Load() {
+			w.signalChan <- syscall.SIGINT
+		}
+		return
+	}
+
+	tunnelConfig := w.tunnelMgr.GetConfigForVIP(w.config.VIP)
+	if tunnelConfig == nil {
+		log.Error("failed to get tunnel configuration", "vip", w.config.VIP)
+		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
+		if !w.closing.Load() {
+			w.signalChan <- syscall.SIGINT
+		}
+		return
 	}
 
 	// Strip CIDR notation from VIP if present
-	vipIP := w.config.VIP
-	if strings.Contains(vipIP, "/") {
-		ip, _, err := net.ParseCIDR(vipIP)
-		if err != nil {
-			log.Error("could not parse VIP CIDR", "err", err, "vip", vipIP)
-			_ = w.wg.Down()
-			if !w.closing.Load() {
-				w.signalChan <- syscall.SIGINT
-			}
-		}
-		vipIP = ip.String()
-	}
+	vipIP := utils.StripCIDR(w.config.VIP)
 
 	// Parse Kubernetes API port
 	kubeAPIPortInt, err := strconv.ParseUint(w.kubeAPIPort, 10, 16)
 	if err != nil {
 		log.Error("could not parse KUBERNETES_SERVICE_PORT_HTTPS", "err", err, "port", w.kubeAPIPort)
-		_ = w.wg.Down()
-		if !w.closing.Load() {
-			w.signalChan <- syscall.SIGINT
-		}
+		_ = wg.Down()
+		panic("could not parse KUBERNETES_SERVICE_PORT_HTTPS")
 	}
 
-	// Apply nftables DNAT rule to route traffic from wg0:6443 to Kubernetes API service
-	log.Info("applying nftables DNAT rule", "interface", "wg0", "vip", vipIP, "sourcePort", 6443, "kubeAPIHost", w.kubeAPIHost, "kubeAPIPort", w.kubeAPIPort)
-	err = nftables.ApplyAPIServerDNAT("wg0", vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false)
+	// Apply nftables DNAT rule to route traffic from wireguard interface:6443 to Kubernetes API service
+	log.Info("applying nftables DNAT rule",
+		"interface", tunnelConfig.InterfaceName,
+		"vip", vipIP,
+		"sourcePort", 6443,
+		"kubeAPIHost", w.kubeAPIHost,
+		"kubeAPIPort", w.kubeAPIPort)
+	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, "TCP")
 	if err != nil {
-		log.Error("could not apply nftables DNAT rule, restarting kube-vip", "err", err)
-		_ = w.wg.Down()
-		if !w.closing.Load() {
-			w.signalChan <- syscall.SIGINT
+		log.Error("could not apply nftables DNAT rule", "err", err)
+		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
+		panic("could not apply nftables DNAT rule")
+	}
+
+	if w.config.EnableServices && !w.config.EnableServicesElection {
+		if err := w.svcProcessor.ServicesWatcher(ctx, w.svcProcessor.SyncServices); err != nil {
+			log.Error("failed to start services watcher", "err", err)
 		}
 	}
 	log.Info("nftables DNAT rule applied successfully")
@@ -169,12 +183,15 @@ func (w *WireGuard) OnStoppedLeading() {
 		log.Info("nftables DNAT chains deleted successfully")
 	}
 
-	err = w.wg.Down()
+	// Tear down all tunnels (control plane + services)
+	err = w.tunnelMgr.TearDownAllTunnels()
 	if err != nil {
-		log.Error(err.Error(), "id", w.config.NodeName)
+		log.Error("failed to tear down tunnels", "err", err)
 	}
-
-	log.Error("lost leadership, restarting kube-vip")
+	if w.config.EnableServices && !w.config.EnableServicesElection {
+		w.svcProcessor.Stop()
+	}
+	log.Error("lost control plane leadership, restarting kube-vip")
 	if !w.closing.Load() {
 		w.signalChan <- syscall.SIGINT
 	}
@@ -186,7 +203,7 @@ func (w *WireGuard) OnNewLeader(identity string) {
 		// I just got the lock
 		return
 	}
-	// safety check
-	_ = w.wg.Down()
+	// safety check - tear down tunnel if we're not the leader
+	_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
 	log.Info("new leader elected", "id", identity)
 }

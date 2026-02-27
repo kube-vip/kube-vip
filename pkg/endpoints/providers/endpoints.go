@@ -131,3 +131,16 @@ func (ep *Endpoints) UpdateServiceAnnotation(ctx context.Context, endpoint strin
 func (ep *Endpoints) GetLabel() string {
 	return ep.label
 }
+
+func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
+	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+		for _, subset := range ep.endpoints.Subsets {
+			for _, p := range subset.Ports {
+				if p.Name == name {
+					return p.Port
+				}
+			}
+		}
+		return 0
+	})
+}

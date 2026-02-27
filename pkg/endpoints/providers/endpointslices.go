@@ -23,6 +23,7 @@ type Endpointslices struct {
 	label       string
 	endpointsv4 []discoveryv1.Endpoint
 	endpointsv6 []discoveryv1.Endpoint
+	ports       []discoveryv1.EndpointPort
 }
 
 func NewEndpointslices() Provider {
@@ -63,6 +64,9 @@ func (ep *Endpointslices) LoadObject(endpoints runtime.Object, cancel context.Ca
 	} else {
 		ep.endpointsv4 = eps.Endpoints
 	}
+
+	// Store ports for resolving named ports
+	ep.ports = eps.Ports
 
 	return nil
 }
@@ -145,4 +149,15 @@ func (ep *Endpointslices) UpdateServiceAnnotation(ctx context.Context, endpoint,
 
 func (ep *Endpointslices) GetLabel() string {
 	return ep.label
+}
+
+func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
+	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+		for _, p := range ep.ports {
+			if p.Name != nil && *p.Name == name && p.Port != nil {
+				return *p.Port
+			}
+		}
+		return 0
+	})
 }
