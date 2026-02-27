@@ -5,6 +5,7 @@ import (
 	"fmt"
 	log "log/slog"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -93,12 +94,12 @@ type DHCPv6Client struct {
 	initRebootFlag  bool
 	requestedIP     net.IP
 	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
-	releasedChan    chan struct{} // indicate that the IP has been released
 	errorChan       chan error    // indicates there was an error on the IP request
 	ipChan          chan string
 	ic              *DHCPv6InternalClient
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
+	stop            sync.Once
 }
 
 // NewDHCPv6Client returns a new DHCP6 Client.
@@ -116,7 +117,6 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 	return &DHCPv6Client{
 		iface:           iface,
 		stopChan:        make(chan struct{}),
-		releasedChan:    make(chan struct{}),
 		errorChan:       make(chan error),
 		initRebootFlag:  initRebootFlag,
 		requestedIP:     net.ParseIP(requestedIP),
@@ -133,9 +133,10 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
-	close(c.ipChan)
-	close(c.stopChan)
-	<-c.releasedChan
+	c.stop.Do(func() {
+		close(c.ipChan)
+		close(c.stopChan)
+	})
 	dhcpv6ClientManager.Delete(c.iface.Name)
 }
 
@@ -150,10 +151,7 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
-	dhcpCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	addr, err := c.requestWithBackoff(dhcpCtx)
+	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
 		return fmt.Errorf("DHCPv6 client failed: %w", err)
@@ -178,7 +176,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			// This way there's not much to do other than log and continue, as the renew error
 			// may be an offline server, or may be an incorrect package match
 
-			addr, err := c.renew(dhcpCtx)
+			addr, err := c.renew(ctx)
 			if err == nil {
 				c.addr = addr
 				log.Info("[DHCPv6] renew", "addr", addr.IPv6Addr.String())
@@ -188,14 +186,14 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			}
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
-			addr, err := c.request(dhcpCtx, true)
+			addr, err := c.request(ctx, true)
 			if err == nil {
 				c.addr = addr
 				log.Info("[DHCPv6] rebind", "lease", addr)
 			} else {
 				log.Warn("[DHCPv6] ip may have changed", "ip", addr.IPv6Addr.String(), "err", err)
 				c.initRebootFlag = false
-				c.addr, err = c.requestWithBackoff(dhcpCtx)
+				c.addr, err = c.requestWithBackoff(ctx)
 				log.Error("[DHCPv6] rebind failed", "err", err)
 			}
 			t1.Reset(t1Timeout)
@@ -215,7 +213,6 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			t1.Stop()
 			t2.Stop()
 
-			close(c.releasedChan)
 			return err
 		}
 	}
