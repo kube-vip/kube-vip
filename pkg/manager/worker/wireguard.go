@@ -33,11 +33,11 @@ type WireGuard struct {
 }
 
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
-	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
+	config *kubevip.Config, closing *atomic.Bool, killFUnc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	electionMgr *election.Manager, leaseMgr *lease.Manager) *WireGuard {
 	return &WireGuard{
-		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+		Common: *newCommon(arpMgr, intfMgr, config, closing, killFUnc,
 			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 	}
 }
@@ -110,9 +110,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	if err != nil {
 		log.Error("could not start wireguard tunnel for control plane", "vip", w.config.VIP, "err", err)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
-		if !w.closing.Load() {
-			w.signalChan <- syscall.SIGINT
-		}
+		w.killFunc()
 		return
 	}
 
@@ -120,9 +118,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	wg := w.tunnelMgr.GetTunnelForVIP(w.config.VIP)
 	if wg == nil {
 		log.Error("failed to get wireguard tunnel after bringing up", "vip", w.config.VIP)
-		if !w.closing.Load() {
-			w.signalChan <- syscall.SIGINT
-		}
+		w.killFunc()
 		return
 	}
 
@@ -130,9 +126,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	if tunnelConfig == nil {
 		log.Error("failed to get tunnel configuration", "vip", w.config.VIP)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
-		if !w.closing.Load() {
-			w.signalChan <- syscall.SIGINT
-		}
+		w.killFunc()
 		return
 	}
 
@@ -144,7 +138,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	if err != nil {
 		log.Error("could not parse KUBERNETES_SERVICE_PORT_HTTPS", "err", err, "port", w.kubeAPIPort)
 		_ = wg.Down()
-		panic("could not parse KUBERNETES_SERVICE_PORT_HTTPS")
+		w.killFunc()
 	}
 
 	// Apply nftables DNAT rule to route traffic from wireguard interface:6443 to Kubernetes API service
@@ -158,7 +152,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	if err != nil {
 		log.Error("could not apply nftables DNAT rule", "err", err)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
-		panic("could not apply nftables DNAT rule")
+		w.killFunc()
 	}
 
 	if w.config.EnableServices && !w.config.EnableServicesElection {
@@ -192,9 +186,7 @@ func (w *WireGuard) OnStoppedLeading() {
 		w.svcProcessor.Stop()
 	}
 	log.Error("lost control plane leadership, restarting kube-vip")
-	if !w.closing.Load() {
-		w.signalChan <- syscall.SIGINT
-	}
+	w.killFunc()
 }
 
 func (w *WireGuard) OnNewLeader(identity string) {

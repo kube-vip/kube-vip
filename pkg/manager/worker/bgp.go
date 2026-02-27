@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -29,12 +27,12 @@ type BGP struct {
 }
 
 func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
-	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
+	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	bgpServer *bgp.Server, bgpSessionInfoGauge *prometheus.GaugeVec,
 	electionMgr *election.Manager, leaseMgr *lease.Manager) *BGP {
 	return &BGP{
-		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+		Common: *newCommon(arpMgr, intfMgr, config, closing, killFunc,
 			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 		bgpServer:           bgpServer,
 		bgpSessionInfoGauge: bgpSessionInfoGauge,
@@ -84,16 +82,14 @@ func (b *BGP) Cleanup() {
 func (b *BGP) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
 	var err error
 	if b.config.EnableLeaderElection {
-		err = b.cpCluster.StartCluster(ctx, b.config, electionManager, b.bgpServer, b.leaseMgr)
+		err = b.cpCluster.StartCluster(ctx, b.config, electionManager, b.bgpServer, b.leaseMgr, b.killFunc)
 	} else {
-		err = b.cpCluster.StartVipService(ctx, b.config, electionManager, b.bgpServer)
+		err = b.cpCluster.StartVipService(ctx, b.config, electionManager, b.bgpServer, b.killFunc)
 	}
 	if err != nil {
 		log.Error("Control Plane", "err", err)
 		// Trigger the shutdown of this manager instance
-		if !b.closing.Load() {
-			b.signalChan <- syscall.SIGINT
-		}
+		b.killFunc()
 	}
 }
 

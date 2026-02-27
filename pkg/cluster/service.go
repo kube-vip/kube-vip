@@ -29,7 +29,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *election.Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc, signalChan chan os.Signal) error {
+func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
+	bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc, killFunc func()) error {
 	var err error
 
 	defer close(cluster.completed)
@@ -39,7 +40,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 	wg.Go(func() {
 		<-ctx.Done()
-		signalChan <- syscall.SIGINT
+		killFunc()
 	})
 
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
@@ -83,17 +84,18 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 		}
 
 		if c.EnableLoadBalancer {
-			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan, &wg)
+			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
+				c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, killFunc, &wg)
 			if err != nil {
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
 			wg.Go(func() {
-				err = sm.NodeWatcher(ctx, lb, c.Port)
+				err = em.NodeWatcher(ctx, lb, c.Port)
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
 					if errors.Is(err, &utils.PanicError{}) {
-						signalChan <- syscall.SIGINT
+						killFunc()
 					}
 				}
 			})
@@ -110,7 +112,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 	if c.EnableLoadBalancer {
 		// Shutdown function that will wait on this signal, unless we call it ourselves
-		<-signalChan
+		<-ctx.Done()
 		for _, lb := range loadbalancers {
 			err = lb.RemoveIPVSLB()
 			if err != nil {
@@ -133,7 +135,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 		ips := []string{}
 		if nodename != "" {
-			if ips, err = getNodeIPs(ctx, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+			if ips, err = getNodeIPs(ctx, nodename, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
 				log.Error("failed to get IP of control-plane node", "err", err)
 			}
 		}
@@ -169,7 +171,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 		// will wait for system interrupt and will send stop signal to backend watch
 		wg.Go(func() {
-			<-signalChan
+			<-ctx.Done()
 			stop <- struct{}{}
 		})
 
@@ -234,7 +236,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 					deleted, err := network.DeleteIP()
 					if err != nil {
 						log.Error("error deleting IP", "err", err)
-						signalChan <- syscall.SIGINT
+						killFunc()
 						return
 					}
 					if deleted {
@@ -246,7 +248,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 	}
 
 	if c.EnableBGP {
-		<-signalChan
+		<-ctx.Done()
 	}
 
 	return nil

@@ -51,6 +51,8 @@ type Manager struct {
 	// This channel is used to signal a shutdown
 	shutdownChan chan struct{}
 
+	sigint sync.Once
+
 	svcProcessor *services.Processor
 
 	// This is a prometheus counter used to count the number of events received
@@ -198,6 +200,9 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
+	// Add Notification for SIGUSR1 (for configuration dump)
+	signal.Notify(signalChan, syscall.SIGUSR1)
+
 	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
 	shutdownChan := make(chan struct{})
 
@@ -216,7 +221,7 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 		}
 	}
 
-	electionMgr, err := election.NewManager(config, clientset, rwClientSet, signalChan)
+	electionMgr, err := election.NewManager(config, clientset, rwClientSet)
 	if err != nil {
 		return nil, fmt.Errorf("creating election manager: %w", err)
 	}
@@ -257,19 +262,6 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start(ctx context.Context) error {
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	sm.signalChan = make(chan os.Signal, 1)
-	// Add Notification for Userland interrupt
-	signal.Notify(sm.signalChan, syscall.SIGINT)
-
-	// Add Notification for SIGTERM (sent from Kubernetes)
-	signal.Notify(sm.signalChan, syscall.SIGTERM)
-
-	// Add Notification for SIGUSR1 (for configuration dump)
-	signal.Notify(sm.signalChan, syscall.SIGUSR1)
-
 	// All watchers and other goroutines should have an additional goroutine that blocks on this, to shut things down
 	sm.shutdownChan = make(chan struct{})
 
@@ -354,7 +346,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.signalChan,
+	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
 		sm.electionMgr, sm.leaseMgr)
 
@@ -427,4 +419,10 @@ func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFun
 			return
 		}
 	}
+}
+
+func (sm *Manager) Kill() {
+	sm.sigint.Do(func() {
+		sm.signalChan <- syscall.SIGINT
+	})
 }

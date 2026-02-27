@@ -3,10 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
@@ -19,7 +16,7 @@ import (
 
 // StartCluster - Begins a running instance of the Leader Election cluster
 func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
-	em *election.Manager, bgpServer *bgp.Server, leaseMgr *lease.Manager) error {
+	em *election.Manager, bgpServer *bgp.Server, leaseMgr *lease.Manager, killFunc func()) error {
 
 	ns, leaseName := lease.NamespaceName(c.LeaseName, c)
 
@@ -49,21 +46,8 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		return nil
 	}
 
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	signalChan := make(chan os.Signal, 1)
-	// Add Notification for Userland interrupt
-	signal.Notify(signalChan, syscall.SIGINT)
-
-	// Add Notification for SIGTERM (sent from Kubernetes)
-	signal.Notify(signalChan, syscall.SIGTERM)
-
 	wg.Go(func() {
-		select {
-		case <-signalChan:
-		case <-cluster.stop:
-		}
+		<-cluster.stop
 
 		log.Info("Received termination, signaling cluster shutdown")
 		// Cancel the leader context, which will in turn cancel the leadership
@@ -101,13 +85,13 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			return fmt.Errorf("lease %q context cancelled before leader election started", leaseName)
 		}
 
-		cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, true)
+		cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, true)
 
 		log.Debug("cluster waiting for leader context done", "lease", leaseName)
 		// wait for leaderelection to be finished
 		<-objLease.Ctx.Done()
 
-		cluster.OnStoppedLeading(c, objLease, bgpServer, signalChan)
+		cluster.OnStoppedLeading(c, objLease, bgpServer)
 
 		return nil
 	}
@@ -118,11 +102,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		LeaseAnnotations: c.LeaseAnnotations,
 		Mgr:              em,
 		OnStartedLeading: func(context.Context) { //nolint TODO: potential clean code
-			cluster.OnStartedLeading(c, objLease, em, bgpServer, signalChan, false)
+			cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, false)
 		},
 		OnStoppedLeading: func() {
 			objLease.Elected.Store(false)
-			cluster.OnStoppedLeading(c, objLease, bgpServer, signalChan)
+			cluster.OnStoppedLeading(c, objLease, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
 			cluster.OnNewLeader(identity, c)
@@ -138,7 +122,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 }
 
 func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Lease,
-	em *election.Manager, bgpServer *bgp.Server, signalChan chan os.Signal, isShared bool) {
+	em *election.Manager, bgpServer *bgp.Server, killFunc func(), isShared bool) {
 	objLease.Elected.Store(true)
 	objLease.Unlock()
 
@@ -163,15 +147,15 @@ func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Leas
 	}
 
 	// As we're leading lets start the vip service
-	err := cluster.vipService(objLease.Ctx, c, em, bgpServer, objLease.Cancel, signalChan)
+	err := cluster.vipService(objLease.Ctx, c, em, bgpServer, objLease.Cancel, killFunc)
 	if err != nil {
 		log.Error("starting VIP service on leader", "err", err)
-		signalChan <- syscall.SIGINT
+		killFunc()
 	}
 }
 
 func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Lease,
-	bgpServer *bgp.Server, signalChan chan os.Signal) {
+	bgpServer *bgp.Server) {
 	// we can do cleanup here
 	log.Info("This node is becoming a follower within the cluster")
 
