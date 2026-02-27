@@ -51,26 +51,15 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 	if err != nil {
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
-	exitFunction := make(chan struct{})
 
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
 	wg.Go(func() {
-		select {
-		case <-p.shutdownChan:
-			log.Debug("(svcs) shutdown called")
-			// Stop the retry watcher
-			rw.Stop()
-			p.Stop()
-			return
-		case <-exitFunction:
-			log.Debug("(svcs) function ending")
-			// Stop the retry watcher
-			rw.Stop()
-			p.Stop()
-			return
-		}
+		<-ctx.Done()
+		log.Debug("(svcs) context cancelled")
+		rw.Stop()
+		p.Stop()
 	})
 	ch := rw.ResultChan()
 
@@ -113,7 +102,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		default:
 		}
 	}
-	close(exitFunction)
+
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return nil
 }

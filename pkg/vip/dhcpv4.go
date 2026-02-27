@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -30,6 +31,7 @@ type DHCPv4Client struct {
 	errorChan       chan error    // indicates there was an error on the IP request
 	ipChan          chan string
 	backoffAttempts uint
+	stop            sync.Once
 }
 
 // NewDHCPv4Client returns a new DHCP Client.
@@ -53,8 +55,10 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
-	close(c.ipChan)
-	close(c.stopChan)
+	c.stop.Do(func() {
+		close(c.ipChan)
+		close(c.stopChan)
+	})
 	<-c.releasedChan
 }
 

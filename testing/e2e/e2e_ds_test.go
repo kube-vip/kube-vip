@@ -106,7 +106,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv4 addresses on exit when only services are enabled", func() {
@@ -122,7 +122,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv4 addresses on exit when only services with per-service leaderelection are enabled", func() {
@@ -138,7 +138,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv4 addresses on exit when control-plane and services are enabled", func() {
@@ -154,7 +154,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv4 addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
@@ -170,7 +170,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 		})
 
@@ -214,7 +214,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv6 addresses on exit when only services are enabled", func() {
@@ -230,7 +230,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv6 addresses on exit when only services with per-service leaderelection are enabled", func() {
@@ -246,7 +246,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv6 addresses on exit when control-plane and services are enabled", func() {
@@ -262,7 +262,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 
 			It(clusterName+" deletes all IPv6 addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
@@ -278,7 +278,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 		})
 
@@ -322,7 +322,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.DualFamily, clusterName)
+				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 
 			It(clusterName+" deletes all addresses on exit when only services are enabled", func() {
@@ -338,7 +338,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.DualFamily, clusterName)
+				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 
 			It(clusterName+" deletes all addresses on exit when only services with per-service leaderelection are enabled", func() {
@@ -354,7 +354,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.DualFamily, clusterName)
+				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 
 			It(clusterName+" deletes all addresses on exit when control-plane and services are enabled", func() {
@@ -370,7 +370,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.DualFamily, clusterName)
+				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 
 			It(clusterName+" deletes all addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
@@ -386,13 +386,13 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.DualFamily, clusterName)
+				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 		})
 	}
 })
 
-func testDsArp(ctx context.Context, manifestValues *e2e.KubevipManifestValues, client kubernetes.Interface, family, clusterName string) {
+func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, client kubernetes.Interface, family, clusterName string) {
 
 	cpEnable, err := strconv.ParseBool(manifestValues.ControlPlaneEnable)
 	Expect(err).ToNot(HaveOccurred())
@@ -491,10 +491,11 @@ func testDsArp(ctx context.Context, manifestValues *e2e.KubevipManifestValues, c
 		}
 
 		svcVips = strings.Split(svcVip, ",")
-
-		for _, addr := range svcVips {
-			By(withTimestamp("checking address was added: " + addr))
-			Expect(checkIPAddress(addr, svcHost, true)).To(BeTrue())
+		if manifestValues.Mode == ModeARP {
+			for _, addr := range svcVips {
+				By(withTimestamp("checking address was added: " + addr))
+				Expect(checkIPAddress(addr, svcHost, true)).To(BeTrue())
+			}
 		}
 	}
 

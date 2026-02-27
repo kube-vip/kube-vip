@@ -53,14 +53,13 @@ type IPVSLoadBalancer struct {
 	lock                sync.Mutex
 	stop                chan struct{}
 	networkInterface    string
-	leaderCancel        context.CancelFunc
-	signal              chan os.Signal
+	killFunc            func()
 	address             string
 	family              ipvs.AddressFamily
 }
 
-func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string,
-	leaderCancel context.CancelFunc, signal chan os.Signal, wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMethod string, backendHealthCheckInterval int,
+	networkInterface string, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
 	log.Info("Starting IPVS LoadBalancer", "address", address)
 
 	// Create IPVS client
@@ -141,16 +140,14 @@ func NewIPVSLB(address string, port uint16, forwardingMethod string, backendHeal
 		forwardingMethod:    m,
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
-		stop:                make(chan struct{}),
 		networkInterface:    networkInterface,
-		leaderCancel:        leaderCancel,
-		signal:              signal,
+		killFunc:            killFunc,
 		address:             address,
 		family:              family,
 	}
 
 	wg.Go(func() {
-		lb.healthCheck()
+		lb.healthCheck(ctx)
 	})
 
 	// Return our created load-balancer
@@ -322,8 +319,8 @@ func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
 	return netip.AddrFrom4([4]byte(ipAddr.To4())), ipvs.INET
 }
 
-func (lb *IPVSLoadBalancer) healthCheck() {
-	backend.Watch(func() {
+func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
+	backend.Watch(ctx, func() {
 		lb.lock.Lock()
 		defer lb.lock.Unlock()
 		for backend, oldStatus := range lb.backendMap {
@@ -348,17 +345,13 @@ func (lb *IPVSLoadBalancer) healthCheck() {
 					lb.backendMap[backend] = newStatus
 				}
 				if lb.forwardingMethod == ipvs.Local && !lb.localBackendExists() {
-					if lb.signal != nil {
-						close(lb.signal)
-					}
-
-					if lb.leaderCancel != nil {
-						lb.leaderCancel()
+					if lb.killFunc != nil {
+						lb.killFunc()
 					}
 				}
 			}
 		}
-	}, lb.interval, lb.stop)
+	}, lb.interval)
 }
 
 func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
