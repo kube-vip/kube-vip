@@ -124,5 +124,5 @@ func (b *BGP) ServicesNoLeader(ctx context.Context) error {
 }
 
 func (b *BGP) Name() string {
-	return "ARP"
+	return "BGP"
 }

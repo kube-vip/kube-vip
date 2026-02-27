@@ -47,7 +47,10 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	}
 
 	wg.Go(func() {
-		<-cluster.stop
+		select {
+		case <-cluster.stop:
+		case <-ctx.Done():
+		}
 
 		log.Info("Received termination, signaling cluster shutdown")
 		// Cancel the leader context, which will in turn cancel the leadership
