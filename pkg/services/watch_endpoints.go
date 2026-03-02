@@ -19,7 +19,8 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
-	rwCtx := context.WithoutCancel(svcCtx.Ctx)
+	rwCtx, rwCancel := context.WithCancel(svcCtx.Ctx)
+	defer rwCancel()
 
 	rw, err := provider.CreateRetryWatcher(rwCtx, p.rwClientSet, service)
 	if err != nil {
@@ -34,19 +35,6 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	}()
 
 	wg.Go(func() {
-		// select {
-		// case <-rwCtx.Done():
-		// 	svcCtx.Cancel()
-		// 	log.Debug("context cancelled", "provider", provider.GetLabel())
-		// 	return
-		// case <-exitFunction:
-		// 	log.Debug("function ending", "provider", provider.GetLabel())
-		// 	// Stop the retry watcher
-		// 	rw.Stop()
-		// 	// Cancel the context, which will in turn cancel the leadership
-		// 	svcCtx.Cancel()
-		// 	return
-		// }
 		<-rwCtx.Done()
 		svcCtx.Cancel()
 		log.Debug("context cancelled", "provider", provider.GetLabel())
