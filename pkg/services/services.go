@@ -317,6 +317,15 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service) error {
 		}
 	}
 
+	// Configure WireGuard DNAT rules if WireGuard is enabled
+	if p.config.EnableWireguard {
+		log.Debug("[service] configuring WireGuard DNAT rules", "service", svc.Name, "namespace", svc.Namespace)
+		if err := p.addServiceWireguard(ctx, svc); err != nil {
+			log.Warn("[service] failed to configure WireGuard DNAT", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			// Don't fail the entire service if WireGuard config fails
+		}
+	}
+
 	finishTime := time.Since(startTime)
 	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
 
@@ -421,6 +430,12 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 
 	// Update the service array
 	p.ServiceInstances = updatedInstances
+
+	// Clean up WireGuard DNAT rules if WireGuard is enabled
+	if p.config.EnableWireguard {
+		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name)
+		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
+	}
 
 	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
