@@ -152,6 +152,9 @@ const (
 	// vipCleanRoutingTable - defines if routing table will be cleaned of redundant routes on kube-vip's start
 	vipCleanRoutingTable = "vip_cleanroutingtable" //nolint
 
+	// vipSkipIPOnInterface - defines if the VIP should not be added to the network interface
+	vipSkipIPOnInterface = "vip_skipiponinterface" //nolint
+
 	// cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 

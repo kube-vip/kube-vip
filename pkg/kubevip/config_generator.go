@@ -433,6 +433,18 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 		}
 		newEnvironment = append(newEnvironment, routingtable...)
 	}
+
+	// Skip adding VIP to network interface
+	if c.SkipAddingVIP {
+		skipVIP := []corev1.EnvVar{
+			{
+				Name:  vipSkipIPOnInterface,
+				Value: strconv.FormatBool(c.SkipAddingVIP),
+			},
+		}
+		newEnvironment = append(newEnvironment, skipVIP...)
+	}
+
 	// If BGP
 	if c.EnableBGP {
 		bgp := []corev1.EnvVar{

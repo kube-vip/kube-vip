@@ -82,9 +82,16 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 		}
 
 		if !c.EnableRoutingTable {
-			// Normal VIP addition, use skipDAD=false for normal DAD process
-			if _, err = network.AddIP(false, false); err != nil {
-				return fmt.Errorf("failed to add IP address %s: %w", network.IP(), err)
+			if c.SkipAddingVIP || c.EnableRoutingTable {
+				// Ensure VIP is not on the interface (cleanup from previous runs)
+				if _, err = network.DeleteIP(); err != nil {
+					log.Warn("attempted to clean existing VIP", "err", err)
+				}
+			} else {
+				// Normal VIP addition, use skipDAD=false for normal DAD process
+				if _, err = network.AddIP(false, false); err != nil {
+					return fmt.Errorf("failed to add IP address %s: %w", network.IP(), err)
+				}
 			}
 		}
 
@@ -207,10 +214,17 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 					log.Debug("entry.Check() for entry", "entry", entry)
 					if entry.Check() {
 						log.Debug("entry.Check() true")
-						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
-						_, err = network.AddIP(true, false)
-						if err != nil {
-							log.Error("error adding address", "err", err)
+						if c.SkipAddingVIP {
+							// Ensure VIP is not on the interface (cleanup from previous runs)
+							if _, err = network.DeleteIP(); err != nil {
+								log.Warn("attempted to clean existing VIP", "err", err)
+							}
+						} else {
+							// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
+							_, err = network.AddIP(true, false)
+							if err != nil {
+								log.Error("error adding address", "err", err)
+							}
 						}
 						if !(*backendMap)[entry] {
 							log.Info("added backend", "ip", network.IP())
@@ -347,11 +361,18 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		// Normal VIP addition, use skipDAD=false for normal DAD process
-		if _, err = network.AddIP(false, false); err != nil {
-			log.Warn(err.Error())
+		if c.SkipAddingVIP {
+			// Ensure VIP is not on the interface (cleanup from previous runs)
+			if _, err = network.DeleteIP(); err != nil {
+				log.Warn("attempted to clean existing VIP", "err", err)
+			}
 		} else {
-			log.Info("successful add IP")
+			// Normal VIP addition, use skipDAD=false for normal DAD process
+			if _, err = network.AddIP(false, false); err != nil {
+				log.Warn(err.Error())
+			} else {
+				log.Info("successful add IP")
+			}
 		}
 
 		if c.EnableARP {

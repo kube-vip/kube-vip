@@ -127,6 +127,9 @@ type Config struct {
 	// Clean routing table of redundant routes on start
 	CleanRoutingTable bool `yaml:"cleanRoutingTable"`
 
+	// SkipAddingVIP, if true, will not add the VIP to the network interface.
+	SkipAddingVIP bool `yaml:"skipAddingVIP"`
+
 	// BGP Configuration
 	BGPConfig     BGPConfig
 	BGPPeerConfig BGPPeer

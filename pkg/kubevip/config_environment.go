@@ -324,6 +324,16 @@ func ParseEnvironment(c *Config) error {
 		c.EnableRoutingTable = b
 	}
 
+	// Skip adding VIP to the interface
+	env = os.Getenv(vipSkipIPOnInterface)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.SkipAddingVIP = b
+	}
+
 	// Routing Table ID
 	env = os.Getenv(vipRoutingTableID)
 	if env != "" {
@@ -844,6 +854,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	}
 	if !baseConfig.PreserveVIPOnLeadershipLoss && fileConfig.PreserveVIPOnLeadershipLoss {
 		baseConfig.PreserveVIPOnLeadershipLoss = fileConfig.PreserveVIPOnLeadershipLoss
+	}
+	if !baseConfig.SkipAddingVIP && fileConfig.SkipAddingVIP {
+		baseConfig.SkipAddingVIP = fileConfig.SkipAddingVIP
 	}
 
 	// Service configuration
