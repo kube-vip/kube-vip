@@ -8,7 +8,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/florianl/go-conntrack v0.6.0
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-containerregistry v0.21.0
+	github.com/google/go-containerregistry v0.21.1
 	github.com/google/nftables v0.3.0
 	github.com/gookit/slog v0.6.0
 	github.com/huin/goupnp v1.3.0
