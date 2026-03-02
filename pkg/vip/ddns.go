@@ -70,18 +70,16 @@ func (ddns *ddnsManager) Start(ctx context.Context, wg *sync.WaitGroup) (string,
 	// also to keep read the ip from channel
 	// so onbound function is unblocked to send the ip
 	wg.Go(func() {
-		func(ctx context.Context) {
-			for {
-				select {
-				case <-ctx.Done():
-					log.Info("stop dhclient for ddns")
-					client.Stop()
-					return
-				case ip := <-client.IPChannel():
-					log.Info("got address from dhcp", "ip", ip)
-				}
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("stop dhclient for ddns")
+				client.Stop()
+				return
+			case ip := <-client.IPChannel():
+				log.Info("got address from dhcp", "ip", ip)
 			}
-		}(ctx)
+		}
 	})
 
 	return ip, nil

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -18,30 +19,37 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
-	rw, err := provider.CreateRetryWatcher(svcCtx.Ctx, p.rwClientSet, service)
+	rwCtx := context.WithoutCancel(svcCtx.Ctx)
+
+	rw, err := provider.CreateRetryWatcher(rwCtx, p.rwClientSet, service)
 	if err != nil {
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
 	}
 
 	wg := sync.WaitGroup{}
-	defer wg.Wait()
 
-	exitFunction := make(chan struct{})
+	defer func() {
+		rw.Stop()
+		wg.Wait()
+	}()
+
 	wg.Go(func() {
-		select {
-		case <-svcCtx.Ctx.Done():
-			log.Debug("context cancelled", "provider", provider.GetLabel())
-			// Stop the retry watcher
-			rw.Stop()
-			return
-		case <-exitFunction:
-			log.Debug("function ending", "provider", provider.GetLabel())
-			// Stop the retry watcher
-			rw.Stop()
-			// Cancel the context, which will in turn cancel the leadership
-			svcCtx.Cancel()
-			return
-		}
+		// select {
+		// case <-rwCtx.Done():
+		// 	svcCtx.Cancel()
+		// 	log.Debug("context cancelled", "provider", provider.GetLabel())
+		// 	return
+		// case <-exitFunction:
+		// 	log.Debug("function ending", "provider", provider.GetLabel())
+		// 	// Stop the retry watcher
+		// 	rw.Stop()
+		// 	// Cancel the context, which will in turn cancel the leadership
+		// 	svcCtx.Cancel()
+		// 	return
+		// }
+		<-rwCtx.Done()
+		svcCtx.Cancel()
+		log.Debug("context cancelled", "provider", provider.GetLabel())
 	})
 
 	ch := rw.ResultChan()
@@ -66,10 +74,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 				return fmt.Errorf("[%s] error while processing delete event: %w", provider.GetLabel(), err)
 			}
 
-			// Close the goroutine that will end the retry watcher, then exit the endpoint watcher function
-			close(exitFunction)
 			log.Info("stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
-
 			return nil
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
@@ -77,7 +82,6 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			log.Error("watch error", "provider", provider.GetLabel(), "err", statusErr)
 		}
 	}
-	close(exitFunction)
 	log.Info("stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 	return nil //nolint:govet
 }

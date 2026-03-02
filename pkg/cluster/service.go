@@ -84,7 +84,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *e
 		}
 
 		if c.EnableLoadBalancer {
-			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
+			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
 				c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, killFunc, &wg)
 			if err != nil {
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
@@ -167,15 +167,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *e
 			}
 		}
 
-		stop := make(chan struct{})
-
-		// will wait for system interrupt and will send stop signal to backend watch
-		wg.Go(func() {
-			<-ctx.Done()
-			stop <- struct{}{}
-		})
-
-		backend.Watch(func() {
+		backend.Watch(ctx, func() {
 			for i := range cluster.Network {
 				network := cluster.Network[i]
 				networkIP := network.IP()
@@ -244,7 +236,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *e
 					}
 				}
 			}
-		}, c.BackendHealthCheckInterval, stop)
+		}, c.BackendHealthCheckInterval)
 	}
 
 	if c.EnableBGP {
