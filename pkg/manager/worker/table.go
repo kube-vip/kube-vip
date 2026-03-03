@@ -37,17 +37,17 @@ func NewTable(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	}
 }
 
-func (t *Table) Configure(ctx context.Context) error {
+func (t *Table) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 	log.Info("destination for routes", "table", t.config.RoutingTableID, "protocol", t.config.RoutingProtocol)
 
 	if t.config.CleanRoutingTable {
-		go func() {
+		wg.Go(func() {
 			// we assume that after 10s all services should be configured so we can delete redundant routes
 			time.Sleep(time.Second * 10)
 			if err := t.cleanRoutes(); err != nil {
 				log.Error("error checking for old routes", "err", err)
 			}
-		}()
+		})
 	}
 
 	if t.config.EgressClean {

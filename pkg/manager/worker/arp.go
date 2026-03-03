@@ -33,9 +33,11 @@ func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	}
 }
 
-func (a *ARP) Configure(ctx context.Context) error {
+func (a *ARP) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 	log.Info("Start ARP/NDP advertisement Global")
-	go a.arpMgr.StartAdvertisement(ctx)
+	wg.Go(func() {
+		a.arpMgr.StartAdvertisement(ctx)
+	})
 	return nil
 }
 

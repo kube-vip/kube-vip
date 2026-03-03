@@ -14,6 +14,7 @@ type KubevipManifestValues struct {
 	ConfigPath           string
 	SvcEnable            string
 	SvcElectionEnable    string
+	VipElectionEnable    string
 	EnableEndpointslices string
 	EnableNodeLabeling   string
 	ControlPlaneEnable   string
@@ -22,6 +23,7 @@ type KubevipManifestValues struct {
 	MPBGPNexthop         string
 	MPBGPNexthopIPv4     string
 	MPBGPNexthopIPv6     string
+	Mode                 string
 }
 
 type BGPPeerValues struct {

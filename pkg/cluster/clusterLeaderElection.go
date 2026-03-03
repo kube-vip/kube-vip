@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -19,7 +20,6 @@ import (
 // StartCluster - Begins a running instance of the Leader Election cluster
 func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	em *election.Manager, bgpServer *bgp.Server, leaseMgr *lease.Manager) error {
-	var err error
 
 	ns, leaseName := lease.NamespaceName(c.LeaseName, c)
 
@@ -31,14 +31,17 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	objLease := leaseMgr.Add(ctx, leaseID)
 	isNew := objLease.Add(objectName)
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	// Start a goroutine that will delete the lease when the service context is cancelled.
 	// This is important for proper cleanup when a service is deleted - it ensures that
 	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
 	// Without this, RunOrDie would continue running until leadership is naturally lost.
-	go func() {
+	wg.Go(func() {
 		<-objLease.Ctx.Done()
 		leaseMgr.Delete(leaseID, objectName)
-	}()
+	})
 
 	if !isNew {
 		log.Debug("this election was already done, waiting for it to finish", "lease", leaseName)
@@ -56,16 +59,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	// Add Notification for SIGTERM (sent from Kubernetes)
 	signal.Notify(signalChan, syscall.SIGTERM)
 
-	if cluster.completed == nil {
-		cluster.completed = make(chan bool, 1)
-		defer close(cluster.completed)
-	}
-
-	if cluster.stop == nil {
-		cluster.stop = make(chan bool, 1)
-	}
-
-	go func() {
+	wg.Go(func() {
 		select {
 		case <-signalChan:
 		case <-cluster.stop:
@@ -74,7 +68,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		log.Info("Received termination, signaling cluster shutdown")
 		// Cancel the leader context, which will in turn cancel the leadership
 		objLease.Cancel()
-	}()
+	})
 
 	// (attempt to) Remove the virtual IP, in case it already exists
 
@@ -85,25 +79,6 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		}
 		if deleted {
 			log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-		}
-	}
-
-	// Defer a function to check if the bgpServer has been created and if so attempt to close it
-	defer func() {
-		if bgpServer != nil {
-			bgpServer.Close()
-		}
-	}()
-
-	if c.EnableBGP && bgpServer == nil {
-		// Lets start BGP
-		log.Info("Starting the BGP server to advertise VIP routes to VGP peers")
-		bgpServer, err = bgp.NewBGPServer(c.BGPConfig)
-		if err != nil {
-			log.Error("new BGP server", "err", err)
-		}
-		if err := bgpServer.Start(ctx, nil); err != nil {
-			log.Error("starting BGP server", "err", err)
 		}
 	}
 
@@ -188,7 +163,7 @@ func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Leas
 	}
 
 	// As we're leading lets start the vip service
-	err := cluster.vipService(objLease.Ctx, c, em, bgpServer, objLease.Cancel)
+	err := cluster.vipService(objLease.Ctx, c, em, bgpServer, objLease.Cancel, signalChan)
 	if err != nil {
 		log.Error("starting VIP service on leader", "err", err)
 		signalChan <- syscall.SIGINT
@@ -202,14 +177,6 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 
 	// Stop the cluster context if it is running
 	objLease.Cancel()
-
-	// Stop the BGP server
-	if bgpServer != nil {
-		err := bgpServer.Close()
-		if err != nil {
-			log.Warn("close BGP server", "err", err)
-		}
-	}
 
 	// Handle VIP cleanup based on configuration
 	if c.PreserveVIPOnLeadershipLoss {
@@ -245,7 +212,6 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 	}
 
 	log.Error("lost leadership, restarting kube-vip")
-	signalChan <- syscall.SIGINT
 }
 
 func (cluster *Cluster) OnNewLeader(identity string, c *kubevip.Config) {

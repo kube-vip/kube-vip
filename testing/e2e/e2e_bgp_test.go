@@ -1078,25 +1078,6 @@ func newGoBGPClient(address string, port uint32) (api.GobgpApiClient, error) {
 }
 
 func checkGoBGPPaths(ctx context.Context, client api.GobgpApiClient, family *api.Family, prefixes []*api.TableLookupPrefix, expectedPaths int) []*api.Destination {
-	// ticker := time.NewTicker(time.Second)
-	// defer ticker.Stop()
-	// to := time.NewTimer(time.Second * 180)
-	// defer to.Stop()
-	// for {
-	// 	select {
-	// 	case <-to.C:
-	// 		return nil
-	// 	case <-ticker.C:
-	// 		paths, err := getGoBGPPaths(ctx, client, family, prefixes)
-	// 		if err != nil {
-	// 			return nil
-	// 		}
-	// 		if len(paths) == expectedPaths {
-	// 			return paths
-	// 		}
-	// 	}
-	// }
-
 	var paths []*api.Destination
 	Eventually(func() error {
 		var err error

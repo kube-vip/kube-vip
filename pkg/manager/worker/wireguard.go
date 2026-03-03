@@ -42,7 +42,7 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	}
 }
 
-func (w *WireGuard) Configure(ctx context.Context) error {
+func (w *WireGuard) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	log.Info("reading wireguard tunnel configurations from Kubernetes secret")
 	tunnelMgr := wireguard.NewTunnelManager()
 	err := tunnelMgr.LoadConfigurationsFromSecret(ctx, w.clientSet, w.config.Namespace, "wireguard")
