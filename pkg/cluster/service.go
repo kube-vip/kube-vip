@@ -347,11 +347,13 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		// Normal VIP addition, use skipDAD=false for normal DAD process
-		if _, err = network.AddIP(false, false); err != nil {
-			log.Warn(err.Error())
-		} else {
-			log.Info("successful add IP")
+		if !c.EnableRoutingTable && !c.EnableBGP {
+			// Normal VIP addition, use skipDAD=false for normal DAD process
+			if _, err = network.AddIP(false, false); err != nil {
+				log.Warn(err.Error())
+			} else {
+				log.Info("successful add IP")
+			}
 		}
 
 		if c.EnableARP {
