@@ -53,14 +53,13 @@ type IPVSLoadBalancer struct {
 	lock                sync.Mutex
 	stop                chan struct{}
 	networkInterface    string
-	leaderCancel        context.CancelFunc
 	killFunc            func()
 	address             string
 	family              ipvs.AddressFamily
 }
 
-func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMethod string, backendHealthCheckInterval int, networkInterface string,
-	leaderCancel context.CancelFunc, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMethod string, backendHealthCheckInterval int,
+	networkInterface string, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
 	log.Info("Starting IPVS LoadBalancer", "address", address)
 
 	// Create IPVS client
@@ -142,7 +141,6 @@ func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMetho
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
 		networkInterface:    networkInterface,
-		leaderCancel:        leaderCancel,
 		killFunc:            killFunc,
 		address:             address,
 		family:              family,
@@ -349,10 +347,6 @@ func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
 				if lb.forwardingMethod == ipvs.Local && !lb.localBackendExists() {
 					if lb.killFunc != nil {
 						lb.killFunc()
-					}
-
-					if lb.leaderCancel != nil {
-						lb.leaderCancel()
 					}
 				}
 			}

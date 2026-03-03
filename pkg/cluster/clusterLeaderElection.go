@@ -150,7 +150,7 @@ func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Leas
 	}
 
 	// As we're leading lets start the vip service
-	err := cluster.vipService(objLease.Ctx, c, em, bgpServer, objLease.Cancel, killFunc)
+	err := cluster.StartVipService(objLease.Ctx, c, em, bgpServer, killFunc)
 	if err != nil {
 		log.Error("starting VIP service on leader", "err", err)
 		killFunc()

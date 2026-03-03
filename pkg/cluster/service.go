@@ -29,8 +29,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
-	bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc, killFunc func()) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
+	bgpServer *bgp.Server, killFunc func()) error {
 	var err error
 
 	defer close(cluster.completed)
@@ -85,7 +85,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, em *e
 
 		if c.EnableLoadBalancer {
 			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
-				c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, killFunc, &wg)
+				c.BackendHealthCheckInterval, c.Interface, killFunc, &wg)
 			if err != nil {
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
