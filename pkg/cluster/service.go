@@ -33,8 +33,6 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	bgpServer *bgp.Server, killFunc func()) error {
 	var err error
 
-	defer close(cluster.completed)
-
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -343,8 +341,6 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	}
 
 	wg.Go(func() {
-		defer close(cluster.completed)
-
 		for i := range cluster.Network {
 			network := cluster.Network[i]
 
