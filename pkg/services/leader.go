@@ -15,7 +15,7 @@ import (
 
 // The StartServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) error {
-	err := p.ServicesWatcher(ctx, p.StartServicesLeaderElection)
+	err := p.ServicesWatcher(ctx, NewCallback(p.StartServicesLeaderElection, true))
 	if err != nil {
 		return err
 	}
@@ -36,7 +36,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 }
 
 // The startServicesWatchForLeaderElection function will start a services watcher, the
-func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, _ *sync.WaitGroup) error {
+func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, _ *sync.WaitGroup, _ bool) error {
 	if svcCtx == nil {
 		return fmt.Errorf("no context context for service %q with UID %q: nil context", service.Name, service.UID)
 	}
@@ -81,6 +81,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		p.leaseMgr.Delete(id, objectName)
 	})
 
+	select {
+	case <-svcCtx.Ctx.Done():
+		return fmt.Errorf("context cancelled before election start: %w", svcCtx.Ctx.Err())
+	case <-svcCtx.EndpointsReady:
+	}
+
 	// this service is sharing lease with another service
 	if svcLease.Elected.Load() {
 		svcLease.Unlock()
@@ -91,31 +97,19 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// Lease was cancelled (e.g., leader election ended), return immediately
 			// This allows the restart loop to create a fresh lease
 			log.Debug("lease context cancelled before leader election started", "service", service.Name, "uid", service.UID)
-			svcCtx.IsActive = false
 			return nil
 		}
 
-		// Common lease handling: sync the service and wait for context cancellation
-		if !svcCtx.IsActive {
-			if err := p.SyncServices(svcCtx, service, &wg); err != nil {
-				log.Error("service sync", "err", err, "uid", service.UID)
-				svcLease.Cancel()
-			}
-			svcCtx.IsActive = true
+		if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
+			log.Error("error on started leading", "error", err)
 		}
 
 		// Block until service context is cancelled
 		<-svcCtx.Ctx.Done()
 
-		if svcCtx.IsActive {
-			// we have no context left here so we use a new one
-			if err := p.deleteService(context.TODO(), service.UID); err != nil {
-				log.Error("service deletion", "uid", service.UID, "err", err)
-			}
+		if err := p.onStoppedLeading(svcLease, service); err != nil {
+			log.Error("error on stopped leading", "error", err)
 		}
-
-		// Mark this service is inactive
-		svcCtx.IsActive = false
 
 		// wait for leaderelection to be finished
 		<-svcLease.Ctx.Done()
@@ -140,9 +134,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			close(svcLease.Started)
 			// Mark this service as active (as we've started leading)
 			// we run this in background as it's blocking
-			svcCtx.IsActive = true
-			if err := p.SyncServices(svcCtx, service, &wg); err != nil {
-				log.Error("service sync", "uid", service.UID, "err", err)
+			if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
 				leaderCancel()
 			}
 		},
@@ -150,16 +142,9 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// we can do cleanup here
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
-			if svcCtx.IsActive {
-				log.Debug("deleting service due to lost leadership", "uid", service.UID)
-				if err := p.deleteService(svcLease.Ctx, service.UID); err != nil {
-					log.Error("service deletion", "err", err)
-				}
+			if err := p.onStoppedLeading(svcLease, service); err != nil {
+				leaderCancel()
 			}
-			// Mark this service is inactive
-			svcCtx.IsActive = false
-			svcLease.Started = make(chan any)
-			leaderCancel()
 		},
 		OnNewLeader: func(identity string) {
 			// we're notified when new leader elected
@@ -176,5 +161,26 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	}
 
 	log.Info("stopping leader election", "service", service.Name, "uid", service.UID)
+	return nil
+}
+
+func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
+	// Mark this service as active (as we've started leading)
+	// we run this in background as it's blocking
+	err := p.SyncServices(svcCtx, service, wg, true)
+	if err != nil {
+		log.Error("service sync", "uid", service.UID, "err", err)
+		return err
+	}
+	return nil
+}
+
+func (p *Processor) onStoppedLeading(svcLease *lease.Lease, service *v1.Service) error {
+	log.Debug("deleting service due to lost leadership", "uid", service.UID)
+	err := p.deleteService(svcLease.Ctx, service.UID)
+	if err != nil {
+		log.Error("service deletion", "err", err)
+		return err
+	}
 	return nil
 }

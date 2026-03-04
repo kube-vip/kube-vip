@@ -251,7 +251,7 @@ func (w *wireguardWorker) delete(ctx context.Context, service *v1.Service, id st
 }
 
 // setInstanceEndpointsStatus updates the endpoint status on the service instance
-func (w *wireguardWorker) setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error {
+func (w *wireguardWorker) setInstanceEndpointsStatus(_ context.Context, service *v1.Service, endpoints []string) error {
 	hasEndpoints := len(endpoints) > 0
 
 	log.Debug("[wireguard] setting instance endpoint status",

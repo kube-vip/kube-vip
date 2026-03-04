@@ -24,8 +24,8 @@ func newBGP(generic generic, bgpServer *bgp.Server) endpointWorker {
 }
 
 func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
-	if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
-		for _, cluster := range instance.Clusters {
+	if inst := instance.FindServiceInstance(service, *b.instances); inst != nil {
+		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
 				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
 					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
@@ -101,7 +101,7 @@ func (b *BGP) clearBGPHosts(ctx context.Context, service *v1.Service) {
 	ClearBGPHosts(ctx, service, b.instances, b.bgpServer)
 }
 
-func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
+func (b *BGP) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }
 
