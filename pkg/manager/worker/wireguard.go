@@ -145,7 +145,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	})
 
 	if w.config.EnableServices && !w.config.EnableServicesElection {
-		if err := w.svcProcessor.ServicesWatcher(ctx, w.svcProcessor.SyncServices); err != nil {
+		if err := w.svcProcessor.ServicesWatcher(ctx, services.NewCallback(w.svcProcessor.SyncServices, false)); err != nil {
 			log.Error("failed to start services watcher", "err", err)
 		}
 	}

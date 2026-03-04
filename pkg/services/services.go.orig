@@ -187,7 +187,11 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 	for x := range inst.VIPConfigs {
 		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-		if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), p.CountRouteReferences, wg); err != nil {
+<<<<<<< HEAD
+		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), p.CountRouteReferences, wg); err != nil {
+=======
+		if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, svc.Name, p.CountRouteReferences, wg); err != nil {
+>>>>>>> 4008abc (Refactored service handling)
 			return fmt.Errorf("failed to start lb: %w", err)
 		}
 	}
@@ -446,10 +450,14 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
 				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
 				if err != nil {
-					log.Error("[service] egress teardown", "err", err)
+					log.Warn("[service] egress teardown", "err", err)
 				}
 			}
 		}
+	}
+
+	if p.config.EnableBGP {
+		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
 	// Update the service array
