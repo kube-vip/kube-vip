@@ -1140,7 +1140,7 @@ func checkIPAddress(lbAddress, container string, expected bool) bool {
 	By(withTimestamp(fmt.Sprintf("checking LB %q, should exist: %t", lbAddress, expected)))
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	to := time.NewTimer(time.Second * 180)
+	to := time.NewTimer(time.Second * 30)
 	defer to.Stop()
 	for {
 		select {

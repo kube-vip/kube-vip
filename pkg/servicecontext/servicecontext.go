@@ -3,27 +3,25 @@ package servicecontext
 import (
 	"context"
 	"sync"
-	"sync/atomic"
-
-	"github.com/kube-vip/kube-vip/pkg/lease"
 )
 
 type Context struct {
 	Ctx                context.Context
 	Cancel             context.CancelFunc
-	IsActive           bool
 	IsWatched          bool
 	ConfiguredNetworks sync.Map
-	Lease              *lease.Lease
-	HasEndpoints       atomic.Bool
+	EndpointsReady     chan any
+	epReady            sync.Once
+	signalled          bool
 	LeaderCancel       context.CancelFunc
 }
 
 func New(ctx context.Context) *Context {
 	svcCtx, svcCancel := context.WithCancel(ctx)
 	return &Context{
-		Ctx:    svcCtx,
-		Cancel: svcCancel,
+		Ctx:            svcCtx,
+		Cancel:         svcCancel,
+		EndpointsReady: make(chan any),
 	}
 }
 
@@ -39,4 +37,19 @@ func (ctx *Context) HasConfiguredNetworks() bool {
 func (ctx *Context) IsNetworkConfigured(ip string) bool {
 	_, exists := ctx.ConfiguredNetworks.Load(ip)
 	return exists
+}
+
+func (ctx *Context) SignalReadiness() {
+	ctx.epReady.Do(func() {
+		close(ctx.EndpointsReady)
+		ctx.signalled = true
+	})
+}
+
+func (ctx *Context) ResetReadiness() {
+	if ctx.signalled {
+		ctx.EndpointsReady = make(chan any)
+		ctx.epReady = sync.Once{}
+		ctx.signalled = false
+	}
 }
