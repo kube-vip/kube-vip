@@ -114,15 +114,6 @@ func (b *BGP) ServicesGlobalLeader(ctx context.Context, id string) {
 	// NOT IMPLEMENTED
 }
 
-func (b *BGP) ServicesNoLeader(ctx context.Context) error {
-	log.Info("beginning watching services without leader election")
-	err := b.svcProcessor.ServicesWatcher(ctx, b.svcProcessor.SyncServices)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (b *BGP) Name() string {
 	return "BGP"
 }
