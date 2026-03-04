@@ -3,6 +3,7 @@ package bgp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -21,6 +22,9 @@ type Server struct {
 	// This is a prometheus gauge indicating the state of the sessions.
 	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
 	BGPSessionInfoGauge *prometheus.GaugeVec
+
+	mtx     sync.Mutex
+	tracker map[string]uint
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -38,8 +42,9 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 	}
 
 	b = &Server{
-		s: gobgp.NewBgpServer(),
-		c: &c,
+		s:       gobgp.NewBgpServer(),
+		c:       &c,
+		tracker: make(map[string]uint),
 
 		BGPSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "kube_vip",
