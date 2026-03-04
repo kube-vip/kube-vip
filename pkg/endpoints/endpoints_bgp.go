@@ -102,7 +102,7 @@ func (b *BGP) clearBGPHosts(ctx context.Context, service *v1.Service) {
 	ClearBGPHosts(ctx, service, b.instances, b.bgpServer)
 }
 
-func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
+func (b *BGP) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }
 

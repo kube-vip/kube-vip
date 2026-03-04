@@ -44,7 +44,7 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
-func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -63,6 +63,18 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		if instance != nil {
+			instance.AddCalled = true
+		}
+
+		if !usesLeaderElection {
+			select {
+			case <-ctx.Ctx.Done():
+				return nil
+			case <-ctx.EndpointsReady:
+			}
+		}
+
 		if err := p.addService(ctx.Ctx, instance, svc, wg); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
@@ -155,7 +167,7 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, newService *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
 	// protect against addService while reading
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -163,29 +175,30 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 	startTime := time.Now()
 
 	var err error
-	if newService == nil {
-		newService, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
+	if inst == nil {
+		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
 		if err != nil {
 			return err
 		}
+		inst.AddCalled = true
 
-		p.ServiceInstances = append(p.ServiceInstances, newService)
+		p.ServiceInstances = append(p.ServiceInstances, inst)
 	}
 
-	for x := range newService.VIPConfigs {
+	for x := range inst.VIPConfigs {
 		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
+		if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
 			return fmt.Errorf("failed to start lb: %w", err)
 		}
 	}
 
-	p.upnpMap(ctx, newService)
+	p.upnpMap(ctx, inst)
 
-	if newService.IsDHCPv4 {
+	if inst.IsDHCPv4 {
 		wg.Go(func() {
 			index := -1
-			for i := range newService.VIPConfigs {
-				ip := net.ParseIP(newService.VIPConfigs[i].VIP)
+			for i := range inst.VIPConfigs {
+				ip := net.ParseIP(inst.VIPConfigs[i].VIP)
 				if ip.To4() != nil {
 					index = i
 					break
@@ -194,12 +207,12 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv4")
 			} else {
-				for ip := range newService.DHCPv4Client.IPChannel() {
+				for ip := range inst.DHCPv4Client.IPChannel() {
 					log.Debug("IP changed", "ip", ip)
-					newService.VIPConfigs[index].VIP = ip
-					newService.DHCPInterfaceIPv4 = ip
+					inst.VIPConfigs[index].VIP = ip
+					inst.DHCPInterfaceIPv4 = ip
 					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, newService); err != nil {
+						if err := p.updateStatus(ctx, inst); err != nil {
 							log.Warn("updating svc", "err", err)
 						}
 					}
@@ -210,11 +223,11 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 		})
 	}
 
-	if newService.IsDHCPv6 {
+	if inst.IsDHCPv6 {
 		wg.Go(func() {
 			index := -1
-			for i := range newService.VIPConfigs {
-				ip := net.ParseIP(newService.VIPConfigs[i].VIP)
+			for i := range inst.VIPConfigs {
+				ip := net.ParseIP(inst.VIPConfigs[i].VIP)
 				if ip.To4() == nil {
 					index = i
 					break
@@ -223,12 +236,12 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv6")
 			} else {
-				for ip := range newService.DHCPv4Client.IPChannel() {
+				for ip := range inst.DHCPv4Client.IPChannel() {
 					log.Debug("IP changed", "ip", ip)
-					newService.VIPConfigs[index].VIP = ip
-					newService.DHCPInterfaceIPv6 = ip
+					inst.VIPConfigs[index].VIP = ip
+					inst.DHCPInterfaceIPv6 = ip
 					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, newService); err != nil {
+						if err := p.updateStatus(ctx, inst); err != nil {
 							log.Warn("updating svc", "err", err)
 						}
 					}
@@ -239,9 +252,9 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 	}
 
 	if !p.config.DisableServiceUpdates {
-		log.Debug("[service] update", "namespace", newService.ServiceSnapshot.Namespace, "name", newService.ServiceSnapshot.Name)
-		if err := p.updateStatus(ctx, newService); err != nil {
-			log.Error("[service] updating status", "namespace", newService.ServiceSnapshot.Namespace, "name", newService.ServiceSnapshot.Name, "err", err)
+		log.Debug("[service] update", "namespace", inst.ServiceSnapshot.Namespace, "name", inst.ServiceSnapshot.Name)
+		if err := p.updateStatus(ctx, inst); err != nil {
+			log.Error("[service] updating status", "namespace", inst.ServiceSnapshot.Namespace, "name", inst.ServiceSnapshot.Name, "err", err)
 		}
 	}
 
@@ -433,7 +446,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
 				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
 				if err != nil {
-					log.Warn("[service] egress teardown", "err", err)
+					log.Error("[service] egress teardown", "err", err)
 				}
 			}
 		}

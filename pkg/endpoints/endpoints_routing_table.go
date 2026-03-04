@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	log "log/slog"
 
@@ -17,6 +18,7 @@ import (
 
 type RoutingTable struct {
 	generic
+	mtx      sync.Mutex
 	routeMgr *route.Manager
 }
 
@@ -27,19 +29,19 @@ func newRoutingTable(generic generic, routeMgr *route.Manager) endpointWorker {
 	}
 }
 
-func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1.Service) error {
-	instance := instance.FindServiceInstance(service, *rt.instances)
-	if instance != nil {
-		for _, cluster := range instance.Clusters {
+func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
+	inst := instance.FindServiceInstance(service, *rt.instances)
+	if inst != nil {
+		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
-				if !ctx.IsNetworkConfigured(cluster.Network[i].IP()) && cluster.Network[i].HasEndpoints() {
+				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) && cluster.Network[i].HasEndpoints() {
 					if err := rt.routeMgr.Add(lease.ServiceNamespacedName(service), cluster.Network[i], false, true); err != nil {
 						return fmt.Errorf("[%s] error adding route: %s", rt.provider.GetLabel(), err.Error())
 					} else {
 						log.Info("added route", "provider",
 							rt.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace",
 							service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", rt.config.RoutingTableID)
-						ctx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
+						svcCtx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
 					}
 				}
 			}
@@ -50,6 +52,8 @@ func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1
 }
 
 func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
+	rt.mtx.Lock()
+	defer rt.mtx.Unlock()
 	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
 		if errs := ClearRoutes(service, rt.instances, rt.routeMgr); len(errs) == 0 {
 			svcCtx.ConfiguredNetworks.Clear()
@@ -100,12 +104,12 @@ func (rt *RoutingTable) deleteAction(service *v1.Service) {
 	ClearRoutes(service, rt.instances, rt.routeMgr)
 }
 
-func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error {
-	instance := instance.FindServiceInstance(service, *rt.instances)
-	if instance == nil {
+func (rt *RoutingTable) setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error {
+	inst := instance.FindServiceInstance(service, *rt.instances)
+	if inst == nil {
 		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {
-		for _, c := range instance.Clusters {
+		for _, c := range inst.Clusters {
 			for n := range c.Network {
 				// if there are no endpoints set HasEndpoints false just in case
 				if len(endpoints) < 1 {
