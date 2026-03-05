@@ -723,6 +723,11 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 	for {
 		time.Sleep(300 * time.Second)
 
+		// Skip logging if no service instances
+		if len(p.ServiceInstances) == 0 {
+			continue
+		}
+
 		log.Info("[UPNP] Refreshing Instances", "number of instances", len(p.ServiceInstances))
 		for i := range p.ServiceInstances {
 			p.upnpMap(ctx, p.ServiceInstances[i])
