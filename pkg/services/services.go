@@ -36,7 +36,6 @@ type ServiceInstanceAction string
 const (
 	ActionDelete ServiceInstanceAction = "delete"
 	ActionAdd    ServiceInstanceAction = "add"
-	ActionUpdate ServiceInstanceAction = "update"
 	ActionNone   ServiceInstanceAction = "none"
 
 	// Default UPNP lease requested is 3600 seconds.
@@ -70,11 +69,6 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		if err := p.nodeLabelManager.AddLabel(ctx.Ctx, svc); err != nil {
 			return fmt.Errorf("error adding label to node: %w", err)
 		}
-	case ActionUpdate:
-		log.Debug("[service] update egress", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.updateEgressConfiguration(ctx.Ctx, svc); err != nil {
-			return fmt.Errorf("error updating egress config %s/%s: %w", svc.Namespace, svc.Name, err)
-		}
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	}
@@ -94,36 +88,6 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 	for _, instance := range p.ServiceInstances {
 		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
 			log.Debug("[DEBUG] found matching service instance", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-
-			// Check if egress endpoint annotations have changed FIRST, before other delete checks
-			// This ensures we don't accidentally delete a service when only the pod IP changed
-			if svc.Annotations[kubevip.Egress] == "true" {
-				// Compare the stored ActiveEndpoint annotations with current service annotations
-				storedActiveEndpoint := instance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
-				currentActiveEndpoint := svc.Annotations[kubevip.ActiveEndpoint]
-				storedActiveEndpointIPv6 := instance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
-				currentActiveEndpointIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
-
-				log.Debug("[DEBUG] egress check",
-					"service", svc.Name,
-					"namespace", svc.Namespace,
-					"stored_ipv4", storedActiveEndpoint,
-					"current_ipv4", currentActiveEndpoint,
-					"stored_ipv6", storedActiveEndpointIPv6,
-					"current_ipv6", currentActiveEndpointIPv6,
-					"equal", storedActiveEndpoint == currentActiveEndpoint && storedActiveEndpointIPv6 == currentActiveEndpointIPv6)
-
-				if storedActiveEndpoint != currentActiveEndpoint || storedActiveEndpointIPv6 != currentActiveEndpointIPv6 {
-					log.Info("egress active endpoint changed, will reconfigure SNAT rules",
-						"service", svc.Name,
-						"namespace", svc.Namespace,
-						"old_ipv4", storedActiveEndpoint,
-						"new_ipv4", currentActiveEndpoint,
-						"old_ipv6", storedActiveEndpointIPv6,
-						"new_ipv6", currentActiveEndpointIPv6)
-					return ActionUpdate // Use targeted update instead of delete + add
-				}
-			}
 
 			for _, address := range addresses {
 				// handle the case where the service instance needs to be deleted
