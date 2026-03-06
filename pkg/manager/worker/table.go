@@ -11,7 +11,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
-	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -47,13 +46,6 @@ func (t *Table) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 			}
 		})
 	}
-
-	if t.config.EgressClean {
-		vip.ClearIPTables(t.config.EgressWithNftables, t.config.ServiceNamespace, iptables.ProtocolIPv4)
-		vip.ClearIPTables(t.config.EgressWithNftables, t.config.ServiceNamespace, iptables.ProtocolIPv6)
-		log.Debug("IPtables rules cleaned on startup")
-	}
-
 	return nil
 }
 

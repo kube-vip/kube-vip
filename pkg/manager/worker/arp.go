@@ -8,12 +8,10 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
-	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/services"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -50,10 +48,7 @@ func (a *ARP) StartControlPlane(ctx context.Context, electionManager *election.M
 }
 
 func (a *ARP) ConfigureServices() {
-	// This will tidy any dangling kube-vip iptables rules
-	if a.config.EgressClean {
-		vip.ClearIPTables(a.config.EgressWithNftables, a.config.ServiceNamespace, iptables.ProtocolIPv4)
-	}
+
 }
 
 func (a *ARP) StartServices(ctx context.Context) error {
