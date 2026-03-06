@@ -99,7 +99,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when only control plane is enabled with leader election", func() {
@@ -117,7 +117,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when only services are enabled", func() {
@@ -135,7 +135,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when only services are enabled with leader election", func() {
@@ -153,7 +153,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when control plane services are enabled", func() {
@@ -171,7 +171,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when control plane w/ leader election and services w/o leader election are enabled", func() {
@@ -189,7 +189,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when control plane w/o leader election and services w/ leader election are enabled", func() {
@@ -207,7 +207,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when control plane and services w/ leader election are enabled", func() {
@@ -225,7 +225,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					BGPAS:                2,
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 		})

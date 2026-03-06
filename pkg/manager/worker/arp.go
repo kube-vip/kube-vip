@@ -3,10 +3,8 @@ package worker
 import (
 	"context"
 	log "log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
@@ -24,11 +22,11 @@ type ARP struct {
 }
 
 func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
-	config *kubevip.Config, closing *atomic.Bool, signalChan chan os.Signal,
+	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	electionMgr *election.Manager, leaseMgr *lease.Manager) *ARP {
 	return &ARP{
-		Common: *newCommon(arpMgr, intfMgr, config, closing, signalChan,
+		Common: *newCommon(arpMgr, intfMgr, config, closing, killFunc,
 			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
 	}
 }
@@ -42,15 +40,13 @@ func (a *ARP) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 }
 
 func (a *ARP) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
-	err := a.cpCluster.StartCluster(ctx, a.config, electionManager, nil, a.leaseMgr)
+	err := a.cpCluster.StartCluster(ctx, a.config, electionManager, nil, a.leaseMgr, a.killFunc)
 	if err != nil {
 		log.Error("starting control plane", "err", err)
 	}
 
 	// Trigger the shutdown of this manager instance
-	if !a.closing.Load() {
-		a.signalChan <- syscall.SIGINT
-	}
+	a.killFunc()
 }
 
 func (a *ARP) ConfigureServices() {

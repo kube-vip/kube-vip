@@ -43,8 +43,6 @@ type Processor struct {
 	clientSet   *kubernetes.Clientset
 	rwClientSet *kubernetes.Clientset
 
-	shutdownChan chan struct{}
-
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
 	CountServiceWatchEvent *prometheus.CounterVec
@@ -70,7 +68,7 @@ type labelManager interface {
 }
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
-	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset, shutdownChan chan struct{},
+	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager,
 	electionMgr *election.Manager, leaseMgr *lease.Manager) *Processor {
 	lbClassFilterFunc := lbClassFilter
@@ -85,7 +83,6 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
-		shutdownChan:     shutdownChan,
 		CountServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "kube_vip",
 			Subsystem: "manager",

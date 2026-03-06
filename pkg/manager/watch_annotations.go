@@ -57,11 +57,9 @@ func (sm *Manager) annotationsWatcher(ctx context.Context) error {
 	// they're as needed
 	log.Warn(err.Error())
 
-	watcherCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	rw, err := watchtools.NewRetryWatcherWithContext(watcherCtx, node.ResourceVersion, &cache.ListWatch{
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.rwClientSet.CoreV1().Nodes().Watch(watcherCtx, listOptions)
+			return sm.rwClientSet.CoreV1().Nodes().Watch(ctx, listOptions)
 		},
 	})
 

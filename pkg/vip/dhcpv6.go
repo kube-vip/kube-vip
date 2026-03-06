@@ -5,6 +5,7 @@ import (
 	"fmt"
 	log "log/slog"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -99,6 +100,7 @@ type DHCPv6Client struct {
 	ic              *DHCPv6InternalClient
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
+	stop            sync.Once
 }
 
 // NewDHCPv6Client returns a new DHCP6 Client.
@@ -133,8 +135,10 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
-	close(c.ipChan)
-	close(c.stopChan)
+	c.stop.Do(func() {
+		close(c.ipChan)
+		close(c.stopChan)
+	})
 	<-c.releasedChan
 	dhcpv6ClientManager.Delete(c.iface.Name)
 }

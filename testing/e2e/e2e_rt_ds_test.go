@@ -97,7 +97,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully on exit when only services are enabled without leaderelection", func() {
@@ -113,7 +113,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully on exit when only services are enabled with leaderelection", func() {
@@ -129,7 +129,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully on exit when only services are enabled with leaderelection per service", func() {
@@ -145,7 +145,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully on exit when control-plane and services are enabled without leaderelection", func() {
@@ -161,7 +161,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully on exit when control-plane and services are enabled with leaderelection", func() {
@@ -177,7 +177,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 			It(clusterName+" exits gracefully when control-plane and services are enabled with leaderelection per service", func() {
@@ -193,7 +193,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					EnableNodeLabeling:   "false",
 				}
 
-				testDsArp(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
 		})

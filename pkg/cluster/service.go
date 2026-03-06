@@ -29,17 +29,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *election.Manager, bgpServer *bgp.Server, cancelLeaderElection context.CancelFunc, signalChan chan os.Signal) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
+	bgpServer *bgp.Server, killFunc func()) error {
 	var err error
-
-	defer close(cluster.completed)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
 	wg.Go(func() {
 		<-ctx.Done()
-		signalChan <- syscall.SIGINT
+		killFunc()
 	})
 
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
@@ -83,17 +82,18 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 		}
 
 		if c.EnableLoadBalancer {
-			lb, err := loadbalancer.NewIPVSLB(network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod, c.BackendHealthCheckInterval, c.Interface, cancelLeaderElection, signalChan, &wg)
+			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
+				c.BackendHealthCheckInterval, c.Interface, killFunc, &wg)
 			if err != nil {
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
 			wg.Go(func() {
-				err = sm.NodeWatcher(ctx, lb, c.Port)
+				err = em.NodeWatcher(ctx, lb, c.Port)
 				if err != nil {
 					log.Error("Error watching node labels", "err", err)
 					if errors.Is(err, &utils.PanicError{}) {
-						signalChan <- syscall.SIGINT
+						killFunc()
 					}
 				}
 			})
@@ -110,7 +110,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 	if c.EnableLoadBalancer {
 		// Shutdown function that will wait on this signal, unless we call it ourselves
-		<-signalChan
+		<-ctx.Done()
 		for _, lb := range loadbalancers {
 			err = lb.RemoveIPVSLB()
 			if err != nil {
@@ -133,7 +133,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 
 		ips := []string{}
 		if nodename != "" {
-			if ips, err = getNodeIPs(ctx, nodename, sm.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+			if ips, err = getNodeIPs(ctx, nodename, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
 				log.Error("failed to get IP of control-plane node", "err", err)
 			}
 		}
@@ -165,15 +165,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 			}
 		}
 
-		stop := make(chan struct{})
-
-		// will wait for system interrupt and will send stop signal to backend watch
-		wg.Go(func() {
-			<-signalChan
-			stop <- struct{}{}
-		})
-
-		backend.Watch(func() {
+		backend.Watch(ctx, func() {
 			for i := range cluster.Network {
 				network := cluster.Network[i]
 				networkIP := network.IP()
@@ -234,7 +226,7 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 					deleted, err := network.DeleteIP()
 					if err != nil {
 						log.Error("error deleting IP", "err", err)
-						signalChan <- syscall.SIGINT
+						killFunc()
 						return
 					}
 					if deleted {
@@ -242,11 +234,11 @@ func (cluster *Cluster) vipService(ctx context.Context, c *kubevip.Config, sm *e
 					}
 				}
 			}
-		}, c.BackendHealthCheckInterval, stop)
+		}, c.BackendHealthCheckInterval)
 	}
 
 	if c.EnableBGP {
-		<-signalChan
+		<-ctx.Done()
 	}
 
 	return nil
@@ -289,17 +281,14 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if network.IsDDNS() {
 			ddnsReady := make(chan struct{})
 			lbWg.Go(func() {
-				ctxDDNS, ddnsCancel := context.WithCancel(ctx)
-				defer ddnsCancel()
-
 				// start the DDNS if requested
 				log.Debug("(svcs) start DDNS", "name", network.DNSName())
-				if err := cluster.StartDDNS(ctxDDNS, cluster.Network[i], c.DHCPBackoffAttempts, &lbWg); err != nil {
+				if err := cluster.StartDDNS(lbCtx, cluster.Network[i], c.DHCPBackoffAttempts, &lbWg); err != nil {
 					log.Error("failed to start DDNS", "err", err)
 				}
 
 				close(ddnsReady)
-				<-cluster.stop
+				<-lbCtx.Done()
 			})
 			<-ddnsReady
 		}
@@ -343,7 +332,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(ctx, network.CIDR())
+			err = bgp.AddHost(lbCtx, network.CIDR())
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -351,20 +340,15 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	}
 
 	wg.Go(func() {
-		defer close(cluster.completed)
-
 		for i := range cluster.Network {
 			network := cluster.Network[i]
-
-			ctxDNS, dnsCancel := context.WithCancel(ctx)
-			defer dnsCancel()
 
 			// start the dns updater if address is dns
 			if network.IsDNS() {
 				log.Info("(svcs) starting the DNS updater", "address", network.DNSName(), "ip", network.IP())
 				ipUpdater := vip.NewIPUpdater(network)
 				wg.Go(func() {
-					ipUpdater.Run(ctxDNS)
+					ipUpdater.Run(lbCtx)
 				})
 			}
 		}

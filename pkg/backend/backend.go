@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -65,7 +66,7 @@ func (e *Entry) Check() bool {
 	return true
 }
 
-func Watch(tickAction func(), interval int, stop chan struct{}) {
+func Watch(ctx context.Context, tickAction func(), interval int) {
 	if interval <= 0 {
 		interval = 5
 	}
@@ -75,7 +76,7 @@ func Watch(tickAction func(), interval int, stop chan struct{}) {
 
 	for {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			ticker.Stop()
 			return
 		case <-ticker.C:
