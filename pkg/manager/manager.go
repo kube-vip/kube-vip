@@ -18,15 +18,18 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/manager/worker"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -383,6 +386,20 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	}
 
 	if sm.config.EnableServices {
+		// This will tidy any dangling kube-vip iptables rules
+		if sm.config.EgressClean {
+			err := nftables.ClearTables()
+			if err != nil {
+				log.Warn("[egress]", "mode", "nftables-internal", "clearing error", err)
+			} else {
+				log.Info("[egress]", "mode", "nftables-internal", "tables", "cleared")
+			}
+			// TODO: Deprecate the iptables code v1.2.x
+			err = vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
+			if err != nil {
+				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "error", err)
+			}
+		}
 		w.ConfigureServices()
 
 		if err = w.StartServices(modeCtx); err != nil {

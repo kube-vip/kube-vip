@@ -131,10 +131,14 @@ func FilterTable(conn *nftables.Conn, tableName string, IPv6 bool) (*nftables.Ta
 }
 
 // ClearTable will remove the original tables and create new empty ones
-func ClearTable(conn *nftables.Conn) error {
+func ClearTables() error {
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
 	tableName := fmt.Sprintf(NatTable, "v6")
 	if t, err := FilterTable(conn, tableName, false); err != nil {
-		return err
+		slog.Debug("[egress]", "Cleaning IPv6 finding tables error", err)
 	} else if t != nil {
 		conn.DelTable(t)
 	}
@@ -143,7 +147,7 @@ func ClearTable(conn *nftables.Conn) error {
 	conn.AddTable(GetTable(true))
 	tableName = fmt.Sprintf(NatTable, "v4")
 	if t, err := FilterTable(conn, tableName, true); err != nil {
-		return err
+		slog.Debug("[egress]", "Cleaning IPv4 finding tables error", err)
 	} else if t != nil {
 		conn.DelTable(t)
 	}

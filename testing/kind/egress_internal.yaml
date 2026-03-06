@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-03
+  labels:
+    env: demo3
+spec:
+  containers:
+    - name: pod-03
+      image: thebsdbox/demo:v1
+      env:
+        - name: CLIENT
+          value: "service4"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-04
+  labels:
+    env: demo4
+spec:
+  containers:
+    - name: pod-04
+      image: thebsdbox/demo:v1
+      env:
+        - name: CLIENT
+          value: "service3"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service3
+  annotations:
+    kube-vip.io/egress: "true"
+    kube-vip.io/egress-internal: "true"
+spec:
+  type: LoadBalancer
+  # "Local" preserves the client source IP and avoids a second hop for
+  # LoadBalancer and NodePort
+  externalTrafficPolicy: Local
+  selector:
+    env: demo3
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service4
+  annotations:
+    kube-vip.io/egress: "true"
+    kube-vip.io/egress-internal: "true"
+    kube-vip.io/egress-allowed-networks: 172.18.0.0/24
+spec:
+  type: LoadBalancer
+  # "Local" preserves the client source IP and avoids a second hop for
+  # LoadBalancer and NodePort
+  externalTrafficPolicy: Local
+  selector:
+    env: demo4
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
