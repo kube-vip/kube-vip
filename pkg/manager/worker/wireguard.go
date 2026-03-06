@@ -12,7 +12,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
-	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -20,7 +19,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	"k8s.io/client-go/kubernetes"
 )
@@ -87,9 +85,6 @@ func (w *WireGuard) ConfigureServices() {
 }
 
 func (w *WireGuard) StartServices(ctx context.Context) error {
-	if w.config.EgressClean {
-		vip.ClearIPTables(w.config.EgressWithNftables, w.config.ServiceNamespace, iptables.ProtocolIPv4)
-	}
 	if w.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
 		err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx)

@@ -397,7 +397,11 @@ func (sm *Manager) startMode(ctx context.Context) error {
 			// TODO: Deprecate the iptables code v1.2.x
 			err = vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 			if err != nil {
-				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "error", err)
+				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", "IPv4", "error", err)
+			}
+			err = vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
+			if err != nil {
+				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", "IPv6", "error", err)
 			}
 		}
 		w.ConfigureServices()
