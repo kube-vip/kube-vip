@@ -9,7 +9,7 @@ func (sm *Manager) PrometheusCollector() []prometheus.Collector {
 		collectors = append(collectors, sm.svcProcessor.CountServiceWatchEvent)
 	}
 	if sm.bgpServer != nil {
-		collectors = append(collectors, sm.bgpServer.BGPSessionInfoGauge)
+		collectors = append(collectors, sm.bgpSessionInfoGauge)
 	}
 	return collectors
 }
