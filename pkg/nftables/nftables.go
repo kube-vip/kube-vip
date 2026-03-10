@@ -527,6 +527,7 @@ func ApplyDNAT(
 	service string,
 	IPv6 bool,
 	protocol string,
+	localEndpoint bool,
 ) error {
 
 	conn, err := nftables.New()
@@ -722,57 +723,62 @@ func ApplyDNAT(
 
 	conn.AddRule(snatRule)
 
-	/* ---------------- MASQUERADE RULE FOR TRAFFIC TO K8S SERVICE ---------------- */
+	/* ---------------- MASQUERADE RULE FOR TRAFFIC TO REMOTE ENDPOINTS ---------------- */
 
-	// Masquerade traffic going to the Kubernetes API service so replies come back to us
-	masqueradeRule := &nftables.Rule{
-		Table: table,
-		Chain: postroutingChain,
-		Exprs: []expr.Any{
-			// oifname != wgIf (going out eth0 or other interface)
-			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpNeq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
+	// Only masquerade for remote endpoints to ensure replies return through this node.
+	// Local endpoints don't need masquerade and skipping it preserves the client's source IP.
+	if !localEndpoint {
+		masqueradeRule := &nftables.Rule{
+			Table: table,
+			Chain: postroutingChain,
+			Exprs: []expr.Any{
+				// oifname != wgIf (going out eth0 or other interface)
+				&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+				&expr.Cmp{
+					Op:       expr.CmpOpNeq,
+					Register: 1,
+					Data:     append([]byte(wgIf), 0),
+				},
 
-			// ip daddr == targetIP
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseNetworkHeader,
-				Offset:       16, // destination IP in IPv4 header
-				Len:          4,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     ipToBytes(target, IPv6),
-			},
+				// ip daddr == targetIP
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseNetworkHeader,
+					Offset:       16, // destination IP in IPv4 header
+					Len:          4,
+				},
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     ipToBytes(target, IPv6),
+				},
 
-			// protocol (tcp or udp) dport == target port
-			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     []byte{protoNum},
-			},
+				// protocol (tcp or udp) dport == target port
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{protoNum},
+				},
 
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseTransportHeader,
-				Offset:       2, // destination port
-				Len:          2,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(targetPort),
-			},
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2, // destination port
+					Len:          2,
+				},
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     binaryutil.BigEndian.PutUint16(targetPort),
+				},
 
-			// masquerade
-			&expr.Masq{},
-		},
+				// masquerade
+				&expr.Masq{},
+			},
+		}
+
+		conn.AddRule(masqueradeRule)
 	}
 
 	conn.AddRule(masqueradeRule)

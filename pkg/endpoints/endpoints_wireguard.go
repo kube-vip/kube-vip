@@ -143,6 +143,8 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				"chainID", portServiceID)
 
 			// Apply the DNAT rule
+			// localEndpoint=true when using ExternalTrafficPolicy=Local, which preserves client source IP
+			isLocalEndpoint := service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal
 			err := nftables.ApplyDNAT(
 				wgInterface,
 				vipAddr,
@@ -152,6 +154,8 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				portServiceID,
 				isIPv6,
 				protocol,
+				isLocalEndpoint,
+				tunnelConfig.ListenPort,
 			)
 			if err != nil {
 				log.Error("[wireguard] failed to update DNAT rule",

@@ -142,7 +142,8 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		"sourcePort", 6443,
 		"kubeAPIHost", w.kubeAPIHost,
 		"kubeAPIPort", w.kubeAPIPort)
-	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, "TCP")
+	// Control plane targets Kubernetes API ClusterIP, which needs masquerade (localEndpoint=false)
+	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, "TCP", false, tunnelConfig.ListenPort)
 	if err != nil {
 		log.Error("could not apply nftables DNAT rule", "err", err)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
