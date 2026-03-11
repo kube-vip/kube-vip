@@ -534,7 +534,8 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 	// NOTE: Do NOT call UpdateServiceAnnotation here - the annotation was already updated
 	// by the endpoint processor, which is why we're being called in the first place.
 	// Calling it again would create an infinite loop of Modified events.
-	i.ServiceSnapshot = svc.DeepCopy()
+	// svc is already a DeepCopy from the endpoint processor, so no need to copy again.
+	i.ServiceSnapshot = svc
 
 	log.Info("[service] egress configuration updated successfully", "service", svc.Name, "namespace", svc.Namespace)
 	return nil

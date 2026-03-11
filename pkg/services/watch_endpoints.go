@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
@@ -38,11 +37,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 
 	ch := rw.ResultChan()
 
-	egressUpdateFunc := func(ctx context.Context, svc *v1.Service) error {
-		return p.updateEgressConfiguration(ctx, svc)
-	}
-
-	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, p.leaseMgr, p.TunnelMgr, p.clientSet, egressUpdateFunc)
+	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, p.leaseMgr, p.TunnelMgr, p.clientSet, p.updateEgressConfiguration)
 
 	var lastKnownGoodEndpoint string
 	for event := range ch {
