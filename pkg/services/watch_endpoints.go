@@ -12,13 +12,18 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 )
 
 func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, service *v1.Service, provider providers.Provider) error {
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
-	rw, err := provider.CreateRetryWatcher(svcCtx.Ctx, p.rwClientSet, service)
+	clientSet, ok := p.rwClientSet.(*kubernetes.Clientset)
+	if !ok {
+		return fmt.Errorf("[%s] rwClientSet is not *kubernetes.Clientset", provider.GetLabel())
+	}
+	rw, err := provider.CreateRetryWatcher(svcCtx.Ctx, clientSet, service)
 	if err != nil {
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
 	}

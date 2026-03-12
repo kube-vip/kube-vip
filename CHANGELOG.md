@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Retry on 403 Forbidden and 401 Unauthorized in `ServicesWatcher` at startup with exponential backoff. Fixes #1464.
+
 ### Added
 - SIGUSR1 signal handler for runtime configuration dumps (#1301)
   - Send SIGUSR1 to kube-vip process to dump current configuration to stdout
