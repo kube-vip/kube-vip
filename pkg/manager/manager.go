@@ -328,6 +328,10 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	var cpCluster *cluster.Cluster
 	var err error
 
+	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
+		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
+		sm.electionMgr, sm.leaseMgr)
+
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	wg := sync.WaitGroup{}
@@ -335,19 +339,15 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	defer func() {
 		// wait for gorutines then cancel context just in case
 		wg.Wait()
+		w.Cleanup()
 		cancel()
 		log.Info("Shutting down Kube-Vip")
 	}()
-
-	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
-		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
-		sm.electionMgr, sm.leaseMgr)
 
 	log.Info("starting Kube-vip Manager", "mode", w.Name())
 	if err := w.Configure(modeCtx, &wg); err != nil {
 		return fmt.Errorf("failed to configure %s mode: %w", w.Name(), err)
 	}
-	defer w.Cleanup()
 
 	if sm.config.EnableControlPlane {
 		err = w.InitControlPlane()
