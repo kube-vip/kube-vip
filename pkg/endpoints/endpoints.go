@@ -18,7 +18,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
 )
 
 type Processor struct {
@@ -27,19 +26,17 @@ type Processor struct {
 	bgpServer        *bgp.Server
 	worker           endpointWorker
 	instances        *[]*instance.Instance
-	clientSet        *kubernetes.Clientset
 	egressUpdateFunc func(context.Context, *v1.Service) error
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, clientSet *kubernetes.Clientset,
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager,
 	egressUpdateFunc func(context.Context, *v1.Service) error) *Processor {
 	return &Processor{
 		config:           config,
 		provider:         provider,
 		bgpServer:        bgpServer,
 		instances:        instances,
-		clientSet:        clientSet,
 		egressUpdateFunc: egressUpdateFunc,
 		worker:           newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr),
 	}
@@ -47,7 +44,8 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 
 func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
-	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup) (bool, error) {
+	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup,
+	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error) (bool, error) {
 
 	var err error
 	if err = p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
@@ -101,7 +99,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	}
 
 	// Set the service accordingly
-	p.updateAnnotations(service, lastKnownGoodEndpoint)
+	p.updateAnnotations(service, lastKnownGoodEndpoint, updateAnnotationFunc)
 
 	log.Debug("watcher", "provider",
 		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", svcCtx.IsActive)
@@ -153,7 +151,7 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 	}
 }
 
-func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string) {
+func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string, updateAnnotationFunc func(context.Context, string, string, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
 		ip := net.ParseIP(*lastKnownGoodEndpoint)
@@ -195,14 +193,8 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 
 		// Persist to Kubernetes
 		ctx := context.Background()
-		var provider providers.Provider
-		if p.config.EnableEndpoints {
-			provider = providers.NewEndpoints()
-		} else {
-			provider = providers.NewEndpointslices()
-		}
 
-		if err := provider.UpdateServiceAnnotation(ctx, endpoint, endpointIPv6, service, p.clientSet); err != nil {
+		if err := updateAnnotationFunc(ctx, endpoint, endpointIPv6, service); err != nil {
 			log.Warn("failed to update service annotation", "service", service.Name, "namespace", service.Namespace, "err", err)
 			return
 		}
