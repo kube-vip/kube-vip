@@ -47,8 +47,7 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 			return fmt.Errorf("creating BGP server: %w", err)
 		}
 	}
-
-	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
+	log.Info("Starting the BGP server to advertise VIP routes to BGP peers", "config", b.config.BGPConfig)
 	if err := b.bgpServer.Start(ctx, func(p *api.WatchEventResponse_PeerEvent) {
 		ipaddr := p.GetPeer().GetState().GetNeighborAddress()
 		port := uint64(179)

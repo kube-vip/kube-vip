@@ -65,6 +65,12 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.Wa
 		return
 	}
 
+	for _, p := range b.c.Peers {
+		if err = b.AddPeer(ctx, p); err != nil {
+			return
+		}
+	}
+
 	if err = b.s.WatchEvent(ctx, &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
 		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
 			log.Info("[BGP]", "peer", p.String())
@@ -74,12 +80,6 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.Wa
 		}
 	}); err != nil {
 		return
-	}
-
-	for _, p := range b.c.Peers {
-		if err = b.AddPeer(ctx, p); err != nil {
-			return
-		}
 	}
 
 	if b.c.Zebra.Enabled {
