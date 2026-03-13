@@ -314,8 +314,10 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		if !c.EnableRoutingTable && !c.EnableBGP {
+		if !c.EnableRoutingTable && !c.EnableBGP && !c.EnableWireguard {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
+			// Note: When WireGuard is enabled, the VIP is added to the tunnel interface
+			// instead of lo, so we skip adding it here.
 			if _, err = network.AddIP(false, false); err != nil {
 				log.Warn(err.Error())
 			} else {
