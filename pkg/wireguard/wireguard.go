@@ -85,44 +85,31 @@ func (w *WireGuard) createInterface() error {
 		return fmt.Errorf("failed to bring interface up: %v", err)
 	}
 
+	// Add the VIP address to the WireGuard interface.
+	// When WireGuard mode is active, the VIP is ONLY on the tunnel interface
+	// (not also on lo), which prevents the kernel from treating incoming packets
+	// as loopback traffic and ensures proper INPUT chain processing for nftables DNAT.
 	addr, err := netlink.ParseAddr(w.cfg.Address)
 	if err != nil {
 		return fmt.Errorf("failed to parse address: %s, %v", w.cfg.Address, err)
 	}
 
 	err = netlink.AddrAdd(link, addr)
-	if err != nil {
+	if err != nil && !isExistErr(err) {
 		return fmt.Errorf("could not add address to link: %s, %v", w.cfg.Address, err)
 	}
+	log.Info("assigned VIP address to WireGuard interface", "interface", w.cfg.InterfaceName, "address", w.cfg.Address)
 
 	if err = netlink.LinkSetMTU(link, 1420); err != nil {
 		return fmt.Errorf("failed to set mtu %w", err)
 	}
 
-	// add rule to consult our routing table for IP packets without a special firewall mark
-	// all packets coming wireguard get that special firewall mark by wireguard itself
-	mask := uint32(0xffffffff)
-	err = netlink.RuleAdd(&netlink.Rule{
-		Table: w.cfg.ListenPort,
-		// the listen port range is already validated
-		Mark:   uint32(w.cfg.ListenPort), //nolint:all
-		Mask:   &mask,
-		Invert: true,
-		Family: netlink.FAMILY_V4,
-		Goto:   -1,
-	})
-	if err != nil {
-		return fmt.Errorf("could not add mark rule to link: %v", err)
-	}
-
-	err = netlink.RuleAdd(&netlink.Rule{
-		Table:             0,
-		SuppressPrefixlen: 0,
-		Goto:              -1,
-	})
-	if err != nil {
-		return fmt.Errorf("could not add rule suppress_prefixlength to main table %w", err)
-	}
+	// NOTE: We intentionally do NOT add a blanket "not fwmark" rule here.
+	// That would route ALL node traffic through the WireGuard tunnel.
+	// Instead, we use connmark in nftables to mark only response packets
+	// to incoming WireGuard connections, and policy routing routes only
+	// those marked packets back through the tunnel.
+	// See nftables.SetupPolicyRouting() and ApplyDNAT() for details.
 
 	w.linkIndex = &link.Attrs().Index
 	log.Info("created link", "interface", w.cfg.InterfaceName)
@@ -228,13 +215,6 @@ func (w *WireGuard) removeRoutes() {
 	log.Info("routes removed", "interface", w.cfg.InterfaceName)
 }
 
-func (w *WireGuard) removeRules() error {
-	return netlink.RuleDel(&netlink.Rule{
-		Table: w.cfg.ListenPort,
-		Goto:  -1,
-	})
-}
-
 // Teardown deletes the interface entirely (called on leadership loss)
 func (w *WireGuard) teardown() error {
 	if w.client != nil {
@@ -251,11 +231,6 @@ func (w *WireGuard) teardown() error {
 		}
 	}
 	w.linkIndex = nil
-
-	err := w.removeRules()
-	if err != nil {
-		log.Error("failed to remove rules", "err", err)
-	}
 
 	log.Info("tear down complete", "interface", w.cfg.InterfaceName)
 	return nil

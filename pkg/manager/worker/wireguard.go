@@ -42,9 +42,17 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 func (w *WireGuard) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	log.Info("reading wireguard tunnel configurations from Kubernetes secret")
 	tunnelMgr := wireguard.NewTunnelManager()
+
 	err := tunnelMgr.LoadConfigurationsFromSecret(ctx, w.clientSet, w.config.Namespace, "wireguard")
 	if err != nil {
 		return fmt.Errorf("failed to load WireGuard tunnel configurations: %w", err)
+	}
+
+	// Clean up any stale resources from previous runs (crash recovery for hostNetwork: true)
+	// Must be called AFTER loading configs so we know which interfaces/ports to clean
+	if err := tunnelMgr.CleanupStaleResources(); err != nil {
+		log.Warn("failed to cleanup stale resources", "err", err)
+		// Continue anyway - the cleanup is best-effort
 	}
 
 	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark"); err != nil {

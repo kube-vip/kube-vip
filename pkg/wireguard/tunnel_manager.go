@@ -8,7 +8,9 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -43,6 +45,59 @@ func NewTunnelManager() *TunnelManager {
 		configs:  make(map[string]*TunnelConfig),
 		refCount: make(map[string]int),
 	}
+}
+
+// CleanupStaleResources removes any stale WireGuard interfaces, nftables rules,
+// and policy routing rules from a previous run. This handles crash recovery
+// when using hostNetwork: true, where resources persist after pod termination.
+// Must be called AFTER LoadConfigurationsFromSecret so we know which interfaces to clean.
+func (tm *TunnelManager) CleanupStaleResources() error {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	log.Info("cleaning up stale WireGuard resources from previous runs")
+
+	// Build set of configured interface names
+	configuredInterfaces := make(map[string]bool)
+	for _, config := range tm.configs {
+		configuredInterfaces[config.InterfaceName] = true
+	}
+
+	if len(configuredInterfaces) == 0 {
+		log.Warn("no tunnel configurations loaded, skipping interface cleanup")
+		return nil
+	}
+
+	// 1. Clean up stale WireGuard interfaces that match our configured names
+	links, err := netlink.LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to list network interfaces: %w", err)
+	}
+
+	for _, link := range links {
+		name := link.Attrs().Name
+		if configuredInterfaces[name] {
+			log.Info("removing stale WireGuard interface", "interface", name)
+			if err := netlink.LinkDel(link); err != nil {
+				log.Warn("failed to delete stale interface", "interface", name, "err", err)
+			}
+		}
+	}
+
+	// 2. Clean up stale nftables chains (kube_vip_*)
+	if err := nftables.CleanupAllChains(); err != nil {
+		log.Warn("failed to cleanup stale nftables chains", "err", err)
+	}
+
+	// 3. Clean up stale policy routing rules for configured listen ports
+	for _, config := range tm.configs {
+		if err := nftables.CleanupPolicyRouting(config.ListenPort); err != nil {
+			log.Warn("failed to cleanup policy routing", "listenPort", config.ListenPort, "err", err)
+		}
+	}
+
+	log.Info("stale resource cleanup complete")
+	return nil
 }
 
 // LoadConfigurationsFromSecret loads WireGuard tunnel configurations from a Kubernetes secret
@@ -204,6 +259,13 @@ func (tm *TunnelManager) BringUpTunnelForVIP(vip string) error {
 	wg := NewWireGuard(wgCfg)
 	if err := wg.Up(); err != nil {
 		return fmt.Errorf("failed to bring up tunnel for VIP %s: %w", vip, err)
+	}
+
+	// Setup policy routing for response packets (uses listen port as mark/table)
+	if err := nftables.SetupPolicyRouting(config.InterfaceName, config.ListenPort); err != nil {
+		// Tear down the tunnel if policy routing setup fails
+		_ = wg.Down()
+		return fmt.Errorf("failed to setup policy routing for VIP %s: %w", vip, err)
 	}
 
 	tm.tunnels[vipKey] = wg
