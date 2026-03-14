@@ -19,6 +19,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -151,7 +152,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		"kubeAPIHost", w.kubeAPIHost,
 		"kubeAPIPort", w.kubeAPIPort)
 	// Control plane targets Kubernetes API ClusterIP, which needs masquerade (localEndpoint=false)
-	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, "TCP", false, tunnelConfig.ListenPort)
+	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, v1.ProtocolTCP, false, tunnelConfig.ListenPort)
 	if err != nil {
 		log.Error("could not apply nftables DNAT rule", "err", err)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)

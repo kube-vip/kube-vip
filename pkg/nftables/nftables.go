@@ -14,6 +14,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	v1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -538,7 +539,7 @@ func ApplyDNAT(
 	targetPort uint16,
 	service string,
 	IPv6 bool,
-	protocol string,
+	protocol v1.Protocol,
 	localEndpoint bool,
 	tunnelListenPort int, // Used as fwmark and routing table for this tunnel
 ) error {
@@ -604,10 +605,12 @@ func ApplyDNAT(
 	// Determine protocol number
 	var protoNum byte
 	switch protocol {
-	case "TCP":
+	case v1.ProtocolTCP:
 		protoNum = unix.IPPROTO_TCP
-	case "UDP":
+	case v1.ProtocolUDP:
 		protoNum = unix.IPPROTO_UDP
+	case v1.ProtocolSCTP:
+		protoNum = unix.IPPROTO_SCTP
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}

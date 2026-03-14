@@ -92,18 +92,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 
 	// Update DNAT rules for each port
 	for _, port := range service.Spec.Ports {
-		// Determine protocol
-		var protocol string
-		switch port.Protocol {
-		case v1.ProtocolTCP:
-			protocol = "TCP"
-		case v1.ProtocolUDP:
-			protocol = "UDP"
-		default:
-			log.Warn("[wireguard] skipping unsupported protocol", "service", service.Name, "port", port.Port, "protocol", port.Protocol)
-			continue
-		}
-
 		// Determine target port (resolve named ports if necessary)
 		targetPort := w.provider.ResolvePort(port)
 		log.Info("[wireguard] resolved port", "service", service.Name, "servicePort", port.Port, "targetPort", targetPort, "targetPortName", port.TargetPort.StrVal)
@@ -153,7 +141,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
 				portServiceID,
 				isIPv6,
-				protocol,
+				port.Protocol,
 				isLocalEndpoint,
 				tunnelConfig.ListenPort,
 			)
