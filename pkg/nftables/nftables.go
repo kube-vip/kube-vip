@@ -743,8 +743,9 @@ func ApplyDNAT(
 
 	conn.AddRule(connmarkInRule)
 
-	// Rule 2: For packets NOT coming from wgIf, restore mark from conntrack
+	// Rule 2: For packets NOT coming from wgIf, restore mark from conntrack.
 	// This ensures response packets (from pod/local stack) get the mark for policy routing.
+	// Only restore if ct mark matches our fwmark to avoid affecting unrelated connections.
 	connmarkRestoreRule := &nftables.Rule{
 		Table: table,
 		Chain: manglePreroutingChain,
@@ -759,6 +760,11 @@ func ApplyDNAT(
 				Key:      expr.CtKeyMARK,
 				Register: 1,
 			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.NativeEndian.PutUint32(fwmark),
+			},
 			&expr.Meta{
 				Key:            expr.MetaKeyMARK,
 				SourceRegister: true,
@@ -769,7 +775,8 @@ func ApplyDNAT(
 
 	conn.AddRule(connmarkRestoreRule)
 
-	// Rule 3: In OUTPUT chain, restore mark for locally-generated responses
+	// Rule 3: In OUTPUT chain, restore mark for locally-generated responses.
+	// Only restore if ct mark matches our fwmark to avoid affecting unrelated connections.
 	connmarkOutputRule := &nftables.Rule{
 		Table: table,
 		Chain: mangleChain,
@@ -777,6 +784,11 @@ func ApplyDNAT(
 			&expr.Ct{
 				Key:      expr.CtKeyMARK,
 				Register: 1,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.NativeEndian.PutUint32(fwmark),
 			},
 			&expr.Meta{
 				Key:            expr.MetaKeyMARK,
