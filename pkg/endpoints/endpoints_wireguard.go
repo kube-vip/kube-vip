@@ -72,9 +72,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	// First, clear existing rules
 	w.clear(svcCtx, nil, service)
 
-	// Get the first endpoint (simple round-robin could be added later)
-	targetIP := endpoints[0]
-
 	// Get service VIPs
 	serviceIPs, err := utils.FetchServiceIPs(service)
 	if err != nil {
@@ -87,7 +84,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	log.Info("[wireguard] updating DNAT rules for endpoint change",
 		"service", service.Name,
 		"namespace", service.Namespace,
-		"targetIP", targetIP,
+		"endpoints", endpoints,
 		"vips", serviceIPs)
 
 	// Update DNAT rules for each port
@@ -95,6 +92,15 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 		// Determine target port (resolve named ports if necessary)
 		targetPort := w.provider.ResolvePort(port)
 		log.Info("[wireguard] resolved port", "service", service.Name, "servicePort", port.Port, "targetPort", targetPort, "targetPortName", port.TargetPort.StrVal)
+
+		// Build targets list from all endpoints
+		targets := make([]nftables.DNATTarget, len(endpoints))
+		for i, ep := range endpoints {
+			targets[i] = nftables.DNATTarget{
+				IP:   ep,
+				Port: uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
+			}
+		}
 
 		for _, vip := range serviceIPs {
 			isIPv6 := isIPv6Address(vip)
@@ -121,24 +127,22 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 
 			portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
 
-			log.Info("[wireguard] applying DNAT rule",
+			log.Info("[wireguard] applying DNAT rule with load balancing",
 				"service", service.Name,
 				"vip", vipAddr,
 				"interface", wgInterface,
 				"sourcePort", port.Port,
-				"target", targetIP,
-				"targetPort", targetPort,
+				"targets", targets,
 				"chainID", portServiceID)
 
-			// Apply the DNAT rule
+			// Apply the DNAT rule with load balancing across all endpoints
 			// localEndpoint=true when using ExternalTrafficPolicy=Local, which preserves client source IP
 			isLocalEndpoint := service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal
 			err := nftables.ApplyDNAT(
 				wgInterface,
 				vipAddr,
-				targetIP,
-				uint16(port.Port),  //nolint:gosec // Port range validated by Kubernetes
-				uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
+				uint16(port.Port), //nolint:gosec // Port range validated by Kubernetes
+				targets,
 				portServiceID,
 				isIPv6,
 				port.Protocol,
@@ -158,7 +162,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				"service", service.Name,
 				"vip", vipAddr,
 				"port", port.Port,
-				"target", fmt.Sprintf("%s:%d", targetIP, targetPort))
+				"targetCount", len(targets))
 		}
 	}
 

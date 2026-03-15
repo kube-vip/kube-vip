@@ -5,7 +5,6 @@ import (
 	"fmt"
 	log "log/slog"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -136,27 +136,46 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	// Strip CIDR notation from VIP if present
 	vipIP := utils.StripCIDR(w.config.VIP)
 
-	// Parse Kubernetes API port
-	kubeAPIPortInt, err := strconv.ParseUint(w.kubeAPIPort, 10, 16)
+	// Fetch the kubernetes API server endpoints from the "kubernetes" service in default namespace
+	targets, err := w.fetchKubernetesEndpoints(ctx)
 	if err != nil {
-		log.Error("could not parse KUBERNETES_SERVICE_PORT_HTTPS", "err", err, "port", w.kubeAPIPort)
-		_ = wg.Down()
+		log.Error("failed to fetch kubernetes endpoints", "err", err)
+		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
 		w.killFunc()
+		return
 	}
 
-	// Apply nftables DNAT rule to route traffic from wireguard interface:6443 to Kubernetes API service
-	log.Info("applying nftables DNAT rule",
+	if len(targets) == 0 {
+		log.Error("no kubernetes API server endpoints found")
+		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
+		w.killFunc()
+		return
+	}
+
+	// Apply nftables DNAT rule with load balancing across all API server endpoints
+	log.Info("applying nftables DNAT rule with load balancing",
 		"interface", tunnelConfig.InterfaceName,
 		"vip", vipIP,
 		"sourcePort", 6443,
-		"kubeAPIHost", w.kubeAPIHost,
-		"kubeAPIPort", w.kubeAPIPort)
-	// Control plane targets Kubernetes API ClusterIP, which needs masquerade (localEndpoint=false)
-	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, v1.ProtocolTCP, false, tunnelConfig.ListenPort)
+		"targets", targets)
+
+	// Control plane targets API server endpoints directly, needs masquerade (localEndpoint=false)
+	err = nftables.ApplyDNAT(
+		tunnelConfig.InterfaceName,
+		vipIP,
+		6443,
+		targets,
+		"controlplane",
+		false,
+		v1.ProtocolTCP,
+		false,
+		tunnelConfig.ListenPort,
+	)
 	if err != nil {
 		log.Error("could not apply nftables DNAT rule", "err", err)
 		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
 		w.killFunc()
+		return
 	}
 
 	if w.config.EnableServices && !w.config.EnableServicesElection {
@@ -164,7 +183,49 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 			log.Error("failed to start services watcher", "err", err)
 		}
 	}
-	log.Info("nftables DNAT rule applied successfully")
+	log.Info("nftables DNAT rule applied successfully", "targetCount", len(targets))
+}
+
+// fetchKubernetesEndpoints fetches the endpoints for the "kubernetes" service in default namespace
+func (w *WireGuard) fetchKubernetesEndpoints(ctx context.Context) ([]nftables.DNATTarget, error) {
+	// List EndpointSlices for the kubernetes service
+	endpointSlices, err := w.clientSet.DiscoveryV1().EndpointSlices("default").List(ctx, metav1.ListOptions{
+		LabelSelector: "kubernetes.io/service-name=kubernetes",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list kubernetes endpointslices: %w", err)
+	}
+
+	var targets []nftables.DNATTarget
+	for _, eps := range endpointSlices.Items {
+		// Get the port (should be 6443 or similar for HTTPS)
+		var targetPort uint16
+		for _, port := range eps.Ports {
+			if port.Port != nil && (port.Name == nil || *port.Name == "https") {
+				targetPort = uint16(*port.Port) //nolint:gosec // Port range validated by Kubernetes
+				break
+			}
+		}
+		if targetPort == 0 {
+			// Default to 6443 if no port found
+			targetPort = 6443
+		}
+
+		for _, endpoint := range eps.Endpoints {
+			// Only use ready endpoints
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				continue
+			}
+			for _, addr := range endpoint.Addresses {
+				targets = append(targets, nftables.DNATTarget{
+					IP:   addr,
+					Port: targetPort,
+				})
+			}
+		}
+	}
+
+	return targets, nil
 }
 
 func (w *WireGuard) OnStoppedLeading() {

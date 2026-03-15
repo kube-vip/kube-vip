@@ -23,9 +23,27 @@ const (
 )
 
 const (
+	// Legacy per-service chain names (kept for compatibility during migration)
 	DNATChain   = "kube_vip_prerouting_%s"
 	InputChain  = "kube_vip_input_%s"
 	MangleChain = "kube_vip_mangle_%s"
+)
+
+// Per-tunnel chain name templates (use with fmt.Sprintf and tunnel interface name)
+const (
+	TunnelDNATChain   = "kvip_dnat_%s"
+	TunnelInputChain  = "kvip_input_%s"
+	TunnelPostrouting = "kvip_post_%s"
+	TunnelManglePre   = "kvip_mpre_%s"
+	TunnelMangleOut   = "kvip_mout_%s"
+)
+
+// Per-tunnel set name templates
+const (
+	AcceptPortsSet = "kvip_accept_%s"
+	SNATPortsSet   = "kvip_snat_%s"
+	MasqIPsSet     = "kvip_masq_ip_%s"
+	MasqPortsSet   = "kvip_masq_pt_%s"
 )
 
 // Note: We use the WireGuard listen port as the routing table number.
@@ -531,19 +549,261 @@ func GetInputChain(IPv6 bool, service string) *nftables.Chain {
 	}
 }
 
-func ApplyDNAT(
-	wgIf string,
-	vipIP string,
-	targetIP string,
-	sourcePort uint16,
-	targetPort uint16,
-	service string,
-	IPv6 bool,
-	protocol v1.Protocol,
-	localEndpoint bool,
-	tunnelListenPort int, // Used as fwmark and routing table for this tunnel
-) error {
+// DNATTarget represents a single target endpoint for DNAT load balancing
+type DNATTarget struct {
+	IP   string
+	Port uint16
+}
 
+// tunnelInfraCreated tracks whether infrastructure has been created per tunnel
+var tunnelInfraCreated = make(map[string]bool)
+
+// getTunnelChainNames returns the chain names for a specific tunnel
+func getTunnelChainNames(wgIf string) (dnat, input, post, mangle, mangleOut string) {
+	return fmt.Sprintf(TunnelDNATChain, wgIf),
+		fmt.Sprintf(TunnelInputChain, wgIf),
+		fmt.Sprintf(TunnelPostrouting, wgIf),
+		fmt.Sprintf(TunnelManglePre, wgIf),
+		fmt.Sprintf(TunnelMangleOut, wgIf)
+}
+
+// getTunnelSetNames returns the set names for a specific tunnel
+func getTunnelSetNames(wgIf string) (accept, snat, masqIP, masqPort string) {
+	return fmt.Sprintf(AcceptPortsSet, wgIf),
+		fmt.Sprintf(SNATPortsSet, wgIf),
+		fmt.Sprintf(MasqIPsSet, wgIf),
+		fmt.Sprintf(MasqPortsSet, wgIf)
+}
+
+// EnsureTunnelInfrastructure creates the chains and sets for a specific tunnel.
+// Each tunnel has its own chains and sets, keyed by the interface name.
+func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelListenPort int) error {
+	table := GetTable(IPv6)
+	key := fmt.Sprintf("%s-%s-%v", table.Name, wgIf, IPv6)
+
+	if tunnelInfraCreated[key] {
+		return nil // Already created
+	}
+
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
+
+	// Ensure table exists
+	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
+		conn.AddTable(table)
+	}
+
+	dnatChainName, inputChainName, postChainName, manglePreName, mangleOutName := getTunnelChainNames(wgIf)
+	acceptSetName, snatSetName, masqIPSetName, masqPortSetName := getTunnelSetNames(wgIf)
+
+	// Check if chains already exist
+	existingChain, _ := conn.ListChain(table, dnatChainName)
+	if existingChain != nil {
+		tunnelInfraCreated[key] = true
+		return nil // Already exists
+	}
+
+	// Create chains for this tunnel
+	dnatPriority := nftables.ChainPriority(-105)
+	manglePriority := nftables.ChainPriority(-150)
+
+	dnatChain := &nftables.Chain{
+		Name:     dnatChainName,
+		Table:    table,
+		Type:     nftables.ChainTypeNAT,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: &dnatPriority,
+	}
+
+	inputChain := &nftables.Chain{
+		Name:     inputChainName,
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookInput,
+		Priority: nftables.ChainPriorityFilter,
+	}
+
+	postroutingChain := &nftables.Chain{
+		Name:     postChainName,
+		Table:    table,
+		Type:     nftables.ChainTypeNAT,
+		Hooknum:  nftables.ChainHookPostrouting,
+		Priority: nftables.ChainPriorityNATSource,
+	}
+
+	manglePreChain := &nftables.Chain{
+		Name:     manglePreName,
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: &manglePriority,
+	}
+
+	mangleOutChain := &nftables.Chain{
+		Name:     mangleOutName,
+		Table:    table,
+		Type:     nftables.ChainTypeRoute,
+		Hooknum:  nftables.ChainHookOutput,
+		Priority: &manglePriority,
+	}
+
+	conn.AddChain(dnatChain)
+	conn.AddChain(inputChain)
+	conn.AddChain(postroutingChain)
+	conn.AddChain(manglePreChain)
+	conn.AddChain(mangleOutChain)
+
+	// Create sets for this tunnel
+	acceptPortsSet := &nftables.Set{
+		Table:   table,
+		Name:    acceptSetName,
+		KeyType: nftables.TypeInetService,
+	}
+
+	snatPortsSet := &nftables.Set{
+		Table:   table,
+		Name:    snatSetName,
+		KeyType: nftables.TypeInetService,
+	}
+
+	masqIPsSet := &nftables.Set{
+		Table:   table,
+		Name:    masqIPSetName,
+		KeyType: nftables.TypeIPAddr,
+	}
+	if IPv6 {
+		masqIPsSet.KeyType = nftables.TypeIP6Addr
+	}
+
+	masqPortsSet := &nftables.Set{
+		Table:   table,
+		Name:    masqPortSetName,
+		KeyType: nftables.TypeInetService,
+	}
+
+	if err := conn.AddSet(acceptPortsSet, nil); err != nil {
+		return fmt.Errorf("failed to create accept_ports set: %w", err)
+	}
+	if err := conn.AddSet(snatPortsSet, nil); err != nil {
+		return fmt.Errorf("failed to create snat_ports set: %w", err)
+	}
+	if err := conn.AddSet(masqIPsSet, nil); err != nil {
+		return fmt.Errorf("failed to create masq_ips set: %w", err)
+	}
+	if err := conn.AddSet(masqPortsSet, nil); err != nil {
+		return fmt.Errorf("failed to create masq_ports set: %w", err)
+	}
+
+	// Parse VIP for SNAT rule
+	vip := net.ParseIP(vipIP)
+	if vip == nil {
+		return fmt.Errorf("invalid vip: %s", vipIP)
+	}
+
+	// Add INPUT accept rule (matches ports in accept_ports set)
+	inputRule := &nftables.Rule{
+		Table: table,
+		Chain: inputChain,
+		Exprs: []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+			&expr.Lookup{SourceRegister: 1, SetName: acceptSetName},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	}
+	conn.AddRule(inputRule)
+
+	// Add SNAT rule (replies going back out tunnel)
+	snatRule := &nftables.Rule{
+		Table: table,
+		Chain: postroutingChain,
+		Exprs: []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 2},
+			&expr.Lookup{SourceRegister: 1, SetName: snatSetName},
+			&expr.Immediate{Register: 1, Data: ipToBytes(vip, IPv6)},
+			&expr.NAT{Type: expr.NATTypeSourceNAT, Family: ipFamily(IPv6), RegAddrMin: 1},
+		},
+	}
+	conn.AddRule(snatRule)
+
+	// Add masquerade rule (for non-local endpoints)
+	ipOffset := uint32(16)
+	ipLen := uint32(4)
+	if IPv6 {
+		ipOffset = 24
+		ipLen = 16
+	}
+
+	masqRule := &nftables.Rule{
+		Table: table,
+		Chain: postroutingChain,
+		Exprs: []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: ipOffset, Len: ipLen},
+			&expr.Lookup{SourceRegister: 1, SetName: masqIPSetName},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+			&expr.Lookup{SourceRegister: 1, SetName: masqPortSetName},
+			&expr.Masq{},
+		},
+	}
+	conn.AddRule(masqRule)
+
+	// Add connmark rules
+	fwmark := uint32(tunnelListenPort) + connmarkOffset //nolint:gosec
+
+	connmarkInRule := &nftables.Rule{
+		Table: table,
+		Chain: manglePreChain,
+		Exprs: []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Ct{Key: expr.CtKeyMARK, Register: 1, SourceRegister: true},
+		},
+	}
+	conn.AddRule(connmarkInRule)
+
+	connmarkRestoreRule := &nftables.Rule{
+		Table: table,
+		Chain: manglePreChain,
+		Exprs: []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
+		},
+	}
+	conn.AddRule(connmarkRestoreRule)
+
+	connmarkOutputRule := &nftables.Rule{
+		Table: table,
+		Chain: mangleOutChain,
+		Exprs: []expr.Any{
+			&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
+		},
+	}
+	conn.AddRule(connmarkOutputRule)
+
+	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("failed to create tunnel infrastructure: %w", err)
+	}
+
+	tunnelInfraCreated[key] = true
+	slog.Info("created nftables infrastructure for tunnel", "table", table.Name, "interface", wgIf)
+	return nil
+}
+
+// CleanupTunnelInfrastructure removes all chains and sets for a specific tunnel
+func CleanupTunnelInfrastructure(wgIf string, IPv6 bool) error {
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -552,54 +812,101 @@ func ApplyDNAT(
 	table := GetTable(IPv6)
 
 	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
-		conn.AddTable(table)
+		return nil // Table doesn't exist
 	}
 
-	dnatChain := GetDNATChain(IPv6, service)
-	inputChain := GetInputChain(IPv6, service)
+	dnatChainName, inputChainName, postChainName, manglePreName, mangleOutName := getTunnelChainNames(wgIf)
+	acceptSetName, snatSetName, masqIPSetName, masqPortSetName := getTunnelSetNames(wgIf)
 
-	// Create POSTROUTING chain for SNAT/masquerade
-	postroutingChain := &nftables.Chain{
-		Name:     fmt.Sprintf("kube_vip_postrouting_%s", service),
-		Table:    table,
-		Type:     nftables.ChainTypeNAT,
-		Hooknum:  nftables.ChainHookPostrouting,
-		Priority: nftables.ChainPriorityNATSource,
+	// Delete chains
+	chains := []string{dnatChainName, inputChainName, postChainName, manglePreName, mangleOutName}
+	for _, name := range chains {
+		ch, err := conn.ListChain(table, name)
+		if err == nil && ch != nil {
+			conn.FlushChain(ch)
+			conn.DelChain(ch)
+		}
 	}
 
-	// Create mangle chain for connmark operations (priority -150, before DNAT at -100)
-	manglePriority := nftables.ChainPriority(-150)
-	mangleChain := &nftables.Chain{
-		Name:     fmt.Sprintf(MangleChain, service),
-		Table:    table,
-		Type:     nftables.ChainTypeRoute,
-		Hooknum:  nftables.ChainHookOutput,
-		Priority: &manglePriority,
+	// Delete sets
+	sets := []string{acceptSetName, snatSetName, masqIPSetName, masqPortSetName}
+	for _, name := range sets {
+		set, err := conn.GetSetByName(table, name)
+		if err == nil && set != nil {
+			conn.DelSet(set)
+		}
 	}
 
-	// Create a prerouting mangle chain for setting/restoring marks
-	manglePreroutingChain := &nftables.Chain{
-		Name:     fmt.Sprintf("kube_vip_mangle_pre_%s", service),
-		Table:    table,
-		Type:     nftables.ChainTypeFilter,
-		Hooknum:  nftables.ChainHookPrerouting,
-		Priority: &manglePriority,
+	// Also delete any per-service DNAT maps for this tunnel
+	allSets, _ := conn.GetSets(table)
+	for _, set := range allSets {
+		if strings.HasPrefix(set.Name, "dnat_") {
+			conn.DelSet(set)
+		}
 	}
-
-	conn.AddChain(dnatChain)
-	conn.AddChain(inputChain)
-	conn.AddChain(postroutingChain)
-	conn.AddChain(mangleChain)
-	conn.AddChain(manglePreroutingChain)
 
 	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("failed to cleanup tunnel infrastructure: %w", err)
+	}
+
+	key := fmt.Sprintf("%s-%s-%v", table.Name, wgIf, IPv6)
+	delete(tunnelInfraCreated, key)
+
+	slog.Info("cleaned up nftables infrastructure for tunnel", "table", table.Name, "interface", wgIf)
+	return nil
+}
+
+// ApplyDNAT creates/updates the DNAT rule and map for a specific port.
+// The service parameter is used to identify the rule for later deletion.
+func ApplyDNAT(
+	wgIf string,
+	vipIP string,
+	sourcePort uint16,
+	targets []DNATTarget,
+	service string,
+	IPv6 bool,
+	protocol v1.Protocol,
+	localEndpoint bool,
+	tunnelListenPort int,
+) error {
+	if len(targets) == 0 {
+		return fmt.Errorf("no targets provided for DNAT")
+	}
+
+	// Ensure tunnel infrastructure exists
+	if err := EnsureTunnelInfrastructure(wgIf, vipIP, IPv6, tunnelListenPort); err != nil {
+		return fmt.Errorf("failed to ensure tunnel infrastructure: %w", err)
+	}
+
+	// Delete existing rule/map for this service-port if it exists
+	_ = DeleteDNATRule(wgIf, IPv6, service)
+
+	conn, err := nftables.New()
+	if err != nil {
 		return err
 	}
 
-	vip := net.ParseIP(vipIP)
-	target := net.ParseIP(targetIP)
-	if vip == nil || target == nil {
-		return fmt.Errorf("invalid vip or target ip")
+	table := GetTable(IPv6)
+	dnatChainName, _, _, _, _ := getTunnelChainNames(wgIf)
+
+	// Get tunnel's DNAT chain
+	dnatChain, err := conn.ListChain(table, dnatChainName)
+	if err != nil || dnatChain == nil {
+		return fmt.Errorf("tunnel DNAT chain not found: %s", dnatChainName)
+	}
+
+	// Parse and validate all target IPs
+	parsedTargets := make([]struct {
+		ip   net.IP
+		port uint16
+	}, len(targets))
+	for i, t := range targets {
+		ip := net.ParseIP(t.IP)
+		if ip == nil {
+			return fmt.Errorf("invalid target ip: %s", t.IP)
+		}
+		parsedTargets[i].ip = ip
+		parsedTargets[i].port = t.Port
 	}
 
 	// Determine protocol number
@@ -615,306 +922,163 @@ func ApplyDNAT(
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 
-	/* ---------------- DNAT RULE ---------------- */
+	// All targets should have the same port (resolved per service port)
+	targetPort := parsedTargets[0].port
+
+	// Create named DNAT map for load balancing (named so it can be updated)
+	dnatMapName := fmt.Sprintf("dnat_%s", service)
+	ipMapDataType := nftables.TypeIPAddr
+	if IPv6 {
+		ipMapDataType = nftables.TypeIP6Addr
+	}
+
+	dnatMap := &nftables.Set{
+		Table:    table,
+		Name:     dnatMapName,
+		IsMap:    true,
+		KeyType:  nftables.TypeInteger,
+		DataType: ipMapDataType,
+	}
+
+	dnatMapElements := make([]nftables.SetElement, len(parsedTargets))
+	for i, t := range parsedTargets {
+		dnatMapElements[i] = nftables.SetElement{
+			Key: binaryutil.BigEndian.PutUint32(uint32(i)), //nolint:gosec
+			Val: ipToBytes(t.ip, IPv6),
+		}
+	}
+
+	if err := conn.AddSet(dnatMap, dnatMapElements); err != nil {
+		return fmt.Errorf("failed to create DNAT map: %w", err)
+	}
+
+	// Create DNAT rule for this port
+	var dnatExprs []expr.Any
+	if len(parsedTargets) > 1 {
+		// Multiple targets: use numgen + map for load balancing
+		dnatExprs = []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(sourcePort)},
+			&expr.Numgen{Register: 1, Modulus: uint32(len(parsedTargets)), Type: unix.NFT_NG_RANDOM}, //nolint:gosec
+			&expr.Lookup{SourceRegister: 1, DestRegister: 1, IsDestRegSet: true, SetName: dnatMapName},
+			&expr.Immediate{Register: 2, Data: binaryutil.BigEndian.PutUint16(targetPort)},
+			&expr.NAT{Type: expr.NATTypeDestNAT, Family: ipFamily(IPv6), RegAddrMin: 1, RegAddrMax: 1, RegProtoMin: 2, RegProtoMax: 2, Specified: true},
+		}
+	} else {
+		// Single target: direct DNAT
+		dnatExprs = []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(sourcePort)},
+			&expr.Immediate{Register: 1, Data: ipToBytes(parsedTargets[0].ip, IPv6)},
+			&expr.Immediate{Register: 2, Data: binaryutil.BigEndian.PutUint16(targetPort)},
+			&expr.NAT{Type: expr.NATTypeDestNAT, Family: ipFamily(IPv6), RegAddrMin: 1, RegProtoMin: 2},
+		}
+	}
 
 	dnatRule := &nftables.Rule{
-		Table: table,
-		Chain: dnatChain,
-		Exprs: []expr.Any{
-
-			// iifname == wgIf
-			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
-
-			// protocol (tcp or udp)
-			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     []byte{protoNum},
-			},
-
-			// dport == sourcePort (incoming port, e.g., 6443)
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseTransportHeader,
-				Offset:       2,
-				Len:          2,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(sourcePort),
-			},
-
-			// dnat to targetIP:targetPort (e.g., 10.43.0.1:443)
-			&expr.Immediate{
-				Register: 1,
-				Data:     ipToBytes(target, IPv6),
-			},
-			&expr.Immediate{
-				Register: 2,
-				Data:     binaryutil.BigEndian.PutUint16(targetPort),
-			},
-			&expr.NAT{
-				Type:        expr.NATTypeDestNAT,
-				Family:      ipFamily(IPv6),
-				RegAddrMin:  1,
-				RegProtoMin: 2,
-			},
-		},
+		Table:    table,
+		Chain:    dnatChain,
+		Exprs:    dnatExprs,
+		UserData: []byte(service), // Store service ID for later deletion
 	}
-
 	conn.AddRule(dnatRule)
 
-	/* ---------------- INPUT ACCEPT RULE ---------------- */
+	// Update tunnel sets with elements for this service
+	acceptSetName, snatSetName, masqIPSetName, masqPortSetName := getTunnelSetNames(wgIf)
 
-	inputRule := &nftables.Rule{
-		Table: table,
-		Chain: inputChain,
-		Exprs: []expr.Any{
-
-			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
-
-			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     []byte{protoNum},
-			},
-
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseTransportHeader,
-				Offset:       2,
-				Len:          2,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(sourcePort),
-			},
-
-			&expr.Verdict{Kind: expr.VerdictAccept},
-		},
+	// Add source port to accept_ports set
+	acceptPortsSet, _ := conn.GetSetByName(table, acceptSetName)
+	if acceptPortsSet != nil {
+		conn.SetAddElements(acceptPortsSet, []nftables.SetElement{
+			{Key: binaryutil.BigEndian.PutUint16(sourcePort)},
+		})
 	}
 
-	conn.AddRule(inputRule)
-
-	/* ---------------- CONNMARK RULES FOR POLICY ROUTING ---------------- */
-
-	// Use listen port + offset as the fwmark to avoid collision with WireGuard's own fwmark.
-	fwmark := uint32(tunnelListenPort) + connmarkOffset //nolint:gosec // Port range validated
-
-	// Rule 1: For incoming packets on wgIf, save mark to conntrack ONLY (not packet mark)
-	// We only set conntrack mark here - NOT the packet mark. If we set the packet mark,
-	// policy routing would route the DNAT'd packet (going to the pod) through the tunnel
-	// instead of through the CNI network.
-	connmarkInRule := &nftables.Rule{
-		Table: table,
-		Chain: manglePreroutingChain,
-		Exprs: []expr.Any{
-			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
-			&expr.Immediate{
-				Register: 1,
-				Data:     binaryutil.NativeEndian.PutUint32(fwmark),
-			},
-			&expr.Ct{
-				Key:            expr.CtKeyMARK,
-				Register:       1,
-				SourceRegister: true,
-			},
-		},
+	// Add target port to snat_ports set
+	snatPortsSet, _ := conn.GetSetByName(table, snatSetName)
+	if snatPortsSet != nil {
+		conn.SetAddElements(snatPortsSet, []nftables.SetElement{
+			{Key: binaryutil.BigEndian.PutUint16(targetPort)},
+		})
 	}
 
-	conn.AddRule(connmarkInRule)
-
-	// Rule 2: For packets NOT coming from wgIf, restore mark from conntrack.
-	// This ensures response packets (from pod/local stack) get the mark for policy routing.
-	// Only restore if ct mark matches our fwmark to avoid affecting unrelated connections.
-	connmarkRestoreRule := &nftables.Rule{
-		Table: table,
-		Chain: manglePreroutingChain,
-		Exprs: []expr.Any{
-			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpNeq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
-			&expr.Ct{
-				Key:      expr.CtKeyMARK,
-				Register: 1,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.NativeEndian.PutUint32(fwmark),
-			},
-			&expr.Meta{
-				Key:            expr.MetaKeyMARK,
-				SourceRegister: true,
-				Register:       1,
-			},
-		},
-	}
-
-	conn.AddRule(connmarkRestoreRule)
-
-	// Rule 3: In OUTPUT chain, restore mark for locally-generated responses.
-	// Only restore if ct mark matches our fwmark to avoid affecting unrelated connections.
-	connmarkOutputRule := &nftables.Rule{
-		Table: table,
-		Chain: mangleChain,
-		Exprs: []expr.Any{
-			&expr.Ct{
-				Key:      expr.CtKeyMARK,
-				Register: 1,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.NativeEndian.PutUint32(fwmark),
-			},
-			&expr.Meta{
-				Key:            expr.MetaKeyMARK,
-				SourceRegister: true,
-				Register:       1,
-			},
-		},
-	}
-
-	conn.AddRule(connmarkOutputRule)
-
-	/* ---------------- SNAT RULE FOR REPLIES ON WG0 ---------------- */
-
-	// SNAT replies going back out wg0 to appear from the VIP
-	snatRule := &nftables.Rule{
-		Table: table,
-		Chain: postroutingChain,
-		Exprs: []expr.Any{
-			// oifname == wgIf
-			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     append([]byte(wgIf), 0),
-			},
-
-			// protocol (tcp or udp) sport == target port
-			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     []byte{protoNum},
-			},
-
-			&expr.Payload{
-				DestRegister: 1,
-				Base:         expr.PayloadBaseTransportHeader,
-				Offset:       0, // source port
-				Len:          2,
-			},
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     binaryutil.BigEndian.PutUint16(targetPort),
-			},
-
-			// snat to VIP
-			&expr.Immediate{
-				Register: 1,
-				Data:     ipToBytes(vip, IPv6),
-			},
-			&expr.NAT{
-				Type:       expr.NATTypeSourceNAT,
-				Family:     ipFamily(IPv6),
-				RegAddrMin: 1,
-			},
-		},
-	}
-
-	conn.AddRule(snatRule)
-
-	/* ---------------- MASQUERADE RULE FOR TRAFFIC TO REMOTE ENDPOINTS ---------------- */
-
-	// Only masquerade for remote endpoints to ensure replies return through this node.
-	// Local endpoints don't need masquerade and skipping it preserves the client's source IP.
+	// For non-local endpoints, add to masquerade sets
 	if !localEndpoint {
-		masqueradeRule := &nftables.Rule{
-			Table: table,
-			Chain: postroutingChain,
-			Exprs: []expr.Any{
-				// oifname != wgIf (going out eth0 or other interface)
-				&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
-				&expr.Cmp{
-					Op:       expr.CmpOpNeq,
-					Register: 1,
-					Data:     append([]byte(wgIf), 0),
-				},
+		masqIPsSet, _ := conn.GetSetByName(table, masqIPSetName)
+		masqPortsSet, _ := conn.GetSetByName(table, masqPortSetName)
 
-				// ip daddr == targetIP
-				&expr.Payload{
-					DestRegister: 1,
-					Base:         expr.PayloadBaseNetworkHeader,
-					Offset:       16, // destination IP in IPv4 header
-					Len:          4,
-				},
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     ipToBytes(target, IPv6),
-				},
-
-				// protocol (tcp or udp) dport == target port
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     []byte{protoNum},
-				},
-
-				&expr.Payload{
-					DestRegister: 1,
-					Base:         expr.PayloadBaseTransportHeader,
-					Offset:       2, // destination port
-					Len:          2,
-				},
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     binaryutil.BigEndian.PutUint16(targetPort),
-				},
-
-				// masquerade
-				&expr.Masq{},
-			},
+		if masqIPsSet != nil {
+			for _, t := range parsedTargets {
+				conn.SetAddElements(masqIPsSet, []nftables.SetElement{
+					{Key: ipToBytes(t.ip, IPv6)},
+				})
+			}
 		}
 
-		conn.AddRule(masqueradeRule)
+		if masqPortsSet != nil {
+			conn.SetAddElements(masqPortsSet, []nftables.SetElement{
+				{Key: binaryutil.BigEndian.PutUint16(targetPort)},
+			})
+		}
 	}
 
 	if err := conn.Flush(); err != nil {
+		return fmt.Errorf("failed to apply DNAT rule: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteDNATRule removes the DNAT rule and map for a specific service
+func DeleteDNATRule(wgIf string, IPv6 bool, service string) error {
+	conn, err := nftables.New()
+	if err != nil {
 		return err
 	}
 
-	return conn.CloseLasting()
+	table := GetTable(IPv6)
+
+	// Check if table exists
+	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
+		return nil
+	}
+
+	// Delete the named DNAT map
+	dnatMapName := fmt.Sprintf("dnat_%s", service)
+	dnatMap, err := conn.GetSetByName(table, dnatMapName)
+	if err == nil && dnatMap != nil {
+		conn.DelSet(dnatMap)
+	}
+
+	// Find and delete the DNAT rule by matching UserData
+	dnatChainName, _, _, _, _ := getTunnelChainNames(wgIf)
+	dnatChain, err := conn.ListChain(table, dnatChainName)
+	if err == nil && dnatChain != nil {
+		rules, err := conn.GetRules(table, dnatChain)
+		if err == nil {
+			for _, rule := range rules {
+				if string(rule.UserData) == service {
+					if err := conn.DelRule(rule); err != nil {
+						slog.Warn("failed to delete DNAT rule", "service", service, "err", err)
+					}
+				}
+			}
+		}
+	}
+
+	return conn.Flush()
 }
 
+// DeleteIngressChains removes DNAT rules and maps for a service from all tunnels.
+// This is a compatibility function - prefer using DeleteDNATRule with explicit wgIf.
 func DeleteIngressChains(IPv6 bool, service string) error {
 	conn, err := nftables.New()
 	if err != nil {
@@ -923,7 +1087,36 @@ func DeleteIngressChains(IPv6 bool, service string) error {
 
 	table := GetTable(IPv6)
 
-	chains := []string{
+	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
+		return nil // Table doesn't exist
+	}
+
+	// Delete the named DNAT map for this service
+	dnatMapName := fmt.Sprintf("dnat_%s", service)
+	dnatMap, err := conn.GetSetByName(table, dnatMapName)
+	if err == nil && dnatMap != nil {
+		conn.DelSet(dnatMap)
+	}
+
+	// Search all chains starting with "kvip_dnat_" for rules with this service's UserData
+	chains, err := conn.ListChains()
+	if err == nil {
+		for _, ch := range chains {
+			if ch.Table.Name == table.Name && strings.HasPrefix(ch.Name, "kvip_dnat_") {
+				rules, err := conn.GetRules(table, ch)
+				if err == nil {
+					for _, rule := range rules {
+						if string(rule.UserData) == service {
+							_ = conn.DelRule(rule)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Also try to delete legacy per-service chains (for backwards compatibility)
+	legacyChains := []string{
 		fmt.Sprintf(DNATChain, service),
 		fmt.Sprintf(InputChain, service),
 		fmt.Sprintf("kube_vip_postrouting_%s", service),
@@ -931,10 +1124,10 @@ func DeleteIngressChains(IPv6 bool, service string) error {
 		fmt.Sprintf("kube_vip_mangle_pre_%s", service),
 	}
 
-	for _, name := range chains {
+	for _, name := range legacyChains {
 		ch, err := conn.ListChain(table, name)
 		if err == nil && ch != nil {
-			slog.Info("[ingress]", "Deleting chain", name)
+			conn.FlushChain(ch)
 			conn.DelChain(ch)
 		}
 	}
@@ -1146,7 +1339,7 @@ func CleanupPolicyRouting(listenPort int) error {
 	return nil
 }
 
-// CleanupAllChains removes all kube-vip nftables chains from both IPv4 and IPv6 tables.
+// CleanupAllChains removes all kube-vip nftables chains and sets from both IPv4 and IPv6 tables.
 func CleanupAllChains() error {
 	conn, err := nftables.New()
 	if err != nil {
@@ -1156,6 +1349,7 @@ func CleanupAllChains() error {
 	for _, ipv6 := range []bool{false, true} {
 		table := GetTable(ipv6)
 
+		// Delete chains
 		chains, err := conn.ListChains()
 		if err != nil {
 			slog.Warn("failed to list chains", "ipv6", ipv6, "err", err)
@@ -1165,7 +1359,19 @@ func CleanupAllChains() error {
 		for _, chain := range chains {
 			if chain.Table.Name == table.Name && isKubeVipChain(chain.Name) {
 				slog.Info("removing stale nftables chain", "chain", chain.Name, "table", table.Name)
+				conn.FlushChain(chain)
 				conn.DelChain(chain)
+			}
+		}
+
+		// Delete sets
+		sets, err := conn.GetSets(table)
+		if err == nil {
+			for _, set := range sets {
+				if isKubeVipSet(set.Name) {
+					slog.Info("removing stale nftables set", "set", set.Name, "table", table.Name)
+					conn.DelSet(set)
+				}
 			}
 		}
 	}
@@ -1174,9 +1380,16 @@ func CleanupAllChains() error {
 		return fmt.Errorf("failed to flush nftables changes: %w", err)
 	}
 
+	// Clear the infrastructure tracking
+	tunnelInfraCreated = make(map[string]bool)
+
 	return nil
 }
 
 func isKubeVipChain(name string) bool {
-	return len(name) >= 8 && name[:8] == "kube_vip"
+	return strings.HasPrefix(name, "kube_vip") || strings.HasPrefix(name, "kvip_")
+}
+
+func isKubeVipSet(name string) bool {
+	return strings.HasPrefix(name, "kvip_") || strings.HasPrefix(name, "dnat_")
 }
