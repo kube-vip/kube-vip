@@ -300,10 +300,27 @@ func (tm *TunnelManager) TearDownTunnelForVIP(vip string) error {
 		return nil
 	}
 
+	// Get config before cleanup (need interface name and listen port)
+	config := tm.configs[vipKey]
+
 	// Reference count is zero, tear down the tunnel
 	if err := wg.Down(); err != nil {
 		log.Error("failed to tear down tunnel", "vip", vip, "err", err)
 		// Continue to remove from map even if teardown failed
+	}
+
+	// Cleanup nftables infrastructure for this tunnel (both IPv4 and IPv6)
+	if config != nil {
+		if err := nftables.CleanupTunnelInfrastructure(config.InterfaceName, false); err != nil {
+			log.Warn("failed to cleanup IPv4 nftables infrastructure", "interface", config.InterfaceName, "err", err)
+		}
+		if err := nftables.CleanupTunnelInfrastructure(config.InterfaceName, true); err != nil {
+			log.Warn("failed to cleanup IPv6 nftables infrastructure", "interface", config.InterfaceName, "err", err)
+		}
+		// Cleanup policy routing rules
+		if err := nftables.CleanupPolicyRouting(config.ListenPort); err != nil {
+			log.Warn("failed to cleanup policy routing", "listenPort", config.ListenPort, "err", err)
+		}
 	}
 
 	delete(tm.tunnels, vipKey)
@@ -324,6 +341,21 @@ func (tm *TunnelManager) TearDownAllTunnels() error {
 		if err := wg.Down(); err != nil {
 			log.Error("failed to tear down tunnel", "vip", vip, "err", err)
 			errors = append(errors, err)
+		}
+
+		// Cleanup nftables infrastructure for this tunnel
+		config := tm.configs[vip]
+		if config != nil {
+			if err := nftables.CleanupTunnelInfrastructure(config.InterfaceName, false); err != nil {
+				log.Warn("failed to cleanup IPv4 nftables infrastructure", "interface", config.InterfaceName, "err", err)
+			}
+			if err := nftables.CleanupTunnelInfrastructure(config.InterfaceName, true); err != nil {
+				log.Warn("failed to cleanup IPv6 nftables infrastructure", "interface", config.InterfaceName, "err", err)
+			}
+			// Cleanup policy routing rules
+			if err := nftables.CleanupPolicyRouting(config.ListenPort); err != nil {
+				log.Warn("failed to cleanup policy routing", "listenPort", config.ListenPort, "err", err)
+			}
 		}
 	}
 

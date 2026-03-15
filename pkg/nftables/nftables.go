@@ -997,17 +997,21 @@ func ApplyDNAT(
 	// Add source port to accept_ports set
 	acceptPortsSet, _ := conn.GetSetByName(table, acceptSetName)
 	if acceptPortsSet != nil {
-		conn.SetAddElements(acceptPortsSet, []nftables.SetElement{
+		if err := conn.SetAddElements(acceptPortsSet, []nftables.SetElement{
 			{Key: binaryutil.BigEndian.PutUint16(sourcePort)},
-		})
+		}); err != nil {
+			return fmt.Errorf("failed to add element to accept_ports set: %w", err)
+		}
 	}
 
 	// Add target port to snat_ports set
 	snatPortsSet, _ := conn.GetSetByName(table, snatSetName)
 	if snatPortsSet != nil {
-		conn.SetAddElements(snatPortsSet, []nftables.SetElement{
+		if err := conn.SetAddElements(snatPortsSet, []nftables.SetElement{
 			{Key: binaryutil.BigEndian.PutUint16(targetPort)},
-		})
+		}); err != nil {
+			return fmt.Errorf("failed to add element to snat_ports set: %w", err)
+		}
 	}
 
 	// For non-local endpoints, add to masquerade sets
@@ -1017,16 +1021,20 @@ func ApplyDNAT(
 
 		if masqIPsSet != nil {
 			for _, t := range parsedTargets {
-				conn.SetAddElements(masqIPsSet, []nftables.SetElement{
+				if err := conn.SetAddElements(masqIPsSet, []nftables.SetElement{
 					{Key: ipToBytes(t.ip, IPv6)},
-				})
+				}); err != nil {
+					return fmt.Errorf("failed to add element to masq_ips set: %w", err)
+				}
 			}
 		}
 
 		if masqPortsSet != nil {
-			conn.SetAddElements(masqPortsSet, []nftables.SetElement{
+			if err := conn.SetAddElements(masqPortsSet, []nftables.SetElement{
 				{Key: binaryutil.BigEndian.PutUint16(targetPort)},
-			})
+			}); err != nil {
+				return fmt.Errorf("failed to add element to masq_ports set: %w", err)
+			}
 		}
 	}
 
