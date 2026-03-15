@@ -20,14 +20,20 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 )
 
 type WireGuard struct {
 	Common
-	tunnelMgr   *wireguard.TunnelManager
-	kubeAPIHost string
-	kubeAPIPort string
+	tunnelMgr           *wireguard.TunnelManager
+	kubeAPIHost         string
+	kubeAPIPort         string
+	endpointWatcherCtx  context.Context
+	endpointWatcherStop context.CancelFunc
 }
 
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
@@ -184,6 +190,10 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		}
 	}
 	log.Info("nftables DNAT rule applied successfully", "targetCount", len(targets))
+
+	// Start endpoint watcher for kubernetes service to handle API server changes
+	w.endpointWatcherCtx, w.endpointWatcherStop = context.WithCancel(ctx)
+	go w.watchKubernetesEndpoints(w.endpointWatcherCtx, tunnelConfig)
 }
 
 // fetchKubernetesEndpoints fetches the endpoints for the "kubernetes" service in default namespace
@@ -228,11 +238,117 @@ func (w *WireGuard) fetchKubernetesEndpoints(ctx context.Context) ([]nftables.DN
 	return targets, nil
 }
 
+// watchKubernetesEndpoints watches the kubernetes service EndpointSlices for changes
+// and updates the DNAT rules when API server endpoints change (e.g., when an API server goes down)
+func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *wireguard.TunnelConfig) {
+	log.Info("starting kubernetes endpoint watcher for control plane")
+
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": "kubernetes"}}
+	opts := metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+	}
+
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			return w.clientSet.DiscoveryV1().EndpointSlices("default").Watch(ctx, opts)
+		},
+	})
+	if err != nil {
+		log.Error("failed to create kubernetes endpoint watcher", "err", err)
+		return
+	}
+	defer rw.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("kubernetes endpoint watcher stopped")
+			return
+		case event, ok := <-rw.ResultChan():
+			if !ok {
+				log.Warn("kubernetes endpoint watcher channel closed, restarting")
+				// Channel closed, try to restart the watcher
+				rw, err = watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
+					WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+						return w.clientSet.DiscoveryV1().EndpointSlices("default").Watch(ctx, opts)
+					},
+				})
+				if err != nil {
+					log.Error("failed to restart kubernetes endpoint watcher", "err", err)
+					return
+				}
+				continue
+			}
+
+			switch event.Type {
+			case watch.Added, watch.Modified, watch.Deleted:
+				log.Info("kubernetes endpoints changed, updating DNAT rules", "eventType", event.Type)
+				if err := w.updateControlPlaneDNAT(ctx, tunnelConfig); err != nil {
+					log.Error("failed to update control plane DNAT rules", "err", err)
+				}
+			case watch.Error:
+				log.Warn("kubernetes endpoint watch error", "event", event)
+			}
+		}
+	}
+}
+
+// updateControlPlaneDNAT updates the DNAT rules for the control plane with current kubernetes endpoints
+func (w *WireGuard) updateControlPlaneDNAT(ctx context.Context, tunnelConfig *wireguard.TunnelConfig) error {
+	targets, err := w.fetchKubernetesEndpoints(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch kubernetes endpoints: %w", err)
+	}
+
+	if len(targets) == 0 {
+		log.Warn("no kubernetes API server endpoints available")
+		// Don't delete rules - keep routing to last known endpoints
+		// This prevents complete API unavailability during brief transitions
+		return nil
+	}
+
+	vipIP := utils.StripCIDR(w.config.VIP)
+
+	log.Info("updating control plane DNAT rules",
+		"interface", tunnelConfig.InterfaceName,
+		"vip", vipIP,
+		"targets", targets)
+
+	// Delete existing rule and apply new one
+	if err := nftables.DeleteDNATRule(tunnelConfig.InterfaceName, false, "controlplane"); err != nil {
+		log.Warn("failed to delete existing control plane DNAT rule", "err", err)
+		// Continue anyway - ApplyDNAT will overwrite
+	}
+
+	err = nftables.ApplyDNAT(
+		tunnelConfig.InterfaceName,
+		vipIP,
+		6443,
+		targets,
+		"controlplane",
+		false,
+		v1.ProtocolTCP,
+		false,
+		tunnelConfig.ListenPort,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to apply updated DNAT rule: %w", err)
+	}
+
+	log.Info("control plane DNAT rules updated successfully", "targetCount", len(targets))
+	return nil
+}
+
 func (w *WireGuard) OnStoppedLeading() {
 	// we can do cleanup here
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 	log.Info("leader lost", "id", w.config.NodeName)
+
+	// Stop the kubernetes endpoint watcher
+	if w.endpointWatcherStop != nil {
+		w.endpointWatcherStop()
+	}
 
 	log.Info("deleting nftables DNAT chains")
 	err := nftables.DeleteIngressChains(false, "controlplane")
