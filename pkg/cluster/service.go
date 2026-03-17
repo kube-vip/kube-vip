@@ -312,9 +312,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			} else {
 				log.Info("successful add Route")
 			}
-		}
-
-		if !c.EnableRoutingTable && !c.EnableBGP {
+		} else if !c.EnableRoutingTable {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			if _, err = network.AddIP(false, false); err != nil {
 				log.Warn(err.Error())
