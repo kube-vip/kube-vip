@@ -41,7 +41,7 @@ type Processor struct {
 	bgpServer *bgp.Server
 
 	clientSet   *kubernetes.Clientset
-	rwClientSet kubernetes.Interface
+	rwClientSet *kubernetes.Clientset
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
