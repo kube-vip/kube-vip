@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 	watchtools "k8s.io/client-go/tools/watch"
 
 	"k8s.io/apimachinery/pkg/watch"
@@ -25,18 +26,19 @@ import (
 
 // This file handles the watching of node annotations for configuration, it will exit once the annotations are
 // present
-func (sm *Manager) annotationsWatcher(ctx context.Context) error {
+func annotationsWatcher(ctx context.Context, clientSet,
+	rwClientSet kubernetes.Interface, config *kubevip.Config) error {
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
-	log.Info("Kube-Vip is waiting for annotation prefix to be present on this node", "prefix", sm.config.Annotations)
+	log.Info("Kube-Vip is waiting for annotation prefix to be present on this node", "prefix", config.Annotations)
 
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": sm.config.NodeName}}
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/hostname": config.NodeName}}
 	listOptions := metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	}
 
 	// First we'll check the annotations for the node and if
 	// they aren't what are expected, we'll drop into the watch until they are
-	nodeList, err := sm.clientSet.CoreV1().Nodes().List(ctx, listOptions)
+	nodeList, err := clientSet.CoreV1().Nodes().List(ctx, listOptions)
 	if err != nil {
 		return err
 	}
@@ -45,11 +47,11 @@ func (sm *Manager) annotationsWatcher(ctx context.Context) error {
 	// there's probably bigger problems
 	node := nodeList.Items[0]
 
-	bgpConfig, bgpPeer, err := parseBgpAnnotations(sm.config.BGPConfig, &node, sm.config.Annotations)
+	bgpConfig, bgpPeer, err := parseBgpAnnotations(config.BGPConfig, &node, config.Annotations)
 	if err == nil {
 		// No error, the annotations already exist
-		sm.config.BGPConfig = bgpConfig
-		sm.config.BGPPeerConfig = bgpPeer
+		config.BGPConfig = bgpConfig
+		config.BGPPeerConfig = bgpPeer
 		return nil
 	}
 
@@ -59,7 +61,7 @@ func (sm *Manager) annotationsWatcher(ctx context.Context) error {
 
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, node.ResourceVersion, &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return sm.rwClientSet.CoreV1().Nodes().Watch(ctx, listOptions)
+			return rwClientSet.CoreV1().Nodes().Watch(ctx, listOptions)
 		},
 	})
 
@@ -83,14 +85,14 @@ func (sm *Manager) annotationsWatcher(ctx context.Context) error {
 				return fmt.Errorf("unable to parse Kubernetes Node from Annotation watcher")
 			}
 
-			bgpConfig, bgpPeer, err := parseBgpAnnotations(sm.config.BGPConfig, node, sm.config.Annotations)
+			bgpConfig, bgpPeer, err := parseBgpAnnotations(config.BGPConfig, node, config.Annotations)
 			if err != nil {
 				log.Error(err.Error())
 				continue
 			}
 
-			sm.config.BGPConfig = bgpConfig
-			sm.config.BGPPeerConfig = bgpPeer
+			config.BGPConfig = bgpConfig
+			config.BGPPeerConfig = bgpPeer
 
 			log.Info("[annotations] exiting Annotations watcher - annotations found")
 			return nil

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Retry on 403 Forbidden and 401 Unauthorized in `ServicesWatcher` at startup with exponential backoff. Fixes #1464.
+- Reintroduce BGP config via node annotations. Fixes #1488.
 
 ### Added
 - SIGUSR1 signal handler for runtime configuration dumps (#1301)
