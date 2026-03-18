@@ -21,31 +21,29 @@ import (
 )
 
 type Processor struct {
-	config           *kubevip.Config
-	provider         providers.Provider
-	bgpServer        *bgp.Server
-	worker           endpointWorker
-	instances        *[]*instance.Instance
-	egressUpdateFunc func(context.Context, *v1.Service) error
+	config     *kubevip.Config
+	provider   providers.Provider
+	bgpServer  *bgp.Server
+	worker     endpointWorker
+	instances  *[]*instance.Instance
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager,
-	egressUpdateFunc func(context.Context, *v1.Service) error) *Processor {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *Processor {
 	return &Processor{
-		config:           config,
-		provider:         provider,
-		bgpServer:        bgpServer,
-		instances:        instances,
-		egressUpdateFunc: egressUpdateFunc,
-		worker:           newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr),
+		config:    config,
+		provider:  provider,
+		bgpServer: bgpServer,
+		instances: instances,
+		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr),
 	}
 }
 
 func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup,
-	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error) (bool, error) {
+	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error,
+	egressUpdateFunc func(context.Context, *v1.Service) error) (bool, error) {
 
 	var err error
 	if err = p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
@@ -99,7 +97,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	}
 
 	// Set the service accordingly
-	p.updateAnnotations(service, lastKnownGoodEndpoint, updateAnnotationFunc)
+	p.updateAnnotations(service, lastKnownGoodEndpoint, updateAnnotationFunc, egressUpdateFunc)
 
 	log.Debug("watcher", "provider",
 		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", svcCtx.IsActive)
@@ -151,7 +149,9 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 	}
 }
 
-func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string, updateAnnotationFunc func(context.Context, string, string, *v1.Service) error) {
+func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string, 
+	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error,
+	egressUpdateFunc func(context.Context, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
 		ip := net.ParseIP(*lastKnownGoodEndpoint)
@@ -204,13 +204,13 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 		// Trigger egress reconfiguration
 		// For services with leader election, the service watcher doesn't process Modified events
 		// after initial setup, so we need to directly call the update function
-		if p.egressUpdateFunc != nil {
+		if egressUpdateFunc != nil {
 			// Create a copy of service with updated annotations
 			svcCopy := service.DeepCopy()
 			svcCopy.Annotations[kubevip.ActiveEndpoint] = endpoint
 			svcCopy.Annotations[kubevip.ActiveEndpointIPv6] = endpointIPv6
 
-			if err := p.egressUpdateFunc(ctx, svcCopy); err != nil {
+			if err := egressUpdateFunc(ctx, svcCopy); err != nil {
 				log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
 			}
 		}
