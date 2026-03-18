@@ -53,15 +53,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	isNew := svcLease.Add(objectName)
 
 	// this service was already processed so we do not need to do anything
-	if !isNew {
+	if !isNew && svcLease.Elected.Load() {
 		log.Debug("this service was already handled, waiting for it to finish", "service", service.Name, "uid", service.UID)
 		// Wait for either the service context or lease context to be done
 		select {
 		case <-svcCtx.Ctx.Done():
-			// Service was deleted
-			p.leaseMgr.Delete(id, objectName)
 		case <-svcLease.Ctx.Done():
-			// Leader election ended (leadership lost or context cancelled)
 		}
 		return nil
 	}
@@ -126,19 +123,10 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return nil
 	}
 
-	// For new leases (not shared), ensure cleanup when the leader election ends
-	// This is critical for the restartable service watcher to be able to restart
-	// the leader election after leadership loss
-	defer func() {
-		// Delete the lease from the manager so subsequent calls can create a fresh lease
-		// This handles the case where leader election ends due to:
-		// 1. Leadership loss (e.g., network timeout)
-		// 2. Context cancellation
-		// 3. Any other reason RunOrDie returns
-		p.leaseMgr.Delete(id, objectName)
-	}()
-
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
+
+	leaderCtx, leaderCancel := context.WithCancel(svcLease.Ctx)
+	svcCtx.LeaderCancel = leaderCancel
 
 	run := election.RunConfig{
 		Config:           p.config,
@@ -155,7 +143,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			svcCtx.IsActive = true
 			if err := p.SyncServices(svcCtx, service, &wg); err != nil {
 				log.Error("service sync", "uid", service.UID, "err", err)
-				svcLease.Cancel()
+				leaderCancel()
 			}
 		},
 		OnStoppedLeading: func() {
@@ -170,7 +158,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			}
 			// Mark this service is inactive
 			svcCtx.IsActive = false
-			svcLease.Cancel()
+			svcLease.Started = make(chan any)
+			leaderCancel()
 		},
 		OnNewLeader: func(identity string) {
 			// we're notified when new leader elected
@@ -182,7 +171,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		},
 	}
 
-	if err := election.RunOrDie(svcLease.Ctx, &run, p.config); err != nil {
+	if err := election.RunOrDie(leaderCtx, &run, p.config); err != nil {
 		return fmt.Errorf("services election failed: %w", err)
 	}
 

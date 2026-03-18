@@ -75,7 +75,14 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		// start leader election if it's enabled and not already started
 		if !svcCtx.IsActive && p.config.EnableServicesElection {
 			wg.Go(func() {
-				startLeaderElection(svcCtx, service, serviceFunc, wg)
+				for {
+					select {
+					case <-svcCtx.Ctx.Done():
+						return
+					default:
+						startLeaderElection(svcCtx, service, serviceFunc, wg)
+					}
+				}
 			})
 		}
 

@@ -63,6 +63,9 @@ func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service) erro
 
 func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	g.clearEgress(lastKnownGoodEndpoint, service)
+	if svcCtx.LeaderCancel != nil {
+		svcCtx.LeaderCancel()
+	}
 }
 
 func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service) {
@@ -73,12 +76,6 @@ func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service
 		}
 
 		*lastKnownGoodEndpoint = "" // reset endpoint
-		if g.config.EnableServicesElection || g.config.EnableLeaderElection {
-			leaseNamespace, leaseName := lease.ServiceName(service)
-			id := lease.NewID(g.config.LeaderElectionType, leaseNamespace, leaseName)
-			objectName := lease.ServiceNamespacedName(service)
-			g.leaseMgr.Delete(id, objectName)
-		}
 	}
 }
 

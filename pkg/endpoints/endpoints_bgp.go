@@ -65,6 +65,10 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 	}
 
 	b.clearEgress(lastKnownGoodEndpoint, service)
+
+	if svcCtx.LeaderCancel != nil {
+		svcCtx.LeaderCancel()
+	}
 }
 
 func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {

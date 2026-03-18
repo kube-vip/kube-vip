@@ -32,7 +32,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 
 	wg.Go(func() {
 		<-svcCtx.Ctx.Done()
-		log.Debug("context cancelled", "provider", provider.GetLabel())
+		log.Debug("[endpoint watcher] service context cancelled", "provider", provider.GetLabel())
 	})
 
 	ch := rw.ResultChan()
@@ -57,7 +57,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 				return fmt.Errorf("[%s] error while processing delete event: %w", provider.GetLabel(), err)
 			}
 
-			log.Info("stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
+			log.Info("[endpoint watcher] stopping watching - endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 			return nil
 		case watch.Error:
 			errObject := apierrors.FromObject(event.Object)
@@ -65,6 +65,6 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			log.Error("watch error", "provider", provider.GetLabel(), "err", statusErr)
 		}
 	}
-	log.Info("stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
+	log.Info("[endpoint watcher] stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 	return nil //nolint:govet
 }
