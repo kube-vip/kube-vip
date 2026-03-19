@@ -75,14 +75,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		// start leader election if it's enabled and not already started
 		if !svcCtx.IsActive && p.config.EnableServicesElection {
 			wg.Go(func() {
-				for {
-					select {
-					case <-svcCtx.Ctx.Done():
-						return
-					default:
-						startLeaderElection(svcCtx, service, serviceFunc, wg)
-					}
-				}
+				startLeaderElection(svcCtx, service, serviceFunc, wg)
 			})
 		}
 
@@ -176,10 +169,6 @@ func startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, se
 			err := serviceFunc(svcCtx, service, wg)
 			if err != nil {
 				log.Error(err.Error())
-			}
-			if !svcCtx.HasEndpoints.Load() {
-				log.Debug("there are no available endpoints for this service, exiting watch", "service", service.Name, "uid", service.UID)
-				return
 			}
 		}
 	}
