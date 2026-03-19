@@ -16,6 +16,7 @@ type Context struct {
 	ConfiguredNetworks sync.Map
 	Lease              *lease.Lease
 	HasEndpoints       atomic.Bool
+	LeaderCancel       context.CancelFunc
 }
 
 func New(ctx context.Context) *Context {
