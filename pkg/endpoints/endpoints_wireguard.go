@@ -103,8 +103,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 		}
 
 		for _, vip := range serviceIPs {
-			isIPv6 := isIPv6Address(vip)
-
 			// Strip CIDR notation if present
 			vipAddr := utils.StripCIDR(vip)
 
@@ -144,7 +142,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 				uint16(port.Port), //nolint:gosec // Port range validated by Kubernetes
 				targets,
 				portServiceID,
-				isIPv6,
 				port.Protocol,
 				isLocalEndpoint,
 				tunnelConfig.ListenPort,

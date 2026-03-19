@@ -858,19 +858,42 @@ func CleanupTunnelInfrastructure(wgIf string, IPv6 bool) error {
 
 // ApplyDNAT creates/updates the DNAT rule and map for a specific port.
 // The service parameter is used to identify the rule for later deletion.
+// IPv4/IPv6 is inferred from the VIP address.
 func ApplyDNAT(
 	wgIf string,
 	vipIP string,
 	sourcePort uint16,
 	targets []DNATTarget,
 	service string,
-	IPv6 bool,
 	protocol v1.Protocol,
 	localEndpoint bool,
 	tunnelListenPort int,
 ) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("no targets provided for DNAT")
+	}
+
+	// Infer IP version from VIP
+	IPv6 := utils.IsIPv6(vipIP)
+
+	// Parse and validate all target IPs, ensuring they match VIP's IP version
+	parsedTargets := make([]struct {
+		ip   net.IP
+		port uint16
+	}, len(targets))
+	for i, t := range targets {
+		ip := net.ParseIP(t.IP)
+		if ip == nil {
+			return fmt.Errorf("invalid target IP: %s", t.IP)
+		}
+		targetIsIPv6 := utils.IsIPv6(t.IP)
+		if IPv6 != targetIsIPv6 {
+			return fmt.Errorf("IP version mismatch: VIP %s is IPv%d but target %s is IPv%d",
+				vipIP, map[bool]int{false: 4, true: 6}[IPv6],
+				t.IP, map[bool]int{false: 4, true: 6}[targetIsIPv6])
+		}
+		parsedTargets[i].ip = ip
+		parsedTargets[i].port = t.Port
 	}
 
 	// Ensure tunnel infrastructure exists
@@ -893,20 +916,6 @@ func ApplyDNAT(
 	dnatChain, err := conn.ListChain(table, dnatChainName)
 	if err != nil || dnatChain == nil {
 		return fmt.Errorf("tunnel DNAT chain not found: %s", dnatChainName)
-	}
-
-	// Parse and validate all target IPs
-	parsedTargets := make([]struct {
-		ip   net.IP
-		port uint16
-	}, len(targets))
-	for i, t := range targets {
-		ip := net.ParseIP(t.IP)
-		if ip == nil {
-			return fmt.Errorf("invalid target ip: %s", t.IP)
-		}
-		parsedTargets[i].ip = ip
-		parsedTargets[i].port = t.Port
 	}
 
 	// Determine protocol number
