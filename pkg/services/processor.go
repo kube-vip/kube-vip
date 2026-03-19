@@ -131,8 +131,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
-		return false, fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q",
-			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster)
+		return false, fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
+			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)

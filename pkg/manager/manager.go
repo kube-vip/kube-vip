@@ -389,7 +389,8 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		w.ConfigureServices()
 
 		if err = w.StartServices(modeCtx); err != nil {
-			return fmt.Errorf("failed to start services: %w", err)
+			sm.Kill()
+			return fmt.Errorf("failed to reconcile services: %w", err)
 		}
 	}
 

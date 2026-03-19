@@ -55,9 +55,12 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
+	watcherCtx, watcherCancel := context.WithCancel(ctx)
+	defer watcherCancel()
+
 	wg.Go(func() {
-		<-ctx.Done()
-		log.Debug("(svcs) context cancelled")
+		<-watcherCtx.Done()
+		log.Debug("(svcs) watcher context cancelled")
 		rw.Stop()
 		p.Stop()
 	})
@@ -70,7 +73,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			restart, err := p.AddOrModify(ctx, event, serviceFunc, &wg)
+			restart, err := p.AddOrModify(watcherCtx, event, serviceFunc, &wg)
 			if restart {
 				break
 			}
