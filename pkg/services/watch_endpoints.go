@@ -45,7 +45,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		switch event.Type {
 
 		case watch.Added, watch.Modified:
-			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection, &wg)
+			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
 			if restart {
 				continue
 			} else if err != nil {
