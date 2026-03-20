@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -388,9 +389,20 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		}
 		w.ConfigureServices()
 
-		if err = w.StartServices(modeCtx); err != nil {
-			sm.Kill()
-			return fmt.Errorf("failed to reconcile services: %w", err)
+		for {
+			select {
+			case <-modeCtx.Done():
+				return nil
+			default:
+				if err = w.StartServices(modeCtx); err != nil {
+					if errors.Is(err, &utils.PanicError{}) {
+						sm.Kill()
+						return fmt.Errorf("failed to reconcile services, non-recoverable error: %w", err)
+					} else {
+						log.Error("failed to reconcile services, restarting", "error", err)
+					}
+				}
+			}
 		}
 	}
 
