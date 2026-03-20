@@ -24,6 +24,7 @@ type KubevipManifestValues struct {
 	MPBGPNexthopIPv4     string
 	MPBGPNexthopIPv6     string
 	Mode                 string
+	Annotations          string
 }
 
 type BGPPeerValues struct {
