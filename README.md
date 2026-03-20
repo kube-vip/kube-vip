@@ -80,3 +80,20 @@ Additionally it is now relatively easy and quick to develop with [skaffold](http
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=kube-vip/kube-vip&type=Date)](https://star-history.com/#kube-vip/kube-vip&Date)
+
+## Configuration
+
+For detailed configuration options, refer to the official documentation: https://kube-vip.io
+
+### vip_arpRate
+
+The `vip_arpRate` environment variable controls the rate (in milliseconds) of gratuitous ARP (gARP) broadcasts.
+
+- Default: 3000 ms (3 seconds)
+
+⚠️ **Warning**: Values lower than 500ms are not supported and may be ignored.
+
+### Example
+
+```bash
+export vip_arpRate=5000
