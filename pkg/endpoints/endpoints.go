@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 )
 
 type Processor struct {
@@ -42,7 +43,7 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup,
-	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error,
+	clientSet *kubernetes.Clientset,
 	egressUpdateFunc func(context.Context, *v1.Service) error) (bool, error) {
 
 	var err error
@@ -97,7 +98,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	}
 
 	// Set the service accordingly
-	p.updateAnnotations(service, lastKnownGoodEndpoint, updateAnnotationFunc, egressUpdateFunc)
+	p.updateAnnotations(service, lastKnownGoodEndpoint, clientSet, egressUpdateFunc)
 
 	log.Debug("watcher", "provider",
 		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint, "active leader election", svcCtx.IsActive)
@@ -149,8 +150,8 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 	}
 }
 
-func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string, 
-	updateAnnotationFunc func(context.Context, string, string, *v1.Service) error,
+func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string,
+	clientSet *kubernetes.Clientset,
 	egressUpdateFunc func(context.Context, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
@@ -194,7 +195,7 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 		// Persist to Kubernetes
 		ctx := context.Background()
 
-		if err := updateAnnotationFunc(ctx, endpoint, endpointIPv6, service); err != nil {
+		if err := p.provider.UpdateServiceAnnotation(ctx, endpoint, endpointIPv6, service, clientSet); err != nil {
 			log.Warn("failed to update service annotation", "service", service.Name, "namespace", service.Namespace, "err", err)
 			return
 		}

@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
@@ -46,10 +45,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		switch event.Type {
 
 		case watch.Added, watch.Modified:
-			updateAnnotationFunc := func(ctx context.Context, endpoint, endpointIPv6 string, svc *v1.Service) error {
-				return provider.UpdateServiceAnnotation(ctx, endpoint, endpointIPv6, svc, p.clientSet)
-			}
-			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection, &wg, updateAnnotationFunc, p.updateEgressConfiguration)
+			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id, p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
 			if restart {
 				continue
 			} else if err != nil {
