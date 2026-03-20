@@ -22,11 +22,11 @@ import (
 )
 
 type Processor struct {
-	config     *kubevip.Config
-	provider   providers.Provider
-	bgpServer  *bgp.Server
-	worker     endpointWorker
-	instances  *[]*instance.Instance
+	config    *kubevip.Config
+	provider  providers.Provider
+	bgpServer *bgp.Server
+	worker    endpointWorker
+	instances *[]*instance.Instance
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
