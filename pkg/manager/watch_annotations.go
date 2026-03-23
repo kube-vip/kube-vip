@@ -147,8 +147,8 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	prefix = regexp.QuoteMeta(prefix)
 
 	nodeASN := ""
+	regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?node-asn$", prefix))
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?node-asn$", prefix))
 		if regex.Match([]byte(k)) {
 			nodeASN = v
 		}
@@ -165,8 +165,8 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	bgpConfig.AS = uint32(u64)
 
 	srcIP := ""
+	regex = regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?src-ip$", prefix))
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?src-ip$", prefix))
 		if regex.Match([]byte(k)) {
 			srcIP = v
 		}
@@ -180,8 +180,8 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	bgpConfig.RouterID, bgpConfig.SourceIP = srcIP, srcIP
 
 	peerASN := ""
+	regex = regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-asn$", prefix))
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-asn$", prefix))
 		if regex.Match([]byte(k)) {
 			peerASN = v
 		}
@@ -198,8 +198,8 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	bgpPeer.AS = uint32(u64)
 
 	peerIPString := ""
+	regex = regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-[0-9]+-)?peer-ip$", prefix))
 	for k, v := range node.Annotations {
-		regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-[0-9]+-)?peer-ip$", prefix))
 		if regex.Match([]byte(k)) {
 			peerIPString += v + ","
 		}
@@ -212,6 +212,7 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	}
 
 	bgpConfig.Peers = make([]kubevip.BGPPeer, 0, len(peerIPs))
+	regexPass := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?bgp-pass$", prefix))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 
@@ -220,8 +221,7 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 			// Check if we're also expecting a password for this peer
 			base64BGPPassword := ""
 			for k, v := range node.Annotations {
-				regex := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?bgp-pass$", prefix))
-				if regex.Match([]byte(k)) {
+				if regexPass.Match([]byte(k)) {
 					base64BGPPassword = v
 				}
 			}
