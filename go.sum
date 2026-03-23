@@ -288,12 +288,12 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
-go.etcd.io/etcd/api/v3 v3.6.8 h1:gqb1VN92TAI6G2FiBvWcqKtHiIjr4SU2GdXxTwyexbM=
-go.etcd.io/etcd/api/v3 v3.6.8/go.mod h1:qyQj1HZPUV3B5cbAL8scG62+fyz5dSxxu0w8pn28N6Q=
+go.etcd.io/etcd/api/v3 v3.6.9 h1:UA7iKfEW1AzgihcBSGXci2kDGQiokSq41F9HMCI/RTI=
+go.etcd.io/etcd/api/v3 v3.6.9/go.mod h1:csEk/qTfxKL36NqJdU15Tgtl65A8dyEY2BYo7PRsIwk=
 go.etcd.io/etcd/client/pkg/v3 v3.6.9 h1:T8nuk8Lz64C+Hzb0coBFLMSlVSQZBpAtFk46swdM1DA=
 go.etcd.io/etcd/client/pkg/v3 v3.6.9/go.mod h1:WEy3PpwbbEBVRdh1NVJYsuUe/8eyI21PNJRazeD8z/Y=
-go.etcd.io/etcd/client/v3 v3.6.8 h1:B3G76t1UykqAOrbio7s/EPatixQDkQBevN8/mwiplrY=
-go.etcd.io/etcd/client/v3 v3.6.8/go.mod h1:MVG4BpSIuumPi+ELF7wYtySETmoTWBHVcDoHdVupwt8=
+go.etcd.io/etcd/client/v3 v3.6.9 h1:3X555hQXmhRr27O37wls53g68CpUiPOiHXrZfz2Al+o=
+go.etcd.io/etcd/client/v3 v3.6.9/go.mod h1:KO7H1HLYh1qaljuVZJQwBFk1lRce6pJzt+C81GEnrlM=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 h1:F7Jx+6hwnZ41NSFTO5q4LYDtJRXBf2PD0rNBkeB/lus=
