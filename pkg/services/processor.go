@@ -99,50 +99,59 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup) (bool, error) {
-	// log.Debugf("Endpoints for service [%s] have been Created or modified", s.service.ServiceName)
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
-		return false, fmt.Errorf("unable to parse Kubernetes services from API watcher")
+		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 	}
 
 	// We only care about LoadBalancer services
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-		return true, nil
+		return nil
 	}
 
 	// Check if we ignore this service
 	if svc.Annotations[kubevip.LoadbalancerIgnore] == "true" {
 		log.Info("ignore annotation for kube-vip", "service name", svc.Name)
-		return true, nil
+		return nil
 	}
 
 	// Check the loadBalancer class
 	if p.lbClassFilter(svc, p.config) {
-		return true, nil
+		return nil
 	}
 
 	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
 
 	// We only care about LoadBalancer services that have been allocated an address
 	if len(svcAddresses) <= 0 && len(svcHostnames) <= 0 {
-		return true, nil
+		return nil
+	}
+
+	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
+	var err error
+	if svcInstance == nil {
+		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
+		if err != nil {
+			return fmt.Errorf("unalbe to create instance for service %s/%s", svc.Namespace, svc.Name)
+		}
+		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
 	}
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
-		return false, fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
+		return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
 			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get service context: %w", err)
+		return fmt.Errorf("failed to get service context: %w", err)
 	}
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
-		i := instance.FindServiceInstance(svc, p.ServiceInstances)
+		i := svcInstance
 		shouldGarbageCollect := false
 		if i != nil {
 			originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
@@ -203,6 +212,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
 		if svcCtx == nil {
+			log.Debug("new context for service", "namespace", svc.Namespace, "name", svc.Name)
 			ns, name := lease.ServiceName(svc)
 			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
 			lease := p.leaseMgr.Add(ctx, leaseID)
@@ -218,7 +228,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			if err != nil {
 				log.Error(err.Error())
 				if errors.Is(err, &utils.PanicError{}) {
-					return false, err
+					return err
 				}
 			}
 
@@ -257,7 +267,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 						if err != nil {
 							log.Error(err.Error())
 							if errors.Is(err, &utils.PanicError{}) {
-								return false, err
+								return err
 							}
 						}
 					}
@@ -291,7 +301,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				if err != nil {
 					log.Error(err.Error())
 					if errors.Is(err, &utils.PanicError{}) {
-						return false, err
+						return err
 					}
 				}
 
@@ -346,7 +356,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			if err != nil {
 				log.Error(err.Error())
 				if errors.Is(err, &utils.PanicError{}) {
-					return false, err
+					return err
 				}
 			}
 		}
@@ -356,29 +366,30 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		}
 	}
 
-	return false, nil
+	return nil
 }
 
-func (p *Processor) Delete(event watch.Event) (bool, error) {
+func (p *Processor) Delete(event watch.Event) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
-		return false, fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
+		return fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
 	}
+
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
-		return false, fmt.Errorf("(svcs) unable to get context: %w", err)
+		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
 	if svcCtx != nil {
 		// We only care about LoadBalancer services
 		if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-			return true, nil
+			return nil
 		}
 
 		// We can ignore this service
 		if svc.Annotations[kubevip.LoadbalancerIgnore] == "true" {
 			log.Info("(svcs) ignore annotation for kube-vip", "service name", svc.Name)
-			return true, nil
+			return nil
 		}
 
 		// If no leader election is enabled, delete routes here
@@ -408,7 +419,7 @@ func (p *Processor) Delete(event watch.Event) (bool, error) {
 
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
-	return true, nil
+	return nil
 }
 
 func (p *Processor) Stop() {

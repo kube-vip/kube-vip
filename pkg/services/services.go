@@ -47,7 +47,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 
 	// Iterate through the synchronising services
 
-	action := p.getServiceInstanceAction(svc)
+	action, instance := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
 		// remove the label from the node before deleting the service
@@ -61,7 +61,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.addService(ctx.Ctx, svc, wg); err != nil {
+		if err := p.addService(ctx.Ctx, instance, svc, wg); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
@@ -76,7 +76,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 	return nil
 }
 
-func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
+func (p *Processor) getServiceInstanceAction(svc *v1.Service) (ServiceInstanceAction, *instance.Instance) {
 	// protect against multiple calls
 	// get the annotations or legacy values from manual configuration
 	addresses, hostnames := instance.FetchServiceAddresses(svc)
@@ -87,53 +87,54 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 
 	for _, instance := range p.ServiceInstances {
 		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
-			log.Debug("[DEBUG] found matching service instance", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-
+			if !instance.AddCalled {
+				return ActionAdd, instance
+			}
 			for _, address := range addresses {
 				// handle the case where the service instance needs to be deleted
 				if instance.IsDHCPv4 {
 					if address != "0.0.0.0" {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv4) {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 				} else {
 					if address == "0.0.0.0" {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 				}
 				if instance.IsDHCPv6 {
 					if address != "::" {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv6) {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 				} else {
 					if address == "::" {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-						return ActionDelete
+						return ActionDelete, instance
 					}
 				}
 				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
-					return ActionDelete
+					return ActionDelete, instance
 				}
 			}
 			// If we reach here, it means the service instance matches the service UID and is not a DHCP service, so we can return "no action"
-			return ActionNone
+			return ActionNone, instance
 		}
 	}
 	if len(addresses) > 0 || len(hostnames) > 0 {
 		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID, "addresses", addresses, "hostnames", hostnames)
-		return ActionAdd // If no matching instance is found, we need to add a new service instance
+		return ActionAdd, nil // If no matching instance is found, we need to add a new service instance
 	}
-	return ActionNone
+	return ActionNone, nil
 }
 
 func comparePortsAndPortStatuses(svc *v1.Service) bool {
@@ -152,16 +153,21 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) addService(ctx context.Context, newService *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
 	// protect against addService while reading
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
 	startTime := time.Now()
 
-	newService, err := instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
-	if err != nil {
-		return err
+	var err error
+	if newService == nil {
+		newService, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
+		if err != nil {
+			return err
+		}
+
+		p.ServiceInstances = append(p.ServiceInstances, newService)
 	}
 
 	for x := range newService.VIPConfigs {
@@ -229,8 +235,6 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.Wa
 			}
 		})
 	}
-
-	p.ServiceInstances = append(p.ServiceInstances, newService)
 
 	if !p.config.DisableServiceUpdates {
 		log.Debug("[service] update", "namespace", newService.ServiceSnapshot.Namespace, "name", newService.ServiceSnapshot.Name)

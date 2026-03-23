@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -73,20 +75,20 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			restart, err := p.AddOrModify(watcherCtx, event, serviceFunc, &wg)
-			if restart {
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("add/modify service error: %w", err)
+			if err := p.AddOrModify(watcherCtx, event, serviceFunc, &wg); err != nil {
+				if errors.Is(err, &utils.PanicError{}) {
+					return fmt.Errorf("add/modify service error: %w", err)
+				} else {
+					log.Error("service watcher event failed", "type", event.Type, "error", err)
+				}
 			}
 		case watch.Deleted:
-			restart, err := p.Delete(event)
-			if restart {
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("delete service error: %w", err)
+			if err := p.Delete(event); err != nil {
+				if errors.Is(err, &utils.PanicError{}) {
+					return fmt.Errorf("delete service error: %w", err)
+				} else {
+					log.Error("service watcher event failed", "type", event.Type, "error", err)
+				}
 			}
 		case watch.Bookmark:
 			// Un-used
