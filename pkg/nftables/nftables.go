@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -708,7 +709,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: inputChain,
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
 			&expr.Lookup{SourceRegister: 1, SetName: acceptSetName},
 			&expr.Verdict{Kind: expr.VerdictAccept},
@@ -722,7 +723,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: postroutingChain,
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 2},
 			&expr.Lookup{SourceRegister: 1, SetName: snatSetName},
 			&expr.Immediate{Register: 1, Data: ipToBytes(vip, IPv6)},
@@ -744,7 +745,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: postroutingChain,
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: ifname(wgIf)},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: ipOffset, Len: ipLen},
 			&expr.Lookup{SourceRegister: 1, SetName: masqIPSetName},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
@@ -762,7 +763,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: manglePreChain,
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
 			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
 			&expr.Ct{Key: expr.CtKeyMARK, Register: 1, SourceRegister: true},
 		},
@@ -774,7 +775,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: manglePreChain,
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: ifname(wgIf)},
 			&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
 			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
@@ -967,7 +968,7 @@ func ApplyDNAT(
 		// Multiple targets: use numgen + map for load balancing
 		dnatExprs = []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
@@ -981,7 +982,7 @@ func ApplyDNAT(
 		// Single target: direct DNAT
 		dnatExprs = []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: append([]byte(wgIf), 0)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
 			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
 			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
@@ -1264,7 +1265,7 @@ func bypassRpfilterForInterface(wgIf string) error {
 		for _, e := range rule.Exprs {
 			// Check for interface-based rule
 			if cmp, ok := e.(*expr.Cmp); ok {
-				if string(cmp.Data) == wgIf+"\x00" {
+				if slices.Equal(cmp.Data, ifname(wgIf)) {
 					hasIfaceRule = true
 				}
 			}
@@ -1321,7 +1322,7 @@ func bypassRpfilterForInterface(wgIf string) error {
 				&expr.Cmp{
 					Op:       expr.CmpOpEq,
 					Register: 1,
-					Data:     append([]byte(wgIf), 0),
+					Data:     ifname(wgIf),
 				},
 				&expr.Counter{},
 				&expr.Verdict{Kind: expr.VerdictReturn},
@@ -1409,4 +1410,10 @@ func isKubeVipChain(name string) bool {
 
 func isKubeVipSet(name string) bool {
 	return strings.HasPrefix(name, "kvip_") || strings.HasPrefix(name, "dnat_")
+}
+
+func ifname(n string) []byte {
+	b := make([]byte, 16)
+	copy(b, []byte(n+"\x00"))
+	return b
 }
