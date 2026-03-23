@@ -120,7 +120,7 @@ func (rt *RoutingTable) deleteAction(service *v1.Service) {
 }
 
 func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error {
-	instance := instance.FindServiceInstanceWithTimeout(service, *rt.instances)
+	instance := instance.FindServiceInstance(service, *rt.instances)
 	if instance == nil {
 		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {

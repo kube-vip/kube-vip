@@ -125,8 +125,17 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	// We only care about LoadBalancer services that have been allocated an address
 	if len(svcAddresses) <= 0 && len(svcHostnames) <= 0 {
-		log.Debug("no addresses", "namespace", svc.Namespace, "name", svc.Name)
 		return nil
+	}
+
+	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
+	var err error
+	if svcInstance == nil {
+		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
+		if err != nil {
+			return fmt.Errorf("unalbe to create instance for service %s/%s", svc.Namespace, svc.Name)
+		}
+		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
 	}
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
@@ -142,7 +151,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
-		i := instance.FindServiceInstance(svc, p.ServiceInstances)
+		i := svcInstance
 		shouldGarbageCollect := false
 		if i != nil {
 			originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
@@ -203,7 +212,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
 		if svcCtx == nil {
-			log.Debug("nnew context for service", "namespace", svc.Namespace, "name", svc.Name)
+			log.Debug("new context for service", "namespace", svc.Namespace, "name", svc.Name)
 			ns, name := lease.ServiceName(svc)
 			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
 			lease := p.leaseMgr.Add(ctx, leaseID)

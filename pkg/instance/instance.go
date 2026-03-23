@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -51,6 +50,9 @@ type Instance struct {
 	ServiceSnapshot *v1.Service
 
 	dnsAddresses []string
+
+	// AddCalled determined that ActionAdd was already performed for the instance
+	AddCalled bool
 }
 
 type Port struct {
@@ -60,7 +62,7 @@ type Port struct {
 
 func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager, wg *sync.WaitGroup) (*Instance, error) {
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
-	log.Info("NewInstance used", "instanceAddresses", instanceAddresses, "instanceHostnames", instanceHostnames)
+	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
 	var newVips []*kubevip.Config
 	var link netlink.Link
@@ -639,24 +641,4 @@ func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	}
 	log.Debug("instance not found", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	return nil
-}
-
-func FindServiceInstanceWithTimeout(svc *v1.Service, instances []*Instance) *Instance {
-	log.Debug("finding service with timeout", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
-	ticker := time.NewTicker(time.Millisecond * 200)
-	defer ticker.Stop()
-	to := time.NewTimer(time.Second * 60)
-	defer to.Stop()
-	for {
-		select {
-		case <-to.C:
-			return nil
-		case <-ticker.C:
-			for i := range instances {
-				if instances[i].ServiceSnapshot.UID == svc.UID {
-					return instances[i]
-				}
-			}
-		}
-	}
 }
