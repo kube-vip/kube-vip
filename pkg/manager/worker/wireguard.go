@@ -5,12 +5,12 @@ import (
 	"fmt"
 	log "log/slog"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
@@ -19,14 +19,20 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
 type WireGuard struct {
 	Common
-	tunnelMgr   *wireguard.TunnelManager
-	kubeAPIHost string
-	kubeAPIPort string
+	tunnelMgr           *wireguard.TunnelManager
+	kubeAPIHost         string
+	kubeAPIPort         string
+	endpointWatcherCtx  context.Context
+	endpointWatcherStop context.CancelFunc
+	endpointWatcherWg   sync.WaitGroup
 }
 
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
@@ -42,9 +48,17 @@ func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 func (w *WireGuard) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	log.Info("reading wireguard tunnel configurations from Kubernetes secret")
 	tunnelMgr := wireguard.NewTunnelManager()
+
 	err := tunnelMgr.LoadConfigurationsFromSecret(ctx, w.clientSet, w.config.Namespace, "wireguard")
 	if err != nil {
 		return fmt.Errorf("failed to load WireGuard tunnel configurations: %w", err)
+	}
+
+	// Clean up any stale resources from previous runs (crash recovery for hostNetwork: true)
+	// Must be called AFTER loading configs so we know which interfaces/ports to clean
+	if err := tunnelMgr.CleanupStaleResources(); err != nil {
+		log.Warn("failed to cleanup stale resources", "err", err)
+		// Continue anyway - the cleanup is best-effort
 	}
 
 	if _, err := sysctl.EnableProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark"); err != nil {
@@ -124,37 +138,96 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 		return
 	}
 
-	// Strip CIDR notation from VIP if present
-	vipIP := utils.StripCIDR(w.config.VIP)
-
-	// Parse Kubernetes API port
-	kubeAPIPortInt, err := strconv.ParseUint(w.kubeAPIPort, 10, 16)
-	if err != nil {
-		log.Error("could not parse KUBERNETES_SERVICE_PORT_HTTPS", "err", err, "port", w.kubeAPIPort)
-		_ = wg.Down()
-		w.killFunc()
-	}
-
-	// Apply nftables DNAT rule to route traffic from wireguard interface:6443 to Kubernetes API service
-	log.Info("applying nftables DNAT rule",
-		"interface", tunnelConfig.InterfaceName,
-		"vip", vipIP,
-		"sourcePort", 6443,
-		"kubeAPIHost", w.kubeAPIHost,
-		"kubeAPIPort", w.kubeAPIPort)
-	err = nftables.ApplyDNAT(tunnelConfig.InterfaceName, vipIP, w.kubeAPIHost, 6443, uint16(kubeAPIPortInt), "controlplane", false, "TCP")
-	if err != nil {
-		log.Error("could not apply nftables DNAT rule", "err", err)
-		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
-		w.killFunc()
-	}
+	// Start endpoint watcher - DNAT rules will be applied when endpoints arrive
+	w.endpointWatcherCtx, w.endpointWatcherStop = context.WithCancel(ctx)
+	w.endpointWatcherWg.Go(func() {
+		w.watchKubernetesEndpoints(w.endpointWatcherCtx, tunnelConfig)
+	})
 
 	if w.config.EnableServices && !w.config.EnableServicesElection {
 		if err := w.svcProcessor.ServicesWatcher(ctx, w.svcProcessor.SyncServices); err != nil {
 			log.Error("failed to start services watcher", "err", err)
 		}
 	}
-	log.Info("nftables DNAT rule applied successfully")
+}
+
+// watchKubernetesEndpoints watches the kubernetes service EndpointSlices for changes
+// and updates the DNAT rules when API server endpoints change (e.g., when an API server goes down)
+func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *wireguard.TunnelConfig) {
+	log.Info("starting kubernetes endpoint watcher for control plane")
+
+	kubeSvc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubernetes",
+			Namespace: "default",
+		},
+	}
+
+	provider := providers.NewEndpointslices()
+	rw, err := provider.CreateRetryWatcher(ctx, w.clientSet, kubeSvc)
+	if err != nil {
+		log.Error("failed to create kubernetes endpoint watcher", "err", err)
+		return
+	}
+	defer rw.Stop()
+
+	for event := range rw.ResultChan() {
+		select {
+		case <-ctx.Done():
+			log.Info("kubernetes endpoint watcher stopped")
+			return
+		default:
+		}
+
+		switch event.Type {
+		case watch.Added, watch.Modified, watch.Deleted:
+			if err := provider.LoadObject(event.Object, func() {}); err != nil {
+				log.Error("failed to load endpoint object", "err", err)
+				continue
+			}
+			endpoints, _ := provider.GetAllEndpoints()
+			log.Info("kubernetes endpoints changed, updating DNAT rules", "eventType", event.Type, "endpoints", endpoints)
+			if err := w.updateControlPlaneDNAT(tunnelConfig, endpoints); err != nil {
+				log.Error("failed to update control plane DNAT rules", "err", err)
+			}
+		case watch.Error:
+			log.Warn("kubernetes endpoint watch error", "event", event)
+		}
+	}
+}
+
+// updateControlPlaneDNAT updates the DNAT rules for the control plane with the given endpoints
+func (w *WireGuard) updateControlPlaneDNAT(tunnelConfig *wireguard.TunnelConfig, endpoints []string) error {
+	if len(endpoints) == 0 {
+		log.Warn("no kubernetes API server endpoints available")
+		// Don't delete rules - keep routing to last known endpoints
+		return nil
+	}
+
+	// Build targets with default port 6443
+	targets := make([]nftables.DNATTarget, len(endpoints))
+	for i, ep := range endpoints {
+		targets[i] = nftables.DNATTarget{IP: ep, Port: 6443}
+	}
+
+	vipIP := utils.StripCIDR(w.config.VIP)
+
+	err := nftables.ApplyDNAT(
+		tunnelConfig.InterfaceName,
+		vipIP,
+		6443,
+		targets,
+		"controlplane",
+		v1.ProtocolTCP,
+		false,
+		tunnelConfig.ListenPort,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to apply updated DNAT rule: %w", err)
+	}
+
+	log.Info("control plane DNAT rules updated", "targetCount", len(targets))
+	return nil
 }
 
 func (w *WireGuard) OnStoppedLeading() {
@@ -162,6 +235,12 @@ func (w *WireGuard) OnStoppedLeading() {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 	log.Info("leader lost", "id", w.config.NodeName)
+
+	// Stop the kubernetes endpoint watcher and wait for it to finish
+	if w.endpointWatcherStop != nil {
+		w.endpointWatcherStop()
+		w.endpointWatcherWg.Wait()
+	}
 
 	log.Info("deleting nftables DNAT chains")
 	err := nftables.DeleteIngressChains(false, "controlplane")
