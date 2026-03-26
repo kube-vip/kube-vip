@@ -7,6 +7,7 @@ import (
 	log "log/slog"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -24,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -99,7 +101,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error, wg *sync.WaitGroup) error {
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, wg *sync.WaitGroup) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
@@ -125,7 +127,11 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	// We only care about LoadBalancer services that have been allocated an address
 	if len(svcAddresses) <= 0 && len(svcHostnames) <= 0 {
-		return nil
+		s, err := p.waitForAddress(ctx, svc)
+		if err != nil {
+			return fmt.Errorf("failed to get updated LB addresses for service %s/%s: %w", svc.Namespace, svc.Name, err)
+		}
+		svc = s
 	}
 
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
@@ -140,8 +146,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
-		return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
-			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
+		return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q",
+			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
@@ -151,23 +157,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
-		i := svcInstance
 		shouldGarbageCollect := false
-		if i != nil {
-			originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
-			shouldGarbageCollect =
-				// Service addresses changed
-				!reflect.DeepEqual(originalServiceAddresses, svcAddresses) ||
-					// Service hostnames changed
-					!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
-					// ExternalTrafficPolicy changed
-					svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy ||
-					// IP stack configuration changed
-					!reflect.DeepEqual(svc.Spec.IPFamilies, i.ServiceSnapshot.Spec.IPFamilies) ||
-					*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
-					// DDNS was disabled/enabled
-					svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS]
-
+		if svcInstance != nil {
+			shouldGarbageCollect = serviceChanged(svcInstance, svc)
 		}
 		if shouldGarbageCollect {
 			for _, addr := range svcAddresses {
@@ -181,13 +173,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 			}
 			// This service has been modified, but it was also active.
-			if svcCtx != nil && svcCtx.IsActive {
+			if svcCtx != nil {
 				log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
-				//Set it to inactive
-				svcCtx.IsActive = false
 				svcCtx.Cancel()
-				log.Warn("(svcs) waiting for load balancer to finish")
-				<-svcCtx.Ctx.Done()
 
 				if err := p.deleteService(ctx, svc.UID); err != nil {
 					log.Error("(svc) unable to remove", "service", svc.UID)
@@ -201,45 +189,46 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		}
 	}
 
-	// Architecture walkthrough: (Had to do this as this code path is making my head hurt)
+	ips, hostnames := instance.FetchServiceAddresses(svc)
+	log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
-	// Is the service active (bool), if not then process this new service
-	// Does this service use an election per service?
-	//
+	if svcCtx == nil {
+		ns, name := lease.ServiceName(svc)
+		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+		lease := p.leaseMgr.Add(ctx, leaseID)
+		svcCtx = servicecontext.New(lease.Ctx)
+		p.svcMap.Store(svc.UID, svcCtx)
+	}
 
-	if svcCtx == nil || svcCtx != nil && !svcCtx.IsActive {
-		ips, hostnames := instance.FetchServiceAddresses(svc)
-		log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
+	// this goroutine starts service handling function (with or without leaderelection)
+	if !svcCtx.IsWatched {
+		wg.Go(func() {
+			watchWg := sync.WaitGroup{}
+			defer func() {
+				// wait for the sub-goroutines and tag service as not watched
+				watchWg.Wait()
+				svcCtx.IsWatched = false
+			}()
 
-		if svcCtx == nil {
-			log.Debug("new context for service", "namespace", svc.Namespace, "name", svc.Name)
-			ns, name := lease.ServiceName(svc)
-			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-			lease := p.leaseMgr.Add(ctx, leaseID)
-			svcCtx = servicecontext.New(lease.Ctx)
-			p.svcMap.Store(svc.UID, svcCtx)
-		}
-
-		// WireGuard services always need endpoint watching for DNAT rule updates
-		// This is independent of leader election settings (which are for control plane HA)
-		if p.config.EnableWireguard && !svcCtx.IsWatched {
-			// Call serviceFunc first to set up the WireGuard tunnel
-			err = serviceFunc(svcCtx, svc, wg)
-			if err != nil {
-				log.Error(err.Error())
-				if errors.Is(err, &utils.PanicError{}) {
-					return err
-				}
-			}
-
-			wg.Go(func() {
-				defer func() {
-					if svcCtx != nil {
-						svcCtx.IsWatched = false
+			watchWg.Go(func() {
+				// start if service is not already watched/handled
+				// signal endpoints goroutine we are ready to start and run service handling function
+				log.Info("(svcs) service function starting", "uid", svc.UID)
+				err = serviceFunc.Run(svcCtx, svc, wg)
+				if err != nil {
+					log.Error(err.Error())
+					if errors.Is(err, &utils.PanicError{}) {
+						// cancel service context on panic error
+						// TODO:  should we quit kube-vip altogether here?
+						svcCtx.Cancel()
 					}
-				}()
+				}
+				log.Info("(svcs) service function done", "uid", svc.UID)
+			})
 
-				// Start endpoint watcher for WireGuard services (uses EndpointSlices by default)
+			// this goroutine will watch endpoints for the service
+			watchWg.Go(func() {
+				// create provider and start watching the endpoints
 				var provider providers.Provider
 				if p.config.EnableEndpoints {
 					provider = providers.NewEndpoints()
@@ -251,122 +240,39 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 			})
 
-			svcCtx.IsWatched = true
-		} else if p.config.EnableServicesElection || // Service Election
-			((p.config.EnableRoutingTable || p.config.EnableBGP) && // Routing table mode or BGP
-				(!p.config.EnableLeaderElection && !p.config.EnableServicesElection)) { // No leaderelection or services election
+		})
 
-			// If this load balancer Traffic Policy is "local"
-			if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+		// tag service as watched
+		svcCtx.IsWatched = true
+	}
 
-				// Start an endpoint watcher if we're not watching it already
-				if !svcCtx.IsWatched {
-					// background the endpoint watcher
-					if (p.config.EnableRoutingTable || p.config.EnableBGP) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
-						err = serviceFunc(svcCtx, svc, wg)
-						if err != nil {
-							log.Error(err.Error())
-							if errors.Is(err, &utils.PanicError{}) {
-								return err
-							}
-						}
-					}
-
-					wg.Go(func() {
-						defer func() {
-							if svcCtx != nil {
-								svcCtx.IsWatched = false
-							}
-						}()
-
-						if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
-							// Add Endpoint or EndpointSlices watcher
-							var provider providers.Provider
-							if p.config.EnableEndpoints {
-								provider = providers.NewEndpoints()
-							} else {
-								provider = providers.NewEndpointslices()
-							}
-							if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-								log.Error(err.Error())
-							}
-						}
-					})
-
-					// We're now watching this service
-					svcCtx.IsWatched = true
-				}
-			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
-				err = serviceFunc(svcCtx, svc, wg)
-				if err != nil {
-					log.Error(err.Error())
-					if errors.Is(err, &utils.PanicError{}) {
-						return err
-					}
-				}
-
-				wg.Go(func() {
-					defer func() {
-						if svcCtx != nil {
-							svcCtx.IsWatched = false
-						}
-					}()
-
-					if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
-						// Add Endpoint watcher
-						var provider providers.Provider
-						if p.config.EnableEndpoints {
-							provider = providers.NewEndpoints()
-						} else {
-							provider = providers.NewEndpointslices()
-						}
-						if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-							log.Error(err.Error())
-						}
-					}
-				})
-				// We're now watching this service
-				svcCtx.IsWatched = true
-			} else {
-				wg.Go(func() {
-					for {
-						select {
-						case <-svcCtx.Ctx.Done():
-							log.Warn("(svcs) restartable service watcher ending", "uid", svc.UID)
-							return
-						default:
-							if !svcCtx.IsActive {
-								log.Info("(svcs) restartable service watcher starting", "uid", svc.UID)
-								err = serviceFunc(svcCtx, svc, wg)
-								if err != nil {
-									log.Error(err.Error())
-									if errors.Is(err, &utils.PanicError{}) {
-										svcCtx.Cancel()
-									}
-								}
-								log.Info("(svcs) restartable service watcher done", "uid", svc.UID)
-							}
-						}
-					}
-				})
-			}
-		} else {
-			// Increment the waitGroup before the service Func is called (Done is completed in there)
-			err = serviceFunc(svcCtx, svc, wg)
-			if err != nil {
-				log.Error(err.Error())
-				if errors.Is(err, &utils.PanicError{}) {
-					return err
-				}
-			}
-		}
-		if !p.config.EnableServicesElection {
-			log.Debug("Service now active", "name", svc.Name, "uid", svc.UID)
-			svcCtx.IsActive = true
-		}
+	if !p.config.EnableServicesElection {
+		log.Debug("Service now active", "name", svc.Name, "uid", svc.UID)
 	}
 
 	return nil
+}
+
+func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Service, error) {
+	addressCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+
+	for {
+		select {
+		case <-addressCtx.Done():
+			return nil, fmt.Errorf("failed to wait for the service LB address: %w", ctx.Err())
+		case <-ticker.C:
+			s, err := p.clientSet.CoreV1().Services(svc.Namespace).Get(addressCtx, svc.Name, metav1.GetOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get updated service data: %w", err)
+			}
+			addrs, hostnames := instance.FetchServiceAddresses(s)
+			if len(addrs) > 0 || len(hostnames) > 0 {
+				return s, nil
+			}
+		}
+	}
 }
 
 func (p *Processor) Delete(event watch.Event) error {
@@ -374,7 +280,6 @@ func (p *Processor) Delete(event watch.Event) error {
 	if !ok {
 		return fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
 	}
-
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
@@ -400,20 +305,17 @@ func (p *Processor) Delete(event watch.Event) error {
 			}
 		}
 
-		if svcCtx.IsActive && !p.config.EnableServicesElection {
+		if !p.config.EnableServicesElection {
 			// If this is an active service then and additional leaderElection will handle stopping
 			err = p.deleteService(svcCtx.Ctx, svc.UID)
 			if err != nil {
 				log.Error(err.Error())
 			}
-			svcCtx.IsActive = false
 		}
 
 		// Calls the cancel function of the context
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		svcCtx.Cancel()
-		log.Warn("(svcs) waiting for load balancer to finish", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		<-svcCtx.Ctx.Done()
 		p.svcMap.Delete(svc.UID)
 	}
 
@@ -444,4 +346,21 @@ func (p *Processor) getServiceContext(uid types.UID) (*servicecontext.Context, e
 
 func (p *Processor) CountRouteReferences(route *netlink.Route) int {
 	return endpoints.CountRouteReferences(route, &p.ServiceInstances)
+}
+
+func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
+	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
+	originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
+
+	// Service addresses changed
+	return !reflect.DeepEqual(originalServiceAddresses, svcAddresses) ||
+		// Service hostnames changed
+		!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
+		// ExternalTrafficPolicy changed
+		svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy ||
+		// IP stack configuration changed
+		!reflect.DeepEqual(svc.Spec.IPFamilies, i.ServiceSnapshot.Spec.IPFamilies) ||
+		*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
+		// DDNS was disabled/enabled
+		svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS]
 }
