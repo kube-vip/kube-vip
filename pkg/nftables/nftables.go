@@ -53,7 +53,7 @@ const (
 // a different mark value for our connmark-based policy routing.
 const connmarkOffset = 0x10000 // 65536 - added to listenPort to get our connmark value
 
-func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, IPv6 bool) error {
+func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool) error {
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -79,13 +79,31 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 	if err != nil {
 		return err
 	}
-	// Create our nftables rule
-	rule, err := CreateRule(podIP, vipIP, service, destinationPorts, ignoreCIDR, conn, IPv6)
+
+	portExpressions, err := portSet(conn, IPv6, destinationPorts)
 	if err != nil {
 		return err
 	}
-	slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
-	conn.AddRule(rule) // Add the rule
+	var rule *nftables.Rule
+	if len(portExpressions) != 0 {
+		for x := range portExpressions {
+			// Create our nftables rule
+			rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR, conn, IPv6, portExpressions[x])
+			if err != nil {
+				return err
+			}
+			slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
+			conn.AddRule(rule) // Add the rule
+		}
+	} else {
+		// Create our nftables rule
+		rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR, conn, IPv6, nil)
+		if err != nil {
+			return err
+		}
+		slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
+		conn.AddRule(rule) // Add the rule
+	}
 
 	err = conn.Flush() // Commit the rule to nftables
 	if err != nil {
@@ -93,6 +111,168 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 	}
 
 	return conn.CloseLasting() // Close out any remaining netlink communication
+}
+
+func portSet(conn *nftables.Conn, IPv6 bool, destinationPorts string) (setExpression [][]expr.Any, err error) {
+	// If we filter on ports protocols then parse them
+	if destinationPorts != "" {
+		table := GetTable(IPv6)
+		fixedPorts := strings.Split(destinationPorts, ",")
+
+		// Create an element using our pod IP
+		tcpElements := []nftables.SetElement{}
+		udpElements := []nftables.SetElement{}
+		sctpElements := []nftables.SetElement{}
+
+		tcpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+		udpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+		sctpSet := &nftables.Set{
+			Anonymous: true,
+			Constant:  true,
+			Table:     table,
+			KeyType:   nftables.TypeInetService,
+		}
+
+		for _, fixedPort := range fixedPorts {
+			data := strings.Split(fixedPort, ":")
+			if len(data) == 0 {
+				continue
+			} else if len(data) == 2 { // Ensure we have two elements { proto:port }
+				// parse the port to a number
+				port, err := strconv.Atoi(data[1])
+				if err != nil {
+					slog.Error("[egress]", "unable to process port", data[1])
+					continue
+				}
+				// Ensure the port is within the valid range for uint16
+				if port < 0 || port > 65535 {
+					slog.Error("[egress]", "port out of range for uint16", data[1])
+					continue
+				}
+
+				switch data[0] {
+				case "tcp":
+					//nolint:gosec
+					tcpElements = append(tcpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				case "udp":
+					//nolint:gosec
+					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				case "sctp":
+					//nolint:gosec
+					sctpElements = append(sctpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
+				default:
+					slog.Error("[egress]", "unknown protocol", data[0])
+				}
+			}
+		}
+
+		// Add TCP Ports
+		if len(tcpElements) != 0 {
+			err := conn.AddSet(tcpSet, tcpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_TCP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        tcpSet.Name,
+					SetID:          tcpSet.ID,
+				},
+			}
+			setExpression = append(setExpression, expression)
+		}
+
+		// Add UDP ports
+		if len(udpElements) != 0 {
+			err = conn.AddSet(udpSet, udpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_UDP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        udpSet.Name,
+					SetID:          udpSet.ID,
+				},
+			}
+			setExpression = append(setExpression, expression)
+		}
+
+		// Add SCTP Ports
+		if len(sctpElements) != 0 {
+			err = conn.AddSet(sctpSet, sctpElements)
+			if err != nil {
+				return nil, err
+			}
+			expression := []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				// [ cmp eq reg 1 0x00000006 ]
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_SCTP},
+				},
+
+				// [ payload load 2b @ transport header + 2 => reg 1 ]
+				&expr.Payload{
+					DestRegister: 1,
+					Base:         expr.PayloadBaseTransportHeader,
+					Offset:       2,
+					Len:          2,
+				},
+				// [ lookup reg 1 set __set%d ]
+				&expr.Lookup{
+					SourceRegister: 1,
+					SetName:        sctpSet.Name,
+					SetID:          sctpSet.ID,
+				},
+			}
+			setExpression = append(setExpression, expression)
+		}
+	}
+	return setExpression, nil
 }
 
 func DeleteSNAT(IPv6 bool, service string) error {
@@ -186,7 +366,7 @@ func ClearTables() error {
 }
 
 // Create our nftables rule
-func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, conn *nftables.Conn, IPv6 bool) (*nftables.Rule, error) {
+func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, allowCIDR []string, conn *nftables.Conn, IPv6 bool, portExpression []expr.Any) (*nftables.Rule, error) {
 
 	// Validate pod IP
 	if net.ParseIP(podIP) == nil {
@@ -268,163 +448,10 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 	// Add expression to the rule
 	rule.Exprs = append(rule.Exprs, expression...)
 
-	// If we filter on ports protocols then parse them
-	if destinationPorts != "" {
-		fixedPorts := strings.Split(destinationPorts, ",")
-
-		// Create an element using our pod IP
-		tcpElements := []nftables.SetElement{}
-		udpElements := []nftables.SetElement{}
-		sctpElements := []nftables.SetElement{}
-
-		tcpSet := &nftables.Set{
-			Anonymous: true,
-			Constant:  true,
-			Table:     table,
-			KeyType:   nftables.TypeInetService,
-		}
-		udpSet := &nftables.Set{
-			Anonymous: true,
-			Constant:  true,
-			Table:     table,
-			KeyType:   nftables.TypeInetService,
-		}
-		sctpSet := &nftables.Set{
-			Anonymous: true,
-			Constant:  true,
-			Table:     table,
-			KeyType:   nftables.TypeInetService,
-		}
-		for _, fixedPort := range fixedPorts {
-			data := strings.Split(fixedPort, ":")
-			if len(data) == 0 {
-				continue
-			} else if len(data) == 2 { // Ensure we have two elements { proto:port }
-				// parse the port to a number
-				port, err := strconv.Atoi(data[1])
-				if err != nil {
-					slog.Error("[egress]", "unable to process port", data[1])
-					continue
-				}
-				// Ensure the port is within the valid range for uint16
-				if port < 0 || port > 65535 {
-					slog.Error("[egress]", "port out of range for uint16", data[1])
-					continue
-				}
-
-				switch data[0] {
-				case "tcp":
-					//nolint:gosec
-					tcpElements = append(tcpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
-				case "udp":
-					//nolint:gosec
-					udpElements = append(udpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
-				case "sctp":
-					//nolint:gosec
-					sctpElements = append(sctpElements, nftables.SetElement{Key: binaryutil.BigEndian.PutUint16(uint16(port))})
-				default:
-					slog.Error("[egress]", "unknown protocol", data[0])
-				}
-			}
-		}
-
-		// Add TCP Ports
-		if len(tcpElements) != 0 {
-			err = conn.AddSet(tcpSet, tcpElements)
-			if err != nil {
-				return nil, err
-			}
-			expression := []expr.Any{
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-				// [ cmp eq reg 1 0x00000006 ]
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     []byte{unix.IPPROTO_TCP},
-				},
-
-				// [ payload load 2b @ transport header + 2 => reg 1 ]
-				&expr.Payload{
-					DestRegister: 1,
-					Base:         expr.PayloadBaseTransportHeader,
-					Offset:       2,
-					Len:          2,
-				},
-				// [ lookup reg 1 set __set%d ]
-				&expr.Lookup{
-					SourceRegister: 1,
-					SetName:        tcpSet.Name,
-					SetID:          tcpSet.ID,
-				},
-			}
-			rule.Exprs = append(rule.Exprs, expression...)
-		}
-
-		// Add UDP ports
-		if len(udpElements) != 0 {
-			err = conn.AddSet(udpSet, udpElements)
-			if err != nil {
-				return nil, err
-			}
-			expression := []expr.Any{
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-				// [ cmp eq reg 1 0x00000006 ]
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     []byte{unix.IPPROTO_UDP},
-				},
-
-				// [ payload load 2b @ transport header + 2 => reg 1 ]
-				&expr.Payload{
-					DestRegister: 1,
-					Base:         expr.PayloadBaseTransportHeader,
-					Offset:       2,
-					Len:          2,
-				},
-				// [ lookup reg 1 set __set%d ]
-				&expr.Lookup{
-					SourceRegister: 1,
-					SetName:        udpSet.Name,
-					SetID:          udpSet.ID,
-				},
-			}
-			rule.Exprs = append(rule.Exprs, expression...)
-		}
-
-		// Add SCTP Ports
-		if len(sctpElements) != 0 {
-			err = conn.AddSet(sctpSet, sctpElements)
-			if err != nil {
-				return nil, err
-			}
-			expression := []expr.Any{
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-				// [ cmp eq reg 1 0x00000006 ]
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     []byte{unix.IPPROTO_SCTP},
-				},
-
-				// [ payload load 2b @ transport header + 2 => reg 1 ]
-				&expr.Payload{
-					DestRegister: 1,
-					Base:         expr.PayloadBaseTransportHeader,
-					Offset:       2,
-					Len:          2,
-				},
-				// [ lookup reg 1 set __set%d ]
-				&expr.Lookup{
-					SourceRegister: 1,
-					SetName:        sctpSet.Name,
-					SetID:          sctpSet.ID,
-				},
-			}
-			rule.Exprs = append(rule.Exprs, expression...)
-		}
+	// If we have additional ports to add to the expression, add them here
+	if portExpression != nil {
+		rule.Exprs = append(rule.Exprs, portExpression...)
 	}
-
 	// Parse which CIDRs we will not SNAT for
 	for _, cidr := range ignoreCIDR {
 		start, end, err := nftables.NetFirstAndLastIP(cidr)
@@ -461,6 +488,41 @@ func CreateRule(podIP, vipIP, service, destinationPorts string, ignoreCIDR []str
 		rule.Exprs = append(rule.Exprs, expression...)
 	}
 
+	// Parse which CIDRs we will only SNAT for
+	for _, cidr := range allowCIDR {
+		start, end, err := nftables.NetFirstAndLastIP(cidr)
+		if err != nil {
+			return nil, err
+		}
+		expression = []expr.Any{}
+
+		payload := &expr.Payload{
+			DestRegister: 1,
+			Base:         expr.PayloadBaseNetworkHeader,
+		}
+		notEqualRange := &expr.Range{
+			Op:       expr.CmpOpEq,
+			Register: 1,
+		}
+
+		if IPv6 {
+			payload.Len = 16
+			payload.Offset = 24
+			notEqualRange.FromData = start.To16()
+			notEqualRange.ToData = end.To16()
+		} else {
+			payload.Offset = 16
+			payload.Len = 4
+			notEqualRange.FromData = start.To4()
+			notEqualRange.ToData = end.To4()
+		}
+		// Add expressions
+		expression = append(expression, payload)
+		expression = append(expression, notEqualRange)
+
+		// // Add expression to the rule
+		rule.Exprs = append(rule.Exprs, expression...)
+	}
 	// Final expression to the rule is the SNAT to the VIP address
 	expression = []expr.Any{}
 

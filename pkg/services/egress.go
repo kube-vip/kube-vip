@@ -224,8 +224,15 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 
 		}
 
+		// Add networks that we specifically should only SNAT for
+		allowCIDRs := []string{}
+		if allowedNetworks != "" {
+			networks := strings.Split(strings.TrimSpace(allowedNetworks), ",") //Remove whitespace characters and then create an array from the CIDRs
+			allowCIDRs = append(allowCIDRs, networks...)
+		}
+
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, utils.IsIPv6(vipIP))
+		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP))
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
