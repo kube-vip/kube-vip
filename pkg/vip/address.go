@@ -366,10 +366,13 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 	defer configurator.link.Lock.Unlock()
 	var existing *netlink.Addr
 	var err error
-	if precheck {
-		if existing, err = configurator.IsSet(); err != nil {
-			return false, errors.Wrap(err, "could not check if address exists")
-		}
+
+	if existing, err = configurator.IsSet(); err != nil {
+		return false, errors.Wrap(err, "could not check if address exists")
+	}
+
+	if existing != nil {
+		configurator.address.PreferedLft = existing.PreferedLft
 	}
 
 	lifetime := NoLifetime
@@ -378,7 +381,7 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 		lifetime = minLifetime[0]
 	}
 
-	if existing != nil && existing.ValidLft > lifetime {
+	if precheck && existing != nil && existing.ValidLft > lifetime {
 		return false, nil
 	}
 
@@ -568,6 +571,8 @@ func (configurator *network) DeleteIP() (bool, error) {
 		return false, nil
 	}
 
+	configurator.address.PreferedLft = result.PreferedLft
+
 	if err = netlink.AddrDel(configurator.link.Intf, configurator.address); err != nil {
 		return false, errors.Wrap(err, "could not delete ip")
 	}
@@ -667,6 +672,8 @@ func (configurator *network) IsDADFAIL() bool {
 	// Find the VIP and check if it is DADFAILED
 	for _, address := range addresses {
 		if address.IP.Equal(configurator.address.IP) && addressHasDADFAILEDFlag(address) {
+			// copy the value of PreferedLft of existing address to the configurator to reconfigure it later
+			configurator.address.PreferedLft = address.PreferedLft
 			return true
 		}
 	}
