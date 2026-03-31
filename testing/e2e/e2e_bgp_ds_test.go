@@ -73,8 +73,8 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareClusterForDS(ctx, tempDirPath, "bgp-ds", imagePath, k8sImagePath,
-					logger, networking, 1, nil, 1)
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
 			})
 
 			AfterAll(func() {
