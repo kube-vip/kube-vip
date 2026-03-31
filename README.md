@@ -60,6 +60,10 @@ All of these would require a separate level of configuration and in some infrast
 
 Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
 
+## Community Tools
+
+- **[KubeStellar Console — Guided kube-vip Install](https://console.kubestellar.io/missions/install-kube-vip)** — A step-by-step guided installation experience for kube-vip with pre-flight checks, validation, troubleshooting, and rollback support.
+
 ## Contributing
 
 Thanks for taking the time to join our community and start contributing! We welcome pull requests. Feel free to dig through the [issues](https://github.com/kube-vip/kube-vip/issues) and jump in.
