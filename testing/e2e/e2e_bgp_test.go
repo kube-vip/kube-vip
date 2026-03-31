@@ -1313,34 +1313,6 @@ func getGoBGPPaths(ctx context.Context, client api.GobgpApiClient, family *api.F
 
 	return rib, nil
 }
-func getGoBGPPeers(ctx context.Context, client api.GobgpApiClient) ([]*api.Peer, error) {
-	peersCtx, cancel := context.WithTimeout(ctx, time.Second*5)
-	defer cancel()
-
-	stream, err := client.ListPeer(peersCtx, &api.ListPeerRequest{})
-	if err != nil {
-		return nil, err
-	}
-
-	l := make([]*api.Peer, 0, 1024)
-	for {
-		r, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, err
-		}
-		l = append(l, r.Peer)
-	}
-
-	By("Peers")
-	for _, p := range l {
-		By(p.String())
-	}
-	By("")
-
-	return l, nil
-}
 
 func startGoBGP(config string, kill chan any) {
 	By("starting GoBGP server")
