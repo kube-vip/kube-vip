@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"syscall"
@@ -28,8 +29,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// BGPRouteManager allows to manage the routes announced by the BGP server.
+type BGPRouteManager interface {
+	AddHost(ctx context.Context, addr string, object string) error
+	DelHost(ctx context.Context, addr string, object string) error
+}
+
 func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
-	bgpServer *bgp.Server, killFunc func()) error {
+	bgpServer BGPRouteManager, killFunc func()) error {
+
 	var err error
 
 	var wg sync.WaitGroup
@@ -72,11 +80,18 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		}
 
 		if c.EnableBGP {
-			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
-			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
-			err = bgpServer.AddHost(ctx, network.CIDR(), c.NodeName)
-			if err != nil {
-				log.Error(err.Error())
+			if c.ControlPlaneHealthCheck.Address != "" {
+				// The health check loop owns route advertisement/withdrawal when configured.
+				wg.Go(func() {
+					cluster.bgpHealthCheckLoop(ctx, c, bgpServer, network.CIDR())
+				})
+			} else {
+				// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation.
+				log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
+				err = bgpServer.AddHost(ctx, network.CIDR(), c.NodeName)
+				if err != nil {
+					log.Error(err.Error())
+				}
 			}
 		}
 
@@ -242,6 +257,82 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	}
 
 	return nil
+}
+
+func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer BGPRouteManager, vipCIDR string) {
+	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
+
+	consecutiveFailures := 0
+	routeAnnounced := false
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+
+	log.Info("Starting BGP health check",
+		"address", c.ControlPlaneHealthCheck.Address,
+		"cidr", vipCIDR,
+		"period", period,
+		"timeout", cluster.healthCheckHTTPClient.Timeout,
+		"threshold", c.ControlPlaneHealthCheck.FailureThreshold,
+	)
+
+	for {
+		statusCode := 0
+		var healthErr error
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ControlPlaneHealthCheck.Address, nil)
+		if err != nil {
+			healthErr = err
+		} else {
+			resp, err := cluster.healthCheckHTTPClient.Do(req)
+			if err != nil {
+				healthErr = err
+			} else {
+				defer resp.Body.Close()
+				statusCode = resp.StatusCode
+			}
+		}
+
+		healthy := healthErr == nil && statusCode == http.StatusOK
+
+		if healthy {
+			consecutiveFailures = 0
+			if !routeAnnounced {
+				log.Info("BGP health check passed, announcing route", "cidr", vipCIDR)
+				if err := bgpServer.AddHost(ctx, vipCIDR, c.NodeName); err != nil {
+					log.Error("BGP health check: failed to announce route", "cidr", vipCIDR, "err", err)
+				} else {
+					routeAnnounced = true
+				}
+			}
+		} else {
+			consecutiveFailures++
+			if healthErr != nil {
+				log.Warn("BGP health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures, "err", healthErr)
+			} else {
+				log.Warn("BGP health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures, "status", statusCode)
+			}
+
+			if consecutiveFailures >= c.ControlPlaneHealthCheck.FailureThreshold && routeAnnounced {
+				log.Warn("BGP health check threshold reached, withdrawing route", "failureThreshold", c.ControlPlaneHealthCheck.FailureThreshold, "cidr", vipCIDR)
+				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
+					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
+				} else {
+					routeAnnounced = false
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if routeAnnounced {
+				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
+					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
+				}
+			}
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func isV6(ip string) (bool, error) {

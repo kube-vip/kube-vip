@@ -539,6 +539,40 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.KeepaliveInterval = u64
 	}
 
+	// BGP health check options
+	env = os.Getenv(controlPlaneHealthCheckAddress)
+	if env != "" {
+		c.ControlPlaneHealthCheck.Address = env
+	}
+	env = os.Getenv(controlPlaneHealthCheckPeriodSeconds)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", controlPlaneHealthCheckPeriodSeconds, env, err)
+		}
+		c.ControlPlaneHealthCheck.PeriodSeconds = int(i)
+	}
+	env = os.Getenv(controlPlaneHealthCheckTimeoutSeconds)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", controlPlaneHealthCheckTimeoutSeconds, env, err)
+		}
+		c.ControlPlaneHealthCheck.TimeoutSeconds = int(i)
+	}
+	env = os.Getenv(controlPlaneHealthCheckFailureThreshold)
+	if env != "" {
+		i, err := strconv.ParseInt(env, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", controlPlaneHealthCheckFailureThreshold, env, err)
+		}
+		c.ControlPlaneHealthCheck.FailureThreshold = int(i)
+	}
+	env = os.Getenv(controlPlaneHealthCheckCAPath)
+	if env != "" {
+		c.ControlPlaneHealthCheck.CAPath = env
+	}
+
 	env = os.Getenv(zebraEnable)
 	if env != "" {
 		result, err := strconv.ParseBool(env)
@@ -890,6 +924,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	// Leader Election configuration
 	mergeLeaderElectionConfig(&baseConfig.KubernetesLeaderElection, &fileConfig.KubernetesLeaderElection)
 
+	// BGP health check configuration
+	mergeHealthCheck(&baseConfig.ControlPlaneHealthCheck, &fileConfig.ControlPlaneHealthCheck)
+
 	// Prometheus configuration
 	if baseConfig.PrometheusHTTPServer == "" && fileConfig.PrometheusHTTPServer != "" {
 		baseConfig.PrometheusHTTPServer = fileConfig.PrometheusHTTPServer
@@ -910,7 +947,7 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 		baseConfig.DHCPBackoffAttempts = fileConfig.DHCPBackoffAttempts
 	}
 
-	// Health check configuration
+	// Health check configuration (HTTP listener for kube-vip readiness)
 	if baseConfig.HealthCheckPort == 0 && fileConfig.HealthCheckPort != 0 {
 		baseConfig.HealthCheckPort = fileConfig.HealthCheckPort
 	}
@@ -995,5 +1032,24 @@ func mergeLeaderElectionConfig(base, file *KubernetesLeaderElection) {
 	}
 	if len(base.LeaseAnnotations) == 0 && len(file.LeaseAnnotations) > 0 {
 		base.LeaseAnnotations = file.LeaseAnnotations
+	}
+}
+
+// mergeHealthCheck merges HTTP health check configuration for BGP route advertisement.
+func mergeHealthCheck(base, file *HealthCheck) {
+	if base.Address == "" && file.Address != "" {
+		base.Address = file.Address
+	}
+	if base.PeriodSeconds == 0 && file.PeriodSeconds != 0 {
+		base.PeriodSeconds = file.PeriodSeconds
+	}
+	if base.TimeoutSeconds == 0 && file.TimeoutSeconds != 0 {
+		base.TimeoutSeconds = file.TimeoutSeconds
+	}
+	if base.FailureThreshold == 0 && file.FailureThreshold != 0 {
+		base.FailureThreshold = file.FailureThreshold
+	}
+	if base.CAPath == "" && file.CAPath != "" {
+		base.CAPath = file.CAPath
 	}
 }

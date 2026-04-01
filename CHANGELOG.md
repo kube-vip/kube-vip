@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- Configurable control-plane health check for BGP mode without leader election
+  - Polls a configurable HTTP(S) endpoint (e.g. `https://localhost:6443/livez`) to verify the exposed service is healthy (usually the local kube-apiserver)
+  - Withdraws the BGP route after a configurable number of consecutive failures, removing the unhealthy node from the ECMP set
+  - Re-announces the route automatically once the endpoint recovers
+  - Gracefully withdraws the route on shutdown (SIGTERM)
+  - Supports custom CA certificates for TLS verification
+  - Configuration via environment variables or CLI flags:
+    - `control_plane_health_check_address` / `--controlPlaneHealthCheckAddress`: URL to poll
+    - `control_plane_health_check_period_seconds` / `--controlPlaneHealthCheckPeriodSeconds`: interval between checks (default: 5)
+    - `control_plane_health_check_timeout_seconds` / `--controlPlaneHealthCheckTimeoutSeconds`: per-request timeout (default: 3)
+    - `control_plane_health_check_failure_threshold` / `--controlPlaneHealthCheckFailureThreshold`: consecutive failures before withdrawal (default: 3)
+    - `control_plane_health_check_ca_path` / `--controlPlaneHealthCheckCAPath`: CA cert for HTTPS verification
 - SIGUSR1 signal handler for runtime configuration dumps (#1301)
   - Send SIGUSR1 to kube-vip process to dump current configuration to stdout
   - Configuration dump includes:

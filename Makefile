@@ -16,7 +16,7 @@ TARGETOS=linux
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
-GO_VERSION := 1.25.5
+GO_VERSION := 1.25.6
 K8S_VERSION ?= v1.35.0
 
 .PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
@@ -132,7 +132,7 @@ unit-tests:
 	go test -race ./...
 
 unit-tests-docker:
-	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip golang:$(GO_VERSION) make unit-tests
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) make unit-tests
 
 integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
