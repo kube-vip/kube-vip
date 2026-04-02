@@ -104,7 +104,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			var err error
 			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp")
 			Expect(err).NotTo(HaveOccurred())
-
 		})
 
 		AfterAll(func() {
@@ -131,6 +130,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "false",
@@ -177,6 +177,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -237,6 +238,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -289,6 +291,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "false",
@@ -337,6 +340,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -397,6 +401,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -448,6 +453,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "false",
@@ -494,6 +500,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -554,6 +561,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -607,6 +615,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -655,6 +664,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -717,6 +727,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -768,6 +779,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "false",
@@ -814,6 +826,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -868,6 +881,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:      cpVIP,
+					ControlPlaneEnable:   "true",
 					ImagePath:            imagePath,
 					ConfigPath:           configPath,
 					SvcEnable:            "true",
@@ -1173,7 +1187,8 @@ func removePod(ctx context.Context, name, namespace string, client kubernetes.In
 }
 
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
-	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int) {
+	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int,
+) {
 	svcAnnotations := make(map[string]string)
 	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
 	if leaseName != "" {
@@ -1415,7 +1430,8 @@ func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName stri
 }
 
 func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
-	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int) {
+	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int,
+) {
 	lbAddresses := vip.Split(lbAddress)
 
 	services := []string{}
@@ -1467,7 +1483,8 @@ func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamesp
 }
 
 func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
-	client kubernetes.Interface, ipFamily []corev1.IPFamily, numberOfServices int) {
+	client kubernetes.Interface, ipFamily []corev1.IPFamily, numberOfServices int,
+) {
 	lbAddresses := vip.Split(lbAddress)
 
 	services := []string{}
