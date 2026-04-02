@@ -213,6 +213,7 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 
 	bgpConfig.Peers = make([]kubevip.BGPPeer, 0, len(peerIPs))
 	regexPass := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?bgp-pass$", prefix))
+	regexMultiHop := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-multi-hop$", prefix))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 
@@ -233,6 +234,21 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 				}
 				// Set the password for each peer
 				bgpPeer.Password = string(decodedPassword)
+			}
+
+			// Check if multi-hop is enabled.
+			for k, v := range node.Annotations {
+				if regexMultiHop.MatchString(k) {
+					switch v {
+					case "true":
+						bgpPeer.MultiHop = true
+					case "false":
+						bgpPeer.MultiHop = false
+					default:
+						return bgpConfig, bgpPeer,
+							fmt.Errorf("invalid %q annotation value: %q, must be \"true\" or \"false\"", k, v)
+					}
+				}
 			}
 			bgpConfig.Peers = append(bgpConfig.Peers, bgpPeer)
 		}
