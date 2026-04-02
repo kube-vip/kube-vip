@@ -207,6 +207,9 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	peerIPString = strings.TrimRight(peerIPString, ",")
 
 	peerIPs := strings.Split(peerIPString, ",")
+	if len(peerIPs) >= 1 && peerIPs[0] == "" || len(peerIPs) == 0 {
+		return bgpConfig, bgpPeer, fmt.Errorf("peer-ip value missing or empty")
+	}
 
 	bgpConfig.Peers = make([]kubevip.BGPPeer, 0, len(peerIPs))
 	for _, peerIP := range peerIPs {

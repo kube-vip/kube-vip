@@ -28,6 +28,7 @@ func TestParseBgpAnnotations(t *testing.T) {
 		"bgp/node-asn": "65000",
 		"bgp/peer-asn": "64000",
 		"bgp/src-ip":   "10.0.0.254",
+		"bgp/peer-ip":  "10.0.0.1",
 	}
 
 	bgpConfig, bgpPeer, err := parseBgpAnnotations(bgpConfigBase, node, "bgp")
