@@ -50,6 +50,10 @@ var kubeManifestPod = &cobra.Command{
 			log.Error("parsing environment", "err", err)
 			return
 		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
+			return
+		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
@@ -88,6 +92,10 @@ var kubeManifestDaemon = &cobra.Command{
 			log.Error("parsing environment", "err", err)
 			return
 		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
+			return
+		}
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
 			_ = cmd.Help()
@@ -123,6 +131,10 @@ var kubeManifestRbac = &cobra.Command{
 		// TODO - A load of text detailing what's actually happening
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
 			log.Error("parsing environment", "err", err)
+			return
+		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
 			return
 		}
 

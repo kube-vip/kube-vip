@@ -132,6 +132,10 @@ type Config struct {
 	BGPPeerConfig BGPPeer
 	BGPPeers      []string
 
+	// ControlPlaneHealthCheck configures HTTP polling of the control plane when using BGP without
+	// leader election. If the health check fails, the BGP route will be withdrawn.
+	ControlPlaneHealthCheck HealthCheck `yaml:"controlPlaneHealthCheck,omitempty"`
+
 	// LoadBalancers are the various services we can load balance over
 	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
 
@@ -233,12 +237,29 @@ type Etcd struct {
 	Endpoints      []string
 }
 
+// HealthCheck defines HTTP health-check settings for control-plane polling when using BGP
+// without leader election.
+type HealthCheck struct {
+	// Address is the URL to poll to check the health of the control-plane. If the health
+	// check fails, the BGP route will be withdrawn.
+	Address string `yaml:"address"`
+	// PeriodSeconds is the interval in seconds between health checks.
+	PeriodSeconds int `yaml:"periodSeconds"`
+	// TimeoutSeconds is the timeout per health check request. If a request takes longer
+	// than this timeout, the health check is considered failed.
+	TimeoutSeconds int `yaml:"timeoutSeconds"`
+	// FailureThreshold is the number of consecutive failures before route withdrawal.
+	FailureThreshold int `yaml:"failureThreshold"`
+	// CAPath is the CA certificate path used for TLS verification when Address is an HTTPS URL.
+	CAPath string `yaml:"caPath"`
+}
+
 // LoadBalancer contains the configuration of a load balancing instance
 type LoadBalancer struct {
 	// Name of a LoadBalancer
 	Name string `yaml:"name"`
 
-	//Ports exposed by a LoadBalancer
+	// Ports exposed by a LoadBalancer
 	Ports []Port
 
 	// BindToVip will bind the load balancer port to the VIP itself

@@ -12,6 +12,9 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
@@ -130,6 +133,14 @@ func commandOutputInLines(node nodes.Node, command string, args ...string) []str
 	Expect(scanner.Err()).To(Succeed())
 
 	return lines
+}
+
+// ClientConfigFromKubeconfig builds a rest.Config from a raw kubeconfig string.
+func ClientConfigFromKubeconfig(kc string) (*rest.Config, error) {
+	getter := func() (*clientcmdapi.Config, error) {
+		return clientcmd.Load([]byte(kc))
+	}
+	return clientcmd.BuildConfigFromKubeconfigGetter("", getter)
 }
 
 func PrintCommandOutputIfErr(err error) error {

@@ -112,6 +112,16 @@ const (
 	bgpHoldTime = "bgp_hold_time"
 	// bgpKeepaliveInterval defines bgp timers keepalive interval
 	bgpKeepaliveInterval = "bgp_keepalive_interval"
+	// controlPlaneHealthCheckAddress defines the URL for control-plane health checks (BGP route withdrawal)
+	controlPlaneHealthCheckAddress = "control_plane_health_check_address"
+	// controlPlaneHealthCheckPeriodSeconds defines the period between control-plane health checks
+	controlPlaneHealthCheckPeriodSeconds = "control_plane_health_check_period_seconds"
+	// controlPlaneHealthCheckTimeoutSeconds defines the timeout for each control-plane health check request
+	controlPlaneHealthCheckTimeoutSeconds = "control_plane_health_check_timeout_seconds"
+	// controlPlaneHealthCheckFailureThreshold defines consecutive failures before BGP route withdrawal
+	controlPlaneHealthCheckFailureThreshold = "control_plane_health_check_failure_threshold"
+	// controlPlaneHealthCheckCAPath defines the path to a CA certificate for control-plane health check TLS verification
+	controlPlaneHealthCheckCAPath = "control_plane_health_check_ca_path"
 
 	// zebraEnable defines if Zebra integraton should be enabled
 	zebraEnable = "zebra_enable"
