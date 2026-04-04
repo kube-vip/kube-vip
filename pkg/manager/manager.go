@@ -89,7 +89,7 @@ type Manager struct {
 }
 
 // New will create a new managing object
-func New(configMap string, config *kubevip.Config) (*Manager, error) {
+func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manager, error) {
 
 	// Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
@@ -212,7 +212,20 @@ func New(configMap string, config *kubevip.Config) (*Manager, error) {
 	nodeLabelManager := node.NewManager(config, clientset)
 
 	var bgpServer *bgp.Server
+	// If BGP is enabled then we start a server instance that will broadcast VIPs
 	if config.EnableBGP {
+		var err error
+		// If Annotations have been set then we will look them up
+		if config.Annotations != "" {
+			err = annotationsWatcher(ctx, clientset, rwClientSet, config)
+		} else {
+			log.Debug("No Node annotations to parse")
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
 		bgpServer, err = bgp.NewBGPServer(config.BGPConfig)
 		if err != nil {
 			return nil, fmt.Errorf("creating BGP server: %w", err)
@@ -312,15 +325,6 @@ func (sm *Manager) Start(ctx context.Context) error {
 		}
 	}
 
-	// If BGP is enabled then we start a server instance that will broadcast VIPs
-	if sm.config.EnableBGP {
-		// If Annotations have been set then we will look them up
-		err := sm.parseAnnotations(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
 	return sm.startMode(ctx)
 }
 
@@ -406,19 +410,6 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		}
 	}
 
-	return nil
-}
-
-func (sm *Manager) parseAnnotations(ctx context.Context) error {
-	if sm.config.Annotations == "" {
-		log.Debug("No Node annotations to parse")
-		return nil
-	}
-
-	err := sm.annotationsWatcher(ctx)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 

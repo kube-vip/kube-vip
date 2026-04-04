@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
@@ -1007,6 +1009,125 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 			)
 		})
+
+		Describe("kube-vip BGP configuration via node annotations", Ordered, func() {
+			var (
+				clusterName string
+				client      kubernetes.Interface
+				gobgpClient api.GobgpApiClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+			)
+
+			BeforeAll(func() {
+				const (
+					nodesNumber  = 1
+					templateName = "kube-vip-bgp-annotations.yaml.tmpl"
+				)
+
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				Expect(err).NotTo(HaveOccurred())
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv4Family,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ImagePath:  imagePath,
+					ConfigPath: configPath,
+				}
+
+				templatePath := filepath.Join(curDir, templateName)
+				kubeVIPBGPManifestTemplate, err = template.New(templateName).ParseFiles(templatePath)
+				Expect(err).NotTo(HaveOccurred())
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "bgp-annotations", k8sImagePath, v129,
+					kubeVIPBGPManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, 1)
+
+				kvPeer := e2e.BGPPeerValues{
+					IP:       localIPv4,
+					AS:       goBGPAS,
+					IPFamily: utils.IPv4Family,
+				}
+
+				err = annotateNodes(ctx, "test", client, kvPeer, kubevipAS)
+				Expect(err).ToNot(HaveOccurred())
+
+				container := fmt.Sprintf("%s-control-plane", clusterName)
+				containerIPv4, _, err := GetContainerIPs(ctx, container)
+				Expect(err).ToNot(HaveOccurred())
+
+				gobgpPeers = append(gobgpPeers, &e2e.BGPPeerValues{
+					IP:       containerIPv4,
+					AS:       kubevipAS,
+					IPFamily: utils.IPv4Family,
+				})
+
+				gobgpClient, err = newGoBGPClient(localIPv4, goBGPPort)
+				Expect(err).ToNot(HaveOccurred())
+
+				for _, p := range gobgpPeers {
+					if slices.Contains([]string{utils.IPv4Family}, p.IPFamily) {
+						Eventually(func() error {
+							_, err = (gobgpClient).AddPeer(ctx, &api.AddPeerRequest{
+								Peer: &api.Peer{
+									Conf: &api.PeerConf{
+										NeighborAddress: p.IP,
+										PeerAsn:         uint32(p.AS),
+									},
+									AfiSafis: []*api.AfiSafi{
+										{
+											Config: &api.AfiSafiConfig{
+												Enabled: true,
+												Family: &api.Family{
+													Afi:  api.Family_AFI_IP6,
+													Safi: api.Family_SAFI_UNICAST,
+												},
+											},
+										},
+										{
+											Config: &api.AfiSafiConfig{
+												Enabled: true,
+												Family: &api.Family{
+													Afi:  api.Family_AFI_IP,
+													Safi: api.Family_SAFI_UNICAST,
+												},
+											},
+										},
+									},
+								},
+							})
+							return err
+						}, "120s", "100ms").Should(Succeed())
+					}
+				}
+			})
+
+			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
+				err := e2e.GetLogs(ctx, client, tempDirPath)
+				Expect(err).ToNot(HaveOccurred())
+				for _, p := range gobgpPeers {
+					Eventually(func() error {
+						_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
+							Address: p.IP,
+						})
+						return err
+					}, "30s", "200ms").Should(Succeed())
+				}
+				cleanupCluster(clusterName, ConfigMtx, logger)
+			})
+
+			DescribeTable("advertise IPv4 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+						trafficPolicy, client, 1, gobgpClient, "", "")
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
 	}
 })
 
@@ -1312,6 +1433,54 @@ func getGoBGPPaths(ctx context.Context, client api.GobgpApiClient, family *api.F
 	}
 
 	return rib, nil
+}
+
+// annotateNodes adds all BGP configuration annotations to all cluster nodes.
+func annotateNodes(ctx context.Context, pref string, client kubernetes.Interface, peer e2e.BGPPeerValues, asn uint32) error {
+	pref += "/bgp-peers-0-"
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, n := range nodes.Items {
+		annotations := n.Annotations
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+
+		var addr string
+		for _, a := range n.Status.Addresses {
+			if a.Type == corev1.NodeInternalIP {
+				addr = a.Address
+			}
+		}
+		if addr == "" {
+			return fmt.Errorf("node %q doesn't have an internal address", n.Name)
+		}
+
+		annotations[pref+"node-asn"] = strconv.Itoa(int(asn))
+		annotations[pref+"src-ip"] = addr
+		annotations[pref+"peer-asn"] = strconv.Itoa(int(peer.AS))
+		annotations[pref+"peer-ip"] = peer.IP
+
+		patch, err := json.Marshal(map[string]any{
+			"metadata": map[string]any{
+				"annotations": annotations,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to marshall annotations patch: %w", err)
+		}
+
+		_, err = client.CoreV1().Nodes().Patch(ctx, n.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func startGoBGP(config string, kill chan any) {

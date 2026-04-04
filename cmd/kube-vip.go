@@ -244,15 +244,15 @@ var kubeVipService = &cobra.Command{
 			}
 		}
 
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+
 		// Define the new service manager
-		mgr, err := manager.New(configMap, &initConfig)
+		mgr, err := manager.New(ctx, configMap, &initConfig)
 		if err != nil {
 			log.Error("new manager", "err", err)
 			return
 		}
-
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)
@@ -421,7 +421,7 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Define the new service manager
-		mgr, err := manager.New(configMap, &initConfig)
+		mgr, err := manager.New(ctx, configMap, &initConfig)
 		if err != nil {
 			log.Error("new manager", "err", err)
 			return

@@ -25,9 +25,11 @@ func TestParseBgpAnnotations(t *testing.T) {
 	}
 
 	node.Annotations = map[string]string{
-		"bgp/node-asn": "65000",
-		"bgp/peer-asn": "64000",
-		"bgp/src-ip":   "10.0.0.254",
+		"bgp/node-asn":       "65000",
+		"bgp/peer-asn":       "64000",
+		"bgp/src-ip":         "10.0.0.254",
+		"bgp/peer-ip":        "10.0.0.1",
+		"bgp/peer-multi-hop": "true",
 	}
 
 	bgpConfig, bgpPeer, err := parseBgpAnnotations(bgpConfigBase, node, "bgp")
@@ -38,15 +40,17 @@ func TestParseBgpAnnotations(t *testing.T) {
 	assert.Equal(t, uint32(65000), bgpConfig.AS, "bgpConfig.AS parsed incorrectly")
 	assert.Equal(t, uint32(64000), bgpPeer.AS, "bgpPeer.AS parsed incorrectly")
 	assert.Equal(t, "10.0.0.254", bgpConfig.RouterID, "bgpConfig.RouterID parsed incorrectly")
+	assert.Equal(t, true, bgpPeer.MultiHop, "bgpPeer.MultiHop parsed incorrectly")
 	assert.EqualValues(t, 15, bgpConfig.HoldTime, "base bgpConfig.HoldTime should not be overwritten")
 	assert.EqualValues(t, 5, bgpConfig.KeepaliveInterval, "base bgpConfig.KeepaliveInterval should not be overwritten")
 
 	node.Annotations = map[string]string{
-		"bgp/node-asn": "65000",
-		"bgp/peer-asn": "64000",
-		"bgp/src-ip":   "10.0.0.254",
-		"bgp/peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
-		"bgp/bgp-pass": "cGFzc3dvcmQ=", // password
+		"bgp/node-asn":       "65000",
+		"bgp/peer-asn":       "64000",
+		"bgp/src-ip":         "10.0.0.254",
+		"bgp/peer-ip":        "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/bgp-pass":       "cGFzc3dvcmQ=", // password
+		"bgp/peer-multi-hop": "true",
 	}
 
 	bgpConfig, bgpPeer, err = parseBgpAnnotations(bgpConfigBase, node, "bgp")
@@ -55,9 +59,9 @@ func TestParseBgpAnnotations(t *testing.T) {
 	}
 
 	bgpPeers := []kubevip.BGPPeer{
-		{Address: "10.0.0.1", AS: uint32(64000), Password: "password"},
-		{Address: "10.0.0.2", AS: uint32(64000), Password: "password"},
-		{Address: "10.0.0.3", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.1", AS: uint32(64000), Password: "password", MultiHop: true},
+		{Address: "10.0.0.2", AS: uint32(64000), Password: "password", MultiHop: true},
+		{Address: "10.0.0.3", AS: uint32(64000), Password: "password", MultiHop: true},
 	}
 	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
 	assert.Equal(t, "10.0.0.3", bgpPeer.Address, "bgpPeer.Address parsed incorrectly")
