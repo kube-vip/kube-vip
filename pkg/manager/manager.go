@@ -353,6 +353,11 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	if sm.config.EnableControlPlane {
 		err = w.InitControlPlane()
 		if err != nil {
+			if sm.config.EnableARP {
+				// Cancel the mode context before returning so the ARP advertisement
+				// goroutine can exit instead of blocking the deferred wg.Wait().
+				cancel()
+			}
 			return err
 		}
 	}
