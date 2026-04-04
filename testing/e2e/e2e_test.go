@@ -20,6 +20,7 @@ import (
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -143,6 +144,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -188,6 +190,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -247,6 +250,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -300,6 +304,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				c, err := kubernetes.NewForConfig(clusterCfg)
 				Expect(err).ToNot(HaveOccurred())
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, c, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -345,6 +350,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -404,6 +410,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -454,6 +461,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -665,12 +673,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
-			})
-
-			AfterEach(func() {
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
-				}, "60s", "5s").Should(Succeed())
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
@@ -1017,7 +1019,8 @@ func withTimestamp(text string) string {
 	return fmt.Sprintf("%s: %s", time.Now(), text)
 }
 
-func createTestDS(ctx context.Context, name, namespace string, client kubernetes.Interface, port int) {
+func createDS(ctx context.Context, name, namespace string, client kubernetes.Interface, port int) {
+	By(withTimestamp(fmt.Sprintf("createing test daemonset %s/%s", namespace, name)))
 	labels := make(map[string]string)
 	labels["app"] = name
 	d := v1.DaemonSet{
@@ -1069,12 +1072,67 @@ func createTestDS(ctx context.Context, name, namespace string, client kubernetes
 		},
 	}
 
-	_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &d, metav1.CreateOptions{})
-	Expect(err).ToNot(HaveOccurred())
+	Eventually(func() error {
+		_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &d, metav1.CreateOptions{})
+		return err
+	}, "60s").Should(Succeed())
 
 	Eventually(func() error {
 		return dsStarted(ctx, name, namespace, client)
-	}, "300s").Should(Succeed())
+	}, "60s").Should(Succeed())
+}
+
+func createPod(ctx context.Context, client kubernetes.Interface, namespace, name string, port int) {
+	By(withTimestamp(fmt.Sprintf("createing test pod %s/%s", namespace, name)))
+	labels := make(map[string]string)
+	labels["app"] = name
+	p := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.PodSpec{
+			Tolerations: []corev1.Toleration{
+				{
+					Key:      "node-role.kubernetes.io/control-plane",
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoSchedule,
+				},
+				{
+					Key:      "node-role.kubernetes.io/master",
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoSchedule,
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:  fmt.Sprintf("%s-v4", name),
+					Image: "ghcr.io/traefik/whoami:v1.11",
+					Ports: []corev1.ContainerPort{
+						{
+							ContainerPort: int32(port),
+						},
+					},
+					Env: []corev1.EnvVar{
+						{
+							Name:  "WHOAMI_PORT_NUMBER",
+							Value: strconv.Itoa(port),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	Eventually(func() error {
+		_, err := client.CoreV1().Pods(namespace).Create(ctx, &p, metav1.CreateOptions{})
+		return err
+	}, "60s").Should(Succeed())
+
+	Eventually(func() error {
+		return podStarted(ctx, name, namespace, client)
+	}, "60s").Should(Succeed())
 }
 
 func dsStarted(ctx context.Context, name, namespace string, client kubernetes.Interface) error {
@@ -1086,6 +1144,28 @@ func dsStarted(ctx context.Context, name, namespace string, client kubernetes.In
 		return fmt.Errorf("not all DS pods are ready")
 	}
 	return nil
+}
+
+func podStarted(ctx context.Context, name, namespace string, client kubernetes.Interface) error {
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if pod.Status.Phase != corev1.PodRunning {
+		return fmt.Errorf("pod %s/%s is not ready", namespace, name)
+	}
+	return nil
+}
+
+func removePod(ctx context.Context, name, namespace string, client kubernetes.Interface) error {
+	propagationPolicy := metav1.DeletePropagationForeground
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}); err != nil && errors.IsNotFound(err) {
+		return nil
+	} else {
+		return err
+	}
 }
 
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
@@ -1249,14 +1329,7 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	client, cfg, err := createKindCluster(logger, &clusterConfig, clusterName)
 	Expect(err).ToNot(HaveOccurred())
 
-	By(withTimestamp("creating test daemonset"))
-	for i := range dsNumber {
-		tmpDsName := dsName
-		if i > 0 {
-			tmpDsName = fmt.Sprintf("%s-%d", dsName, i)
-		}
-		createTestDS(ctx, tmpDsName, dsNamespace, client, 80+i)
-	}
+	createTestDS(ctx, client, dsNamespace, dsName, dsNumber)
 
 	By(withTimestamp("loading local docker image to kind cluster"))
 	Expect(e2e.LoadDockerImageToKind(logger, manifestValues.ImagePath, clusterName)).To(Succeed())

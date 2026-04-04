@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"k8s.io/client-go/kubernetes"
@@ -73,11 +74,12 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareClusterForDS(ctx, tempDirPath, "rt-ds", imagePath, k8sImagePath,
-					logger, networking, 1, nil, 1)
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "rt-ds", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())

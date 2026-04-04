@@ -68,6 +68,7 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 			return err
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -124,6 +125,7 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 			return err
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -181,6 +183,7 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 			slog.Fatal(err)
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -255,6 +258,7 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 			slog.Fatal(err)
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -311,6 +315,7 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 			slog.Fatal(err)
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -381,6 +386,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 			slog.Fatal(err)
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -470,6 +476,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 			slog.Fatal(err)
 		}
 
+		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 			slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 			return err
@@ -591,6 +598,7 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 		slog.Fatal(err)
 	}
 
+	slog.Infof("saving logs to %q", tempDirPath)
 	if err = e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
 		slog.Infof("🧪 ---> simple deployment getlogs err <---: %w", err)
 		return err

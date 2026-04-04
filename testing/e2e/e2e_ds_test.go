@@ -82,11 +82,12 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareClusterForDS(ctx, tempDirPath, "ipv4-ds", imagePath, k8sImagePath,
-					logger, networking, 1, nil, 1)
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv4-ds", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -157,7 +158,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
-			It(clusterName+" deletes all IPv4 addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
+			It(clusterName+" deletes all IPv4 addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
 					Mode:                 Mode,
 					ControlPlaneEnable:   "true",
@@ -171,6 +172,22 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+			})
+
+			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
+				manifestValues := &e2e.KubevipManifestValues{
+					Mode:                 Mode,
+					ControlPlaneEnable:   "false",
+					VipElectionEnable:    "true",
+					ImagePath:            imagePath,
+					ConfigPath:           configPath,
+					SvcEnable:            "true",
+					SvcElectionEnable:    "true",
+					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
+				}
+
+				testEndpoints(ctx, manifestValues, client, utils.IPv4Family, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
 			})
 		})
 
@@ -190,11 +207,12 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareClusterForDS(ctx, tempDirPath, "ipv6-ds", imagePath, k8sImagePath,
-					logger, networking, 1, nil, 1)
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv6-ds", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -265,7 +283,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
 
-			It(clusterName+" deletes all IPv6 addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
+			It(clusterName+" deletes all IPv6 addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
 					Mode:                 Mode,
 					ControlPlaneEnable:   "true",
@@ -279,6 +297,22 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+			})
+
+			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
+				manifestValues := &e2e.KubevipManifestValues{
+					Mode:                 Mode,
+					ControlPlaneEnable:   "false",
+					VipElectionEnable:    "true",
+					ImagePath:            imagePath,
+					ConfigPath:           configPath,
+					SvcEnable:            "true",
+					SvcElectionEnable:    "true",
+					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
+				}
+
+				testEndpoints(ctx, manifestValues, client, utils.IPv6Family, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
 			})
 		})
 
@@ -298,11 +332,12 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
 				Expect(err).NotTo(HaveOccurred())
 
-				clusterName, client, _ = prepareClusterForDS(ctx, tempDirPath, "ipdual-ds", imagePath, k8sImagePath,
-					logger, networking, 1, nil, 1)
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipdual-ds", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
 			})
 
 			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
 					return e2e.GetLogs(ctx, client, tempDirPath)
 				}, "60s", "5s").Should(Succeed())
@@ -373,7 +408,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
 
-			It(clusterName+" deletes all addresses on exit when ontrol plane and services with per-service leaderelection are enabled", func() {
+			It(clusterName+" deletes all addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
 					Mode:                 Mode,
 					ControlPlaneEnable:   "true",
@@ -388,11 +423,30 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
 			})
+
+			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
+				manifestValues := &e2e.KubevipManifestValues{
+					Mode:                 Mode,
+					ControlPlaneEnable:   "false",
+					VipElectionEnable:    "true",
+					ImagePath:            imagePath,
+					ConfigPath:           configPath,
+					SvcEnable:            "true",
+					SvcElectionEnable:    "true",
+					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
+				}
+
+				testEndpoints(ctx, manifestValues, client, utils.DualFamily, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
+			})
 		})
 	}
 })
 
 func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, client kubernetes.Interface, family, clusterName string) {
+
+	createTestDS(ctx, client, dsNamespace, dsName, 1)
+	defer removeTestDS(ctx, client, dsNamespace, dsName, 1)
 
 	cpEnable, err := strconv.ParseBool(manifestValues.ControlPlaneEnable)
 	Expect(err).ToNot(HaveOccurred())
@@ -530,6 +584,113 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 			By(withTimestamp("deleting service: " + svc))
 			Expect(client.CoreV1().Services(dsNamespace).Delete(ctx, svc, metav1.DeleteOptions{})).To(Succeed())
 			time.Sleep(time.Second)
+		}
+	}
+}
+
+func testEndpoints(ctx context.Context, manifestValues *e2e.KubevipManifestValues,
+	client kubernetes.Interface, family, clusterName string,
+	trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+
+	createPod(ctx, client, dsNamespace, dsName, 80)
+	defer removePod(ctx, dsName, dsNamespace, client)
+
+	manifestValues.ControlPlaneEnable = "false"
+
+	svcEnable, err := strconv.ParseBool(manifestValues.SvcEnable)
+	Expect(err).ToNot(HaveOccurred())
+
+	vipElection, err := strconv.ParseBool(manifestValues.VipElectionEnable)
+	Expect(err).ToNot(HaveOccurred())
+
+	svcElection, err := strconv.ParseBool(manifestValues.SvcElectionEnable)
+	Expect(err).ToNot(HaveOccurred())
+
+	svcUseLease, svcPerServiceElection := false, false
+
+	switch manifestValues.Mode {
+	case ModeARP:
+		svcUseLease = true
+		svcPerServiceElection = svcElection
+	case ModeRT:
+		if vipElection || svcElection {
+			svcUseLease = true
+		}
+		if svcElection {
+			svcPerServiceElection = true
+		}
+	case ModeBGP:
+		if svcElection {
+			svcUseLease = true
+			svcPerServiceElection = true
+		}
+	}
+
+	genFam := family
+	if family == utils.DualFamily {
+		genFam = e2e.DualstackFamily
+	}
+
+	createKubeVipDS(ctx, "kube-vip", "kube-system", manifestValues, client)
+
+	families := []corev1.IPFamily{}
+	switch family {
+	case utils.IPv4Family:
+		families = []corev1.IPFamily{corev1.IPv4Protocol}
+	case utils.IPv6Family:
+		families = []corev1.IPFamily{corev1.IPv6Protocol}
+	case utils.DualFamily:
+		families = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
+	}
+
+	var svcVips []string
+	var svcHost, svcVip string
+
+	if svcEnable {
+		leaseName := "plndr-svcs-lock"
+		leaseNamespace := "kube-system"
+
+		svcVip = e2e.GenerateVIP(genFam, SOffset.Get())
+		var leases []string
+		_, leases = createTestServiceForDS(ctx, "test-svc", svcVip, leaseName,
+			trafficPolicy, client, svcElection, families, 1)
+
+		if svcUseLease {
+			if svcPerServiceElection {
+				Expect(leases).ToNot(BeEmpty())
+				leaseName = leases[0]
+				leaseNamespace = dsNamespace
+			}
+			svcHost = e2e.GetLeaseHolder(ctx, leaseName, leaseNamespace, client)
+			By(withTimestamp(fmt.Sprintf("services lease %s/%s holder: %s", leaseNamespace, leaseName, svcHost)))
+		} else {
+			svcHost = fmt.Sprintf("%s-control-plane", clusterName)
+		}
+
+		svcVips = strings.Split(svcVip, ",")
+		if manifestValues.Mode == ModeARP {
+			for _, addr := range svcVips {
+				By(withTimestamp("checking address was added: " + addr))
+				Expect(checkIPAddress(addr, svcHost, true)).To(BeTrue())
+			}
+		}
+
+		Expect(removePod(ctx, dsName, dsNamespace, client)).To(Succeed())
+
+		if manifestValues.Mode == ModeARP {
+			for _, addr := range svcVips {
+				By(withTimestamp("checking address was added: " + addr))
+				Expect(checkIPAddress(addr, svcHost, false)).To(BeTrue())
+			}
+		}
+
+		createPod(ctx, client, dsNamespace, dsName, 80)
+
+		if manifestValues.Mode == ModeARP {
+			for _, addr := range svcVips {
+				By(withTimestamp("checking address was added: " + addr))
+				Expect(checkIPAddress(addr, svcHost, true)).To(BeTrue())
+			}
 		}
 	}
 }
@@ -713,19 +874,26 @@ func createKubeVipDS(ctx context.Context, name, namespace string, manifestValues
 
 	Eventually(func() error {
 		return dsStarted(ctx, name, namespace, client)
-	}, "300s").Should(Succeed())
+	}, "60s").Should(Succeed())
 }
 
 func removeKubeVipDS(ctx context.Context, client kubernetes.Interface) {
-	By(withTimestamp("removing kube-vip's daemonset"))
-	Eventually(func() error {
-		return client.AppsV1().DaemonSets("kube-system").Delete(ctx, "kube-vip", metav1.DeleteOptions{})
-	}, "300s", "200ms").Should(Succeed())
+	removeDS(ctx, client, "kube-system", "kube-vip")
 }
 
-func prepareClusterForDS(ctx context.Context, tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePath string, logger log.Logger,
+func removeDS(ctx context.Context, client kubernetes.Interface, namespace, name string) {
+	By(withTimestamp(fmt.Sprintf("removing daemonset %s/%s", namespace, name)))
+	propagationPolicy := metav1.DeletePropagationForeground
+	Eventually(func() error {
+		return client.AppsV1().DaemonSets(namespace).Delete(ctx, name, metav1.DeleteOptions{
+			PropagationPolicy: &propagationPolicy,
+		})
+	}, "60s", "200ms").Should(Succeed())
+}
+
+func prepareClusterForDS(tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePath string, logger log.Logger,
 	networking *kindconfigv1alpha4.Networking, nodesNum int,
-	addSAN *san, dsNumber int) (string, kubernetes.Interface, *rest.Config) {
+	addSAN *san) (string, kubernetes.Interface, *rest.Config) {
 
 	clusterConfig := kindconfigv1alpha4.Cluster{
 		Networking: *networking,
@@ -778,15 +946,6 @@ func prepareClusterForDS(ctx context.Context, tempDirPath, clusterNameSuffix, kv
 		)))
 	}
 
-	By(withTimestamp("creating test daemonset"))
-	for i := range dsNumber {
-		tmpDsName := dsName
-		if i > 0 {
-			tmpDsName = fmt.Sprintf("%s-%d", dsName, i)
-		}
-		createTestDS(ctx, tmpDsName, dsNamespace, client, 80+i)
-	}
-
 	return clusterName, client, cfg
 }
 
@@ -811,4 +970,26 @@ func createTestServiceForDS(ctx context.Context, svcName, lbAddress, leaseName s
 	}
 
 	return services, leases
+}
+
+func createTestDS(ctx context.Context, client kubernetes.Interface, namespace, name string, dsNumber int) {
+	By(withTimestamp("creating test daemonsets"))
+	for i := range dsNumber {
+		tmpName := name
+		if i > 0 {
+			tmpName = fmt.Sprintf("%s-%d", name, i)
+		}
+		createDS(ctx, tmpName, namespace, client, 80+i)
+	}
+}
+
+func removeTestDS(ctx context.Context, client kubernetes.Interface, namespace, name string, dsNumber int) {
+	By(withTimestamp("creating test daemonsets"))
+	for i := range dsNumber {
+		tmpName := name
+		if i > 0 {
+			tmpName = fmt.Sprintf("%s-%d", name, i)
+		}
+		removeDS(ctx, client, namespace, tmpName)
+	}
 }
