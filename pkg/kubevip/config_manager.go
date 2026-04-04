@@ -12,6 +12,14 @@ const (
 	Auto = "auto"
 )
 
+func (c *Config) CheckSubnetExists() error {
+	if c.VIPSubnet == "" && c.VIP != "" && c.Address == "" {
+		return fmt.Errorf("vip_subnet must be set if using vip_address instead of address environment variable")
+	}
+
+	return nil
+}
+
 func (c *Config) CheckInterface() error {
 	if c.Interface != "" {
 		if err := isValidInterface(c.Interface); err != nil {

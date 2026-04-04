@@ -344,10 +344,9 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-		// wait for gorutines then cancel context just in case
+		cancel()
 		wg.Wait()
 		w.Cleanup()
-		cancel()
 		log.Info("Shutting down Kube-Vip")
 	}()
 
