@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -104,6 +105,7 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		}
 		config.NodeName = hostname
 	}
+	config.NodeName = normalizeNodeName(config.NodeName)
 	log.Info("using node name", "name", config.NodeName)
 
 	adminConfigPath := "/etc/kubernetes/admin.conf"
@@ -437,4 +439,10 @@ func (sm *Manager) Kill() {
 	sm.sigint.Do(func() {
 		sm.signalChan <- syscall.SIGINT
 	})
+}
+
+// normalizeNodeName ensures the local machine hostname conforms to
+// Kubernetes RFC1123 node naming conventions (lowercase).
+func normalizeNodeName(name string) string {
+	return strings.ToLower(name)
 }
