@@ -234,7 +234,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 		})
 
-		/*Describe("kube-vip IPv6 BGP unnumbered functionality", Ordered, func() {
+		Describe("kube-vip IPv6 BGP unnumbered functionality", Ordered, func() {
 			var (
 				client      kubernetes.Interface
 				clusterName string
@@ -282,6 +282,6 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
 			})
-		})*/
+		})
 	}
 })
