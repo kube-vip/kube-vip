@@ -16,7 +16,6 @@ import (
 type BGPPeer struct {
 	Address      string
 	Port         uint16
-	Interface    string
 	AS           uint32
 	Password     string
 	MultiHop     bool
@@ -66,7 +65,6 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 			continue
 		}
 		isV6Peer := peerStr[0] == '['
-		isUnnumberedPeer := strings.HasPrefix(peerStr, "unnumbered:")
 
 		address := ""
 		if isV6Peer {
@@ -76,29 +74,20 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 			}
 			address = peerStr[1:addressEndPos]
 			peerStr = peerStr[addressEndPos+1:]
-		} else if isUnnumberedPeer {
-			unnumberedEndPos := strings.IndexByte(peerStr, ':')
-			peerStr = peerStr[unnumberedEndPos+1:]
 		}
 
 		peer := strings.Split(peerStr, ":")
-		if len(peer) < 2 && !isUnnumberedPeer {
+		if len(peer) < 2 {
 			return nil, fmt.Errorf("mandatory peering params <host>:<AS> incomplete")
 		}
 
-		iface := ""
-		if isUnnumberedPeer {
-			iface = peer[0]
-		} else if !isV6Peer {
+		if !isV6Peer {
 			address = peer[0]
 		}
 
-		var ASNumber uint64
-		if len(peer) >= 2 {
-			ASNumber, err = strconv.ParseUint(peer[1], 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
-			}
+		ASNumber, err := strconv.ParseUint(peer[1], 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
 		}
 
 		password := ""
@@ -118,9 +107,9 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 		if len(peer) >= 5 {
 			port, err = strconv.ParseUint(peer[4], 10, 16)
 			if err != nil {
-				return nil, fmt.Errorf("BGP Peer Port format error [%s]", peer[4])
+				return nil, fmt.Errorf("BGP Peer AS format error [%s]", peer[1])
 			}
-		} else if !isUnnumberedPeer {
+		} else {
 			port = 179
 		}
 
@@ -144,11 +133,9 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 		}
 
 		peerConfig := BGPPeer{
-			Address: address,
-			//nolint:gosec // previously parsed into uint32
+			Address:      address,
 			AS:           uint32(ASNumber),
 			Port:         uint16(port),
-			Interface:    iface,
 			Password:     password,
 			MultiHop:     multiHop,
 			MpbgpNexthop: mpbgpNexthop,
