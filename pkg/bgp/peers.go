@@ -13,7 +13,6 @@ import (
 	api "github.com/osrg/gobgp/v3/api"
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/osrg/gobgp/v3/pkg/config/oc"
 	"github.com/osrg/gobgp/v3/pkg/server"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -22,10 +21,9 @@ import (
 func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) {
 	p := &api.Peer{
 		Conf: &api.PeerConf{
-			NeighborAddress:   peer.Address,
-			PeerAsn:           peer.AS,
-			NeighborInterface: peer.Interface,
-			AuthPassword:      peer.Password,
+			NeighborAddress: peer.Address,
+			PeerAsn:         peer.AS,
+			AuthPassword:    peer.Password,
 		},
 
 		Timers: &api.Timers{
@@ -47,17 +45,6 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 			RemoteAddress: peer.Address,
 			RemotePort:    uint32(179),
 		},
-	}
-
-	if peer.Interface != "" {
-		neighborAddress, err := oc.GetIPv6LinkLocalNeighborAddress(peer.Interface)
-		if err != nil {
-			return fmt.Errorf("failed to get link-local address of interface %s: %w", peer.Interface, err)
-		}
-
-		p.State = &api.PeerState{
-			NeighborAddress: neighborAddress,
-		}
 	}
 
 	if b.c.MpbgpNexthop != "" {
