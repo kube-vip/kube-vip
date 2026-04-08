@@ -158,7 +158,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -201,7 +201,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -244,7 +244,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -287,7 +287,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -330,7 +330,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -386,7 +386,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -440,7 +440,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -494,7 +494,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -549,7 +549,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -604,7 +604,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -658,7 +658,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {
@@ -722,7 +722,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -784,7 +784,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -846,7 +846,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -909,7 +909,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -972,7 +972,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, n := range gobgpPeers {
 					_, err := gobgpClient.DeletePeer(ctx, &api.DeletePeerRequest{
@@ -1106,7 +1106,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				for _, p := range gobgpPeers {
 					Eventually(func() error {

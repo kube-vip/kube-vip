@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -17,7 +22,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
-func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath string) error {
+const logDir = "/var/log/pods"
+
+func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath string, clusterName string) error {
 	if os.Getenv("E2E_KEEP_LOGS") != "true" {
 		if err := os.RemoveAll(tempDirPath); err != nil {
 			return fmt.Errorf("failed to remove temporary directory %q: %w", tempDirPath, err)
@@ -27,6 +34,10 @@ func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath strin
 
 	intCtx, cancel := context.WithTimeout(ctx, time.Second*20)
 	defer cancel()
+
+	if err := getLogsFromDir(intCtx, tempDirPath, clusterName); err != nil {
+		return fmt.Errorf("failed to get logs from /var/log/containers: %w", err)
+	}
 
 	path := filepath.Join(tempDirPath, "pods.json")
 	fpods, err := os.Create(path)
@@ -123,6 +134,41 @@ func GetLogs(ctx context.Context, client kubernetes.Interface, tempDirPath strin
 		err = os.WriteFile(path, buf.Bytes(), 0600)
 		if err != nil {
 			return fmt.Errorf("failed to write the log file %q: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+func getLogsFromDir(ctx context.Context, dir, clusterName string) error {
+	cli, err := client.NewClientWithOpts(client.FromEnv)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+
+	containers, err := cli.ContainerList(ctx, container.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	nodes := []string{}
+	for _, c := range containers {
+		if strings.Contains(c.Names[0], clusterName) &&
+			(strings.Contains(c.Names[0], "control-plane") || strings.Contains(c.Names[0], "worker")) {
+			nodes = append(nodes, c.Names[0][1:])
+		}
+	}
+
+	for i, n := range nodes {
+		out := filepath.Join(dir, n)
+		if i == 0 {
+			if err := os.Mkdir(out, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("failed to create directory %s: %w", out, err)
+			}
+		}
+		cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", n, logDir), out) //nolint:gosec
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to get logs from container %s: %w", n, err)
 		}
 	}
 

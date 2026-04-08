@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"k8s.io/client-go/kubernetes"
@@ -45,7 +46,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp")
+			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-bgp-ds")
 			Expect(err).NotTo(HaveOccurred())
 
 		})
@@ -70,7 +71,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test-ds")
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds", imagePath, k8sImagePath,
@@ -78,10 +79,14 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			})
 
 			AfterAll(func() {
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
-				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
+			})
+
+			AfterEach(func() {
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
+				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It(clusterName+" exits gracefully when only control plane is enabled", func() {
