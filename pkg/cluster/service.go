@@ -41,6 +41,13 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		killFunc()
 	})
 
+	nodename := ""
+	if c.NodeName != "" {
+		nodename = c.NodeName
+	} else {
+		nodename = os.Getenv("HOSTNAME")
+	}
+
 	loadbalancers := []*loadbalancer.IPVSLoadBalancer{}
 
 	for i := range cluster.Network {
@@ -75,7 +82,10 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		if c.EnableBGP {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("Attempting to advertise over BGP", "address", network.CIDR())
-			err = bgpServer.AddHost(ctx, network.CIDR())
+			if nodename == "" {
+				nodename = bgp.KVNodename
+			}
+			err = bgpServer.AddHost(ctx, network.CIDR(), nodename)
 			if err != nil {
 				log.Error(err.Error())
 			}
@@ -123,13 +133,6 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		backendMapV4 := backend.Map{}
 		backendMapV6 := backend.Map{}
 		// only check localhost
-
-		nodename := ""
-		if c.NodeName != "" {
-			nodename = c.NodeName
-		} else {
-			nodename = os.Getenv("HOSTNAME")
-		}
 
 		ips := []string{}
 		if nodename != "" {
@@ -334,7 +337,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(lbCtx, network.CIDR())
+			err = bgp.AddHost(lbCtx, network.CIDR(), name)
 			if err != nil {
 				log.Error(err.Error())
 			}
