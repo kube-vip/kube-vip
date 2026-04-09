@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -76,7 +77,7 @@ func TestWatchWithAuthRetry(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			w, err := watchWithAuthRetry(ctx, func(_ context.Context) (watch.Interface, error) {
+			w, err := utils.WatchWithAuthRetry(ctx, func(_ context.Context) (watch.Interface, error) {
 				attempts++
 				return tc.watchFn(attempts)
 			})

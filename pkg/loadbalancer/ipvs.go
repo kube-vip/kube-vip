@@ -51,15 +51,13 @@ type IPVSLoadBalancer struct {
 	backendMap          backend.Map
 	interval            int
 	lock                sync.Mutex
-	stop                chan struct{}
-	networkInterface    string
 	killFunc            func()
 	address             string
 	family              ipvs.AddressFamily
 }
 
 func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMethod string, backendHealthCheckInterval int,
-	networkInterface string, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+	killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
 	log.Info("Starting IPVS LoadBalancer", "address", address)
 
 	// Create IPVS client
@@ -140,7 +138,6 @@ func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMetho
 		forwardingMethod:    m,
 		interval:            backendHealthCheckInterval,
 		backendMap:          make(backend.Map),
-		networkInterface:    networkInterface,
 		killFunc:            killFunc,
 		address:             address,
 		family:              family,
@@ -167,7 +164,6 @@ func enableProcSys(path, name string) error {
 
 func (lb *IPVSLoadBalancer) RemoveIPVSLB() error {
 	log.Info("Stopping IPVS LoadBalancer", "address", lb.address)
-	close(lb.stop)
 	err := lb.client.RemoveService(lb.loadBalancerService)
 	if err != nil {
 		return fmt.Errorf("error removing existing IPVS service: %v", err)
@@ -190,6 +186,7 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 		if err != nil {
 			log.Error("checking if backend is local", "err", err)
 		}
+		log.Info("checked if backend is local", "addr", address, "local", isLocal)
 	}
 
 	backend := backend.Entry{Addr: address, Port: port, IsLocal: isLocal}
@@ -346,6 +343,7 @@ func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
 				}
 				if lb.forwardingMethod == ipvs.Local && !lb.localBackendExists() {
 					if lb.killFunc != nil {
+						log.Error("no local backends available, restarting kube-vip")
 						lb.killFunc()
 					}
 				}
@@ -355,29 +353,39 @@ func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
 }
 
 func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
-	link, err := netlink.LinkByName(lb.networkInterface)
-	if err != nil {
-		return false, fmt.Errorf("getting link '%s': %w", lb.networkInterface, err)
-	}
-
-	family := netlink.FAMILY_V6
-	if utils.IsIPv4(address) {
-		family = netlink.FAMILY_V4
-	}
-
 	target := net.ParseIP(address)
 	if target == nil {
-		return false, fmt.Errorf("address '%s' is not a valid IP address", address)
+		return false, fmt.Errorf("unable to parse IP address %s", address)
 	}
 
-	addrs, err := netlink.AddrList(link, family)
+	links, err := netlink.LinkList()
 	if err != nil {
-		return false, fmt.Errorf("listing addresses for link '%s': %w", lb.networkInterface, err)
+		return false, fmt.Errorf("listing links: %w", err)
 	}
 
-	for _, addr := range addrs {
-		if addr.IP.Equal(target) {
-			return true, nil
+	family := netlink.FAMILY_V4
+	if utils.IsIPv6(address) {
+		family = netlink.FAMILY_V6
+	}
+
+	for _, link := range links {
+		if link.Type() == "veth" {
+			continue
+		}
+
+		addrs, err := netlink.AddrList(link, family)
+		if err != nil {
+			log.Error("listing addresses", "link", link.Attrs().Name, "error", err.Error())
+			continue
+		}
+
+		for _, addr := range addrs {
+			if addr.Scope != int(netlink.SCOPE_UNIVERSE) {
+				continue
+			}
+			if addr.IP.Equal(target) {
+				return true, nil
+			}
 		}
 	}
 

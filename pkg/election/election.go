@@ -157,28 +157,33 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 		LabelSelector: "node-role.kubernetes.io/control-plane",
 	}
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	defer watchCancel()
+
+	rw, err := watchtools.NewRetryWatcherWithContext(watchCtx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return em.RetryWatcherClient.CoreV1().Nodes().Watch(ctx, listOptions)
+			return utils.WatchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
+				return em.RetryWatcherClient.CoreV1().Nodes().Watch(watchCtx, listOptions)
+			})
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("error creating label watcher: %s", err.Error())
 	}
 
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
-
 	wg.Go(func() {
-		<-ctx.Done()
-		log.Info("Received termination, signaling shutdown")
-		// Cancel the context
+		<-watchCtx.Done()
+		log.Info("Node watcher context cancelled, stopping")
+		// Stop the retrywatcher
 		rw.Stop()
 	})
 
 	ch := rw.ResultChan()
-	// defer rw.Stop()
 
+	var watchErr error
 	for event := range ch {
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
@@ -238,12 +243,13 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 
 			status := statusErr.ErrStatus
 			log.Error("watcher", "status", status)
+			watchErr = fmt.Errorf("node watcher error, status: %s", status.String())
 		default:
 		}
 	}
 
 	log.Info("Exiting Node watcher")
-	return nil
+	return watchErr
 }
 
 func checkIfNodeIsReady(node *v1.Node) bool {

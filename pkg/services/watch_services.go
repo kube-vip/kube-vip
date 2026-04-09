@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -18,44 +17,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 )
-
-// watchWithAuthRetry retries watchFn with exponential backoff on transient 403 Forbidden
-// and 401 Unauthorized errors. On joining control plane nodes with K8s 1.34+, the local
-// etcd may still be a learner when kube-vip starts, causing RBAC data to be unavailable.
-// These auth errors resolve once etcd is promoted to a full member (typically within seconds).
-// Non-auth errors are returned immediately. Context cancellation stops the retry loop.
-func watchWithAuthRetry(ctx context.Context, watchFn func(context.Context) (watch.Interface, error)) (watch.Interface, error) {
-	var w watch.Interface
-	var lastErr error
-	err := wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
-		Duration: 2 * time.Second,
-		Factor:   2.0,
-		Jitter:   0.1,
-		Steps:    10,
-		Cap:      30 * time.Second,
-	}, func(ctx context.Context) (bool, error) {
-		var watchErr error
-		w, watchErr = watchFn(ctx)
-		if watchErr == nil {
-			return true, nil
-		}
-		if !apierrors.IsForbidden(watchErr) && !apierrors.IsUnauthorized(watchErr) {
-			return false, watchErr
-		}
-		lastErr = watchErr
-		log.Warn("(svcs) services watch auth error, retrying", "err", watchErr)
-		return false, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("(svcs) services watch failed after retries: %w (last: %v)", err, lastErr)
-	}
-	return w, nil
-}
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error) error {
@@ -82,7 +47,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc func(*servi
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return watchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
+			return utils.WatchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
 				return p.rwClientSet.CoreV1().Services(p.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
 			})
 		},
