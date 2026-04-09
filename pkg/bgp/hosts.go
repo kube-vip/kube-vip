@@ -35,7 +35,7 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 		}); err != nil {
 			return err
 		}
-		log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects)+1)
+		log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects)+1, "object", object)
 	}
 
 	objects[object] = true
@@ -50,7 +50,7 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 
 	objects, exists := b.tracker[addr]
 	if !exists {
-		log.Debug("[BGP] deleting host - nothing to delete", "addr", addr)
+		log.Debug("[BGP] deleting host - nothing to delete", "addr", addr, "object", object)
 		return nil
 	}
 
@@ -73,7 +73,9 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 			return err
 		}
 		delete(b.tracker, addr)
-		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects))
+		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects), "object", object)
+	} else {
+		log.Debug("[BGP] deleting from tracker only", "addr", addr, "object", object)
 	}
 
 	return nil

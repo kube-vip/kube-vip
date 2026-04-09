@@ -9,6 +9,7 @@ import (
 	log "log/slog"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
@@ -56,19 +57,43 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback) 
 		return fmt.Errorf("error creating services watcher: %s", err.Error())
 	}
 
+	d, err := debouncer.New(rw.ResultChan(), p.config.DebounceTime)
+	if err != nil {
+		return fmt.Errorf("failed to create debouncer for endpoints event: %w", err)
+	}
+
 	wg := sync.WaitGroup{}
-	defer wg.Wait()
+	defer func() {
+		if d != nil {
+			d.Stop()
+		}
+		rw.Stop()
+		wg.Wait()
+	}()
 
 	watcherCtx, watcherCancel := context.WithCancel(ctx)
 	defer watcherCancel()
 
 	wg.Go(func() {
+		if d != nil {
+			if err := d.Start(watcherCtx); err != nil {
+				log.Error("(svcs) debouncer, cancelling context", "error", err.Error())
+				watcherCancel()
+			}
+		}
 		<-watcherCtx.Done()
 		log.Debug("(svcs) watcher context cancelled")
+		if d != nil {
+			d.Stop()
+		}
 		rw.Stop()
 		p.Stop()
 	})
+
 	ch := rw.ResultChan()
+	if d != nil {
+		ch = d.Output()
+	}
 
 	// Used for tracking an active endpoint / pod
 	for event := range ch {

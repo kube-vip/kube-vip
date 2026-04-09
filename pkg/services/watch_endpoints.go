@@ -6,6 +6,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -23,17 +24,31 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
 	}
 
+	d, err := debouncer.New(rw.ResultChan(), p.config.DebounceTime)
+	if err != nil {
+		rw.Stop()
+		return fmt.Errorf("failed to create debouncer for endpoints event: %w", err)
+	}
+
 	wg := sync.WaitGroup{}
 
 	stopChan := make(chan any)
 
 	defer func() {
 		close(stopChan)
-		rw.Stop()
+		if d != nil {
+			d.Stop()
+		}
 		wg.Wait()
 	}()
 
 	wg.Go(func() {
+		if d != nil {
+			if err := d.Start(svcCtx.Ctx); err != nil {
+				log.Error("[endpoint watcher] debouncer, cancelling context", "error", err.Error())
+				svcCtx.Cancel()
+			}
+		}
 		select {
 		case <-svcCtx.Ctx.Done():
 			log.Debug("[endpoint watcher] context cancelled", "provider", provider.GetLabel())
@@ -44,9 +59,12 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		}
 	})
 
-	ch := rw.ResultChan()
-
 	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, p.leaseMgr, p.TunnelMgr, p.routeMgr)
+
+	ch := rw.ResultChan()
+	if d != nil {
+		ch = d.Output()
+	}
 
 	var lastKnownGoodEndpoint string
 	for event := range ch {

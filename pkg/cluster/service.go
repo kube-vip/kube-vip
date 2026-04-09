@@ -422,7 +422,11 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		<-cluster.stop
+		select {
+		case <-cluster.stop:
+		case <-ctx.Done():
+		}
+
 		// Stop the loadbalancer context if it is running
 		lbCancel()
 

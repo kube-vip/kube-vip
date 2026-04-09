@@ -561,9 +561,17 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 		}
 	}
 
-	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
-	Expect(err).ToNot(HaveOccurred())
-	Expect(len(pods.Items)).To(Equal(1))
+	var pods *corev1.PodList
+	Eventually(func() error {
+		pods, err = client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
+		if err != nil {
+			return err
+		}
+		if len(pods.Items) != 1 {
+			return fmt.Errorf("expected 1 pod, but got %d", len(pods.Items))
+		}
+		return nil
+	}, "40s").Should(Succeed())
 
 	removeKubeVipDS(ctx, client)
 
