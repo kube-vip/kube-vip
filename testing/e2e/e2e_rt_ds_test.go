@@ -46,7 +46,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp")
+			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-rt-ds")
 			Expect(err).NotTo(HaveOccurred())
 
 		})
@@ -79,11 +79,14 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
-				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
+			})
+
+			AfterEach(func() {
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
+				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It(clusterName+" exits gracefully on exit when only control plane is enabled", func() {

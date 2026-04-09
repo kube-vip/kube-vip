@@ -59,7 +59,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -76,7 +76,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -94,7 +94,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -112,7 +112,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -130,7 +130,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -148,7 +148,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -166,7 +166,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -184,7 +184,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -202,7 +202,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}
@@ -220,7 +220,7 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
 		}
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath); err != nil {
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
 			slog.Error(err)
 		}
 	}

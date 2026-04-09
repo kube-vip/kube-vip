@@ -146,7 +146,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -192,7 +192,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -252,7 +252,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -306,7 +306,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				Expect(err).ToNot(HaveOccurred())
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, c, tempDirPath)
+					return e2e.GetLogs(ctx, c, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -352,7 +352,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -412,7 +412,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -463,7 +463,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -509,7 +509,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -569,7 +569,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -622,7 +622,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -670,7 +670,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -732,7 +732,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -783,7 +783,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -829,7 +829,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -883,7 +883,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
 				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath)
+					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				}, "60s", "5s").Should(Succeed())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})

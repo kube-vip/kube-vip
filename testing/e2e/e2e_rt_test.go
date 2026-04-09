@@ -112,7 +112,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -173,7 +173,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -244,7 +244,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -321,7 +321,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -392,7 +392,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -462,7 +462,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -533,7 +533,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -606,7 +606,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -676,7 +676,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -755,7 +755,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -835,7 +835,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
@@ -917,7 +917,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 			AfterAll(func() {
 				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath)
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				cleanupCluster(clusterName, ConfigMtx, logger)
 			})
