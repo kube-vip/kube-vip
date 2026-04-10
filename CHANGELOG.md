@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retry on 403 Forbidden and 401 Unauthorized in `ServicesWatcher` at startup with exponential backoff. Fixes #1464.
 - Reintroduce BGP config via node annotations. Fixes #1488.
 - Fail fast in runtime `manager` and `service` paths when legacy `vip_address` is used without `vip_subnet` in control-plane ARP, BGP, or Routing Table mode.
-- Cancel the mode context before waiting on goroutines during shutdown.
+- Cancel the mode context on init or configuration failure before waiting on goroutines during shutdown.
 
 
 ### Added
