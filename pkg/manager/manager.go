@@ -344,20 +344,23 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-		cancel()
+
 		wg.Wait()
 		w.Cleanup()
+		cancel()
 		log.Info("Shutting down Kube-Vip")
 	}()
 
 	log.Info("starting Kube-vip Manager", "mode", w.Name())
 	if err := w.Configure(modeCtx, &wg); err != nil {
+		defer cancel()
 		return fmt.Errorf("failed to configure %s mode: %w", w.Name(), err)
 	}
 
 	if sm.config.EnableControlPlane {
 		err = w.InitControlPlane()
 		if err != nil {
+			defer cancel()
 			return err
 		}
 	}
