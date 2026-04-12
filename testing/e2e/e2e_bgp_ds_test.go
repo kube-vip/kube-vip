@@ -265,6 +265,13 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				Expect(err).ToNot(HaveOccurred())
 			})
 
+			AfterEach(func() {
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
+				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
 			It(clusterName+" exits gracefully when unnumbered BGP peers are configured", func() {
 				manifestValues := &e2e.KubevipManifestValues{
 					Mode:                 Mode,
