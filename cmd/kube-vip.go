@@ -235,6 +235,15 @@ var kubeVipService = &cobra.Command{
 			configMap = envConfigMap
 		}
 
+		// Legacy vip_address requires vip_subnet for control-plane ARP, BGP, and Routing Table modes.
+		if initConfig.EnableControlPlane &&
+			(initConfig.EnableARP || initConfig.EnableBGP || initConfig.EnableRoutingTable) {
+			if err := initConfig.CheckSubnetExists(); err != nil {
+				log.Error("checking subnet exists if vip_address defined", "err", err)
+				return
+			}
+		}
+
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
@@ -290,6 +299,15 @@ var kubeVipManager = &cobra.Command{
 
 		// Set the logging level for all subsequent functions
 		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
+
+		// Legacy vip_address requires vip_subnet for control-plane ARP, BGP, and Routing Table modes.
+		if initConfig.EnableControlPlane &&
+			(initConfig.EnableARP || initConfig.EnableBGP || initConfig.EnableRoutingTable) {
+			if err := initConfig.CheckSubnetExists(); err != nil {
+				log.Error("checking subnet exists if vip_address defined", "err", err)
+				return
+			}
+		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
