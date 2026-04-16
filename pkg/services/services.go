@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -700,7 +701,9 @@ func (p *Processor) updateStatus(ctx context.Context, i *instance.Instance) erro
 		Jitter:   0.1,
 	}
 	// will retry for every error encountered, TODO: should a list of errors that will trigger retry be specified?
-	err := retry.OnError(retryConfig, func(error) bool { return true }, func() error {
+	err := retry.OnError(retryConfig, func(err error) bool {
+		return !errors.Is(err, context.Canceled)
+	}, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
 		currentService, err := p.clientSet.CoreV1().Services(i.ServiceSnapshot.Namespace).Get(ctx, i.ServiceSnapshot.Name, metav1.GetOptions{})
