@@ -143,7 +143,7 @@ e2e-tests-arp: get-whoami
 e2e-tests-rt: get-whoami
 	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
-e2e-tests-bgp: get-whoami
+e2e-tests-bgp: get-whoami get-gobgp
 	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
 
 e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
