@@ -21,13 +21,7 @@ func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context) err
 	}
 
 	if p.config.EnableRoutingTable {
-		for _, instance := range p.ServiceInstances {
-			for _, cluster := range instance.Clusters {
-				for i := range cluster.Network {
-					_ = cluster.Network[i].DeleteRoute()
-				}
-			}
-		}
+		p.routeMgr.Clear()
 	}
 
 	log.Info("Shutting down kube-Vip")

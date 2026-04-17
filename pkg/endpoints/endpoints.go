@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
@@ -30,13 +31,13 @@ type Processor struct {
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *Processor {
+	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager) *Processor {
 	return &Processor{
 		config:    config,
 		provider:  provider,
 		bgpServer: bgpServer,
 		instances: instances,
-		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr),
+		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr, routeMgr),
 	}
 }
 

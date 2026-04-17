@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -38,10 +39,10 @@ type WireGuard struct {
 func NewWireGuard(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFUnc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager) *WireGuard {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *WireGuard {
 	return &WireGuard{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFUnc,
-			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr),
 	}
 }
 

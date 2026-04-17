@@ -8,19 +8,21 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
-	stop    chan bool
-	once    sync.Once
-	Network []vip.Network
-	arpMgr  *arp.Manager
+	stop     chan bool
+	once     sync.Once
+	Network  []vip.Network
+	arpMgr   *arp.Manager
+	routeMgr *route.Manager
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
-func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.Manager, arpMgr *arp.Manager) (*Cluster, error) {
+func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager) (*Cluster, error) {
 	var networks []vip.Network
 	var err error
 
@@ -33,9 +35,10 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 	}
 	// Initialise the Cluster structure
 	newCluster := &Cluster{
-		Network: networks,
-		arpMgr:  arpMgr,
-		stop:    make(chan bool),
+		Network:  networks,
+		arpMgr:   arpMgr,
+		stop:     make(chan bool),
+		routeMgr: routeMgr,
 	}
 
 	log.Debug("service security", "enabled", c.EnableServiceSecurity)

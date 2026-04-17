@@ -21,7 +21,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -194,11 +193,11 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 							log.Info("added backend", "ip", network.IP())
 						}
 
-						err = network.AddRoute(true)
+						err = cluster.routeMgr.Add(c.NodeName, network, true, false)
 						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
 							log.Warn(err.Error())
 						} else if err == nil && !(*backendMap)[entry] {
-							log.Info("added route", "route", network.PrepareRoute().String())
+							log.Info("added route", "route", network.PrepareRoute())
 						}
 
 						(*backendMap)[entry] = true
@@ -216,11 +215,9 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 				}
 
 				if deleteAddress {
-					err = network.DeleteRoute()
-					if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH) {
+					err = cluster.routeMgr.Delete(c.NodeName, network)
+					if err != nil {
 						log.Warn("deleting route", "err", err)
-					} else if err == nil {
-						log.Info("deleted route", "route", network.PrepareRoute().String())
 					}
 
 					deleted, err := network.DeleteIP()
@@ -267,7 +264,7 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, CountRouteReferences func(*netlink.Route) int, wg *sync.WaitGroup) error {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, wg *sync.WaitGroup) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint
@@ -306,7 +303,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		log.Debug("config flags", "enable_routing_table", c.EnableRoutingTable, "enable_leader_election", c.EnableLeaderElection, "enable_services_election", c.EnableServicesElection)
 
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
-			err = network.AddRoute(false)
+			err = cluster.routeMgr.Add(name, network, false, false)
 			if err != nil {
 				log.Warn(err.Error())
 			} else {
@@ -365,13 +362,8 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 		if c.EnableRoutingTable {
 			for i := range cluster.Network {
-				// chek if route is not  referenced by another service
-				r := cluster.Network[i].PrepareRoute()
-				if CountRouteReferences(r) < 1 {
-					log.Info("[VIP] Deleting Route for VIP", "IP", cluster.Network[i].IP())
-					if err := cluster.Network[i].DeleteRoute(); err != nil {
-						log.Warn(err.Error())
-					}
+				if err := cluster.routeMgr.Delete(name, cluster.Network[i]); err != nil {
+					log.Warn(err.Error())
 				}
 			}
 

@@ -10,10 +10,10 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/election"
-	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
@@ -27,10 +27,10 @@ type Table struct {
 func NewTable(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFUnc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager) *Table {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Table {
 	return &Table{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFUnc,
-			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr),
 	}
 }
 
@@ -97,7 +97,7 @@ func (t *Table) cleanRoutes() error {
 		if t.config.EnableControlPlane {
 			found = (routes[i].Dst.IP.String() == t.config.Address)
 		} else {
-			found = endpoints.CountRouteReferences(&routes[i], &t.svcProcessor.ServiceInstances) > 0
+			found = t.routeMgr.Check(routes[i].String())
 		}
 
 		if !found {
