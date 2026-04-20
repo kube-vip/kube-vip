@@ -83,17 +83,25 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 		if c.EnableLoadBalancer {
 			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
-				c.BackendHealthCheckInterval, c.Interface, killFunc, &wg)
+				c.BackendHealthCheckInterval, killFunc, &wg)
 			if err != nil {
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
 			wg.Go(func() {
-				err = em.NodeWatcher(ctx, lb, c.Port)
-				if err != nil {
-					log.Error("Error watching node labels", "err", err)
-					if errors.Is(err, &utils.PanicError{}) {
-						killFunc()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						err = em.NodeWatcher(ctx, lb, c.Port)
+						if err != nil {
+							log.Error("Error watching node labels", "err", err)
+							if errors.Is(err, &utils.PanicError{}) {
+								killFunc()
+								return
+							}
+						}
 					}
 				}
 			})
