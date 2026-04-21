@@ -68,12 +68,12 @@ func EnsureKindNetwork() {
 	Eventually(session).Should(gexec.Exit(0))
 }
 
-func GenerateVIP(family string, offset uint) string {
+func GenerateVIP(family string, offset uint, network string) string {
 	if family == DualstackFamily || family == DualstackFamilyIPv6 {
-		return fmt.Sprintf("%s,%s", GenerateVIP(utils.IPv4Family, offset), GenerateVIP(utils.IPv6Family, offset))
+		return fmt.Sprintf("%s,%s", GenerateVIP(utils.IPv4Family, offset, network), GenerateVIP(utils.IPv6Family, offset, network))
 	}
 
-	cidrs := getKindNetworkSubnetCIDRs()
+	cidrs := getKindNetworkSubnetCIDRs(network)
 
 	for _, cidr := range cidrs {
 		if cidr != "" {
@@ -107,25 +107,25 @@ func GenerateVIP(family string, offset uint) string {
 	return ""
 }
 
-func GenerateDualStackVIP(offset uint) string {
-	return GenerateVIP(utils.IPv4Family, offset) + "," + GenerateVIP(utils.IPv6Family, offset)
+func GenerateDualStackVIP(offset uint, network string) string {
+	return GenerateVIP(utils.IPv4Family, offset, network) + "," + GenerateVIP(utils.IPv6Family, offset, network)
 }
 
-func getKindNetworkSubnetCIDRs() []string {
+func getKindNetworkSubnetCIDRs(name string) []string {
 	cmd := exec.Command(
-		"docker", "inspect", "kind",
+		"docker", "inspect", name,
 		"--format", `{{ range $i, $a := .IPAM.Config }}{{ println .Subnet }}{{ end }}`,
 	)
 	cmdOut := new(bytes.Buffer)
 	cmd.Stdout = cmdOut
-	Expect(cmd.Run()).To(Succeed(), "The Docker \"kind\" network was not found.")
+	Expect(cmd.Run()).To(Succeed(), fmt.Sprintf("The Docker %q network was not found.", name))
 	reader := bufio.NewReader(cmdOut)
 
 	cidrs := []string{}
 	for {
 		line, readErr := reader.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
-			Expect(readErr).NotTo(HaveOccurred(), "Error finding subnet CIDRs in the Docker \"kind\" network")
+			Expect(readErr).NotTo(HaveOccurred(), fmt.Sprintf("Error finding subnet CIDRs in the Docker %q network", name))
 		}
 
 		cidrs = append(cidrs, strings.TrimSpace(line))

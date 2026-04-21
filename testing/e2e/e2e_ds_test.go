@@ -56,7 +56,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			var err error
 			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp-ds")
 			Expect(err).NotTo(HaveOccurred())
-
 		})
 
 		AfterAll(func() {
@@ -87,7 +86,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterAll(func() {
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
@@ -215,7 +214,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterAll(func() {
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
@@ -343,7 +342,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterAll(func() {
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
@@ -499,7 +498,7 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 	}
 
 	if cpEnable {
-		manifestValues.ControlPlaneVIP = e2e.GenerateVIP(genFam, SOffset.Get())
+		manifestValues.ControlPlaneVIP = e2e.GenerateVIP(genFam, SOffset.Get(), clusterName)
 	}
 
 	createKubeVipDS(ctx, "kube-vip", "kube-system", manifestValues, client)
@@ -536,7 +535,7 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 		leaseName := "plndr-svcs-lock"
 		leaseNamespace := "kube-system"
 
-		svcVip = e2e.GenerateVIP(genFam, SOffset.Get())
+		svcVip = e2e.GenerateVIP(genFam, SOffset.Get(), clusterName)
 		var leases []string
 		services, leases = createTestServiceForDS(ctx, "test-svc", svcVip, leaseName,
 			corev1.ServiceExternalTrafficPolicyCluster, client, svcElection, families, 1)
@@ -659,7 +658,7 @@ func testEndpoints(ctx context.Context, manifestValues *e2e.KubevipManifestValue
 		leaseName := "plndr-svcs-lock"
 		leaseNamespace := "kube-system"
 
-		svcVip = e2e.GenerateVIP(genFam, SOffset.Get())
+		svcVip = e2e.GenerateVIP(genFam, SOffset.Get(), clusterName)
 		var leases []string
 		_, leases = createTestServiceForDS(ctx, "test-svc", svcVip, leaseName,
 			trafficPolicy, client, svcElection, families, 1)
@@ -903,6 +902,8 @@ func removeDS(ctx context.Context, client kubernetes.Interface, namespace, name 
 func prepareClusterForDS(tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePath string, logger log.Logger,
 	networking *kindconfigv1alpha4.Networking, nodesNum int,
 	addSAN *san) (string, kubernetes.Interface, *rest.Config) {
+	clusterCreationMtx.Lock()
+	defer clusterCreationMtx.Unlock()
 
 	clusterConfig := kindconfigv1alpha4.Cluster{
 		Networking: *networking,
@@ -939,6 +940,9 @@ func prepareClusterForDS(tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePa
 	}
 
 	clusterName := fmt.Sprintf("%s-%s", filepath.Base(tempDirPath), clusterNameSuffix)
+
+	err := os.Setenv(kindNetworkEnv, clusterName)
+	Expect(err).ToNot(HaveOccurred())
 
 	By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
 	client, cfg, err := createKindCluster(logger, &clusterConfig, clusterName)

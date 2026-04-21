@@ -79,7 +79,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 			})
 
 			AfterAll(func() {
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
