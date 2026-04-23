@@ -168,7 +168,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			It("should add paths", func() {
@@ -211,7 +211,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			It("should add paths", func() {
@@ -254,7 +254,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			It("should add paths", func() {
@@ -297,7 +297,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			It("should add paths", func() {
@@ -340,7 +340,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -394,7 +394,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
@@ -448,7 +448,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -502,7 +502,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -557,7 +557,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -612,7 +612,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -668,7 +668,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -730,7 +730,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
@@ -792,7 +792,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -854,7 +854,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -917,7 +917,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -980,7 +980,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 					})
 					Expect(err).ToNot(HaveOccurred())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -1116,7 +1116,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 						return err
 					}, "30s", "200ms").Should(Succeed())
 				}
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -1134,7 +1134,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 func testBGP(ctx context.Context, offset uint, lbFamily string, afiFamily api.Family_Afi, svcFamily []corev1.IPFamily, svcName string,
 	trafficPolicy corev1.ServiceExternalTrafficPolicy, client kubernetes.Interface, numberOfServices int,
 	gobgpClient api.GobgpApiClient, expectedNexthop string, serviceLease string) {
-	lbAddress := e2e.GenerateVIP(lbFamily, offset)
+	lbAddress := e2e.GenerateVIP(lbFamily, offset, defaultNetwork)
 	routeCheckFamily := &api.Family{
 		Afi:  afiFamily,
 		Safi: api.Family_SAFI_UNICAST,
@@ -1148,7 +1148,7 @@ func setupEnv(ctx context.Context, cpVIP, clusterName *string, tempDirPath strin
 	logger log.Logger, nodesNumber int, mpbgpnexthop, clusterNameSuffix string, serviceElection, cpEnable, svcEnable bool) (string, string) {
 	var err error
 
-	*cpVIP = e2e.GenerateVIP(clusterAddrFamily, SOffset.Get())
+	*cpVIP = e2e.GenerateVIP(clusterAddrFamily, SOffset.Get(), defaultNetwork)
 
 	var clusterIPFamily kindconfigv1alpha4.ClusterIPFamily
 	var podSubnet, serviceSubnet string

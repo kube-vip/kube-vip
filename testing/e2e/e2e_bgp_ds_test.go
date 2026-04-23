@@ -48,7 +48,6 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			var err error
 			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-bgp-ds")
 			Expect(err).NotTo(HaveOccurred())
-
 		})
 
 		AfterAll(func() {
@@ -79,7 +78,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			})
 
 			AfterAll(func() {
-				cleanupCluster(clusterName, ConfigMtx, logger)
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
 			})
 
 			AfterEach(func() {
@@ -234,5 +233,55 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			})
 
 		})
+
+		/*Describe("kube-vip IPv6 BGP unnumbered functionality", Ordered, func() {
+			var (
+				client      kubernetes.Interface
+				clusterName string
+				tempDirPath string
+			)
+
+			BeforeAll(func() {
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv6Family,
+				}
+
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test-bgp-v6")
+				Expect(err).NotTo(HaveOccurred())
+
+				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds-v6", imagePath, k8sImagePath,
+					logger, networking, 1, nil)
+			})
+
+			AfterAll(func() {
+				cleanupCluster(clusterName, clusterName, ConfigMtx, logger)
+			})
+
+			AfterEach(func() {
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
+				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It(clusterName+" exits gracefully when unnumbered BGP peers are configured", func() {
+				manifestValues := &e2e.KubevipManifestValues{
+					Mode:                 Mode,
+					ControlPlaneEnable:   "true",
+					VipElectionEnable:    "false",
+					ImagePath:            imagePath,
+					ConfigPath:           configPath,
+					SvcEnable:            "true",
+					SvcElectionEnable:    "false",
+					EnableEndpointslices: "true",
+					EnableNodeLabeling:   "false",
+					BGPPeers:             "unnumbered:eth0",
+					BGPAS:                2,
+				}
+
+				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
+			})
+		})*/
 	}
 })
