@@ -91,18 +91,21 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 			if len(allowCIDR) == 0 {
 				// No allowed CIDRs
 				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, portExpressions[x])
+				if err != nil {
+					return err
+				}
 				slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
 				conn.AddRule(rule) // Add the rule
 			} else {
 				// Create a rule for each allowed CIDR
 				for x := range allowCIDR {
 					rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[x], conn, IPv6, portExpressions[x])
+					if err != nil {
+						return err
+					}
 					slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
 					conn.AddRule(rule) // Add the rule
 				}
-			}
-			if err != nil {
-				return err
 			}
 
 		}
@@ -111,17 +114,22 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 		if len(allowCIDR) == 0 {
 			// No allowed CIDRs
 			rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, nil)
+			if err != nil {
+				return err
+			}
 			slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
 			conn.AddRule(rule) // Add the rule
 		} else {
 			// Create a rule for each allowed CIDR
 			for x := range allowCIDR {
 				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[x], conn, IPv6, nil)
+				if err != nil {
+					return err
+				}
 				slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
 				conn.AddRule(rule) // Add the rule
 			}
 		}
-
 	}
 
 	err = conn.Flush() // Commit the rule to nftables
