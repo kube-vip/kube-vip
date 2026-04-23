@@ -24,16 +24,17 @@ func newBGP(generic generic, bgpServer *bgp.Server) endpointWorker {
 }
 
 func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
-	if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
-		for _, cluster := range instance.Clusters {
+	if inst := instance.FindServiceInstance(service, *b.instances); inst != nil {
+		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
 				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
-					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
+					log.Debug("attempting to advertise BGP", "service", fmt.Sprintf("%s/%s", service.Namespace, service.Name),
+						"provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
 					err := b.bgpServer.AddHost(svcCtx.Ctx, cluster.Network[i].CIDR())
 					if err != nil {
 						log.Error("error adding BGP host", "provider", b.provider.GetLabel(), "err", err)
 					} else {
-						log.Info("added BGP host", "provider",
+						log.Info("added BGP host", "service", fmt.Sprintf("%s/%s", service.Namespace, service.Name), "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].CIDR(), "service name", service.Name, "namespace", service.Namespace)
 						svcCtx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
 					}
@@ -52,9 +53,9 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 				for i := range cluster.Network {
 					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR())
 					if err != nil {
-						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
+						log.Error("deleting BGP host", "service", fmt.Sprintf("%s/%s", service.Namespace, service.Name), "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
-						log.Info("deleted BGP host", "provider",
+						log.Info("deleted BGP host", "service", fmt.Sprintf("%s/%s", service.Namespace, service.Name), "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace)
 						svcCtx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
 					}
@@ -101,7 +102,7 @@ func (b *BGP) clearBGPHosts(ctx context.Context, service *v1.Service) {
 	ClearBGPHosts(ctx, service, b.instances, b.bgpServer)
 }
 
-func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
+func (b *BGP) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }
 

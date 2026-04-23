@@ -74,7 +74,7 @@ func (c *Common) GlobalLeader(ctx context.Context, leaseName string) {
 
 func (c *Common) ServicesNoLeader(ctx context.Context) error {
 	log.Info("beginning watching services without leader election")
-	err := c.svcProcessor.ServicesWatcher(ctx, c.svcProcessor.SyncServices)
+	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false))
 	if err != nil {
 		return fmt.Errorf("error while watching services: %w", err)
 	}
@@ -86,7 +86,7 @@ func (c *Common) Cleanup() {
 }
 
 func (c *Common) OnStartedLeading(ctx context.Context) {
-	err := c.svcProcessor.ServicesWatcher(ctx, c.svcProcessor.SyncServices)
+	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false))
 	if err != nil {
 		log.Error("service watcher", "err", err)
 		c.killFunc()

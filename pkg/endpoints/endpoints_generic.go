@@ -22,7 +22,7 @@ type endpointWorker interface {
 	getEndpoints(service *v1.Service, id string) ([]string, error)
 	removeEgress(service *v1.Service, lastKnownGoodEndpoint *string)
 	delete(ctx context.Context, service *v1.Service, id string) error
-	setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
+	setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error
 }
 
 func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) endpointWorker {
@@ -119,6 +119,6 @@ func (g *generic) delete(_ context.Context, _ *v1.Service, _ string) error {
 	return nil
 }
 
-func (g *generic) setInstanceEndpointsStatus(_ *v1.Service, _ []string) error {
+func (g *generic) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }
