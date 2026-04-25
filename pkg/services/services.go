@@ -430,7 +430,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
 				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
 				if err != nil {
-					log.Error("[service] egress teardown", "err", err)
+					log.Warn("[service] egress teardown", "err", err)
 				}
 			}
 		}
