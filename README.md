@@ -58,6 +58,33 @@ All of these would require a separate level of configuration and in some infrast
 
 ## Troubleshooting and Feedback
 
+### SELinux and IPVS kernel modules
+
+When using IPVS load balancing on nodes with SELinux enforcing, kube-vip may be
+blocked from requesting kernel modules from inside the container. Symptoms can
+include the kube-vip pod entering `Error` or `CrashLoopBackOff`, logs that show
+`ensure IPVS kernel modules are loaded`, or audit denials for `module_request`
+from `container_t`.
+
+Load the required IPVS modules on every node that can run kube-vip before
+deploying it:
+
+```shell
+sudo modprobe ip_vs
+sudo modprobe ip_vs_rr
+```
+
+To persist this across reboots, add the modules to a file such as
+`/etc/modules-load.d/kube-vip-ipvs.conf`:
+
+```text
+ip_vs
+ip_vs_rr
+```
+
+Preloading only the required modules is preferred to enabling the SELinux
+`domain_kernel_load_modules` boolean for containers.
+
 Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
 
 ## Community Tools
