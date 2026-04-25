@@ -98,8 +98,8 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 				conn.AddRule(rule) // Add the rule
 			} else {
 				// Create a rule for each allowed CIDR
-				for x := range allowCIDR {
-					rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[x], conn, IPv6, portExpressions[x])
+				for y := range allowCIDR {
+					rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, portExpressions[x])
 					if err != nil {
 						return err
 					}
@@ -121,8 +121,8 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 			conn.AddRule(rule) // Add the rule
 		} else {
 			// Create a rule for each allowed CIDR
-			for x := range allowCIDR {
-				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[x], conn, IPv6, nil)
+			for y := range allowCIDR {
+				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, nil)
 				if err != nil {
 					return err
 				}
