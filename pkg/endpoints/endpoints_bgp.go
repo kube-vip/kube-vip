@@ -7,6 +7,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
@@ -29,7 +30,7 @@ func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Servic
 			for i := range cluster.Network {
 				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
 					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
-					err := b.bgpServer.AddHost(svcCtx.Ctx, cluster.Network[i].CIDR())
+					err := b.bgpServer.AddHost(svcCtx.Ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
 					if err != nil {
 						log.Error("error adding BGP host", "provider", b.provider.GetLabel(), "err", err)
 					} else {
@@ -50,7 +51,7 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 		if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
 			for _, cluster := range instance.Clusters {
 				for i := range cluster.Network {
-					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR())
+					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
 					if err != nil {
 						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
@@ -119,7 +120,7 @@ func ClearBGPHostsByInstance(ctx context.Context, instance *instance.Instance, b
 	for _, cluster := range instance.Clusters {
 		for i := range cluster.Network {
 			network := cluster.Network[i]
-			err := bgpServer.DelHost(ctx, network.CIDR())
+			err := bgpServer.DelHost(ctx, network.CIDR(), lease.ServiceNamespacedName(instance.ServiceSnapshot))
 			if err != nil {
 				log.Error("[endpoint] error deleting BGP host", "err", err)
 			} else {
