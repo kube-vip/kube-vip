@@ -6,8 +6,6 @@ import (
 	"net"
 	"strconv"
 
-	//nolint
-
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
@@ -17,6 +15,8 @@ import (
 	"github.com/osrg/gobgp/v3/pkg/server"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+const defaultBGPPort uint32 = 179
 
 // AddPeer will add peers to the BGP configuration
 func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) {
@@ -45,7 +45,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 		Transport: &api.Transport{
 			MtuDiscovery:  true,
 			RemoteAddress: peer.Address,
-			RemotePort:    uint32(179),
+			RemotePort:    defaultBGPPort,
 		},
 	}
 

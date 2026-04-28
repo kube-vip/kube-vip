@@ -27,7 +27,7 @@ func FindIPAddress(addrName string) (string, string, error) {
 					// If we're not searching for a specific adapter return the first one
 					if addrName == "" {
 						return iface.Name, address, nil
-					} else
+					}
 					// If this is the correct adapter return the details
 					if iface.Name == addrName {
 						return iface.Name, address, nil
