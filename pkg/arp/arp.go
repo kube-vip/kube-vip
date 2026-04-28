@@ -25,6 +25,10 @@ type Instance struct {
 }
 
 func NewManager(config *kubevip.Config) *Manager {
+	if config.ArpBroadcastRate < 500 {
+		log.Warn("[ARP manager] arp broadcast rate is too low", "rate (ms)", config.ArpBroadcastRate, "setting to (ms)", "3000")
+		config.ArpBroadcastRate = 3000
+	}
 	return &Manager{
 		config: config,
 	}
@@ -112,11 +116,15 @@ func (m *Manager) Count(name string) int {
 
 func (m *Manager) StartAdvertisement(ctx context.Context) {
 	log.Info("[ARP manager] starting ARP/NDP advertisement")
+
+	ticker := time.NewTicker(time.Duration(m.config.ArpBroadcastRate) * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done(): // if cancel() execute
 			return
-		default:
+		case <-ticker.C: // send gratuitous ARP/NDP on each tick
 			m.instances.Range(func(_ any, instance any) bool {
 				if i, ok := instance.(*Instance); ok {
 					if i.counter > 0 {
@@ -131,11 +139,6 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 				return true
 			})
 		}
-		if m.config.ArpBroadcastRate < 500 {
-			log.Warn("[ARP manager] arp broadcast rate is too low", "rate (ms)", m.config.ArpBroadcastRate, "setting to (ms)", "3000")
-			m.config.ArpBroadcastRate = 3000
-		}
-		time.Sleep(time.Duration(m.config.ArpBroadcastRate) * time.Millisecond)
 	}
 }
 
