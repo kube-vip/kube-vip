@@ -52,7 +52,7 @@ metadata:
   annotations:
     kube-vip.io/egress: "true"
     kube-vip.io/egress-internal: "true"
-    kube-vip.io/egress-allowed-networks: 172.18.0.0/24
+    kube-vip.io/egress-allowed-networks: 172.18.0.0/24,192.168.0.0/24
 spec:
   type: LoadBalancer
   # "Local" preserves the client source IP and avoids a second hop for
