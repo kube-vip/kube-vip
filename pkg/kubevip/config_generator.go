@@ -507,6 +507,40 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 
 	}
 
+	if c.ControlPlaneHealthCheck.Address != "" {
+		healthCheckVars := []corev1.EnvVar{
+			{
+				Name:  controlPlaneHealthCheckAddress,
+				Value: c.ControlPlaneHealthCheck.Address,
+			},
+		}
+		if c.ControlPlaneHealthCheck.PeriodSeconds > 0 {
+			healthCheckVars = append(healthCheckVars, corev1.EnvVar{
+				Name:  controlPlaneHealthCheckPeriodSeconds,
+				Value: fmt.Sprintf("%d", c.ControlPlaneHealthCheck.PeriodSeconds),
+			})
+		}
+		if c.ControlPlaneHealthCheck.TimeoutSeconds > 0 {
+			healthCheckVars = append(healthCheckVars, corev1.EnvVar{
+				Name:  controlPlaneHealthCheckTimeoutSeconds,
+				Value: fmt.Sprintf("%d", c.ControlPlaneHealthCheck.TimeoutSeconds),
+			})
+		}
+		if c.ControlPlaneHealthCheck.FailureThreshold > 0 {
+			healthCheckVars = append(healthCheckVars, corev1.EnvVar{
+				Name:  controlPlaneHealthCheckFailureThreshold,
+				Value: fmt.Sprintf("%d", c.ControlPlaneHealthCheck.FailureThreshold),
+			})
+		}
+		if c.ControlPlaneHealthCheck.CAPath != "" {
+			healthCheckVars = append(healthCheckVars, corev1.EnvVar{
+				Name:  controlPlaneHealthCheckCAPath,
+				Value: c.ControlPlaneHealthCheck.CAPath,
+			})
+		}
+		newEnvironment = append(newEnvironment, healthCheckVars...)
+	}
+
 	// If the load-balancer is enabled then add the configuration to the manifest
 	if c.EnableLoadBalancer {
 		lb := []corev1.EnvVar{
@@ -587,7 +621,7 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 
 	var securityContext *corev1.SecurityContext
 	if c.LoadBalancerForwardingMethod == "masquerade" {
-		var privileged = true
+		privileged := true
 		securityContext = &corev1.SecurityContext{
 			Privileged: &privileged,
 		}

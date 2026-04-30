@@ -16,26 +16,68 @@ spec:
     env:
     - name: vip_loglevel
       value: "-4"
+{{- if .BGPAS }}
+    - name: lb_class_legacy_handling
+      value: "false"
+    - name: lb_class_name
+    - name: prometheus_server
+      value: :2112
+    - name: disable_service_updates
+      value: "false"
+    - name: vip_arp
+      value: "false"
+    - name: port
+      value: "6443"
+    - name: vip_cidr
+      value: "32"
+    - name: vip_leaderelection
+      value: "false"
+    - name: vip_interface
+      value: lo
+    - name: bgp_enable
+      value: "true"
+    - name: bgp_hold_time
+      value: "3"
+    - name: bgp_keepalive_interval
+      value: "1"
+    - name: bgp_sourceif
+      value: "eth0"
+    - name: bgp_routerid
+      value: "2.2.2.2"
+    - name: bgp_as
+      value: "{{ .BGPAS }}"
+    - name: bgp_peers
+      value: "{{ .BGPPeers }}"
+{{- if .MPBGPNexthop }}
+    - name: mpbgp_nexthop
+      value: "{{ .MPBGPNexthop }}"
+    - name: mpbgp_ipv4
+      value: "{{ .MPBGPNexthopIPv4 }}"
+    - name: mpbgp_ipv6
+      value: "{{ .MPBGPNexthopIPv6 }}"
+{{- end }}
+{{- else }}
     - name: vip_arp
       value: "true"
     - name: vip_interface
       value: eth0
     - name: vip_leaderelection
       value: "true"
-    - name: address
-      value: "{{ .ControlPlaneVIP }}"
     - name: vip_leaseduration
       value: "5"
     - name: vip_renewdeadline
       value: "3"
     - name: vip_retryperiod
       value: "1"
-    - name: cp_enable
-      value: "true"
     - name: vip_nodename
       valueFrom:
         fieldRef:
           fieldPath: spec.nodeName
+{{- end }}
+    - name: address
+      value: "{{ .ControlPlaneVIP }}"
+    - name: cp_enable
+      value: "{{ .ControlPlaneEnable }}"
     - name: svc_enable
       value: "{{ .SvcEnable }}"
     - name: svc_election
@@ -44,6 +86,26 @@ spec:
       value: "{{ .EnableNodeLabeling }}"
     - name: enable_endpointslices
       value: "{{ .EnableEndpointslices }}"
+{{- if .ControlPlaneHealthCheckAddress }}
+    - name: control_plane_health_check_address
+      value: "{{ .ControlPlaneHealthCheckAddress }}"
+{{- if .ControlPlaneHealthCheckPeriodSeconds }}
+    - name: control_plane_health_check_period_seconds
+      value: "{{ .ControlPlaneHealthCheckPeriodSeconds }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckTimeoutSeconds }}
+    - name: control_plane_health_check_timeout_seconds
+      value: "{{ .ControlPlaneHealthCheckTimeoutSeconds }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckFailureThreshold }}
+    - name: control_plane_health_check_failure_threshold
+      value: "{{ .ControlPlaneHealthCheckFailureThreshold }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckCAPath }}
+    - name: control_plane_health_check_ca_path
+      value: "{{ .ControlPlaneHealthCheckCAPath }}"
+{{- end }}
+{{- end }}
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
@@ -54,6 +116,11 @@ spec:
     volumeMounts:
     - mountPath: /etc/kubernetes/admin.conf
       name: kubeconfig
+{{- if .ControlPlaneHealthCheckCAPath }}
+    - mountPath: {{ .ControlPlaneHealthCheckCAPath }}
+      name: health-check-ca
+      readOnly: true
+{{- end }}
   hostAliases:
     - hostnames:
       - kubernetes
@@ -63,3 +130,9 @@ spec:
   - hostPath:
       path: "{{ .ConfigPath }}"
     name: kubeconfig
+{{- if .ControlPlaneHealthCheckCAPath }}
+  - hostPath:
+      path: {{ .ControlPlaneHealthCheckCAPath }}
+      type: File
+    name: health-check-ca
+{{- end }}

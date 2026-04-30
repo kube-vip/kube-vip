@@ -42,6 +42,10 @@ var kubeKubeadmInit = &cobra.Command{
 			log.Error("parsing environment", "err", err)
 			return
 		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
+			return
+		}
 
 		// TODO - check for certain things VIP/interfaces
 		if initConfig.Interface == "" {
@@ -84,6 +88,10 @@ var kubeKubeadmJoin = &cobra.Command{
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing environment", "err", err)
+			return
+		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
 			return
 		}
 

@@ -105,6 +105,11 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.Zebra.URL, "zebraUrl", "unix:/var/run/frr/zserv.api", "Path to the unix domain socket for connecting to Zebra daemon")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.Zebra.Version, "zebraVersion", 6, "Zebra API Version")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPConfig.Zebra.SoftwareName, "zebraSoftwareName", "frr8.3", "Software Name for Zebra")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ControlPlaneHealthCheck.Address, "controlPlaneHealthCheckAddress", "", "URL to poll for the control-plane health check when using BGP without leader election")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.ControlPlaneHealthCheck.PeriodSeconds, "controlPlaneHealthCheckPeriodSeconds", 5, "Seconds between control-plane health checks")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.ControlPlaneHealthCheck.TimeoutSeconds, "controlPlaneHealthCheckTimeoutSeconds", 3, "Timeout for each control-plane health check request")
+	kubeVipCmd.PersistentFlags().IntVar(&initConfig.ControlPlaneHealthCheck.FailureThreshold, "controlPlaneHealthCheckFailureThreshold", 3, "Consecutive control-plane health check failures before withdrawing the BGP route")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ControlPlaneHealthCheck.CAPath, "controlPlaneHealthCheckCAPath", "", "Path to CA certificate for TLS verification when the control-plane health check URL is HTTPS")
 
 	// Namespace for kube-vip
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")
@@ -215,6 +220,10 @@ var kubeVipService = &cobra.Command{
 			log.Error("parsing env", "err", err)
 			return
 		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
+			return
+		}
 
 		// Change RTN_UNSPEC to default type
 		if initConfig.RoutingProtocol == unix.RTN_UNSPEC {
@@ -289,6 +298,10 @@ var kubeVipManager = &cobra.Command{
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing environment", "err", err)
+			return
+		}
+		if err := initConfig.Validate(); err != nil {
+			log.Error("validating configuration", "err", err)
 			return
 		}
 
