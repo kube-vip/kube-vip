@@ -14,6 +14,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"k8s.io/client-go/kubernetes"
 )
@@ -30,12 +31,13 @@ type Common struct {
 	clientSet    *kubernetes.Clientset
 	electionMgr  *election.Manager
 	leaseMgr     *lease.Manager
+	routeMgr     *route.Manager
 }
 
 func newCommon(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager) *Common {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Common {
 	return &Common{
 		arpMgr:       arpMgr,
 		intfMgr:      intfMgr,
@@ -47,12 +49,13 @@ func newCommon(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 		clientSet:    clientSet,
 		electionMgr:  electionMgr,
 		leaseMgr:     leaseMgr,
+		routeMgr:     routeMgr,
 	}
 }
 
 func (c *Common) InitControlPlane() error {
 	var err error
-	c.cpCluster, err = cluster.InitCluster(c.config, false, c.intfMgr, c.arpMgr)
+	c.cpCluster, err = cluster.InitCluster(c.config, false, c.intfMgr, c.arpMgr, c.routeMgr)
 	if err != nil {
 		return fmt.Errorf("cluster initialization error: %w", err)
 	}

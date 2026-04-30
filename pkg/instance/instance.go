@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -60,7 +61,9 @@ type Port struct {
 	Type string
 }
 
-func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, intfMgr *networkinterface.Manager, arpMgr *arp.Manager, wg *sync.WaitGroup) (*Instance, error) {
+func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
+	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
+	wg *sync.WaitGroup) (*Instance, error) {
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
 	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
@@ -355,7 +358,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config, i
 			}
 		}
 
-		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr)
+		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr, routeMgr)
 		if err != nil {
 			log.Error("failed to add service", "err", err)
 			return nil, err

@@ -11,6 +11,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"k8s.io/client-go/kubernetes"
 )
@@ -22,10 +23,10 @@ type ARP struct {
 func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager) *ARP {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *ARP {
 	return &ARP{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFunc,
-			svcProcessor, mutex, clientSet, electionMgr, leaseMgr),
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr),
 	}
 }
 

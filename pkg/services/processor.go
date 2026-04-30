@@ -17,12 +17,12 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
@@ -59,6 +59,8 @@ type Processor struct {
 
 	// TunnelMgr manages multiple WireGuard tunnels (one per service VIP)
 	TunnelMgr *wireguard.TunnelManager
+
+	routeMgr *route.Manager
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -70,7 +72,7 @@ type labelManager interface {
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager,
-	electionMgr *election.Manager, leaseMgr *lease.Manager) *Processor {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
@@ -96,6 +98,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		nodeLabelManager: nodeLabelManager,
 		electionMgr:      electionMgr,
 		TunnelMgr:        wireguard.NewTunnelManager(),
+		routeMgr:         routeMgr,
 	}
 }
 
@@ -131,7 +134,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
 	var err error
 	if svcInstance == nil {
-		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
+		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
 		if err != nil {
 			return fmt.Errorf("unalbe to create instance for service %s/%s", svc.Namespace, svc.Name)
 		}
@@ -395,7 +398,7 @@ func (p *Processor) Delete(event watch.Event) error {
 		// If no leader election is enabled, delete routes here
 		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
-			if errs := endpoints.ClearRoutes(svc, &p.ServiceInstances); len(errs) == 0 {
+			if errs := endpoints.ClearRoutes(svc, &p.ServiceInstances, p.routeMgr); len(errs) == 0 {
 				svcCtx.ConfiguredNetworks.Clear()
 			}
 		}
@@ -440,8 +443,4 @@ func (p *Processor) getServiceContext(uid types.UID) (*servicecontext.Context, e
 		return nil, fmt.Errorf("failed to cast service context pointer - UID: %s", uid)
 	}
 	return ctx, nil
-}
-
-func (p *Processor) CountRouteReferences(route *netlink.Route) int {
-	return endpoints.CountRouteReferences(route, &p.ServiceInstances)
 }

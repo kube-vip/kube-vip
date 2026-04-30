@@ -2,6 +2,7 @@ package vip
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"net"
 	"slices"
@@ -38,7 +39,7 @@ const (
 // Network is an interface that enable managing operations for a given IP
 type Network interface {
 	AddIP(precheck bool, skipDAD bool, minLifetime ...int) (bool, error)
-	AddRoute(precheck bool) error
+	AddRoute(precheck bool) (bool, error)
 	DeleteIP() (bool, error)
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
@@ -47,6 +48,7 @@ type Network interface {
 	CIDR() string
 	IPisLinkLocal() bool
 	PrepareRoute() *netlink.Route
+	RouteHash() string
 	SetIP(ip string) error
 	SetServicePorts(service *v1.Service)
 	Interface() string
@@ -284,8 +286,16 @@ func (configurator *network) PrepareRoute() *netlink.Route {
 	return route
 }
 
+func (configurator *network) RouteHash() string {
+	r := configurator.PrepareRoute()
+	h := fnv.New32a()
+	h.Write([]byte(r.String()))
+
+	return strconv.FormatUint(uint64(h.Sum32()), 16)
+}
+
 // AddRoute - Add an IP address to a route table
-func (configurator *network) AddRoute(precheck bool) error {
+func (configurator *network) AddRoute(precheck bool) (bool, error) {
 	configurator.link.Lock.Lock()
 	defer configurator.link.Lock.Unlock()
 	route := configurator.PrepareRoute()
@@ -295,17 +305,18 @@ func (configurator *network) AddRoute(precheck bool) error {
 	if precheck {
 		exists, err = configurator.routeExists(route)
 		if err != nil {
-			return errors.Wrap(err, "failed to check route")
+			return false, errors.Wrap(err, "failed to check route")
 		}
 	}
 
 	if !exists {
 		if err := netlink.RouteAdd(route); err != nil {
-			return errors.Wrap(err, "failed to add route")
+			return false, errors.Wrap(err, "failed to add route")
 		}
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 func (configurator *network) routeExists(route *netlink.Route) (bool, error) {

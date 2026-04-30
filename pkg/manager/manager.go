@@ -28,6 +28,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/node"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -87,6 +88,9 @@ type Manager struct {
 
 	// Will handle leases
 	leaseMgr *lease.Manager
+
+	// Will handle routes
+	routeMgr *route.Manager
 }
 
 // New will create a new managing object
@@ -240,9 +244,10 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	}
 
 	leaseMgr := lease.NewManager()
+	routeMgr := route.NewManager()
 
 	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
-		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr)
+		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr)
 
 	return &Manager{
 		clientSet:   clientset,
@@ -269,6 +274,7 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		nodeLabelManager: nodeLabelManager,
 		electionMgr:      electionMgr,
 		leaseMgr:         leaseMgr,
+		routeMgr:         routeMgr,
 	}, nil
 }
 
@@ -337,7 +343,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
-		sm.electionMgr, sm.leaseMgr)
+		sm.electionMgr, sm.leaseMgr, sm.routeMgr)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down

@@ -164,7 +164,7 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 
 	var err error
 	if newService == nil {
-		newService, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, wg)
+		newService, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func (p *Processor) addService(ctx context.Context, newService *instance.Instanc
 
 	for x := range newService.VIPConfigs {
 		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), p.CountRouteReferences, wg); err != nil {
+		if err := newService.Clusters[x].StartLoadBalancerService(ctx, newService.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
 			return fmt.Errorf("failed to start lb: %w", err)
 		}
 	}
@@ -395,6 +395,14 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
+	if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances, p.routeMgr); len(errs) > 0 {
+			for _, err := range errs {
+				log.Error("unable to clear routes", "err", err)
+			}
+		}
+	}
+
 	if !shared {
 		for x := range serviceInstance.Clusters {
 			serviceInstance.Clusters[x].Stop()
@@ -416,14 +424,6 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 			err = netlink.LinkDel(macvlan)
 			if err != nil {
 				return fmt.Errorf("[service] error deleting DHCP Link : %v", err)
-			}
-		}
-
-		if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
-			if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances); len(errs) > 0 {
-				for _, err := range errs {
-					log.Error("unable to clear routes", "err", err)
-				}
 			}
 		}
 

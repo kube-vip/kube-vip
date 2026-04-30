@@ -11,6 +11,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
@@ -25,14 +26,15 @@ type endpointWorker interface {
 	setInstanceEndpointsStatus(service *v1.Service, endpoints []string) error
 }
 
-func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) endpointWorker {
+func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance,
+	leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager) endpointWorker {
 	generic := newGeneric(config, provider, instances, leaseMgr)
 
 	if config.EnableWireguard {
 		return newWireguardWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr)
 	}
 	if config.EnableRoutingTable {
-		return newRoutingTable(generic)
+		return newRoutingTable(generic, routeMgr)
 	}
 	if config.EnableBGP {
 		return newBGP(generic, bgpServer)
