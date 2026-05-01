@@ -84,9 +84,8 @@ func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 	if i != nil {
 		i.mu.Lock()
 		defer i.mu.Unlock()
-		if i.counter > 1 {
-			i.counter--
-		} else {
+		i.counter--
+		if i.counter == 0 {
 			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name())
 			if deleteIP {
 				if _, err := instance.network.DeleteIP(); err != nil {
@@ -127,6 +126,8 @@ func (m *Manager) StartAdvertisement(ctx context.Context) {
 		case <-ticker.C: // send gratuitous ARP/NDP on each tick
 			m.instances.Range(func(_ any, instance any) bool {
 				if i, ok := instance.(*Instance); ok {
+					i.mu.Lock()
+					defer i.mu.Unlock()
 					if i.counter > 0 {
 						ensureIPAndSendGratuitous(i)
 					} else {
