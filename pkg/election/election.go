@@ -68,7 +68,7 @@ func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 			return err
 		}
 	default:
-		log.Info(fmt.Sprintf("LeaderElectionMode %s not supported, exiting", c.LeaderElectionType))
+		log.Info("LeaderElectionMode not supported, exiting", "mode", c.LeaderElectionType)
 	}
 
 	return nil
@@ -171,7 +171,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("error creating label watcher: %s", err.Error())
+		return fmt.Errorf("error creating label watcher: %w", err)
 	}
 
 	wg.Go(func() {
@@ -198,7 +198,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 					if checkIfNodeIsReady(node) {
 						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 						if err != nil {
-							log.Error("add IPVS backend", "err", err)
+							log.Error("adding node to load balancer", "node", node.Name, "ip", node.Status.Addresses[x].Address, "err", err)
 							if errors.Is(err, &utils.PanicError{}) {
 								return fmt.Errorf("add IPVS backend: %w", err)
 							}
@@ -206,7 +206,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 					} else {
 						err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 						if err != nil {
-							log.Error("remove IPVS backend", "err", err)
+							log.Error("removing node from load balancer", "node", node.Name, "ip", node.Status.Addresses[x].Address, "err", err)
 						}
 					}
 				}
@@ -222,7 +222,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					err = lb.RemoveBackend(node.Status.Addresses[x].Address, port)
 					if err != nil {
-						log.Error("Del IPVS backend", "err", err)
+						log.Error("removing node from load balancer", "node", node.Name, "ip", node.Status.Addresses[x].Address, "err", err)
 					}
 				}
 			}
