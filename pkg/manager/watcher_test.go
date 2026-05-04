@@ -44,12 +44,12 @@ func TestParseBgpAnnotations(t *testing.T) {
 	assert.EqualValues(t, 15, bgpConfig.HoldTime, "base bgpConfig.HoldTime should not be overwritten")
 	assert.EqualValues(t, 5, bgpConfig.KeepaliveInterval, "base bgpConfig.KeepaliveInterval should not be overwritten")
 
-	node.Annotations = map[string]string{
+	node.Annotations = map[string]string{ //nolint:gosec
 		"bgp/node-asn":       "65000",
 		"bgp/peer-asn":       "64000",
 		"bgp/src-ip":         "10.0.0.254",
 		"bgp/peer-ip":        "10.0.0.1,10.0.0.2,10.0.0.3",
-		"bgp/bgp-pass":       "cGFzc3dvcmQ=", // password
+		"bgp/bgp-pass":       "cGFzc3dvcmQ=", // dummy password for the test, gosec linter disabled
 		"bgp/peer-multi-hop": "true",
 	}
 
@@ -90,12 +90,12 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 		t.Fatal("Parsing BGP annotations should return an error when no annotations exist")
 	}
 
-	node.Annotations = map[string]string{
+	node.Annotations = map[string]string{ //nolint:gosec
 		"bgp/bgp-peers-0-node-asn": "65000",
 		"bgp/bgp-peers-0-peer-asn": "64000",
 		"bgp/bgp-peers-0-peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
 		"bgp/bgp-peers-0-src-ip":   "10.0.0.254",
-		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // password
+		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // dummy password for the test, gosec linter disabled
 	}
 
 	bgpConfig, bgpPeer, err := parseBgpAnnotations(bgpConfigBase, node, "bgp")

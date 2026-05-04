@@ -20,7 +20,8 @@ type Context struct {
 }
 
 func New(ctx context.Context) *Context {
-	svcCtx, svcCancel := context.WithCancel(ctx)
+	// context and cancel stored for a future use, gosec linter disabled
+	svcCtx, svcCancel := context.WithCancel(ctx) //nolint:gosec
 	return &Context{
 		Ctx:    svcCtx,
 		Cancel: svcCancel,

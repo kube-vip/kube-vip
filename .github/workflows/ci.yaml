@@ -10,7 +10,10 @@ jobs:
       - name: Init
         run: sudo apt-get update && sudo apt-get install -y build-essential &&  sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.7.2
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          install-only: true
       - name: Checkout code
         uses: actions/checkout@v6
       - name: Install Go
