@@ -509,13 +509,13 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				manifestValues = &e2e.KubevipManifestValues{
-					ControlPlaneVIP:      cpVIP,
-					ImagePath:            imagePath,
-					ConfigPath:           configPath,
-					ControlPlaneEnable:   "false",
-					SvcEnable:            "true",
-					SvcElectionEnable:    "false",
-					EnableEndpointslices: "true",
+					ControlPlaneVIP:    cpVIP,
+					ImagePath:          imagePath,
+					ConfigPath:         configPath,
+					ControlPlaneEnable: "false",
+					SvcEnable:          "true",
+					SvcElectionEnable:  "false",
+					EnableEndpoints:    "false",
 				}
 
 				var err error
@@ -582,13 +582,13 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				manifestValues = &e2e.KubevipManifestValues{
-					ControlPlaneVIP:      cpVIP,
-					ImagePath:            imagePath,
-					ConfigPath:           configPath,
-					ControlPlaneEnable:   "false",
-					SvcEnable:            "true",
-					SvcElectionEnable:    "false",
-					EnableEndpointslices: "true",
+					ControlPlaneVIP:    cpVIP,
+					ImagePath:          imagePath,
+					ConfigPath:         configPath,
+					ControlPlaneEnable: "false",
+					SvcEnable:          "true",
+					SvcElectionEnable:  "false",
+					EnableEndpoints:    "false",
 				}
 
 				var err error
@@ -811,13 +811,13 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				manifestValues = &e2e.KubevipManifestValues{
-					ControlPlaneVIP:      cpVIP,
-					ImagePath:            imagePath,
-					ConfigPath:           configPath,
-					ControlPlaneEnable:   "false",
-					SvcEnable:            "true",
-					SvcElectionEnable:    "true",
-					EnableEndpointslices: "true",
+					ControlPlaneVIP:    cpVIP,
+					ImagePath:          imagePath,
+					ConfigPath:         configPath,
+					ControlPlaneEnable: "false",
+					SvcEnable:          "true",
+					SvcElectionEnable:  "true",
+					EnableEndpoints:    "false",
 				}
 
 				var err error
@@ -893,13 +893,13 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				manifestValues = &e2e.KubevipManifestValues{
-					ControlPlaneVIP:      cpVIP,
-					ImagePath:            imagePath,
-					ConfigPath:           configPath,
-					ControlPlaneEnable:   "false",
-					SvcEnable:            "true",
-					SvcElectionEnable:    "true",
-					EnableEndpointslices: "true",
+					ControlPlaneVIP:    cpVIP,
+					ImagePath:          imagePath,
+					ConfigPath:         configPath,
+					ControlPlaneEnable: "false",
+					SvcEnable:          "true",
+					SvcElectionEnable:  "true",
+					EnableEndpoints:    "false",
 				}
 
 				var err error

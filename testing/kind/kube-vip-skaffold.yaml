@@ -39,8 +39,8 @@ spec:
             - name: vip_address
             - name: prometheus_server
               value: :2112
-            - name: enable_endpointslices
-              value: "true"
+            - name: enable_endpoints
+              value: "false"
             - name: EGRESS_CLEAN
               value: "true"
             - name: egress_withnftables

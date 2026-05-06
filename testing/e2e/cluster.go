@@ -76,8 +76,8 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	if spec.KubeVip.EnableNodeLabeling == "" {
 		spec.KubeVip.EnableNodeLabeling = "false"
 	}
-	if spec.KubeVip.EnableEndpointslices == "" {
-		spec.KubeVip.EnableEndpointslices = "false"
+	if spec.KubeVip.EnableEndpoints == "" {
+		spec.KubeVip.EnableEndpoints = "true"
 	}
 
 	// Render kube-vip manifest
@@ -115,7 +115,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	// Build Kind cluster config
 	k8sImage := os.Getenv("K8S_IMAGE_PATH")
 	clusterConfig := kindconfigv1alpha4.Cluster{
-		Networking:                    spec.Networking,
+		Networking:                   spec.Networking,
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
 	for i := range spec.Nodes {

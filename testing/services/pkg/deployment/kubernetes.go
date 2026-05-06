@@ -84,8 +84,8 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 									Value: "true",
 								},
 								{
-									Name:  "enable_endpointslices",
-									Value: "true",
+									Name:  "enable_endpoints",
+									Value: "false",
 								},
 								{
 									Name:  "svc_election",

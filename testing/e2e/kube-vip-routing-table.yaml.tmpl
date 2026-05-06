@@ -48,8 +48,8 @@ spec:
       value: "{{ .SvcElectionEnable }}"
     - name: enable_node_labeling
       value: "{{ .EnableNodeLabeling }}"
-    - name: enable_endpointslices
-      value: "{{ .EnableEndpointslices }}"
+    - name: enable_endpoints
+      value: "{{ .EnableEndpoints }}"
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
