@@ -43,7 +43,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 		Expect(server).ToNot(BeNil(), "SharedBGPServer not initialized")
 
 		var err error
-		tempDirRoot, err = os.MkdirTemp("", "kube-vip-test-bgp-hc")
+		tempDirRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-bgp-hc", testDirPrefix))
 		Expect(err).NotTo(HaveOccurred())
 
 		cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)

@@ -48,6 +48,7 @@ const (
 	dsNamespace    = "default"
 	defaultNetwork = "kind"
 	kindNetworkEnv = "KIND_EXPERIMENTAL_DOCKER_NETWORK"
+	testDirPrefix  = "kube-vip-test"
 )
 
 const testJSON = `
@@ -102,7 +103,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp")
+			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-arp", testDirPrefix))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -140,7 +141,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv4", k8sImagePath, v129,
@@ -187,7 +188,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-ipv4", k8sImagePath, v129,
@@ -248,7 +249,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-ipv4", k8sImagePath, v129,
@@ -301,7 +302,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, clusterCfg = prepareCluster(ctx, tempDirPath, "ipv6", k8sImagePath, v129,
@@ -350,7 +351,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-ipv6", k8sImagePath, v129,
@@ -411,7 +412,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-ipv6", k8sImagePath, v129,
@@ -463,7 +464,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-ipv4", k8sImagePath, v129,
@@ -510,7 +511,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-ipv4", k8sImagePath, v129,
@@ -571,7 +572,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-el-ipv4", k8sImagePath, v129,
@@ -625,7 +626,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-ipv6", k8sImagePath, v129,
@@ -674,7 +675,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-ipv6", k8sImagePath, v129,
@@ -737,7 +738,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ds-svc-el-ipv6", k8sImagePath, v129,
@@ -789,7 +790,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv4-hostname", k8sImagePath, v129,
@@ -836,7 +837,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-m-ipv6", k8sImagePath, v129,
@@ -891,7 +892,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-m-ds", k8sImagePath, v129,

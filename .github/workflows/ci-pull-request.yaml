@@ -38,13 +38,13 @@ jobs:
         run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-bgp
         if: matrix.mode== 'bgp'
       - name: Change log directory permissions
-        run: sudo chmod -R 755 /tmp/kube-vip-test-${{ matrix.mode }}*
+        run: sudo chmod -R 755 /tmp/kube-vip-test*
         if: matrix.mode== 'bgp' && always()
       - name: Save logs
         uses: actions/upload-artifact@v7
         with:
           name: e2e-test-logs-${{ matrix.mode }}-${{ steps.date.outputs.date }}
-          path: /tmp/kube-vip-test-${{ matrix.mode }}*
+          path: /tmp/kube-vip-test*
         if: always()
   service-e2e-tests:
     runs-on: ubuntu-latest

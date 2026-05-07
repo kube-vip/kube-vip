@@ -54,7 +54,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-arp-ds")
+			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -78,7 +78,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv4-ds", imagePath, k8sImagePath,
@@ -90,7 +90,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())
@@ -206,7 +206,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv6-ds", imagePath, k8sImagePath,
@@ -218,7 +218,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())
@@ -334,7 +334,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipdual-ds", imagePath, k8sImagePath,
@@ -346,7 +346,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())

@@ -71,7 +71,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
@@ -106,7 +106,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
@@ -141,7 +141,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
@@ -176,7 +176,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
@@ -210,7 +210,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
@@ -257,7 +257,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
@@ -304,7 +304,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
@@ -351,7 +351,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
@@ -399,7 +399,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
@@ -447,7 +447,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
@@ -494,7 +494,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
@@ -549,7 +549,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
@@ -604,7 +604,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
@@ -659,7 +659,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
@@ -715,7 +715,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
@@ -771,7 +771,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
@@ -824,7 +824,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 			BeforeAll(func() {
 				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				kindCluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{

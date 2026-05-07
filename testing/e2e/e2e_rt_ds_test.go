@@ -46,7 +46,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-rt-ds")
+			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-rt-ds", testDirPrefix))
 			Expect(err).NotTo(HaveOccurred())
 
 		})
@@ -71,7 +71,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "rt-ds", imagePath, k8sImagePath,
@@ -83,7 +83,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())

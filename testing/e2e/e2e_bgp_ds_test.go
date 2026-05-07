@@ -46,7 +46,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-bgp-ds")
+			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-bgp-ds", testDirPrefix))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -70,7 +70,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test-ds")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-ds", testDirPrefix))
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds", imagePath, k8sImagePath,
@@ -82,7 +82,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())
@@ -247,7 +247,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test-bgp-v6")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-bgp-v6", testDirPrefix))
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds-v6", imagePath, k8sImagePath,
@@ -259,7 +259,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 			})
 
 			AfterEach(func() {
-				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, "kube-vip-test")
+				tempDirPathLocal, err := os.MkdirTemp(tempDirPath, testDirPrefix)
 				By(fmt.Sprintf("saving logs to %q", tempDirPathLocal))
 				err = e2e.GetLogs(ctx, client, tempDirPathLocal, clusterName)
 				Expect(err).ToNot(HaveOccurred())

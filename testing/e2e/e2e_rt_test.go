@@ -45,7 +45,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		BeforeAll(func() {
 			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", "kube-vip-test-rt")
+			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-rt", testDirPrefix))
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -103,7 +103,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv4", k8sImagePath, v129,
@@ -164,7 +164,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				}
 
 				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv6", k8sImagePath, v129,
@@ -235,7 +235,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ipnet: localIPv6Net,
 				}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-ipv4", k8sImagePath, v129,
@@ -312,7 +312,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ipnet: localIPv4Net,
 				}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-ipv6", k8sImagePath, v129,
@@ -383,7 +383,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
@@ -453,7 +453,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6", k8sImagePath, v129,
@@ -524,7 +524,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129,
@@ -597,7 +597,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129,
@@ -667,7 +667,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
@@ -746,7 +746,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6", k8sImagePath, v129,
@@ -826,7 +826,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129,
@@ -908,7 +908,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, "kube-vip-test")
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
 				Expect(err).NotTo(HaveOccurred())
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129,

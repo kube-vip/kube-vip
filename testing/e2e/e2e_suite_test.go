@@ -5,6 +5,7 @@ package e2e_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -70,7 +71,7 @@ var _ = SynchronizedBeforeSuite(
 			return nil
 		}
 
-		tmpDir, err := os.MkdirTemp("", "kube-vip-bgp-shared")
+		tmpDir, err := os.MkdirTemp("", fmt.Sprintf("%s-bgp-shared", testDirPrefix))
 		Expect(err).NotTo(HaveOccurred())
 
 		srv := bgp.NewServer(tmpDir)
