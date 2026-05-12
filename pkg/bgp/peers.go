@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
+	"github.com/jpillora/backoff"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	api "github.com/osrg/gobgp/v3/api"
@@ -50,7 +52,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 	}
 
 	if peer.Interface != "" {
-		neighborAddress, err := oc.GetIPv6LinkLocalNeighborAddress(peer.Interface)
+		neighborAddress, err := getIPv6LinkLocalNeighborAddress(ctx, peer.Interface)
 		if err != nil {
 			return fmt.Errorf("failed to get link-local address of interface %s: %w", peer.Interface, err)
 		}
@@ -256,4 +258,45 @@ func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *a
 	}
 
 	return nil
+}
+
+func getIPv6LinkLocalNeighborAddress(ctx context.Context, peerInterface string) (string, error) {
+	neighCtx, neighCancel := context.WithTimeout(ctx, time.Minute)
+	defer neighCancel()
+
+	bo := backoff.Backoff{
+		Factor: 2,
+		Jitter: true,
+		Min:    1 * time.Second,
+		Max:    5 * time.Second,
+	}
+
+	maxAttempts := 20.0
+
+	var err error
+	for {
+		select {
+		case <-neighCtx.Done():
+			if err != nil {
+				return "", fmt.Errorf("failed to get link-local address of interface %s: %w", peerInterface, err)
+			}
+			return "", fmt.Errorf("failed to get link-local address of interface %s: %w", peerInterface, neighCtx.Err())
+		default:
+			dur := bo.Duration()
+			neighborAddress, err := oc.GetIPv6LinkLocalNeighborAddress(peerInterface)
+			if err != nil && bo.Attempt() >= maxAttempts {
+				return "", fmt.Errorf("failed to get link-local address of interface %s: %w", peerInterface, err)
+			}
+			if neighborAddress != "" {
+				return neighborAddress, nil
+			}
+			t := time.NewTimer(dur)
+			select {
+			case <-neighCtx.Done():
+				t.Stop()
+			case <-t.C:
+			}
+		}
+
+	}
 }
