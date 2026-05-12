@@ -10,6 +10,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/trafficmirror"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
@@ -71,7 +72,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback) 
 
 	// Used for tracking an active endpoint / pod
 	for event := range ch {
-		p.CountServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
+		metrics.CountServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
 
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {

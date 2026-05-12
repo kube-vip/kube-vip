@@ -14,7 +14,6 @@ import (
 
 	log "log/slog"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
@@ -458,7 +458,8 @@ var kubeVipManager = &cobra.Command{
 			return
 		}
 
-		prometheus.MustRegister(mgr.PrometheusCollector()...)
+		metrics.RegisterPrometheusMetrics()
+		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)

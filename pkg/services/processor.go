@@ -17,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
@@ -45,10 +46,6 @@ type Processor struct {
 
 	clientSet   *kubernetes.Clientset
 	rwClientSet *kubernetes.Clientset
-
-	// This is a prometheus counter used to count the number of events received
-	// from the service watcher
-	CountServiceWatchEvent *prometheus.CounterVec
 
 	intfMgr *networkinterface.Manager
 	arpMgr  *arp.Manager
@@ -84,13 +81,6 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
-		CountServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "all_services_events",
-			Help:      "Count all events fired by the service watcher categorised by event type",
-		}, []string{"type"}),
-
 		intfMgr:          intfMgr,
 		arpMgr:           arpMgr,
 		leaseMgr:         leaseMgr,
@@ -106,6 +96,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	if !ok {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 	}
+
+	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
+	defer timer.ObserveDuration()
 
 	// We only care about LoadBalancer services
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
@@ -139,19 +132,23 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	if svcInstance == nil {
 		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
-			return fmt.Errorf("unalbe to create instance for service %s/%s", svc.Namespace, svc.Name)
+			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
+			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
 		}
 		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
+		p.updateActiveServicesMetric()
 	}
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "invalid_config").Inc()
 		return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
 			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
+		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 		return fmt.Errorf("failed to get service context: %w", err)
 	}
 
@@ -179,6 +176,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				svcCtx.Cancel()
 
 				if err := p.deleteService(ctx, svc.UID); err != nil {
+					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
 					log.Error("(svc) unable to remove", "service", svc.UID)
 				}
 				// in theory this should never fail
@@ -186,6 +184,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
+				p.updateActiveServicesMetric()
 			}
 		}
 	}
@@ -319,6 +318,7 @@ func (p *Processor) Delete(event watch.Event) error {
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		svcCtx.Cancel()
 		p.svcMap.Delete(svc.UID)
+		p.updateActiveServicesMetric()
 	}
 
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
@@ -361,4 +361,17 @@ func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
 		*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
 		// DDNS was disabled/enabled
 		svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS]
+}
+
+func (p *Processor) updateActiveServicesMetric() {
+	counts := map[string]int{}
+	for _, inst := range p.ServiceInstances {
+		if inst.ServiceSnapshot != nil {
+			counts[inst.ServiceSnapshot.Namespace]++
+		}
+	}
+	metrics.ActiveServices.Reset()
+	for ns, count := range counts {
+		metrics.ActiveServices.WithLabelValues(ns).Set(float64(count))
+	}
 }

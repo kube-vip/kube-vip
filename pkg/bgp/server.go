@@ -11,18 +11,12 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgp "github.com/osrg/gobgp/v3/pkg/server"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Server manages a server object
 type Server struct {
-	s *gobgp.BgpServer
-	c *kubevip.BGPConfig
-
-	// This is a prometheus gauge indicating the state of the sessions.
-	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
-	BGPSessionInfoGauge *prometheus.GaugeVec
-
+	s       *gobgp.BgpServer
+	c       *kubevip.BGPConfig
 	mtx     sync.Mutex
 	tracker map[string]map[string]bool
 }
@@ -45,13 +39,6 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 		s:       gobgp.NewBgpServer(),
 		c:       &c,
 		tracker: make(map[string]map[string]bool),
-
-		BGPSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "bgp_session_info",
-			Help:      "Display state of session by setting metric for label value with current state to 1",
-		}, []string{"state", "peer"}),
 	}
 	return
 }
