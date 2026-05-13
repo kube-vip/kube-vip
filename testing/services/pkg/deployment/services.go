@@ -14,7 +14,6 @@ import (
 	"github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/client-go/kubernetes"
@@ -33,7 +32,6 @@ import (
 func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kubernetes.Clientset) []error {
 	var err error
 	var errs []error
-	globalTempDirPath, err := os.MkdirTemp("/tmp", "kube-vip-service-tests")
 	if err != nil {
 		slog.Error(err)
 		return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
@@ -41,8 +39,8 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 
 	defer func() {
 		if os.Getenv("E2E_KEEP_LOGS") != "true" {
-			if err := os.RemoveAll(globalTempDirPath); err != nil {
-				slog.Error(fmt.Errorf("failed to remove temporary directory %q: %w", globalTempDirPath, err))
+			if err := os.RemoveAll(config.TempDirPath); err != nil {
+				slog.Error(fmt.Errorf("failed to remove temporary directory %q: %w", config.TempDirPath, err))
 			}
 		}
 	}()
@@ -53,15 +51,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			slog.Error(err)
 			errs = append(errs, err)
 		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "Simple")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
-		}
 	}
 
 	if config.Deployments {
@@ -69,15 +58,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
-		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "Deployments")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
 		}
 	}
 
@@ -88,15 +68,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			slog.Error(err)
 			errs = append(errs, err)
 		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "LeaderFailover")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
-		}
 	}
 
 	if config.LeaderActive {
@@ -105,15 +76,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
-		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "LeaderActive")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
 		}
 	}
 
@@ -124,15 +86,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			slog.Error(err)
 			errs = append(errs, err)
 		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "LocalDeploy")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
-		}
 	}
 
 	if config.Egress {
@@ -141,15 +94,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
-		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "EgressDeployment")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
 		}
 	}
 
@@ -160,15 +104,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			slog.Error(err)
 			errs = append(errs, err)
 		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "EgressDeploymentInternal")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
-		}
 	}
 
 	if config.EgressIPv6 {
@@ -177,15 +112,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
-		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "EgressIPv6")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
 		}
 	}
 
@@ -196,15 +122,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 			slog.Error(err)
 			errs = append(errs, err)
 		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "EgressIPv6Internal")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
-		}
 	}
 
 	if config.DualStack {
@@ -213,15 +130,6 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
-		}
-		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "DualStack")
-		if err != nil {
-			slog.Error(err)
-			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
-		}
-		slog.Infof("saving logs to %q", tempDirPath)
-		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Error(err)
 		}
 	}
 

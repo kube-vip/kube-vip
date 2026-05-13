@@ -167,11 +167,13 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 		_, _, err = svc.CreateService(ctx, clientset)
 		if err != nil {
 			slog.Fatal(err)
+			return err
 		}
-		config.SuccessCounter++
 	}
 
-	return err
+	config.SuccessCounter++
+
+	return nil
 }
 func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Clientset) error {
 
@@ -232,7 +234,6 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	if err != nil {
 		return err
 	}
-	config.SuccessCounter++
 
 	// Get all addresses on all nodes
 	nodes, err := getAddressesOnNodes()
@@ -245,7 +246,9 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 		return err
 	}
 
-	return err
+	config.SuccessCounter++
+
+	return nil
 }
 func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kubernetes.Clientset) error {
 	// pod Failover tests
@@ -362,7 +365,6 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 		}
 		lbAddress := lbAddresses[0]
 
-		config.SuccessCounter++
 		nodes, err := getAddressesOnNodes()
 		if err != nil {
 			return err
@@ -372,6 +374,8 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 			return err
 		}
 	}
+
+	config.SuccessCounter++
 
 	return nil
 }
