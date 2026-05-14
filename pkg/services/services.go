@@ -420,6 +420,19 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		for x := range serviceInstance.Clusters {
 			serviceInstance.Clusters[x].Stop()
 		}
+
+		if serviceInstance.IsVLAN {
+			vlan, err := netlink.LinkByName(serviceInstance.VLANInterface)
+			if err != nil {
+				return fmt.Errorf("[service] error finding VLAN Interface: %v", err)
+			}
+
+			err = netlink.LinkDel(vlan)
+			if err != nil {
+				return fmt.Errorf("[service] error deleting VLAN interface : %v", err)
+			}
+		}
+
 		if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
 			if serviceInstance.IsDHCPv4 {
 				serviceInstance.DHCPv4Client.Stop()

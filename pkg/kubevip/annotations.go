@@ -52,6 +52,9 @@ const (
 	// Define an interface name to bind the address of the LoadBalancer to
 	ServiceInterface = "kube-vip.io/serviceInterface"
 
+	// Specify VLAN subinterface for service (e.g. eth0.200)
+	ServiceVlan = "kube-vip.io/serviceVLAN"
+
 	ServiceSecurityIgnore = "kube-vip.io/ignore-service-security"
 
 	// Enable UPNP on a Service

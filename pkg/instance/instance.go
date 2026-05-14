@@ -44,6 +44,10 @@ type Instance struct {
 	DHCPv4Client        vip.DHCPClient
 	DHCPv6Client        vip.DHCPClient
 
+	// Service use Vlan
+	IsVLAN        bool
+	VLANInterface string
+
 	// External Gateway IP the service is forwarded from
 	UPNPGatewayIPs []string
 
@@ -72,10 +76,31 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	var err error
 	var dnsAddresses []string
 
+	// Create new service
+	instance := &Instance{
+		ServiceSnapshot: svc,
+		dnsAddresses:    dnsAddresses,
+	}
+
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
 		var svcInterface string
-		svcInterface = svc.Annotations[kubevip.ServiceInterface] // If the service has a specific interface defined, then use it
+
+		svcInterface = svc.Annotations[kubevip.ServiceVlan]
+		if svcInterface != "" {
+			parent, tag, err := utils.ParseVLANInterface(svcInterface)
+			if err != nil {
+				log.Error("failed to validate VLAN", "err", err)
+			}
+
+			if err := instance.addVLAN(parent, tag); err != nil {
+				log.Error("failed to create VLAN", "err", err)
+			}
+		} else {
+			// If no vlan defined use specific interface from annotation
+			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+		}
+
 		if svcInterface == kubevip.Auto {
 			link, err = autoFindInterface(address)
 			if err != nil {
@@ -194,7 +219,21 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 		log.Info("hostname", "addr", hostname)
 		// Detect if we're using a specific interface for services
 		var svcInterface string
-		svcInterface = svc.Annotations[kubevip.ServiceInterface] // If the service has a specific interface defined, then use it
+
+		svcInterface = svc.Annotations[kubevip.ServiceVlan]
+		if svcInterface != "" {
+			parent, tag, err := utils.ParseVLANInterface(svcInterface)
+			if err != nil {
+				log.Error("failed to validate VLAN", "err", err)
+			}
+
+			if err := instance.addVLAN(parent, tag); err != nil {
+				log.Error("failed to create VLAN", "err", err)
+			}
+		} else {
+			// If no vlan defined use specific interface from annotation
+			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+		}
 
 		// If it is still blank then use the
 		if svcInterface == "" {
@@ -237,12 +276,6 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
 		})
-	}
-
-	// Create new service
-	instance := &Instance{
-		ServiceSnapshot: svc,
-		dnsAddresses:    dnsAddresses,
 	}
 
 	if svc.Annotations != nil {
@@ -430,6 +463,57 @@ func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
 		return defaultInterface
 	}
 	return link.Attrs().Name
+}
+
+func (i *Instance) addVLAN(parentInterface string, tag int) error {
+	var parent netlink.Link
+
+	interfaceName := fmt.Sprintf("%s.%d", parentInterface, tag)
+	iface, err := netlink.LinkByName(interfaceName)
+	if err != nil {
+		// check if parent interface doesnt exist
+		parent, err = netlink.LinkByName(parentInterface)
+		if err != nil {
+			return fmt.Errorf("error finding VLAN parent interface %s:  %v", parentInterface, err)
+		}
+
+		log.Info("Creating new VLAN interface", "interface", interfaceName)
+
+		vlan := &netlink.Vlan{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:        interfaceName,
+				ParentIndex: parent.Attrs().Index,
+			},
+			VlanId:       tag,
+			VlanProtocol: netlink.VLAN_PROTOCOL_8021Q,
+		}
+
+		err = netlink.LinkAdd(vlan)
+		if err != nil {
+			return fmt.Errorf("could not add VLAN %s: %v", interfaceName, err)
+		}
+
+		err = netlink.LinkSetUp(vlan)
+		if err != nil {
+			return fmt.Errorf("could not bring up VLAN interface [%s] : %v", interfaceName, err)
+		}
+
+		_, err = net.InterfaceByName(interfaceName)
+		if err != nil {
+			return fmt.Errorf("error finding new VLAN interface by name [%v]", err)
+		}
+	} else {
+		log.Info("Using existing VLAN interface", "interface", interfaceName)
+
+		if err := utils.ValidateVLANInterface(iface, parent, tag); err != nil {
+			return err
+		}
+	}
+
+	i.VLANInterface = interfaceName
+	i.IsVLAN = true
+
+	return nil
 }
 
 func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint, wg *sync.WaitGroup) error {
