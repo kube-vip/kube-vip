@@ -81,27 +81,15 @@ func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service
 	}
 }
 
-func (g *generic) getEndpoints(_ *v1.Service, id string) ([]string, error) {
-	return g.getLocalEndpoints(id)
-}
-
-func (g *generic) getLocalEndpoints(id string) ([]string, error) {
-	// Build endpoints
-	var endpoints []string
-	var err error
-	if endpoints, err = g.provider.GetLocalEndpoints(id, g.config); err != nil {
-		return nil, fmt.Errorf("[%s] error getting local endpoints: %w", g.provider.GetLabel(), err)
-	}
-
-	return endpoints, nil
+func (g *generic) getEndpoints(service *v1.Service, id string) ([]string, error) {
+	return g.getAllEndpoints(service, id)
 }
 
 func (g *generic) getAllEndpoints(service *v1.Service, id string) ([]string, error) {
 	// Build endpoints
 	var err error
 	var endpoints []string
-	if !g.config.EnableLeaderElection && !g.config.EnableServicesElection &&
-		service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
+	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 		if endpoints, err = g.provider.GetAllEndpoints(); err != nil {
 			return nil, fmt.Errorf("[%s] error getting all endpoints: %w", g.provider.GetLabel(), err)
 		}
