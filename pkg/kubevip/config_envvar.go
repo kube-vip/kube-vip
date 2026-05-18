@@ -18,16 +18,16 @@ const (
 	// vipLeaseName - defines the name of the lease lock
 	vipLeaseName = "vip_leasename"
 
-	// vipLeaderElection - defines if the kubernetes algorithm should be used
+	// vipLeaseDuration - defines how long the current leader is considered valid
 	vipLeaseDuration = "vip_leaseduration"
 
-	// vipLeaderElection - defines if the kubernetes algorithm should be used
+	// vipRenewDeadline - defines how long the leader has to renew the lease before losing leadership
 	vipRenewDeadline = "vip_renewdeadline"
 
-	// vipLeaderElection - defines if the kubernetes algorithm should be used
+	// vipRetryPeriod - defines the time between attempts to acquire/renew the lease
 	vipRetryPeriod = "vip_retryperiod"
 
-	// vipLeaderElection - defines the annotations given to the lease lock
+	// vipLeaseAnnotations - defines the annotations given to the lease lock
 	vipLeaseAnnotations = "vip_leaseannotations"
 
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
