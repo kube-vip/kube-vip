@@ -185,10 +185,24 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 		p.ServiceInstances = append(p.ServiceInstances, inst)
 	}
 
-	for x := range inst.VIPConfigs {
-		log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
-		if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
-			return fmt.Errorf("failed to start lb: %w", err)
+	if err := p.configureService(ctx, inst, svc, wg); err != nil {
+		return fmt.Errorf("failed to configure service: %w", err)
+	}
+
+	finishTime := time.Since(startTime)
+	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
+
+	return nil
+}
+
+func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
+	// is not a global leader election mode
+	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
+		for x := range inst.VIPConfigs {
+			log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
+			if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
+				return fmt.Errorf("failed to start lb: %w", err)
+			}
 		}
 	}
 
@@ -264,7 +278,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 		log.Debug("[service] Flushing conntrack rules", "service", svc.Name, "namespace", svc.Namespace)
 		for _, serviceIP := range serviceIPs {
-			err = vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[kubevip.EgressDestinationPorts], svc.Annotations[kubevip.EgressSourcePorts])
+			err := vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[kubevip.EgressDestinationPorts], svc.Annotations[kubevip.EgressSourcePorts])
 			if err != nil {
 				log.Error("[service] flushing any remaining egress connections", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
@@ -281,13 +295,13 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 		// If we'er not using NFtables, then ensure that the correct iptables modules are loaded
 		if p.config.EgressWithNftables {
 			// Ensure that kernel modules are loaded and report back missing modules.
-			err = p.nftablesCheck()
+			err := p.nftablesCheck()
 			if err != nil {
 				log.Warn("[service] configuring nft egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		} else {
 			// Ensure that kernel modules are loaded and report back missing modules.
-			err = p.iptablesCheck()
+			err := p.iptablesCheck()
 			if err != nil {
 				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
@@ -304,7 +318,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
 
-						err = p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
+						err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
 						if err != nil {
 							errList = append(errList, err)
 							log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -318,7 +332,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
 				}
-				err = p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
+				err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
 				if err != nil {
 					errList = append(errList, err)
 					log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
@@ -332,7 +346,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 			} else {
 				provider = providers.NewEndpointslices()
 			}
-			err = provider.UpdateServiceAnnotation(ctx, svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
+			err := provider.UpdateServiceAnnotation(ctx, svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
 			if err != nil {
 				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
@@ -347,9 +361,6 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 			// Don't fail the entire service if WireGuard config fails
 		}
 	}
-
-	finishTime := time.Since(startTime)
-	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
 
 	return nil
 }

@@ -3,6 +3,7 @@ package servicecontext
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 type Context struct {
@@ -12,7 +13,7 @@ type Context struct {
 	ConfiguredNetworks sync.Map
 	EndpointsReady     chan any
 	epReady            sync.Once
-	signalled          bool
+	Signalled          atomic.Bool
 	LeaderCancel       context.CancelFunc
 }
 
@@ -43,14 +44,14 @@ func (ctx *Context) IsNetworkConfigured(ip string) bool {
 func (ctx *Context) SignalReadiness() {
 	ctx.epReady.Do(func() {
 		close(ctx.EndpointsReady)
-		ctx.signalled = true
+		ctx.Signalled.Store(true)
 	})
 }
 
 func (ctx *Context) ResetReadiness() {
-	if ctx.signalled {
+	if ctx.Signalled.Load() {
 		ctx.EndpointsReady = make(chan any)
 		ctx.epReady = sync.Once{}
-		ctx.signalled = false
+		ctx.Signalled.Store(false)
 	}
 }

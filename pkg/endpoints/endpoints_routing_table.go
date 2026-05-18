@@ -54,7 +54,7 @@ func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service 
 func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	rt.mtx.Lock()
 	defer rt.mtx.Unlock()
-	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
+	if !rt.config.EnableServicesElection {
 		if errs := ClearRoutes(service, rt.instances, rt.routeMgr); len(errs) == 0 {
 			svcCtx.ConfiguredNetworks.Clear()
 		} else {
