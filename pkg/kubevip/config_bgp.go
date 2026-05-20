@@ -107,10 +107,10 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 		}
 
 		multiHop := false
-		if len(peer) >= 4 {
+		if len(peer) >= 4 && peer[3] != "" {
 			multiHop, err = strconv.ParseBool(peer[3])
 			if err != nil {
-				return nil, fmt.Errorf("BGP MultiHop format error (true/false) [%s]", peer[1])
+				return nil, fmt.Errorf("BGP MultiHop format error (true/false) [%s]", peer[3])
 			}
 		}
 
@@ -130,6 +130,9 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 			configData := strings.Split(config[1], ";")
 			for _, cfg := range configData {
 				c := strings.Split(cfg, "=")
+				if len(c) < 2 {
+					return nil, fmt.Errorf("peer configuration parameter '%s' is missing a value (expected key=value)", c[0])
+				}
 				switch c[0] {
 				case "mpbgp_nexthop":
 					mpbgpNexthop = c[1]
