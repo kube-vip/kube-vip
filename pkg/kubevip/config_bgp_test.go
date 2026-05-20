@@ -39,12 +39,41 @@ func TestParseBGPPeerConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "IPv6 bracketed, with password and multihop",
+			args: args{config: "[fd00:100:64::2]:65000:secret:true"},
+			wantBgpPeers: []BGPPeer{
+				{Address: "fd00:100:64::2", Port: 179, AS: 65000, Password: "secret", MultiHop: true},
+			},
+		},
+		{
+			name: "IPv6 bracketed, empty fields",
+			args: args{config: "[fd00:100:64::2]:65000::false"},
+			wantBgpPeers: []BGPPeer{
+				{Address: "fd00:100:64::2", Port: 179, AS: 65000, MultiHop: false},
+			},
+		},
+		{
 			name: "Unnumbered",
 			args: args{config: "unnumbered:eth0,unnumbered:eth1:65000::true/mpbgp_nexthop=auto_sourceif"},
 			wantBgpPeers: []BGPPeer{
 				{Interface: "eth0", MultiHop: false},
 				{Interface: "eth1", AS: 65000, MultiHop: true, MpbgpNexthop: "auto_sourceif"},
 			},
+		},
+		{
+			name:    "Malformed parameter (no value)",
+			args:    args{config: "1.2.3.4:65000/mpbgp_nexthop"},
+			wantErr: true,
+		},
+		{
+			name:    "Unsupported parameter",
+			args:    args{config: "1.2.3.4:65000/unknown=value"},
+			wantErr: true,
+		},
+		{
+			name:    "Malformed IPv6 (no matching bracket)",
+			args:    args{config: "[fd00:100:64::2:65000"},
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
