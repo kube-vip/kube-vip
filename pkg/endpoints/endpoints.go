@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -70,6 +71,8 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	// If we have a local endpoint then begin the leader Election, unless it's already running
 	//
 
+	les := atomic.Int64{}
+
 	// Check that we have local endpoints
 	if len(endpoints) != 0 {
 		// Ignore IPv4
@@ -78,13 +81,29 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		}
 
 		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
-		svcCtx.SignalReadiness()
 
 		if p.config.EnableServicesElection {
 			wg.Go(func() {
+				les.Add(1)
 				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
 			})
+		} else if p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection) {
+			if !svcCtx.Signalled.Load() {
+				inst := instance.FindServiceInstance(service, *p.instances)
+				if inst == nil {
+					return true, fmt.Errorf("[%s] failed to find an instance for service %s/%s", p.provider.GetLabel(), service.Namespace, service.Name)
+				}
+				// global leader election is enabled for services
+				for x := range inst.VIPConfigs {
+					log.Debug("starting loadbalancer for service", "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
+					if err := inst.Clusters[x].StartLoadBalancerService(svcCtx.Ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(service), wg); err != nil {
+						return true, fmt.Errorf("failed to start lb: %w", err)
+					}
+				}
+			}
 		}
+
+		svcCtx.SignalReadiness()
 
 		// There are local endpoints available on the node
 		// Process immediately if:
@@ -97,8 +116,16 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		}
 	} else {
 		// There are no local endpoints
-		svcCtx.ResetReadiness()
-		p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
+		if svcCtx.Signalled.Load() {
+			svcCtx.ResetReadiness()
+			p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
+			if p.config.EnableARP && !p.config.EnableLeaderElection {
+				i := instance.FindServiceInstance(service, *p.instances)
+				for _, c := range i.Clusters {
+					c.Stop()
+				}
+			}
+		}
 	}
 
 	// Set the service accordingly

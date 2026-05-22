@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	log "log/slog"
@@ -21,7 +20,6 @@ import (
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
 	stop                  chan bool
-	once                  sync.Once
 	Network               []vip.Network
 	arpMgr                *arp.Manager
 	routeMgr              *route.Manager
@@ -90,9 +88,8 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 func (cluster *Cluster) Stop() {
 	// Close the stop channel, which will shut down the VIP (if needed)
 	if cluster.stop != nil {
-		cluster.once.Do(func() { // Ensure that the close channel can only ever be called once
-			close(cluster.stop)
-		})
+		close(cluster.stop)
+		cluster.stop = make(chan bool) // recreate channel for future use
 	}
 }
 
