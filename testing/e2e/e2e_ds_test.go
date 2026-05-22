@@ -997,7 +997,7 @@ func createTestDS(ctx context.Context, client kubernetes.Interface, namespace, n
 }
 
 func removeTestDS(ctx context.Context, client kubernetes.Interface, namespace, name string, dsNumber int) {
-	By(withTimestamp("creating test daemonsets"))
+	By(withTimestamp("removing test daemonsets"))
 	for i := range dsNumber {
 		tmpName := name
 		if i > 0 {

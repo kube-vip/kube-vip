@@ -119,7 +119,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		if svcCtx.Signalled.Load() {
 			svcCtx.ResetReadiness()
 			p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
-			if p.config.EnableARP && !p.config.EnableLeaderElection {
+			if p.config.EnableARP && !p.config.EnableServicesElection {
 				i := instance.FindServiceInstance(service, *p.instances)
 				for _, c := range i.Clusters {
 					c.Stop()
