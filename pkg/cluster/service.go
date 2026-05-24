@@ -179,7 +179,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			}
 		}
 
-		backend.Watch(ctx, func() {
+		backend.Watch(ctx, c.BackendHealthCheckInterval, func() {
 			for i := range cluster.Network {
 				network := cluster.Network[i]
 				networkIP := network.IP()
@@ -246,7 +246,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 					}
 				}
 			}
-		}, c.BackendHealthCheckInterval)
+		})
 	}
 
 	if c.EnableBGP {

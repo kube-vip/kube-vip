@@ -66,7 +66,7 @@ func (e *Entry) Check() bool {
 	return true
 }
 
-func Watch(ctx context.Context, tickAction func(), interval int) {
+func Watch(ctx context.Context, interval int, tickAction func()) {
 	if interval <= 0 {
 		interval = 5
 	}
@@ -77,7 +77,6 @@ func Watch(ctx context.Context, tickAction func(), interval int) {
 	for {
 		select {
 		case <-ctx.Done():
-			ticker.Stop()
 			return
 		case <-ticker.C:
 			tickAction()
