@@ -80,9 +80,7 @@ func Watch(ctx context.Context, tickAction func(), interval int) {
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			ticker.Stop()
 			tickAction()
-			ticker.Reset(time.Second * time.Duration(interval))
 		}
 	}
 }
