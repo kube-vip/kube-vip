@@ -6,7 +6,6 @@ import (
 	log "log/slog"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
@@ -14,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"k8s.io/client-go/kubernetes"
@@ -32,12 +32,14 @@ type Common struct {
 	electionMgr  *election.Manager
 	leaseMgr     *lease.Manager
 	routeMgr     *route.Manager
+	nodeLabelMgr node.Labeler
 }
 
 func newCommon(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Common {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
+	nodeLabelMgr node.Labeler) *Common {
 	return &Common{
 		arpMgr:       arpMgr,
 		intfMgr:      intfMgr,
@@ -50,12 +52,13 @@ func newCommon(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 		electionMgr:  electionMgr,
 		leaseMgr:     leaseMgr,
 		routeMgr:     routeMgr,
+		nodeLabelMgr: nodeLabelMgr,
 	}
 }
 
 func (c *Common) InitControlPlane() error {
 	var err error
-	c.cpCluster, err = cluster.InitCluster(c.config, false, c.intfMgr, c.arpMgr, c.routeMgr)
+	c.cpCluster, err = cluster.InitCluster(c.config, false, c.intfMgr, c.arpMgr, c.routeMgr, c.nodeLabelMgr)
 	if err != nil {
 		return fmt.Errorf("cluster initialization error: %w", err)
 	}
@@ -108,12 +111,6 @@ func (c *Common) OnStoppedLeading() {
 }
 
 func (c *Common) OnNewLeader(identity string) {
-	// we're notified when new leader elected
-	if c.config.EnableNodeLabeling {
-		labelCtx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-		applyNodeLabel(labelCtx, c.clientSet, c.config.Address, c.config.NodeName, identity)
-	}
 	if identity == c.config.NodeName {
 		// I just got the lock
 		return

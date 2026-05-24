@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -55,7 +56,7 @@ type Processor struct {
 	leaseMgr *lease.Manager
 
 	// nodeLabelManager is the manager for the node labels
-	nodeLabelManager labelManager
+	nodeLabelManager node.Labeler
 
 	electionMgr *election.Manager
 
@@ -66,14 +67,10 @@ type Processor struct {
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
-type labelManager interface {
-	AddLabel(ctx context.Context, svc *v1.Service) error
-	RemoveLabel(ctx context.Context, svc *v1.Service) error
-}
 
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
-	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager labelManager,
+	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager node.Labeler,
 	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
@@ -140,7 +137,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
 	var err error
 	if svcInstance == nil {
-		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
+		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
 			return fmt.Errorf("unalbe to create instance for service %s/%s", svc.Namespace, svc.Name)
 		}

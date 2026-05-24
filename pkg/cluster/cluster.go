@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
@@ -23,11 +24,14 @@ type Cluster struct {
 	Network               []vip.Network
 	arpMgr                *arp.Manager
 	routeMgr              *route.Manager
+	nodeLabelMgr          node.Labeler
+	labelAdded            bool
 	healthCheckHTTPClient *http.Client
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
-func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager) (*Cluster, error) {
+func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.Manager, arpMgr *arp.Manager,
+	routeMgr *route.Manager, nodeLabelMgr node.Labeler) (*Cluster, error) {
 	var networks []vip.Network
 	var healthCheckHTTPClient *http.Client
 	var err error
@@ -53,6 +57,7 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 		arpMgr:                arpMgr,
 		stop:                  make(chan bool),
 		routeMgr:              routeMgr,
+		nodeLabelMgr:          nodeLabelMgr,
 		healthCheckHTTPClient: healthCheckHTTPClient,
 	}
 

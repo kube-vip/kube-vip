@@ -18,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/sysctl"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -58,6 +59,10 @@ type Instance struct {
 
 	// AddCalled determined that ActionAdd was already performed for the instance
 	AddCalled bool
+
+	// LabelAdded determined that node was labeled with
+	// service-provided.kube-vip.io label
+	LabelAdded bool
 }
 
 type Port struct {
@@ -67,7 +72,7 @@ type Port struct {
 
 func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
-	wg *sync.WaitGroup) (*Instance, error) {
+	nodeLabelMgr node.Labeler, wg *sync.WaitGroup) (*Instance, error) {
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
 	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
@@ -391,7 +396,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			}
 		}
 
-		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr, routeMgr)
+		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr, routeMgr, nodeLabelMgr)
 		if err != nil {
 			log.Error("failed to add service", "err", err)
 			return nil, err

@@ -169,7 +169,7 @@ func (e *testError) Error() string { return e.msg }
 func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRouteManager) (context.CancelFunc, <-chan struct{}) {
 	t.Helper()
 
-	c, err := cluster.InitCluster(cfg, true, nil, nil, nil)
+	c, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
 	}

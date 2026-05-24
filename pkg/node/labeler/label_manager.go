@@ -2,27 +2,18 @@ package labeler
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-)
-
-const (
-	// labelName is the name of the label that will be added to the node
-	// it is prefix for the label key before "/"
-	labelName = "service-provided.kube-vip.io"
 )
 
 // labelOperation is the operation to perform on the node labels
@@ -52,20 +43,18 @@ type Manager struct {
 }
 
 // AddLabel a new label to the node
-func (m *Manager) AddLabel(ctx context.Context, svc *corev1.Service) error {
-	log.Debug("[service] add label to node", "namespace", svc.Namespace, "name", svc.Name)
-	labelKey, labelValue := generateNodeLabelKeyValue(svc)
-	return m.patchNode(ctx, labelOperationAdd, map[string]string{labelKey: labelValue})
+func (m *Manager) AddLabel(labels map[string]string) error {
+	log.Debug("add labels to node", "node", m.nodeName)
+	return m.patchNode(labelOperationAdd, labels)
 }
 
 // RemoveLabel a label from the node
-func (m *Manager) RemoveLabel(ctx context.Context, svc *corev1.Service) error {
-	log.Debug("[service] delete label from node", "namespace", svc.Namespace, "name", svc.Name)
-	labelKey, _ := generateNodeLabelKeyValue(svc)
-	return m.patchNode(ctx, labelOperationRemove, map[string]string{labelKey: ""})
+func (m *Manager) RemoveLabel(labels map[string]string) error {
+	log.Debug("delete label from node")
+	return m.patchNode(labelOperationRemove, labels)
 }
 
-// clean up the node labels
+// CleanUpLabels purges the node labels
 func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	log.Debug("cleaning up labels for node", "node", m.nodeName, "timeout", timeout)
 
@@ -81,8 +70,8 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 
 	// collect all labels with the prefix to remove
 	labels := map[string]string{}
-	for k := range node.Labels {
-		if strings.HasPrefix(k, labelName) {
+	for _, k := range kubevip.GetKeysForCleanup() {
+		if _, ok := node.Labels[k]; ok {
 			labels[k] = ""
 		}
 	}
@@ -93,37 +82,19 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	}
 
 	// patch the node with the labels to remove
-	return m.patchNode(ctx, labelOperationRemove, labels)
-}
-
-// generateNodeLabelKeyValue generates a label key and value for the given service
-func generateNodeLabelKeyValue(svc *corev1.Service) (string, string) {
-	addresses, _ := instance.FetchServiceAddresses(svc)
-
-	sanitized := make([]string, len(addresses))
-	for i, addr := range addresses {
-		sanitized[i] = sanitizeIPForLabel(addr)
-	}
-
-	return fmt.Sprintf("%s/%s.%s", labelName, svc.Name, svc.Namespace), strings.Join(sanitized, ",")
-}
-
-// Helper function to convert IPv6 hex address without colons
-func sanitizeIPForLabel(addr string) string {
-	ip := net.ParseIP(addr)
-	if ip == nil || ip.To4() != nil {
-		return addr
-	}
-	return hex.EncodeToString(ip.To16())
+	return m.patchNode(labelOperationRemove, labels)
 }
 
 // patchNode patches the node with the given labels
-func (m *Manager) patchNode(ctx context.Context, operation labelOperation, labels map[string]string) error {
+func (m *Manager) patchNode(operation labelOperation, labels map[string]string) error {
 	type patchStringLabel struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
 		Value string `json:"value"`
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
 
 	patchLabels := []patchStringLabel{}
 	// generate the patch

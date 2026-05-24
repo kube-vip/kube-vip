@@ -343,7 +343,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
-		sm.electionMgr, sm.leaseMgr, sm.routeMgr)
+		sm.electionMgr, sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
