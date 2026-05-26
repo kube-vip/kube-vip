@@ -317,7 +317,7 @@ func ipAndFamily(address string) (netip.Addr, ipvs.AddressFamily) {
 }
 
 func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
-	backend.Watch(ctx, func() {
+	backend.Watch(ctx, lb.interval, func() {
 		lb.lock.Lock()
 		defer lb.lock.Unlock()
 		for backend, oldStatus := range lb.backendMap {
@@ -349,7 +349,7 @@ func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
 				}
 			}
 		}
-	}, lb.interval)
+	})
 }
 
 func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
