@@ -21,7 +21,7 @@ spec:
     - name: vip_interface
       value: eth0
     - name: vip_leaderelection
-      value: "false"
+      value: "{{ .VipElectionEnable }}"
     - name: address
       value: "{{ .ControlPlaneVIP }}"
     - name: vip_leaseduration
