@@ -14,7 +14,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -31,9 +30,8 @@ type Worker interface {
 func New(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	bgpServer *bgp.Server, bgpSessionInfoGauge *prometheus.GaugeVec,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
-	nodeLabelMgr node.Labeler) Worker {
+	bgpServer *bgp.Server, electionMgr *election.Manager, leaseMgr *lease.Manager,
+	routeMgr *route.Manager, nodeLabelMgr node.Labeler) Worker {
 	if config.EnableARP {
 		return NewARP(arpMgr, intfMgr, config, closing, killFunc,
 			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr,
@@ -42,7 +40,7 @@ func New(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 
 	if config.EnableBGP {
 		return NewBGP(arpMgr, intfMgr, config, closing, killFunc,
-			svcProcessor, mutex, clientSet, bgpServer, bgpSessionInfoGauge,
+			svcProcessor, mutex, clientSet, bgpServer,
 			electionMgr, leaseMgr, routeMgr, nodeLabelMgr)
 	}
 

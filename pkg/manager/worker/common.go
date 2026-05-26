@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
@@ -202,10 +203,13 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 			objLease.Unlock()
 			close(objLease.Started)
 			a.OnStartedLeading(ctx)
+			metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
+			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
 		},
 		OnStoppedLeading: func() {
 			objLease.Elected.Store(false)
 			a.OnStoppedLeading()
+			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
 		},
 		OnNewLeader: a.OnNewLeader,
 	}

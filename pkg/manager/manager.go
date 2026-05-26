@@ -62,10 +62,6 @@ type Manager struct {
 	// from the service watcher
 	countServiceWatchEvent *prometheus.CounterVec
 
-	// This is a prometheus gauge indicating the state of the sessions.
-	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
-	bgpSessionInfoGauge *prometheus.GaugeVec
-
 	// This mutex is to protect calls from various goroutines
 	mutex sync.Mutex
 
@@ -260,12 +256,6 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 			Name:      "all_services_events",
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
-		bgpSessionInfoGauge: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "bgp_session_info",
-			Help:      "Display state of session by setting metric for label value with current state to 1",
-		}, []string{"state", "peer"}),
 		signalChan:       signalChan,
 		svcProcessor:     svcProcessor,
 		intfMgr:          intfMgr,
@@ -342,8 +332,8 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	var err error
 
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
-		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.bgpSessionInfoGauge,
-		sm.electionMgr, sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
+		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.electionMgr,
+		sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down

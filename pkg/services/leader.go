@@ -9,6 +9,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
@@ -134,14 +135,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
 				leaderCancel()
 			}
+			metrics.LeaderTransitionsTotal.WithLabelValues(id.Name()).Inc()
+			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(1)
 		},
 		OnStoppedLeading: func() {
 			// we can do cleanup here
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
 			if err := p.onStoppedLeading(svcLease, service); err != nil {
+				metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
 				leaderCancel()
 			}
+			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(0)
 			svcLease.Started = make(chan any)
 		},
 		OnNewLeader: func(identity string) {
