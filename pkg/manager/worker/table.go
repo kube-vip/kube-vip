@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -27,10 +28,12 @@ type Table struct {
 func NewTable(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFUnc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Table {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
+	nodeLabelMgr node.Labeler) *Table {
 	return &Table{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFUnc,
-			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr),
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr,
+			nodeLabelMgr),
 	}
 }
 

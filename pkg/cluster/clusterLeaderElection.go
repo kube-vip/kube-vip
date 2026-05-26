@@ -134,6 +134,12 @@ func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Leas
 		close(objLease.Started)
 	}
 
+	labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
+	if err := cluster.nodeLabelMgr.AddLabel(labels); err != nil {
+		log.Error("error adding label to node", "err", err)
+	}
+	cluster.labelAdded = true
+
 	if c.PreserveVIPOnLeadershipLoss {
 		log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
 		// Force add the VIPs (this will work even if they exist due to the precheck logic)
@@ -161,6 +167,14 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 	bgpServer *bgp.Server) {
 	// we can do cleanup here
 	log.Info("This node is becoming a follower within the cluster")
+
+	if cluster.labelAdded {
+		labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
+		if err := cluster.nodeLabelMgr.RemoveLabel(labels); err != nil {
+			log.Error("error removing label from node", "err", err)
+		}
+		cluster.labelAdded = false
+	}
 
 	// Stop the cluster context if it is running
 	objLease.Cancel()
@@ -222,5 +236,11 @@ func (cluster *Cluster) OnNewLeader(identity string, c *kubevip.Config) {
 					"interface", cluster.Network[i].Interface())
 			}
 		}
+	}
+}
+
+func generateLabelsFromConfig(addr, labelKey string) map[string]string {
+	return map[string]string{
+		labelKey: utils.SanitizeIPForLabel(addr),
 	}
 }

@@ -27,7 +27,7 @@ func TestInitCluster_HealthCheckClientNoCA(t *testing.T) {
 		},
 	}
 
-	_, err := cluster.InitCluster(cfg, true, nil, nil, nil)
+	_, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestInitCluster_HealthCheckClientValidCA(t *testing.T) {
 		},
 	}
 
-	_, err := cluster.InitCluster(cfg, true, nil, nil, nil)
+	_, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestInitCluster_HealthCheckClientInvalidCAPath(t *testing.T) {
 		},
 	}
 
-	_, err := cluster.InitCluster(cfg, true, nil, nil, nil)
+	_, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid CA path")
 	}
@@ -90,7 +90,7 @@ func TestInitCluster_HealthCheckClientInvalidCAContent(t *testing.T) {
 		},
 	}
 
-	_, err := cluster.InitCluster(cfg, true, nil, nil, nil)
+	_, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid CA content")
 	}

@@ -48,15 +48,9 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
-
 	action, instance := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
-		// remove the label from the node before deleting the service
-		if err := p.nodeLabelManager.RemoveLabel(ctx.Ctx, svc); err != nil {
-			return fmt.Errorf("error removing label from node: %w", err)
-		}
-
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if err := p.deleteService(ctx.Ctx, svc.UID); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
@@ -79,10 +73,6 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
-		// add the label to the node after adding the service
-		if err := p.nodeLabelManager.AddLabel(ctx.Ctx, svc); err != nil {
-			return fmt.Errorf("error adding label to node: %w", err)
-		}
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	}
@@ -176,7 +166,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 	var err error
 	if inst == nil {
-		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, wg)
+		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
 			return err
 		}
@@ -188,6 +178,13 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 	if err := p.configureService(ctx, inst, svc, wg); err != nil {
 		return fmt.Errorf("failed to configure service: %w", err)
 	}
+
+	// add the label to the node after adding the service
+	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
+	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
+		return fmt.Errorf("error adding label to node: %w", err)
+	}
+	inst.LabelAdded = true
 
 	finishTime := time.Since(startTime)
 	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
@@ -382,6 +379,13 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 			// Flip the found when we match
 			found = true
 			serviceInstance = p.ServiceInstances[x]
+		}
+	}
+
+	if serviceInstance.LabelAdded {
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
+		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
+			return fmt.Errorf("error removing label from node: %w", err)
 		}
 	}
 
@@ -887,5 +891,19 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 				}
 			}
 		}
+	}
+}
+
+// GenerateLabelFromService generates a label key and value for the given service
+func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]string {
+	addresses, _ := instance.FetchServiceAddresses(svc)
+
+	sanitized := make([]string, len(addresses))
+	for i, addr := range addresses {
+		sanitized[i] = utils.SanitizeIPForLabel(addr)
+	}
+
+	return map[string]string{
+		fmt.Sprintf("%s/%s.%s", labelKey, svc.Name, svc.Namespace): strings.Join(sanitized, ","),
 	}
 }

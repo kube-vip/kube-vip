@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"strings"
@@ -129,4 +130,13 @@ func FetchServiceIPs(service *v1.Service) ([]string, error) {
 	}
 
 	return ips, nil
+}
+
+// Helper function to convert IPv6 hex address without colons
+func SanitizeIPForLabel(addr string) string {
+	ip := net.ParseIP(addr)
+	if ip == nil || ip.To4() != nil {
+		return addr
+	}
+	return hex.EncodeToString(ip.To16())
 }

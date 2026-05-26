@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
+	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	api "github.com/osrg/gobgp/v3/api"
@@ -31,10 +32,12 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	bgpServer *bgp.Server, bgpSessionInfoGauge *prometheus.GaugeVec,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *BGP {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
+	nodeLabelMgr node.Labeler) *BGP {
 	return &BGP{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFunc,
-			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr),
+			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr,
+			nodeLabelMgr),
 		bgpServer:           bgpServer,
 		bgpSessionInfoGauge: bgpSessionInfoGauge,
 	}
