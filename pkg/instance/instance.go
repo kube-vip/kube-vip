@@ -44,6 +44,7 @@ type Instance struct {
 	DHCPHostname        string
 	DHCPv4Client        vip.DHCPClient
 	DHCPv6Client        vip.DHCPClient
+	macvlanName         string
 
 	// Service use Vlan
 	IsVLAN        bool
@@ -301,6 +302,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			}
 		}
 		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
+		instance.macvlanName = svc.Annotations[kubevip.MacvlanName]
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -530,8 +532,12 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}
 
-	// Generate name from UID
-	interfaceName := fmt.Sprintf("vip-%s", i.ServiceSnapshot.UID[0:8])
+	interfaceName := i.macvlanName
+
+	if interfaceName == "" {
+		// Generate name from UID
+		interfaceName = fmt.Sprintf("vip-%s", i.ServiceSnapshot.UID[0:8])
+	}
 
 	// Check if the interface doesn't exist first
 	iface, err := net.InterfaceByName(interfaceName)
