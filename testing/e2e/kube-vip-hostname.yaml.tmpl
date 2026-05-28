@@ -32,6 +32,10 @@ spec:
       value: "true"
     - name: enable_node_labeling
       value: "{{ .EnableNodeLabeling }}"
+{{- if .EnableServiceSecurity }}
+    - name: enable_service_security
+      value: "{{ .EnableServiceSecurity }}"
+{{- end }}
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:

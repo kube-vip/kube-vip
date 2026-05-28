@@ -84,17 +84,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when only control plane is enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "false",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "false",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "false",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "false",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -102,17 +103,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when only control plane is enabled with leader election", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "false",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "false",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -120,17 +122,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when only services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "false",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "false",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -138,17 +141,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when only services are enabled with leader election", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "false",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "false",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -156,17 +160,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when control plane services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "false",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "false",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -174,17 +179,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when control plane w/ leader election and services w/o leader election are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -192,17 +198,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when control plane w/o leader election and services w/ leader election are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "false",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "false",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -210,17 +217,18 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 
 			It(clusterName+" exits gracefully when control plane and services w/ leader election are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
-					BGPPeers:           "127.0.0.1:1::false",
-					BGPAS:              2,
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					BGPPeers:              "127.0.0.1:1::false",
+					BGPAS:                 2,
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)

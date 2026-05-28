@@ -868,16 +868,17 @@ func setupEnv(ctx context.Context, cpVIP *string,
 	}
 
 	manifestValues := e2e.KubevipManifestValues{
-		ControlPlaneVIP:    *cpVIP,
-		ControlPlaneEnable: fmt.Sprintf("%t", cpEnable),
-		SvcEnable:          fmt.Sprintf("%t", svcEnable),
-		SvcElectionEnable:  fmt.Sprintf("%t", serviceElection),
-		EnableNodeLabeling: "false",
-		BGPAS:              bgp.KubevipAS,
-		BGPPeers:           bgp.PeerStrings(kvPeers),
-		MPBGPNexthop:       mpbgpnexthop,
-		MPBGPNexthopIPv4:   defaultFixedNexthopv4,
-		MPBGPNexthopIPv6:   defaultFixedNexthopv6,
+		ControlPlaneVIP:       *cpVIP,
+		ControlPlaneEnable:    fmt.Sprintf("%t", cpEnable),
+		SvcEnable:             fmt.Sprintf("%t", svcEnable),
+		SvcElectionEnable:     fmt.Sprintf("%t", serviceElection),
+		EnableNodeLabeling:    "false",
+		BGPAS:                 bgp.KubevipAS,
+		BGPPeers:              bgp.PeerStrings(kvPeers),
+		MPBGPNexthop:          mpbgpnexthop,
+		MPBGPNexthopIPv4:      defaultFixedNexthopv4,
+		MPBGPNexthopIPv6:      defaultFixedNexthopv6,
+		EnableServiceSecurity: "true",
 	}
 
 	By(manifestValues.BGPPeers)

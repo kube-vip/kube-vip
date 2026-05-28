@@ -196,7 +196,7 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 	// is not a global leader election mode
 	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		for x := range inst.VIPConfigs {
-			log.Debug("starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
+			log.Debug("[service] starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
 			if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
 				return fmt.Errorf("failed to start lb: %w", err)
 			}

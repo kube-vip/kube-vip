@@ -367,6 +367,7 @@ func (m *mockNetwork) HasEndpoints() bool              { return false }
 func (m *mockNetwork) ARPName() string                 { return "" }
 func (m *mockNetwork) GetPossibleSubnets() string      { return "" }
 func (m *mockNetwork) DHCPFamily() string              { return "" }
+func (m *mockNetwork) IPVSMark() uint32                { return 0 }
 
 // testHealthServer wraps an HTTPS httptest.Server with an atomic status code.
 // caPath is the path to the server's CA cert for client verification.

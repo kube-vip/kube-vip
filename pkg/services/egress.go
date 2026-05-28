@@ -45,6 +45,10 @@ func (p *Processor) iptablesCheck() error {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		log.Warn("error while reading /proc/modules", "error", err)
+	}
+
 	if !filter || !nat || !mangle {
 		return fmt.Errorf("missing iptables modules -> nat [%t] -> filter [%t] mangle -> [%t]", nat, filter, mangle)
 	}
@@ -68,6 +72,10 @@ func (p *Processor) nftablesCheck() error {
 		case "nft_ct":
 			ct = true
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Warn("error while reading /proc/modules", "error", err)
 	}
 
 	if !queue || !ct {
@@ -204,13 +212,8 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		return nil
 	}
 
-	protocol := iptables.ProtocolIPv4
-	if utils.IsIPv6(vipIP) {
-		protocol = iptables.ProtocolIPv6
-	}
-
 	// Use the internal egress implementation
-	if internalEgress != "" {
+	if internalEgress != "" || p.config.EgressWithNftables {
 		// Create an array of CIDRs that we wont SNAT to.
 		ignoreCIDRs := []string{
 			podCidr,
@@ -237,6 +240,11 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
 		return nil
+	}
+
+	protocol := iptables.ProtocolIPv4
+	if utils.IsIPv6(vipIP) {
+		protocol = iptables.ProtocolIPv6
 	}
 
 	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)

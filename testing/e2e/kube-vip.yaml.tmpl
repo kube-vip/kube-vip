@@ -106,6 +106,10 @@ spec:
       value: "{{ .ControlPlaneHealthCheckCAPath }}"
 {{- end }}
 {{- end }}
+{{- if .EnableServiceSecurity }}
+    - name: enable_service_security
+      value: "{{ .EnableServiceSecurity }}"
+{{- end }}
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:

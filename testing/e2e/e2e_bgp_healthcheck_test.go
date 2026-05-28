@@ -66,6 +66,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 				ControlPlaneHealthCheckTimeoutSeconds:   1,
 				ControlPlaneHealthCheckFailureThreshold: 3,
 				ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
+				EnableServiceSecurity:                   "true",
 			},
 		})
 
