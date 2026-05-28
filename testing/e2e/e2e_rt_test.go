@@ -1297,7 +1297,7 @@ func testServiceRT(ctx context.Context, svcName, lbAddress, leaseName, leaseName
 			svcLease = leaseName
 		}
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, svcLease, dsNumber)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, svcLease, dsNumber, false)
 		time.Sleep(time.Second)
 	}
 

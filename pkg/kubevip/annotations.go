@@ -73,4 +73,7 @@ const (
 
 	// Forces kube-vip to use the specified veth interface when DHCP is being used for a service
 	MacvlanName = "kube-vip.io/macvlanName"
+
+	// Set the BROADCAST flag in DHCP DISCOVER/REQUEST packets
+	DHCPBroadcast = "kube-vip.io/dhcp-broadcast"
 )

@@ -232,6 +232,20 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
+			DescribeTable("propagates dhcp-broadcast annotation to service",
+				func(svcName string, offset uint, dhcpBroadcast bool) {
+					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
+					createTestService(ctx, svcName, dsNamespace, dsName, lbAddress,
+						client, corev1.IPFamilyPolicyPreferDualStack, []corev1.IPFamily{corev1.IPv4Protocol},
+						corev1.ServiceExternalTrafficPolicyCluster, "", 80, dhcpBroadcast)
+					checkDHCPBroadcastAnnotation(ctx, svcName, dsNamespace, dhcpBroadcast, client)
+					err := client.CoreV1().Services(dsNamespace).Delete(ctx, svcName, metav1.DeleteOptions{})
+					Expect(err).ToNot(HaveOccurred())
+				},
+				Entry("sets annotation when dhcp-broadcast is true", "test-svc-dhcp-broadcast", SOffset.Get(), true),
+				Entry("does not set annotation when dhcp-broadcast is false", "test-svc-no-broadcast", SOffset.Get(), false),
+			)
 		})
 
 		Describe("kube-vip IPv4 functionality, svc_enable=true, svc_election=true", Ordered, func() {
@@ -1275,12 +1289,15 @@ func removePod(ctx context.Context, name, namespace string, client kubernetes.In
 }
 
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
-	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int,
+	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool,
 ) {
 	svcAnnotations := make(map[string]string)
 	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
 	if leaseName != "" {
 		svcAnnotations[kubevip.ServiceLease] = leaseName
+	}
+	if dhcpBroadcast {
+		svcAnnotations[kubevip.DHCPBroadcast] = "true"
 	}
 
 	labels := make(map[string]string)
@@ -1339,6 +1356,13 @@ func checkIPAddress(lbAddress, container string, expected bool) bool {
 			}
 		}
 	}
+}
+
+func checkDHCPBroadcastAnnotation(ctx context.Context, name, namespace string, expected bool, client kubernetes.Interface) {
+	svc, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+	Expect(err).ToNot(HaveOccurred())
+	_, annotationSet := svc.Annotations[kubevip.DHCPBroadcast]
+	Expect(annotationSet).To(Equal(expected))
 }
 
 func checkIPAddressByLease(ctx context.Context, name, namespace, lbAddress string, expected bool, client kubernetes.Interface) bool {
@@ -1536,7 +1560,7 @@ func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamesp
 
 	for _, svc := range services {
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 80)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 80, false)
 		time.Sleep(time.Second)
 	}
 
@@ -1611,7 +1635,7 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 			tmpDsName = fmt.Sprintf("%s-%d", tmpDsName, i)
 		}
 		createTestService(ctx, svc, dsNamespace, tmpDsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, lease, 80+i)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, lease, 80+i, false)
 		time.Sleep(time.Second)
 	}
 
