@@ -70,4 +70,7 @@ const (
 
 	// Enable DDNS for the service
 	ServiceDDNS = "kube-vip.io/ddns"
+
+	// Forces kube-vip to use the specified veth interface when DHCP is being used for a service
+	MacvlanName = "kube-vip.io/macvlanName"
 )
