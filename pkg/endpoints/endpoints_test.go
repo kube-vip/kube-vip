@@ -9,6 +9,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -35,9 +36,8 @@ func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
 	}
 }
 
-
 type fakeWorker struct {
-	endpoints      []string
+	endpoints     []string
 	clearCalled   bool
 	processCalled bool
 }
@@ -69,7 +69,7 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 		worker := &fakeWorker{endpoints: []string{}}
 		p := &Processor{
 			config:   &kubevip.Config{},
-			provider: providers.NewEndpoints(),
+			provider: providers.NewEndpointslices(),
 			worker:   worker,
 		}
 
@@ -80,7 +80,7 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 
 		restart, err := p.AddOrModify(
 			svcCtx,
-			watch.Event{Type: watch.Modified, Object: &v1.Endpoints{}},
+			watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string),
 			service,
 			"node-1",
