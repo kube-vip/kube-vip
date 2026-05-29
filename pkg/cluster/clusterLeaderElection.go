@@ -179,38 +179,7 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 	// Stop the cluster context if it is running
 	objLease.Cancel()
 
-	// Handle VIP cleanup based on configuration
-	if c.PreserveVIPOnLeadershipLoss {
-		// For IPv6, we must remove VIPs immediately to avoid DAD failures on the new leader
-		// IPv6 Duplicate Address Detection will fail if the new leader tries to add an IP that is still present on this node's interface
-		// We need to check each VIP individually and only remove IPv6 VIPs
-		for i := range cluster.Network {
-			if utils.IsIPv6(cluster.Network[i].IP()) {
-				log.Info("Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
-				deleted, err := cluster.Network[i].DeleteIP()
-				if err != nil {
-					log.Warn("delete VIP", "err", err)
-				}
-				if deleted {
-					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-				}
-			} else {
-				log.Info("Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
-			}
-		}
-	} else {
-		// Legacy behavior: delete VIP addresses on leadership loss
-		log.Info("Deleting VIP addresses on leadership loss (legacy behavior)")
-		for i := range cluster.Network {
-			deleted, err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warn("delete VIP", "err", err)
-			}
-			if deleted {
-				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-			}
-		}
-	}
+	cluster.cleanupVIPs(c)
 
 	log.Error("lost leadership, restarting kube-vip")
 }

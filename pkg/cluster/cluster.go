@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
@@ -131,4 +132,40 @@ func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {
 		Timeout:   time.Duration(c.ControlPlaneHealthCheck.TimeoutSeconds) * time.Second,
 		Transport: transport,
 	}, nil
+}
+
+// cleanupVIPs handles VIP removal based on the PreserveVIPOnLeadershipLoss configuration.
+// When preservation is enabled, IPv6 VIPs are always removed immediately to prevent DAD
+// failures on the new leader, while IPv4 VIPs are intentionally left in place.
+// When preservation is disabled (legacy behavior), all VIPs are removed.
+func (cluster *Cluster) cleanupVIPs(c *kubevip.Config) {
+	for i := range cluster.Network {
+		if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
+			continue
+		}
+
+		if c.PreserveVIPOnLeadershipLoss {
+			if utils.IsIPv6(cluster.Network[i].IP()) {
+				log.Info("[VIP] Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
+				deleted, err := cluster.Network[i].DeleteIP()
+				if err != nil {
+					log.Warn(err.Error())
+				}
+				if deleted {
+					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+				}
+			} else {
+				log.Info("[VIP] Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
+			}
+		} else {
+			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
+			deleted, err := cluster.Network[i].DeleteIP()
+			if err != nil {
+				log.Warn(err.Error())
+			}
+			if deleted {
+				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
+			}
+		}
+	}
 }
