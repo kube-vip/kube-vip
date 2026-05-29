@@ -68,6 +68,9 @@ const (
 	// Name of the service lease object
 	ServiceLease = "kube-vip.io/leaseName"
 
+	// Allow service reconciliation even when no endpoints are present (Cluster policy only)
+	AllowReconcileWithoutEndpoints = "kube-vip.io/allow-reconcile-without-endpoints"
+
 	// Enable DDNS for the service
 	ServiceDDNS = "kube-vip.io/ddns"
 

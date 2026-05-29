@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,8 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		log.Error("updating instance", "err", err)
 	}
 
+	allowReconcileWithoutEndpoints := shouldAllowReconcileWithoutEndpoints(service)
+
 	// Find out if we have any local endpoints
 	// if out endpoint is empty then populate it
 	// if not, go through the endpoints and see if ours still exists
@@ -115,8 +118,11 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 			}
 		}
 	} else {
-		// There are no local endpoints
-		if svcCtx.Signalled.Load() {
+		if allowReconcileWithoutEndpoints {
+			// Explicit opt-in for controllers that create LoadBalancer services without endpoints
+			svcCtx.SignalReadiness()
+		} else if svcCtx.Signalled.Load() {
+			// There are no local endpoints
 			svcCtx.ResetReadiness()
 			p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
 			if p.config.EnableARP && !p.config.EnableServicesElection {
@@ -270,6 +276,14 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 			}
 		}
 	}
+}
+
+func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {
+	if service == nil || service.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+		return false
+	}
+
+	return strings.EqualFold(service.Annotations[kubevip.AllowReconcileWithoutEndpoints], "true")
 }
 
 func hasV6(endpoints []string) bool {
