@@ -85,6 +85,26 @@ ip_vs_rr
 Preloading only the required modules is preferred to enabling the SELinux
 `domain_kernel_load_modules` boolean for containers.
 
+### Gateway API `LoadBalancer` services with no endpoints
+
+Some Gateway API controllers create `LoadBalancer` services that intentionally have no Endpoints/EndpointSlices backends.
+
+If you want kube-vip to reconcile such a service, opt in with:
+
+```yaml
+metadata:
+  annotations:
+    kube-vip.io/allow-reconcile-without-endpoints: "true"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+```
+
+Scope:
+- Works only with `externalTrafficPolicy: Cluster`
+- No effect for `Local`
+- Default endpoint-gated behavior remains unchanged for services without this annotation
+
 Please raise issues on the GitHub repository and as mentioned check the documentation at [https://kube-vip.io](https://kube-vip.io/).
 
 ## Community Tools

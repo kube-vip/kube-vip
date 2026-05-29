@@ -85,25 +85,8 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 
 		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
 
-		if p.config.EnableServicesElection {
-			wg.Go(func() {
-				les.Add(1)
-				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
-			})
-		} else if p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection) {
-			if !svcCtx.Signalled.Load() {
-				inst := instance.FindServiceInstance(service, *p.instances)
-				if inst == nil {
-					return true, fmt.Errorf("[%s] failed to find an instance for service %s/%s", p.provider.GetLabel(), service.Namespace, service.Name)
-				}
-				// global leader election is enabled for services
-				for x := range inst.VIPConfigs {
-					log.Debug("starting loadbalancer for service", "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
-					if err := inst.Clusters[x].StartLoadBalancerService(svcCtx.Ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(service), wg); err != nil {
-						return true, fmt.Errorf("failed to start lb: %w", err)
-					}
-				}
-			}
+		if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg, &les); err != nil {
+			return true, err
 		}
 
 		svcCtx.SignalReadiness()
@@ -120,7 +103,16 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	} else {
 		if allowReconcileWithoutEndpoints {
 			// Explicit opt-in for controllers that create LoadBalancer services without endpoints
+			if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg, &les); err != nil {
+				return true, err
+			}
 			svcCtx.SignalReadiness()
+
+			if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+				if err := p.worker.processInstance(svcCtx, service); err != nil {
+					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
+				}
+			}
 		} else if svcCtx.Signalled.Load() {
 			// There are no local endpoints
 			svcCtx.ResetReadiness()
@@ -250,6 +242,34 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 			}
 		}
 	}
+}
+
+func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
+	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup, les *atomic.Int64) error {
+	if p.config.EnableServicesElection {
+		wg.Go(func() {
+			les.Add(1)
+			p.startLeaderElection(svcCtx, service, serviceFunc, wg)
+		})
+		return nil
+	}
+
+	if p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection) {
+		if !svcCtx.Signalled.Load() {
+			inst := instance.FindServiceInstance(service, *p.instances)
+			if inst == nil {
+				return fmt.Errorf("[%s] failed to find an instance for service %s/%s", p.provider.GetLabel(), service.Namespace, service.Name)
+			}
+			for x := range inst.VIPConfigs {
+				log.Debug("starting loadbalancer for service", "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
+				if err := inst.Clusters[x].StartLoadBalancerService(svcCtx.Ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(service), wg); err != nil {
+					return fmt.Errorf("failed to start lb: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
