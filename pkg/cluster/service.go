@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -153,11 +152,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		}
 
 		if len(ips) == 0 {
-			isV6, err := isV6(cluster.Network[0].IP())
-			if err != nil {
-				return fmt.Errorf("failed to parse IP '%s'", cluster.Network[0].IP())
-			}
-			if !isV6 {
+			if !utils.IsIPv6(cluster.Network[0].IP()) {
 				ips = append(ips, "127.0.0.1")
 			} else {
 				ips = append(ips, "::1")
@@ -168,11 +163,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 		for _, ip := range ips {
 			entry := backend.Entry{Addr: ip, Port: c.Port}
-			ipv6, err := isV6(ip)
-			if err != nil {
-				log.Error("failed to check IP type", "IP", ip, "error", err)
-			}
-			if !ipv6 {
+			if !utils.IsIPv6(ip) {
 				backendMapV4[entry] = false
 			} else {
 				backendMapV6[entry] = false
@@ -183,11 +174,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			for i := range cluster.Network {
 				network := cluster.Network[i]
 				networkIP := network.IP()
-				isNetworkV6, err := isV6(networkIP)
-				if err != nil {
-					log.Error("failed to check IP type", "IP", networkIP, "error", err)
-					continue
-				}
+				isNetworkV6 := utils.IsIPv6(networkIP)
 				log.Debug("current ip to process", "ip", networkIP)
 
 				backendMap := &backendMapV4
@@ -330,14 +317,6 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		case <-ticker.C:
 		}
 	}
-}
-
-func isV6(ip string) (bool, error) {
-	ipaddr := net.ParseIP(ip)
-	if ipaddr == nil {
-		return false, fmt.Errorf("failed to parse IP '%s'", ip)
-	}
-	return ipaddr.To4() == nil, nil
 }
 
 func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clientset) ([]string, error) {
