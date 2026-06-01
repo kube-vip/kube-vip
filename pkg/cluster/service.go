@@ -439,40 +439,8 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 			return
 		}
-		for i := range cluster.Network {
-			if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
-				continue
-			}
 
-			// Handle VIP cleanup based on configuration
-			if c.PreserveVIPOnLeadershipLoss {
-				// For IPv6, we must remove VIPs immediately to avoid DAD failures on the new leader
-				// IPv6 Duplicate Address Detection will fail if the new leader tries to add an IP
-				// that is still present on this node's interface
-				if utils.IsIPv6(cluster.Network[i].IP()) {
-					log.Info("[VIP] Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
-					deleted, err := cluster.Network[i].DeleteIP()
-					if err != nil {
-						log.Warn(err.Error())
-					}
-					if deleted {
-						log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-					}
-				} else {
-					log.Info("[VIP] Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
-				}
-			} else {
-				// Legacy behavior: delete VIP addresses on leadership loss
-				log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
-				deleted, err := cluster.Network[i].DeleteIP()
-				if err != nil {
-					log.Warn(err.Error())
-				}
-				if deleted {
-					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-				}
-			}
-		}
+		cluster.cleanupVIPs(c)
 	})
 
 	return nil
