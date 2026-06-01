@@ -32,7 +32,7 @@ func NewDHCPClient(network Network, backoffAttempts uint) (DHCPClient, error) {
 			return nil, fmt.Errorf("failed to create DHCP client: %w", err)
 		}
 	} else {
-		client = NewDHCPv4Client(iface, false, "", backoffAttempts)
+		client = NewDHCPv4Client(iface, false, "", backoffAttempts, false)
 	}
 
 	return client, nil

@@ -26,6 +26,7 @@ type Service struct {
 	policyLocal    bool // set the policy to local pods
 	testHTTP       bool
 	testDualstack  bool // test dualstack loadbalancer services
+	dhcpBroadcast  bool // test dhcp broadcast flag
 	timeout        int  // how long to wait for the service to be created
 }
 
@@ -259,6 +260,13 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 
 	if s.policyLocal {
 		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
+	}
+
+	if s.dhcpBroadcast {
+		if svc.Annotations == nil {
+			svc.Annotations = make(map[string]string)
+		}
+		svc.Annotations[kubevip.DHCPBroadcast] = "true"
 	}
 
 	if s.testDualstack {

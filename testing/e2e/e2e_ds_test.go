@@ -978,7 +978,7 @@ func createTestServiceForDS(ctx context.Context, svcName, lbAddress, leaseName s
 
 	for _, svc := range services {
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 80)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", 80, false)
 		time.Sleep(time.Second)
 	}
 

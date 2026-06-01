@@ -26,6 +26,7 @@ type DHCPv4Client struct {
 	lease           *nclient4.Lease
 	initRebootFlag  bool
 	requestedIP     net.IP
+	broadcastFlag   bool
 	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
 	releasedChan    chan struct{} // indicate that the IP has been released
 	errorChan       chan error    // indicates there was an error on the IP request
@@ -35,7 +36,7 @@ type DHCPv4Client struct {
 }
 
 // NewDHCPv4Client returns a new DHCP Client.
-func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP string, backoffAttempts uint) *DHCPv4Client {
+func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP string, backoffAttempts uint, broadcastFlag bool) *DHCPv4Client {
 	return &DHCPv4Client{
 		iface:           iface,
 		stopChan:        make(chan struct{}),
@@ -43,6 +44,7 @@ func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP stri
 		errorChan:       make(chan error),
 		initRebootFlag:  initRebootFlag,
 		requestedIP:     net.ParseIP(requestedIP),
+		broadcastFlag:   broadcastFlag,
 		ipChan:          make(chan string),
 		backoffAttempts: backoffAttempts,
 	}
@@ -252,6 +254,10 @@ func (c *DHCPv4Client) request(ctx context.Context, rebind bool) (*nclient4.Leas
 	defer dhclient.Close()
 
 	modifiers := make([]dhcpv4.Modifier, 0)
+
+	if c.broadcastFlag {
+		modifiers = append(modifiers, func(d *dhcpv4.DHCPv4) { d.SetBroadcast() })
+	}
 
 	if c.ddnsHostName != "" {
 		modifiers = append(modifiers,

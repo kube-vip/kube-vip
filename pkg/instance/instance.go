@@ -45,6 +45,7 @@ type Instance struct {
 	DHCPv4Client        vip.DHCPClient
 	DHCPv6Client        vip.DHCPClient
 	macvlanName         string
+	dhcpBroadcast       bool
 
 	// Service use Vlan
 	IsVLAN        bool
@@ -303,6 +304,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 		}
 		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 		instance.macvlanName = svc.Annotations[kubevip.MacvlanName]
+		instance.dhcpBroadcast = svc.Annotations[kubevip.DHCPBroadcast] == "true"
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -614,7 +616,7 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 			initRebootFlag = true
 		}
 
-		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4, backoffAttempts)
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4, backoffAttempts, i.dhcpBroadcast)
 
 		// Add the client so that we can call it to stop function
 		i.DHCPv4Client = client

@@ -979,7 +979,7 @@ func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolic
 
 	for _, svc := range services {
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, serviceLease, 80)
+			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, serviceLease, 80, false)
 		time.Sleep(time.Second)
 	}
 
