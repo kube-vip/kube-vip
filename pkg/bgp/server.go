@@ -9,8 +9,9 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	api "github.com/osrg/gobgp/v3/api"
-	gobgp "github.com/osrg/gobgp/v3/pkg/server"
+	api "github.com/osrg/gobgp/v4/api"
+	"github.com/osrg/gobgp/v4/pkg/apiutil"
+	gobgp "github.com/osrg/gobgp/v4/pkg/server"
 )
 
 // Server manages a server object
@@ -44,7 +45,7 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 }
 
 // Start starts the BGP server
-func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.WatchEventResponse_PeerEvent)) (err error) {
+func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiutil.WatchEventMessage_PeerEvent)) (err error) {
 	go b.s.Serve()
 
 	if err = b.s.StartBgp(ctx, &api.StartBgpRequest{
@@ -57,14 +58,14 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.Wa
 		return
 	}
 
-	if err = b.s.WatchEvent(ctx, &api.WatchEventRequest{Peer: &api.WatchEventRequest_Peer{}}, func(r *api.WatchEventResponse) {
-		if p := r.GetPeer(); p != nil && p.Type == api.WatchEventResponse_PeerEvent_STATE {
-			log.Info("[BGP]", "peer", p.String())
+	if err = b.s.WatchEvent(ctx, gobgp.WatchEventMessageCallbacks{
+		OnPeerUpdate: func(p *apiutil.WatchEventMessage_PeerEvent, _ time.Time) {
+			log.Info("[BGP]", "peer", fmt.Sprintf("%+v", p))
 			if peerStateChangeCallback != nil {
 				peerStateChangeCallback(p)
 			}
-		}
-	}); err != nil {
+		},
+	}, gobgp.WatchPeer()); err != nil {
 		return
 	}
 
@@ -90,7 +91,6 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*api.Wa
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
-	// create new BGP stop context (independent)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return b.s.StopBgp(ctx, &api.StopBgpRequest{})

@@ -177,8 +177,8 @@ kind-reload:
 
 get-gobgp:
 	mkdir -p bin
-	wget -nc --directory-prefix=bin https://github.com/osrg/gobgp/releases/download/v3.37.0/gobgp_3.37.0_linux_amd64.tar.gz
-	tar -xvzf bin/gobgp_3.37.0_linux_amd64.tar.gz -C bin
+	wget -nc --directory-prefix=bin https://github.com/osrg/gobgp/releases/download/v4.6.0/gobgp_4.6.0_linux_amd64.tar.gz
+	tar -xvzf bin/gobgp_4.6.0_linux_amd64.tar.gz -C bin
 
 get-whoami:
 	docker pull ghcr.io/traefik/whoami:v1.11

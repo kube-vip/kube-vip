@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	api "github.com/osrg/gobgp/v3/api"
+	api "github.com/osrg/gobgp/v4/api"
 
 	"github.com/vishvananda/netlink"
 )

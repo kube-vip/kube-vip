@@ -17,7 +17,8 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
-	api "github.com/osrg/gobgp/v3/api"
+	api "github.com/osrg/gobgp/v4/api"
+	"github.com/osrg/gobgp/v4/pkg/apiutil"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/kubernetes"
@@ -51,14 +52,15 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	}
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
-	if err := b.bgpServer.Start(ctx, func(p *api.WatchEventResponse_PeerEvent) {
-		ipaddr := p.GetPeer().GetState().GetNeighborAddress()
+	if err := b.bgpServer.Start(ctx, func(p *apiutil.WatchEventMessage_PeerEvent) {
+		ipaddr := p.Peer.State.NeighborAddress.String()
 		port := uint64(179)
 		peerDescription := fmt.Sprintf("%s:%d", ipaddr, port)
 
 		for stateName, stateValue := range api.PeerState_SessionState_value {
 			metricValue := 0.0
-			if stateValue == int32(p.GetPeer().GetState().GetSessionState().Number()) {
+			if int(p.Peer.State.SessionState) == int(stateValue) {
+
 				metricValue = 1
 			}
 

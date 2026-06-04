@@ -6,7 +6,7 @@ import (
 	log "log/slog"
 	"net"
 
-	api "github.com/osrg/gobgp/v3/api"
+	"github.com/osrg/gobgp/v4/pkg/apiutil"
 )
 
 // AddHost will update peers of a host
@@ -30,8 +30,8 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 			return fmt.Errorf("failed to get path for %v", ip)
 		}
 
-		if _, err := b.s.AddPath(ctx, &api.AddPathRequest{
-			Path: p,
+		if _, err := b.s.AddPath(apiutil.AddPathRequest{
+			Paths: []*apiutil.Path{p},
 		}); err != nil {
 			return err
 		}
@@ -67,8 +67,8 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 			return nil
 		}
 
-		if err := b.s.DeletePath(ctx, &api.DeletePathRequest{
-			Path: p,
+		if err := b.s.DeletePath(apiutil.DeletePathRequest{
+			Paths: []*apiutil.Path{p},
 		}); err != nil {
 			return err
 		}
