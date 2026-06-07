@@ -111,7 +111,7 @@ func TestDumpBGPSection(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		mgr.dumpBGPSection()
+		mgr.dumpBGPSection(t.Context())
 
 		w.Close()
 		os.Stdout = old
@@ -142,7 +142,7 @@ func TestDumpBGPSection(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
-		mgr.dumpBGPSection()
+		mgr.dumpBGPSection(t.Context())
 
 		w.Close()
 		os.Stdout = old
@@ -156,6 +156,9 @@ func TestDumpBGPSection(t *testing.T) {
 		assert.Contains(t, output, "BGP Router ID: 192.168.1.1")
 		assert.Contains(t, output, "BGP AS: 65000")
 		assert.Contains(t, output, "BGP Peers: 2")
+
+		assert.Contains(t, output, "--- ACTIVE BGP RIB STATE ---")
+		assert.Contains(t, output, "BGP Server instance is inactive or uninitialized")
 	})
 }
 

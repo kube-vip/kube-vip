@@ -95,3 +95,36 @@ func (b *Server) Close() error {
 	defer cancel()
 	return b.s.StopBgp(ctx, &api.StopBgpRequest{})
 }
+
+// ListAdvertisedRoutes retrieves all active routes inside GoBGP's local RIB.
+// It queries the GLOBAL table type to find routes that kube-vip has requested GoBGP to advertise.
+func (b *Server) ListAdvertisedRoutes(ctx context.Context, isIPv6 bool) ([]*api.Destination, error) {
+	family := &api.Family{
+		Afi:  api.Family_AFI_IP,
+		Safi: api.Family_SAFI_UNICAST,
+	}
+	if isIPv6 {
+		family.Afi = api.Family_AFI_IP6
+	}
+
+	var destinations []*api.Destination
+
+	req := &api.ListPathRequest{
+		TableType: api.TableType_GLOBAL,
+		Family:    family,
+	}
+
+	// GoBGP's embedded server API uses a callback function to stream results
+	// locally without requiring a gRPC client stream setup.
+	err := b.s.ListPath(ctx, req, func(destination *api.Destination) {
+		if destination != nil {
+			destinations = append(destinations, destination)
+		}
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract local RIB: %w", err)
+	}
+
+	return destinations, nil
+}
