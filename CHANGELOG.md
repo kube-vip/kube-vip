@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Annotation: `kube-vip.io/allow-reconcile-without-endpoints: "true"`
   - Starts service handling path for opted-in endpointless Cluster services while preserving default endpoint-gated behavior for non-opt-in services and `Local` policy
   - Added endpoint behavior tests and README usage documentation
+  - Added support in ipoib interfaces in ARP mode. Fixes #694
 
 ### Changed
 - Updated signal handlers in manager_arp.go, manager_bgp.go, manager_wireguard.go, and manager_table.go to use switch statement pattern for handling multiple signals (SIGUSR1, SIGINT, SIGTERM)
