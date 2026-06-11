@@ -27,7 +27,7 @@ func (sm *Manager) dumpConfiguration(ctx context.Context) {
 	fmt.Printf("\n")
 
 	sm.dumpConfigSection()
-	sm.dumpBGPSection()
+	sm.dumpBGPSection(ctx)
 	sm.dumpARPSection()
 	sm.dumpServicesSection(ctx)
 	sm.dumpNetworkInterfacesSection()
@@ -54,7 +54,7 @@ func (sm *Manager) dumpConfigSection() {
 	fmt.Printf("\n")
 }
 
-func (sm *Manager) dumpBGPSection() {
+func (sm *Manager) dumpBGPSection(ctx context.Context) {
 	fmt.Printf("--- BGP CONFIGURATION ---\n")
 	fmt.Printf("BGP Enabled: %t\n", sm.config.EnableBGP)
 	if sm.config.EnableBGP {
@@ -69,6 +69,8 @@ func (sm *Manager) dumpBGPSection() {
 			fmt.Printf("  Peer %d: %s:%d (AS: %d, MultiHop: %t)\n",
 				i+1, peer.Address, peer.Port, peer.AS, peer.MultiHop)
 		}
+		fmt.Printf("\n--- ACTIVE BGP RIB STATE ---\n")
+		sm.dumpBGPRoutes(ctx)
 	}
 	fmt.Printf("\n")
 }
@@ -232,4 +234,55 @@ func (sm *Manager) dumpNFTablesSection() {
 		fmt.Printf("Chain: %s\n", chains[x])
 	}
 	fmt.Println()
+}
+
+func (sm *Manager) dumpBGPRoutes(ctx context.Context) {
+	if sm.bgpServer == nil {
+		fmt.Printf("  BGP Server instance is inactive or uninitialized\n")
+		return
+	}
+
+	// Create a short-lived execution window so a stuck BGP loop won't hang the entire SIGUSR1 routine
+	queryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	for _, isIPv6 := range []bool{false, true} {
+		label := "IPv4"
+		if isIPv6 {
+			label = "IPv6"
+		}
+
+		routes, err := sm.bgpServer.ListAdvertisedRoutes(queryCtx, isIPv6)
+		if err != nil {
+			fmt.Printf("  Error fetching %s routes: %v\n", label, err)
+			continue
+		}
+
+		if len(routes) == 0 {
+			fmt.Printf("  No %s routes found in global RIB\n", label)
+			continue
+		}
+
+		fmt.Printf("  %-18s | %-15s | %s\n", "Prefix", "Next Hop", "Discovered/Updated")
+		fmt.Printf("  ------------------------------------------------------------\n")
+
+		for _, dest := range routes {
+			for _, path := range dest.Paths {
+				nextHop := "N/A"
+				if path.NeighborIp != "" {
+					nextHop = path.NeighborIp
+				}
+
+				var timeStr string
+				if path.Age != nil {
+					timeStr = path.Age.AsTime().Format("15:04:05")
+				} else {
+					timeStr = "Unknown"
+				}
+
+				fmt.Printf("  %-18s | %-15s | %s\n", dest.Prefix, nextHop, timeStr)
+			}
+		}
+		fmt.Println()
+	}
 }

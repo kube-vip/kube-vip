@@ -48,6 +48,7 @@ var _ = Describe("SIGUSR1 Signal Handler", func() {
 				"--address", "192.168.1.100",
 				"--interface", "lo",
 				"--port", "6443",
+				"--bgp", 
 			)
 
 			var err error
@@ -61,6 +62,7 @@ var _ = Describe("SIGUSR1 Signal Handler", func() {
 
 			Eventually(session.Out, "5s").Should(gbytes.Say("KUBE-VIP CONFIGURATION DUMP"))
 			Eventually(session.Out).Should(gbytes.Say("VIP: 192.168.1.100"))
+			Eventually(session.Out).Should(gbytes.Say("ACTIVE BGP RIB STATE"))
 
 			Consistently(session, "2s").ShouldNot(gexec.Exit())
 		})
