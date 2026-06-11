@@ -11,6 +11,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	api "github.com/osrg/gobgp/v4/api"
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
+	bgp "github.com/osrg/gobgp/v4/pkg/packet/bgp"
 	gobgp "github.com/osrg/gobgp/v4/pkg/server"
 )
 
@@ -99,27 +100,38 @@ func (b *Server) Close() error {
 // ListAdvertisedRoutes retrieves all active routes inside GoBGP's local RIB.
 // It queries the GLOBAL table type to find routes that kube-vip has requested GoBGP to advertise.
 func (b *Server) ListAdvertisedRoutes(ctx context.Context, isIPv6 bool) ([]*api.Destination, error) {
-	family := &api.Family{
-		Afi:  api.Family_AFI_IP,
-		Safi: api.Family_SAFI_UNICAST,
-	}
+	afi := bgp.AFI_IP
+
 	if isIPv6 {
-		family.Afi = api.Family_AFI_IP6
+		afi = bgp.AFI_IP6
 	}
+
+	family := bgp.NewFamily(uint16(afi), bgp.SAFI_UNICAST)
 
 	var destinations []*api.Destination
 
-	req := &api.ListPathRequest{
-		TableType: api.TableType_GLOBAL,
+	req := apiutil.ListPathRequest{
+		TableType: api.TableType_TABLE_TYPE_GLOBAL,
 		Family:    family,
 	}
 
 	// GoBGP's embedded server API uses a callback function to stream results
 	// locally without requiring a gRPC client stream setup.
-	err := b.s.ListPath(ctx, req, func(destination *api.Destination) {
-		if destination != nil {
-			destinations = append(destinations, destination)
+	err := b.s.ListPath(req, func(prefix bgp.NLRI, paths []*apiutil.Path) {
+		var newPaths []*api.Path
+		for _, p := range paths {
+			np, err := apiutil.NewPath(p.Family, p.Nlri, p.Withdrawal, p.Attrs, time.Unix(p.Age, 0))
+			if err != nil {
+				log.Error("failed to create BGP path details", "err", err)
+				continue
+			}
+			newPaths = append(newPaths, np)
 		}
+		d := &api.Destination{
+			Prefix: prefix.String(),
+			Paths:  newPaths,
+		}
+		destinations = append(destinations, d)
 	})
 
 	if err != nil {

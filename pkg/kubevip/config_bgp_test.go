@@ -19,45 +19,52 @@ func TestParseBGPPeerConfig(t *testing.T) {
 			name: "IPv4, default port",
 			args: args{config: "192.168.0.10:65000::false,192.168.0.11:65000::false"},
 			wantBgpPeers: []BGPPeer{
-				{Address: "192.168.0.10", Port: 179, AS: 65000, MultiHop: false},
-				{Address: "192.168.0.11", Port: 179, AS: 65000, MultiHop: false},
+				{Address: "192.168.0.10", Port: 179, AS: 65000, MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
+				{Address: "192.168.0.11", Port: 179, AS: 65000, MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
 			name: "IPv4, different port",
 			args: args{config: "192.168.0.10:65000::false:180,192.168.0.11:65000::false:190"},
 			wantBgpPeers: []BGPPeer{
-				{Address: "192.168.0.10", Port: 180, AS: 65000, MultiHop: false},
-				{Address: "192.168.0.11", Port: 190, AS: 65000, MultiHop: false},
+				{Address: "192.168.0.10", Port: 180, AS: 65000, MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
+				{Address: "192.168.0.11", Port: 190, AS: 65000, MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
 			name: "IPv6, multi-protocol",
-			args: args{config: "[fd00:1111:2222:3333:c7d9:7235:6bf7:5d52]:65501::false/mpbgp_nexthop=auto_sourceif"},
+			args: args{config: "[fd00:1111:2222:3333:c7d9:7235:6bf7:5d52]:65501::false::mpbgp_nexthop=auto_sourceif"},
 			wantBgpPeers: []BGPPeer{
-				{Address: "fd00:1111:2222:3333:c7d9:7235:6bf7:5d52", Port: 179, AS: 65501, MultiHop: false, MpbgpNexthop: "auto_sourceif"},
+				{Address: "fd00:1111:2222:3333:c7d9:7235:6bf7:5d52", Port: 179, AS: 65501, MultiHop: false, MpbgpNexthop: "auto_sourceif", BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
+			},
+		},
+		{
+			name: "IPv6, multi-protocol, BFD",
+			args: args{config: "[fd00:1111:2222:3333:c7d9:7235:6bf7:5d52]:65501::false::mpbgp_nexthop=auto_sourceif:true;300;300;3"},
+			wantBgpPeers: []BGPPeer{
+				{Address: "fd00:1111:2222:3333:c7d9:7235:6bf7:5d52", Port: 179, AS: 65501, MultiHop: false, MpbgpNexthop: "auto_sourceif", BFDEnabled: true, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
 			name: "IPv6 bracketed, with password and multihop",
 			args: args{config: "[fd00:100:64::2]:65000:secret:true"},
 			wantBgpPeers: []BGPPeer{
-				{Address: "fd00:100:64::2", Port: 179, AS: 65000, Password: "secret", MultiHop: true},
+				{Address: "fd00:100:64::2", Port: 179, AS: 65000, Password: "secret", MultiHop: true, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
 			name: "IPv6 bracketed, empty fields",
 			args: args{config: "[fd00:100:64::2]:65000::false"},
 			wantBgpPeers: []BGPPeer{
-				{Address: "fd00:100:64::2", Port: 179, AS: 65000, MultiHop: false},
+				{Address: "fd00:100:64::2", Port: 179, AS: 65000, MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
 			name: "Unnumbered",
-			args: args{config: "unnumbered:eth0,unnumbered:eth1:65000::true/mpbgp_nexthop=auto_sourceif"},
+			args: args{config: "unnumbered:eth0,unnumbered:eth1:65000::true::mpbgp_nexthop=auto_sourceif"},
 			wantBgpPeers: []BGPPeer{
-				{Interface: "eth0", MultiHop: false},
-				{Interface: "eth1", AS: 65000, MultiHop: true, MpbgpNexthop: "auto_sourceif"},
+				{Interface: "eth0", MultiHop: false, BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
+				{Interface: "eth1", Port: 179, AS: 65000, MultiHop: true, MpbgpNexthop: "auto_sourceif", BFDEnabled: false, BFDReceiveInterval: 300, BFDTransmitInterval: 300, BFDDetectMultiplier: 3},
 			},
 		},
 		{
@@ -80,11 +87,11 @@ func TestParseBGPPeerConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gotBgpPeers, err := ParseBGPPeerConfig(tt.args.config)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseBGPPeerConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ParseBGPPeerConfig() error = \n%v, wantErr \n%v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(gotBgpPeers, tt.wantBgpPeers) {
-				t.Errorf("ParseBGPPeerConfig() = %v, want %v", gotBgpPeers, tt.wantBgpPeers)
+				t.Errorf("ParseBGPPeerConfig() = \n%v, want \n%v", gotBgpPeers, tt.wantBgpPeers)
 			}
 		})
 	}

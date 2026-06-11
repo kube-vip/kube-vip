@@ -53,6 +53,16 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 		},
 	}
 
+	if peer.BFDEnabled {
+		p.Bfd = &api.BfdPeerConfig{
+			Enabled:                  true,
+			DesiredMinimumTxInterval: peer.BFDReceiveInterval,
+			RequiredMinimumReceive:   peer.BFDTransmitInterval,
+			DetectionMultiplier:      peer.BFDDetectMultiplier,
+			Port:                     3784, // Should this be configurable??
+		}
+	}
+
 	if peer.Interface != "" {
 		neighborAddress, err := getIPv6LinkLocalNeighborAddress(ctx, peer.Interface)
 		if err != nil {
