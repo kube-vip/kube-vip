@@ -58,6 +58,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		}
 
 		if err := network.SetMask(c.VIPSubnet); err != nil {
+			killFunc()
 			return fmt.Errorf("failed to set mask for subnet %q: %w", c.VIPSubnet, err)
 		}
 
@@ -73,7 +74,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		if !c.EnableRoutingTable {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			if _, err = network.AddIP(false, false); err != nil {
-				return fmt.Errorf("failed to add IP address %s: %w", network.IP(), err)
+				log.Error("failed to add IP", "address", network.IP(), "error", err)
 			}
 		}
 
@@ -97,6 +98,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
 				c.BackendHealthCheckInterval, killFunc, &wg)
 			if err != nil {
+				killFunc()
 				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
 			}
 
