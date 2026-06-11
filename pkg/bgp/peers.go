@@ -4,18 +4,20 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"time"
 
 	"github.com/jpillora/backoff"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	api "github.com/osrg/gobgp/v3/api"
+	api "github.com/osrg/gobgp/v4/api"
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"github.com/osrg/gobgp/v3/pkg/config/oc"
-	"github.com/osrg/gobgp/v3/pkg/server"
-	"google.golang.org/protobuf/types/known/anypb"
+	"github.com/osrg/gobgp/v4/pkg/apiutil"
+	"github.com/osrg/gobgp/v4/pkg/config/oc"
+	bgp "github.com/osrg/gobgp/v4/pkg/packet/bgp"
+	"github.com/osrg/gobgp/v4/pkg/server"
 )
 
 const defaultBGPPort uint32 = 179
@@ -102,7 +104,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 
 		err = b.s.AddDefinedSet(ctx, &api.AddDefinedSetRequest{
 			DefinedSet: &api.DefinedSet{
-				DefinedType: api.DefinedType_NEIGHBOR,
+				DefinedType: api.DefinedType_DEFINED_TYPE_NEIGHBOR,
 				Name:        fmt.Sprintf("peer-%s", p.Conf.NeighborAddress),
 				List:        []string{fmt.Sprintf("%s/%s", p.Conf.NeighborAddress, mask)},
 			},
@@ -133,62 +135,57 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 	return nil
 }
 
-func (b *Server) getPath(ip net.IP) (path *api.Path) {
+func (b *Server) getPath(ip net.IP) *apiutil.Path {
 	isV6 := ip.To4() == nil
 
-	//nolint
-	originAttr, _ := anypb.New(&api.OriginAttribute{
-		Origin: 0,
-	})
-
 	if !isV6 {
-		//nolint
-		nlri, _ := anypb.New(&api.IPAddressPrefix{
-			Prefix:    ip.String(),
-			PrefixLen: vip.DefaultMaskIPv4,
-		})
+		prefix, err := bgp.NewIPAddrPrefix(netip.MustParsePrefix(
+			fmt.Sprintf("%s/%d", ip.String(), vip.DefaultMaskIPv4),
+		))
+		if err != nil {
+			return nil
+		}
 
-		//nolint
-		nhAttr, _ := anypb.New(&api.NextHopAttribute{
-			NextHop: "0.0.0.0", // gobgp will fill this
-		})
+		nh, err := bgp.NewPathAttributeNextHop(netip.MustParseAddr("0.0.0.0"))
+		if err != nil {
+			return nil
+		}
 
-		path = &api.Path{
-			Family: &api.Family{
-				Afi:  api.Family_AFI_IP,
-				Safi: api.Family_SAFI_UNICAST,
+		return &apiutil.Path{
+			Family: bgp.RF_IPv4_UC,
+			Nlri:   prefix,
+			Attrs: []bgp.PathAttributeInterface{
+				bgp.NewPathAttributeOrigin(0),
+				nh,
 			},
-			Nlri:   nlri,
-			Pattrs: []*anypb.Any{originAttr, nhAttr},
-		}
-	} else {
-		//nolint
-		nlri, _ := anypb.New(&api.IPAddressPrefix{
-			Prefix:    ip.String(),
-			PrefixLen: vip.DefaultMaskIPv6,
-		})
-
-		v6Family := &api.Family{
-			Afi:  api.Family_AFI_IP6,
-			Safi: api.Family_SAFI_UNICAST,
-		}
-
-		//nolint
-		mpAttr, _ := anypb.New(&api.MpReachNLRIAttribute{
-			Family:   v6Family,
-			NextHops: []string{"::"}, // gobgp will fill this
-			Nlris:    []*anypb.Any{nlri},
-		})
-
-		path = &api.Path{
-			Family: v6Family,
-			Nlri:   nlri,
-			Pattrs: []*anypb.Any{originAttr, mpAttr},
 		}
 	}
-	return
-}
 
+	prefix, err := bgp.NewIPAddrPrefix(netip.MustParsePrefix(
+		fmt.Sprintf("%s/%d", ip.String(), vip.DefaultMaskIPv6),
+	))
+	if err != nil {
+		return nil
+	}
+
+	mpReach, err := bgp.NewPathAttributeMpReachNLRI(
+		bgp.RF_IPv6_UC,
+		[]bgp.PathNLRI{{NLRI: prefix}},
+		netip.MustParseAddr("::"),
+	)
+	if err != nil {
+		return nil
+	}
+
+	return &apiutil.Path{
+		Family: bgp.RF_IPv6_UC,
+		Nlri:   prefix,
+		Attrs: []bgp.PathAttributeInterface{
+			bgp.NewPathAttributeOrigin(0),
+			mpReach,
+		},
+	}
+}
 func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *api.Peer, family api.Family_Afi) error {
 	familyType := "v4"
 	if family == api.Family_AFI_IP6 {
@@ -210,12 +207,12 @@ func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *a
 						},
 					},
 					NeighborSet: &api.MatchSet{
-						Type: api.MatchSet_ANY,
+						Type: api.MatchSet_TYPE_ANY,
 						Name: setName,
 					},
 				},
 				Actions: &api.Actions{
-					RouteAction: api.RouteAction_ACCEPT,
+					RouteAction: api.RouteAction_ROUTE_ACTION_ACCEPT,
 					Nexthop: &api.NexthopAction{
 						Address: address,
 					},
@@ -224,12 +221,12 @@ func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *a
 			{
 				Conditions: &api.Conditions{
 					NeighborSet: &api.MatchSet{
-						Type: api.MatchSet_ANY,
+						Type: api.MatchSet_TYPE_ANY,
 						Name: setName,
 					},
 				},
 				Actions: &api.Actions{
-					RouteAction: api.RouteAction_ACCEPT,
+					RouteAction: api.RouteAction_ROUTE_ACTION_ACCEPT,
 				},
 			},
 		},
@@ -245,7 +242,7 @@ func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *a
 	err = s.AddPolicyAssignment(ctx, &api.AddPolicyAssignmentRequest{
 		Assignment: &api.PolicyAssignment{
 			Name:      "global",
-			Direction: api.PolicyDirection_EXPORT,
+			Direction: api.PolicyDirection_POLICY_DIRECTION_EXPORT,
 			Policies: []*api.Policy{
 				{
 					Name: policy.Name,

@@ -30,7 +30,7 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/kube-vip/kube-vip/testing/e2e/bgp"
 
-	api "github.com/osrg/gobgp/v3/api"
+	api "github.com/osrg/gobgp/v4/api"
 )
 
 const (
@@ -62,7 +62,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 
@@ -97,7 +97,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 
@@ -132,7 +132,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 
@@ -167,7 +167,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 
@@ -202,7 +202,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -249,7 +249,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -296,7 +296,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -343,7 +343,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -390,7 +390,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				containerIP string
 				tempDirPath string
@@ -438,7 +438,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				containerIP string
 				tempDirPath string
@@ -486,7 +486,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -541,7 +541,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -596,7 +596,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -651,7 +651,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 				nodesNumber = 1
@@ -706,7 +706,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				containerIP string
 				tempDirPath string
@@ -762,7 +762,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			var (
 				cpVIP       string
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				containerIP string
 				tempDirPath string
@@ -817,7 +817,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 		Describe("kube-vip BGP configuration via node annotations", Ordered, func() {
 			var (
 				kindCluster *e2e.Cluster
-				gobgpClient api.GobgpApiClient
+				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
 			)
@@ -873,7 +873,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 
 func testBGP(ctx context.Context, offset uint, lbFamily string, afiFamily api.Family_Afi, svcFamily []corev1.IPFamily, svcName string,
 	trafficPolicy corev1.ServiceExternalTrafficPolicy, client kubernetes.Interface, numberOfServices int,
-	gobgpClient api.GobgpApiClient, expectedNexthop string, serviceLease string,
+	gobgpClient api.GoBgpServiceClient, expectedNexthop string, serviceLease string,
 ) {
 	lbAddress := e2e.GenerateVIP(lbFamily, offset, defaultNetwork)
 	routeCheckFamily := &api.Family{
@@ -886,7 +886,7 @@ func testBGP(ctx context.Context, offset uint, lbFamily string, afiFamily api.Fa
 func setupEnv(ctx context.Context, cpVIP *string,
 	server *bgp.Server, clusterAddrFamily, bgpClientAddrFamily string,
 	peerAddrFamily []string, gobgpPeers *[]*e2e.BGPPeerValues,
-	gobgpClient *api.GobgpApiClient, logger log.Logger,
+	gobgpClient *api.GoBgpServiceClient, logger log.Logger,
 	nodesNumber int, mpbgpnexthop, clusterNameSuffix string,
 	serviceElection, cpEnable, svcEnable bool,
 ) (*e2e.Cluster, string, string) {
@@ -967,7 +967,7 @@ func setupEnv(ctx context.Context, cpVIP *string,
 
 func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, serviceAddrFamily []corev1.IPFamily, numberOfServices int,
-	gobgpClient api.GobgpApiClient, gobgpFamily *api.Family, expectedNexthop string,
+	gobgpClient api.GoBgpServiceClient, gobgpFamily *api.Family, expectedNexthop string,
 	serviceLease string,
 ) {
 	lbAddresses := vip.Split(lbAddress)
@@ -1019,7 +1019,7 @@ func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolic
 	}
 }
 
-func testControlPlaneBGP(ctx context.Context, gobgpClient api.GobgpApiClient, lbAddresses []string) {
+func testControlPlaneBGP(ctx context.Context, gobgpClient api.GoBgpServiceClient, lbAddresses []string) {
 	for _, addr := range lbAddresses {
 		By(withTimestamp(fmt.Sprintf("checking bgp route for address %q", addr)))
 		afiFamily := api.Family_AFI_IP

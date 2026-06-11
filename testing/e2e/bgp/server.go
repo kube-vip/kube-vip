@@ -24,7 +24,7 @@ import (
 	"github.com/docker/docker/client"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	api "github.com/osrg/gobgp/v3/api"
+	api "github.com/osrg/gobgp/v4/api"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
@@ -46,7 +46,7 @@ const (
 // Server manages a GoBGP daemon and provides a gRPC client for route
 // verification and peer management. Create with NewServer, tear down with Stop.
 type Server struct {
-	Client    api.GobgpApiClient
+	Client    api.GoBgpServiceClient
 	LocalIPv4 string
 	LocalIPv6 string
 	TempDir   string
@@ -112,7 +112,7 @@ func BuildServerFromInfo(ipv4, ipv6, tempDir string) *Server {
 }
 
 // NewClientIPv6 creates a second gRPC client connection via IPv6.
-func (s *Server) NewClientIPv6() api.GobgpApiClient {
+func (s *Server) NewClientIPv6() api.GoBgpServiceClient {
 	c, err := newGoBGPClient(s.LocalIPv6, GoBGPPort)
 	Expect(err).ToNot(HaveOccurred())
 	return c
@@ -189,7 +189,7 @@ func (s *Server) RemovePeers(ctx context.Context, peers []*e2e.BGPPeerValues) {
 
 // ResolveVIP queries GoBGP for the current next-hops announcing the given VIP.
 // Returns the node IPs that a real BGP router would forward traffic to.
-func ResolveVIP(ctx context.Context, c api.GobgpApiClient, vip string) []string {
+func ResolveVIP(ctx context.Context, c api.GoBgpServiceClient, vip string) []string {
 	family := &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}
 	dests, err := ListPaths(ctx, c, family, []*api.TableLookupPrefix{{Prefix: vip}})
 	Expect(err).ToNot(HaveOccurred())
@@ -212,7 +212,7 @@ func ResolveVIP(ctx context.Context, c api.GobgpApiClient, vip string) []string 
 // CheckPaths polls GoBGP until exactly expectedDests destinations exist for
 // the given prefix. Returns the destinations for further assertions.
 // This counts Destination objects (used by the existing service BGP tests).
-func CheckPaths(ctx context.Context, c api.GobgpApiClient, family *api.Family, prefixes []*api.TableLookupPrefix, expectedDests int) []*api.Destination {
+func CheckPaths(ctx context.Context, c api.GoBgpServiceClient, family *api.Family, prefixes []*api.TableLookupPrefix, expectedDests int) []*api.Destination {
 	var paths []*api.Destination
 	Eventually(func() error {
 		var err error
@@ -232,7 +232,7 @@ func CheckPaths(ctx context.Context, c api.GobgpApiClient, family *api.Family, p
 // destinations) for the given prefix matches expected.
 // This counts individual Path objects within Destinations (needed when multiple
 // peers announce the same prefix, e.g. 2 CP nodes announcing the same VIP).
-func CheckPathCount(ctx context.Context, c api.GobgpApiClient, prefix string, expected int, timeout time.Duration) {
+func CheckPathCount(ctx context.Context, c api.GoBgpServiceClient, prefix string, expected int, timeout time.Duration) {
 	family := &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}
 	prefixes := []*api.TableLookupPrefix{{Prefix: prefix}}
 	Eventually(func() error {
@@ -252,12 +252,12 @@ func CheckPathCount(ctx context.Context, c api.GobgpApiClient, prefix string, ex
 }
 
 // ListPaths queries GoBGP for routes matching the given family and prefixes.
-func ListPaths(ctx context.Context, c api.GobgpApiClient, family *api.Family, prefixes []*api.TableLookupPrefix) ([]*api.Destination, error) {
+func ListPaths(ctx context.Context, c api.GoBgpServiceClient, family *api.Family, prefixes []*api.TableLookupPrefix) ([]*api.Destination, error) {
 	pathCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	stream, err := c.ListPath(pathCtx, &api.ListPathRequest{
-		TableType: api.TableType_GLOBAL, Family: family, Prefixes: prefixes,
-		SortType: api.ListPathRequest_PREFIX,
+		TableType: api.TableType_TABLE_TYPE_GLOBAL, Family: family, Prefixes: prefixes,
+		SortType: api.ListPathRequest_SORT_TYPE_PREFIX,
 	})
 	if err != nil {
 		return nil, err
@@ -331,13 +331,13 @@ func joinNonEmpty(ss []string) string {
 	return result
 }
 
-func newGoBGPClient(address string, port uint32) (api.GobgpApiClient, error) {
+func newGoBGPClient(address string, port uint32) (api.GoBgpServiceClient, error) {
 	target := net.JoinHostPort(address, strconv.Itoa(int(port)))
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to GoBGP server %q: %w", target, err)
 	}
-	return api.NewGobgpApiClient(conn), nil
+	return api.NewGoBgpServiceClient(conn), nil
 }
 
 func runGoBGP(config string, kill chan any) {
