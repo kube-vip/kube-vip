@@ -24,7 +24,7 @@ type BGPPeer struct {
 	MpbgpIPv4    string
 	MpbgpIPv6    string
 
-	// BFD Configurtion
+	// BFD Configuration
 	BFDEnabled          bool
 	BFDReceiveInterval  uint32
 	BFDTransmitInterval uint32
@@ -58,7 +58,7 @@ type ZebraConfig struct {
 }
 
 // BGP Peer layout is as follows:
-// <address>:<AS>:<password>:<multihop>:<port><optional mpbgp options>:<BFD options>
+// <address>:<AS>:<password>:<multihop>:<port>:<optional mpbgp options>:<BFD options>
 
 // <address> - IP address of the peer. For IPv6 addresses, the address should be enclosed in square brackets (e.g. [fd00:100:64::2]). For unnumbered peers, the address should be prefixed with "unnumbered:" followed by the interface name (e.g. unnumbered:eth0).
 // <AS> - Autonomous System number of the peer (e.g. 65000)
@@ -66,19 +66,17 @@ type ZebraConfig struct {
 // <multihop> - Optional flag to indicate if this is a multihop peer (true/false, default: false)
 // <port> - Optional BGP port number (default: 179)
 // <optional mpbgp options> - Optional MP-BGP parameters in the format of key=value pairs separated by ';' (e.g. mpbgp_nexthop=auto_sourceif;mpbgp_ipv4=)
-// <BFD options> - Optional BFD parameters (if any) in the format of comma-separated values (e.g. bfd_receive_interval=300,bfd_transmit_interval=300,bfd_detect_multiplier=3)
+// <BFD options> - Optional BFD parameters (if any) in the format of semicolon-separated values (enable, receive_interval, transmit_interval, detect_multiplier) (e.g. true;300;300;3)
 
 // ParseBGPPeerConfig - take a string and parses it into an array of peers
 func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 	peers := strings.Split(config, ",")
-	if len(peers) == 0 {
+	if len(peers) == 0 || config == "" {
 		return nil, fmt.Errorf("no BGP Peer configurations found")
 	}
 
 	for x := range peers {
 		peerStr := peers[x]
-		//config := strings.Split(peerStr, "/")
-		//peerStr = config[0]
 		if peerStr == "" {
 			continue
 		}
@@ -154,7 +152,7 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 		// Look at peer[5] for optional MP-BGP parameters
 		var mpbgpNexthop, mpbgpIPv4, mpbgpIPv6 string
 
-		if len(peer) >= 6 {
+		if len(peer) >= 6 && peer[5] != "" {
 			configData := strings.Split(peer[5], ";")
 			for _, cfg := range configData {
 				c := strings.Split(cfg, "=")
@@ -176,36 +174,36 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 		}
 
 		// Look at peer[6] for optional BFD parameters (if any)
-		bpfEnabled := false
-		bpfReceiveInterval := uint64(300)
-		bpfTransmitInterval := uint64(300)
-		bpfDetectMultiplier := uint64(3)
+		bfdEnabled := false
+		bfdReceiveInterval := uint64(300)
+		bfdTransmitInterval := uint64(300)
+		bfdDetectMultiplier := uint64(3)
 
-		if len(peer) >= 7 {
+		if len(peer) >= 7 && peer[6] != "" {
 			c := strings.Split(peer[6], ";")
 			if len(c) < 4 {
-				return nil, fmt.Errorf("BFD configuration error: at least 4 parameters are required (enable, receive_interval, transmit_interval, detect_multiplier)[%s]", c[1])
+				return nil, fmt.Errorf("BFD configuration error: at least 4 parameters are required (enable, receive_interval, transmit_interval, detect_multiplier) [%s]", peer[6])
 			}
-			bpfEnabled, err = strconv.ParseBool(c[0])
+			bfdEnabled, err = strconv.ParseBool(c[0])
 			if err != nil {
 				return nil, fmt.Errorf("BFD configuration error: invalid value for bfd_enabled (true/false) [%s]", c[0])
 			}
 
 			if c[1] != "" {
-				bpfReceiveInterval, err = strconv.ParseUint(c[1], 10, 32)
+				bfdReceiveInterval, err = strconv.ParseUint(c[1], 10, 32)
 				if err != nil {
 					return nil, fmt.Errorf("BFD configuration error: invalid value for bfd_receive_interval [%s]", c[1])
 				}
 			}
 
 			if c[2] != "" {
-				bpfTransmitInterval, err = strconv.ParseUint(c[2], 10, 32)
+				bfdTransmitInterval, err = strconv.ParseUint(c[2], 10, 32)
 				if err != nil {
 					return nil, fmt.Errorf("BFD configuration error: invalid value for bfd_transmit_interval [%s]", c[2])
 				}
 			}
 			if c[3] != "" {
-				bpfDetectMultiplier, err = strconv.ParseUint(c[3], 10, 32)
+				bfdDetectMultiplier, err = strconv.ParseUint(c[3], 10, 32)
 				if err != nil {
 					return nil, fmt.Errorf("BFD configuration error: invalid value for bfd_detect_multiplier [%s]", c[3])
 				}
@@ -223,10 +221,10 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 			MpbgpNexthop:        mpbgpNexthop,
 			MpbgpIPv4:           mpbgpIPv4,
 			MpbgpIPv6:           mpbgpIPv6,
-			BFDEnabled:          bpfEnabled,
-			BFDReceiveInterval:  uint32(bpfReceiveInterval),
-			BFDTransmitInterval: uint32(bpfTransmitInterval),
-			BFDDetectMultiplier: uint32(bpfDetectMultiplier),
+			BFDEnabled:          bfdEnabled,
+			BFDReceiveInterval:  uint32(bfdReceiveInterval),
+			BFDTransmitInterval: uint32(bfdTransmitInterval),
+			BFDDetectMultiplier: uint32(bfdDetectMultiplier),
 		}
 
 		bgpPeers = append(bgpPeers, peerConfig)
