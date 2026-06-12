@@ -36,9 +36,12 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 	if len(c.Peers) == 0 {
 		return nil, fmt.Errorf("you need to provide at least one peer")
 	}
+	bgpLogger := log.Default()
+	lvl := &log.LevelVar{}
+	lvl.Set(log.LevelInfo)
 
 	b = &Server{
-		s:       gobgp.NewBgpServer(),
+		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
 		c:       &c,
 		tracker: make(map[string]map[string]bool),
 	}
