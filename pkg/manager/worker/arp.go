@@ -25,7 +25,8 @@ func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 	config *kubevip.Config, closing *atomic.Bool, killFunc func(),
 	svcProcessor *services.Processor, mutex *sync.Mutex, clientSet *kubernetes.Clientset,
 	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
-	nodeLabelMgr node.Labeler) *ARP {
+	nodeLabelMgr node.Labeler,
+) *ARP {
 	return &ARP{
 		Common: *newCommon(arpMgr, intfMgr, config, closing, killFunc,
 			svcProcessor, mutex, clientSet, electionMgr, leaseMgr, routeMgr,
@@ -36,7 +37,7 @@ func NewARP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 func (a *ARP) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 	log.Info("Start ARP/NDP advertisement Global")
 	wg.Go(func() {
-		a.arpMgr.StartAdvertisement(ctx)
+		a.arpMgr.StartAdvertisement(ctx, a.killFunc)
 	})
 	return nil
 }
@@ -52,7 +53,6 @@ func (a *ARP) StartControlPlane(ctx context.Context, electionManager *election.M
 }
 
 func (a *ARP) ConfigureServices() {
-
 }
 
 func (a *ARP) StartServices(ctx context.Context) error {

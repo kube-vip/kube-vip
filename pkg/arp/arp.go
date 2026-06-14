@@ -10,6 +10,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/vishvananda/netlink"
 )
 
 type Manager struct {
@@ -113,7 +114,43 @@ func (m *Manager) Count(name string) int {
 	return 0
 }
 
-func (m *Manager) StartAdvertisement(ctx context.Context) {
+func (m *Manager) StartAdvertisement(ctx context.Context, killFunc func()) {
+	if m.config.LoseLeadership {
+		var wg sync.WaitGroup
+		defer wg.Wait()
+
+		watchCtx, cancelWatch := context.WithCancel(ctx)
+		defer cancelWatch()
+
+		log.Info("[ARP manager] starting watching network device", "interface", m.config.Interface)
+
+		duration := time.Duration(m.config.LoseLeadershipTimeoutSeconds) * time.Second
+		timeout := time.NewTimer(duration)
+		timeout.Stop()
+
+		wg.Go(func() {
+			select {
+			case <-timeout.C:
+				killFunc()
+			case <-watchCtx.Done():
+				return
+			}
+		})
+
+		wg.Go(func() {
+			defer cancelWatch()
+			if err := watch(watchCtx, m.config.Interface, func(s netlink.LinkOperState) {
+				if isUp(s) {
+					timeout.Stop()
+					return
+				}
+				timeout.Reset(duration)
+			}); err != nil {
+				log.Warn("[ARP manager] stopped watching interface", "err", err)
+			}
+		})
+	}
+
 	log.Info("[ARP manager] starting ARP/NDP advertisement")
 
 	ticker := time.NewTicker(time.Duration(m.config.ArpBroadcastRate) * time.Millisecond)
@@ -200,7 +237,6 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 				log.Warn(err.Error())
 			}
 		}
-
 	} else {
 		// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 		err := vip.ARPSendGratuitous(ipString, iface)
@@ -208,4 +244,52 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 			log.Warn(err.Error())
 		}
 	}
+}
+
+// watch subscribing to the network interface events and calls handler
+func watch(ctx context.Context, interfaceName string, operStateHandler func(netlink.LinkOperState)) error {
+	ifname, err := netlink.LinkByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to watch interface %q: %w", interfaceName, err)
+	}
+
+	// verify if this interface is physical device
+	if _, ok := ifname.(*netlink.Device); !ok {
+		return fmt.Errorf("interface %s is not physical, ignoring", interfaceName)
+	}
+
+	events := make(chan netlink.LinkUpdate)
+	done := make(chan struct{})
+
+	if err := netlink.LinkSubscribe(events, done); err != nil {
+		return fmt.Errorf("failed to subscribe to the interface events: %w", err)
+	}
+	defer close(done)
+
+	//  handle initial state
+	operStateHandler(ifname.Attrs().OperState)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-events:
+			if !ok {
+				return fmt.Errorf("interface events channel closed")
+			}
+
+			attrs := event.Attrs()
+			// LinkSubscribe captures events for all network devices found
+			// so we only care about vip interface
+			if ifname.Attrs().Name != attrs.Name {
+				continue
+			}
+			log.Debug("handling device change", "state", attrs.OperState)
+			operStateHandler(attrs.OperState)
+		}
+	}
+}
+
+func isUp(operState netlink.LinkOperState) bool {
+	return operState == netlink.OperUp
 }
