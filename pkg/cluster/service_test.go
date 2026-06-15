@@ -14,6 +14,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
@@ -154,6 +155,34 @@ func TestBGPHealthCheckLoop_RetriesDelHostOnFailure(t *testing.T) {
 		"route should be withdrawn after clearing DelHost error")
 }
 
+func TestRoutingTableHealthCheck_AddsVIPWhenHealthy(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
+	startRoutingTableVipService(t, newRoutingTableConfig(healthcheck.server.URL, healthcheck.caPath), network)
+
+	expectEventually(t, network.isPresent,
+		"VIP should be added while health check is healthy")
+}
+
+func TestRoutingTableHealthCheck_RemovesVIPWhenUnhealthy(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
+	startRoutingTableVipService(t, newRoutingTableConfig(healthcheck.server.URL, healthcheck.caPath), network)
+
+	expectEventually(t, network.isPresent,
+		"VIP should be added while health check is healthy")
+
+	healthcheck.setStatus(http.StatusServiceUnavailable)
+	expectEventually(t, func() bool { return !network.isPresent() },
+		"VIP should be removed once health check becomes unhealthy")
+}
+
 var (
 	errTestAddHost = &testError{msg: "mock AddHost error"}
 	errTestDelHost = &testError{msg: "mock DelHost error"}
@@ -189,6 +218,40 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRoute
 	})
 
 	return cancel, done
+}
+
+// startRoutingTableVipService launches vipService in routing-table mode with a
+// mock network and a real route.Manager (which only drives the mock network's
+// route methods, so no netlink calls happen). Registers cleanup to stop it.
+func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *mockNetwork) {
+	t.Helper()
+
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
+	if err != nil {
+		t.Fatalf("InitCluster: %v", err)
+	}
+	c.Network = []vip.Network{network}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		_ = c.StartVipService(ctx, cfg, nil, nil, func() {})
+		close(done)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
+func newRoutingTableConfig(url, caPath string) *kubevip.Config {
+	cfg := newTestConfig(url, caPath)
+	cfg.EnableBGP = false
+	cfg.EnableRoutingTable = true
+	cfg.BackendHealthCheckInterval = 1
+	return cfg
 }
 
 func newTestConfig(url, caPath string) *kubevip.Config {
@@ -259,33 +322,51 @@ func (m *mockBGPRouteManager) setDelErr(err error) {
 type mockNetwork struct {
 	ip   string
 	cidr string
+
+	mu      sync.Mutex
+	present bool
 }
 
-func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) { return true, nil }
-func (m *mockNetwork) AddRoute(bool) (bool, error)            { return false, nil }
-func (m *mockNetwork) DeleteIP() (bool, error)                { return false, nil }
-func (m *mockNetwork) DeleteRoute() error                     { return nil }
-func (m *mockNetwork) UpdateRoutes() (bool, error)            { return false, nil }
-func (m *mockNetwork) IsSet() (*netlink.Addr, error)          { return nil, nil }
-func (m *mockNetwork) IP() string                             { return m.ip }
-func (m *mockNetwork) CIDR() string                           { return m.cidr }
-func (m *mockNetwork) IPisLinkLocal() bool                    { return false }
-func (m *mockNetwork) PrepareRoute() *netlink.Route           { return nil }
-func (m *mockNetwork) RouteHash() string                      { return "" }
-func (m *mockNetwork) SetIP(string) error                     { return nil }
-func (m *mockNetwork) SetServicePorts(*corev1.Service)        {}
-func (m *mockNetwork) Interface() string                      { return "eth0" }
-func (m *mockNetwork) IsDADFAIL() bool                        { return false }
-func (m *mockNetwork) IsDNS() bool                            { return false }
-func (m *mockNetwork) IsDDNS() bool                           { return false }
-func (m *mockNetwork) DDNSHostName() string                   { return "" }
-func (m *mockNetwork) DNSName() string                        { return "" }
-func (m *mockNetwork) SetMask(string) error                   { return nil }
-func (m *mockNetwork) SetHasEndpoints(bool)                   {}
-func (m *mockNetwork) HasEndpoints() bool                     { return false }
-func (m *mockNetwork) ARPName() string                        { return "" }
-func (m *mockNetwork) GetPossibleSubnets() string             { return "" }
-func (m *mockNetwork) DHCPFamily() string                     { return "" }
+func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.present = true
+	return true, nil
+}
+func (m *mockNetwork) DeleteIP() (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.present = false
+	return false, nil
+}
+func (m *mockNetwork) isPresent() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.present
+}
+func (m *mockNetwork) AddRoute(bool) (bool, error)     { return false, nil }
+func (m *mockNetwork) DeleteRoute() error              { return nil }
+func (m *mockNetwork) UpdateRoutes() (bool, error)     { return false, nil }
+func (m *mockNetwork) IsSet() (*netlink.Addr, error)   { return nil, nil }
+func (m *mockNetwork) IP() string                      { return m.ip }
+func (m *mockNetwork) CIDR() string                    { return m.cidr }
+func (m *mockNetwork) IPisLinkLocal() bool             { return false }
+func (m *mockNetwork) PrepareRoute() *netlink.Route    { return nil }
+func (m *mockNetwork) RouteHash() string               { return "" }
+func (m *mockNetwork) SetIP(string) error              { return nil }
+func (m *mockNetwork) SetServicePorts(*corev1.Service) {}
+func (m *mockNetwork) Interface() string               { return "eth0" }
+func (m *mockNetwork) IsDADFAIL() bool                 { return false }
+func (m *mockNetwork) IsDNS() bool                     { return false }
+func (m *mockNetwork) IsDDNS() bool                    { return false }
+func (m *mockNetwork) DDNSHostName() string            { return "" }
+func (m *mockNetwork) DNSName() string                 { return "" }
+func (m *mockNetwork) SetMask(string) error            { return nil }
+func (m *mockNetwork) SetHasEndpoints(bool)            {}
+func (m *mockNetwork) HasEndpoints() bool              { return false }
+func (m *mockNetwork) ARPName() string                 { return "" }
+func (m *mockNetwork) GetPossibleSubnets() string      { return "" }
+func (m *mockNetwork) DHCPFamily() string              { return "" }
 
 // testHealthServer wraps an HTTPS httptest.Server with an atomic status code.
 // caPath is the path to the server's CA cert for client verification.

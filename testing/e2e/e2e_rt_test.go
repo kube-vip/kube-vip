@@ -4,10 +4,12 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"text/template"
@@ -132,6 +134,92 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 		})
 
+		Describe("kube-vip IPv4 control-plane routing table mode with control-plane health check", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				tempDirPath string
+
+				nodesNumber = 3
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv4Family,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:                         cpVIP,
+					ImagePath:                               imagePath,
+					ConfigPath:                              configPath,
+					ControlPlaneEnable:                      "true",
+					SvcEnable:                               "false",
+					SvcElectionEnable:                       "false",
+					EnableNodeLabeling:                      "false",
+					ControlPlaneHealthCheckAddress:          "https://localhost:6443/livez",
+					ControlPlaneHealthCheckPeriodSeconds:    1,
+					ControlPlaneHealthCheckTimeoutSeconds:   1,
+					ControlPlaneHealthCheckFailureThreshold: 3,
+					ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
+				}
+
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
+				Expect(err).NotTo(HaveOccurred())
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv4-hc", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
+				Expect(err).ToNot(HaveOccurred())
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+			})
+
+			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
+				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
+				time.Sleep(30 * time.Second)
+
+				By("verifying every control-plane node sets up the VIP and route while healthy")
+				for i := 1; i <= nodesNumber; i++ {
+					container := controlPlaneContainerName(clusterName, i)
+					Expect(checkIPAddress(cpVIP, container, true)).To(BeTrue())
+					e2e.CheckRoutePresence(cpVIP, container, true)
+				}
+
+				// Pick a non-first node so the others keep serving the control plane.
+				targetContainer := controlPlaneContainerName(clusterName, 2)
+				otherContainer := controlPlaneContainerName(clusterName, 1)
+
+				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
+				setAPIServerState(targetContainer, false)
+
+				By("verifying the unhealthy node withdraws its VIP and route")
+				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
+				e2e.CheckRoutePresence(cpVIP, targetContainer, false)
+
+				By("verifying a healthy node keeps its VIP and route")
+				Expect(checkIPAddress(cpVIP, otherContainer, true)).To(BeTrue())
+				e2e.CheckRoutePresence(cpVIP, otherContainer, true)
+
+				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
+				setAPIServerState(targetContainer, true)
+
+				By("verifying the recovered node re-adds its VIP and route")
+				// Allow extra time here: the apiserver static pod must be restarted
+				// by the kubelet and become healthy again before kube-vip re-adds the VIP.
+				Eventually(func() bool {
+					return e2e.CheckIPAddressPresence(cpVIP, targetContainer, true)
+				}, "180s", "2s").Should(BeTrue(), "VIP should be re-added after apiserver recovery")
+				e2e.CheckRoutePresence(cpVIP, targetContainer, true)
+			})
+		})
+
 		Describe("kube-vip IPv6 control-plane routing table mode functionality", Ordered, func() {
 			var (
 				cpVIP       string
@@ -187,6 +275,92 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					Expect(checkIPAddress(cpVIP, container, true)).To(BeTrue())
 					e2e.CheckRoutePresence(cpVIP, container, true)
 				}
+			})
+		})
+
+		Describe("kube-vip IPv6 control-plane routing table mode with control-plane health check", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				tempDirPath string
+
+				nodesNumber = 3
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateVIP(utils.IPv6Family, SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv6Family,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:                         cpVIP,
+					ImagePath:                               imagePath,
+					ConfigPath:                              configPath,
+					ControlPlaneEnable:                      "true",
+					SvcEnable:                               "false",
+					SvcElectionEnable:                       "false",
+					EnableNodeLabeling:                      "false",
+					ControlPlaneHealthCheckAddress:          "https://localhost:6443/livez",
+					ControlPlaneHealthCheckPeriodSeconds:    1,
+					ControlPlaneHealthCheckTimeoutSeconds:   1,
+					ControlPlaneHealthCheckFailureThreshold: 3,
+					ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
+				}
+
+				var err error
+				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
+				Expect(err).NotTo(HaveOccurred())
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv6-hc", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				By(fmt.Sprintf("saving logs to %q", tempDirPath))
+				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
+				Expect(err).ToNot(HaveOccurred())
+				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+			})
+
+			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
+				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
+				time.Sleep(30 * time.Second)
+
+				By("verifying every control-plane node sets up the VIP and route while healthy")
+				for i := 1; i <= nodesNumber; i++ {
+					container := controlPlaneContainerName(clusterName, i)
+					Expect(checkIPAddress(cpVIP, container, true)).To(BeTrue())
+					e2e.CheckRoutePresence(cpVIP, container, true)
+				}
+
+				// Pick a non-first node so the others keep serving the control plane.
+				targetContainer := controlPlaneContainerName(clusterName, 2)
+				otherContainer := controlPlaneContainerName(clusterName, 1)
+
+				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
+				setAPIServerState(targetContainer, false)
+
+				By("verifying the unhealthy node withdraws its VIP and route")
+				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
+				e2e.CheckRoutePresence(cpVIP, targetContainer, false)
+
+				By("verifying a healthy node keeps its VIP and route")
+				Expect(checkIPAddress(cpVIP, otherContainer, true)).To(BeTrue())
+				e2e.CheckRoutePresence(cpVIP, otherContainer, true)
+
+				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
+				setAPIServerState(targetContainer, true)
+
+				By("verifying the recovered node re-adds its VIP and route")
+				// Allow extra time here: the apiserver static pod must be restarted
+				// by the kubelet and become healthy again before kube-vip re-adds the VIP.
+				Eventually(func() bool {
+					return e2e.CheckIPAddressPresence(cpVIP, targetContainer, true)
+				}, "180s", "2s").Should(BeTrue(), "VIP should be re-added after apiserver recovery")
+				e2e.CheckRoutePresence(cpVIP, targetContainer, true)
 			})
 		})
 
@@ -1315,4 +1489,33 @@ func testServiceRT(ctx context.Context, svcName, lbAddress, leaseName, leaseName
 type san struct {
 	ip    *net.IP
 	ipnet *net.IPNet
+}
+
+// controlPlaneContainerName returns the kind docker container name for the
+// i-th (1-based) control-plane node of the cluster.
+func controlPlaneContainerName(clusterName string, i int) string {
+	if i > 1 {
+		return fmt.Sprintf("%s-control-plane%d", clusterName, i)
+	}
+	return fmt.Sprintf("%s-control-plane", clusterName)
+}
+
+// setAPIServerEnabled stops or starts the static apiserver pod on a control-plane
+// container by moving its manifest in or out of the kubelet manifests directory.
+func setAPIServerState(container string, enabled bool) {
+	const (
+		manifestPath = "/etc/kubernetes/manifests/kube-apiserver.yaml"
+		stashPath    = "/tmp/kube-apiserver.yaml"
+	)
+
+	src, dst := manifestPath, stashPath
+	if enabled {
+		src, dst = stashPath, manifestPath
+	}
+
+	out := new(bytes.Buffer)
+	cmd := exec.Command("docker", "exec", container, "mv", src, dst)
+	cmd.Stdout = out
+	cmd.Stderr = out
+	Expect(cmd.Run()).To(Succeed(), out.String())
 }

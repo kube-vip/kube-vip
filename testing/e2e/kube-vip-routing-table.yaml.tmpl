@@ -50,6 +50,26 @@ spec:
       value: "{{ .EnableNodeLabeling }}"
     - name: enable_endpoints
       value: "{{ .EnableEndpoints }}"
+{{- if .ControlPlaneHealthCheckAddress }}
+    - name: control_plane_health_check_address
+      value: "{{ .ControlPlaneHealthCheckAddress }}"
+{{- if .ControlPlaneHealthCheckPeriodSeconds }}
+    - name: control_plane_health_check_period_seconds
+      value: "{{ .ControlPlaneHealthCheckPeriodSeconds }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckTimeoutSeconds }}
+    - name: control_plane_health_check_timeout_seconds
+      value: "{{ .ControlPlaneHealthCheckTimeoutSeconds }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckFailureThreshold }}
+    - name: control_plane_health_check_failure_threshold
+      value: "{{ .ControlPlaneHealthCheckFailureThreshold }}"
+{{- end }}
+{{- if .ControlPlaneHealthCheckCAPath }}
+    - name: control_plane_health_check_ca_path
+      value: "{{ .ControlPlaneHealthCheckCAPath }}"
+{{- end }}
+{{- end }}
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
@@ -60,6 +80,11 @@ spec:
     volumeMounts:
     - mountPath: /etc/kubernetes/admin.conf
       name: kubeconfig
+{{- if .ControlPlaneHealthCheckCAPath }}
+    - mountPath: {{ .ControlPlaneHealthCheckCAPath }}
+      name: health-check-ca
+      readOnly: true
+{{- end }}
   hostAliases:
     - hostnames:
       - kubernetes
@@ -69,3 +94,9 @@ spec:
   - hostPath:
       path: "{{ .ConfigPath }}"
     name: kubeconfig
+{{- if .ControlPlaneHealthCheckCAPath }}
+  - hostPath:
+      path: {{ .ControlPlaneHealthCheckCAPath }}
+      type: File
+    name: health-check-ca
+{{- end }}
