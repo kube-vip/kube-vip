@@ -46,9 +46,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 		ctx, cancel := context.WithCancel(context.TODO())
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-rt", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-rt", testDirPrefix))
 		})
 
 		BeforeEach(func() {
@@ -104,19 +102,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It("setups IPv4 address and route on control-plane node", func() {
@@ -165,19 +160,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It("setups IPv6 address and route on control-plane node", func() {
@@ -237,18 +229,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ipnet: localIPv6Net,
 				}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
@@ -314,18 +304,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ipnet: localIPv4Net,
 				}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, addSAN, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
@@ -352,13 +340,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv4 services routing table mode functionality", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -370,7 +357,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -385,18 +372,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 routes for services",
@@ -422,13 +407,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv6 services routing table mode functionality", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -440,7 +424,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -455,18 +439,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 routes for services",
@@ -492,13 +474,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv4 primary", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -510,7 +491,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -526,18 +507,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
@@ -563,13 +542,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv6 primary", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -583,7 +561,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ServiceSubnet: "fd00:10:96::/112,10.96.0.0/16",
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -599,18 +577,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
@@ -636,13 +612,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv4 services routing table mode functionality with services election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -654,7 +629,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -669,18 +644,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 routes for services",
@@ -715,13 +688,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv6 services routing table mode functionality with services election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -733,7 +705,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -748,18 +720,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 routes for services",
@@ -794,13 +764,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv4 primary with services election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -812,7 +781,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -828,18 +797,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
@@ -874,13 +841,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv6 primary with services election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -894,7 +860,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					ServiceSubnet: "fd00:10:96::/112,10.96.0.0/16",
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -910,18 +876,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
@@ -956,13 +920,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv4 services routing table mode functionality with global election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -974,7 +937,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -990,18 +953,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4-global", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 routes for services",
@@ -1037,13 +998,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip IPv6 services routing table mode functionality with global election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -1055,7 +1015,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -1071,18 +1031,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6-global", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 routes for services",
@@ -1118,13 +1076,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv4 primary with global election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -1136,7 +1093,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -1153,18 +1110,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4-global", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
@@ -1200,13 +1155,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		Describe("kube-vip DualStack services routing table mode functionality - IPv6 primary with global election", Ordered, func() {
 			var (
-				cpVIP          string
-				clusterName    string
-				client         kubernetes.Interface
-				manifestValues *e2e.KubevipManifestValues
-				svcElection    bool
-				ipFamily       []corev1.IPFamily
-				tempDirPath    string
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
 
 				nodesNumber = 1
 			)
@@ -1218,7 +1172,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				manifestValues = &e2e.KubevipManifestValues{
+				manifestValues := &e2e.KubevipManifestValues{
 					ControlPlaneVIP:    cpVIP,
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
@@ -1235,18 +1189,16 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}
 
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6-global", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				Expect(err).ToNot(HaveOccurred())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",

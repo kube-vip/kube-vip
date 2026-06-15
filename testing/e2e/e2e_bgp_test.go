@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,14 +64,11 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
-
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -80,11 +76,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			It("should add paths", func() {
@@ -100,14 +95,11 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				gobgpClient api.GoBgpServiceClient
 				gobgpPeers  []*e2e.BGPPeerValues
 				tempDirPath string
-
 				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -115,11 +107,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			It("should add paths", func() {
@@ -140,9 +131,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -150,11 +139,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			It("should add paths", func() {
@@ -175,9 +163,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -185,11 +171,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			It("should add paths", func() {
@@ -209,9 +194,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -219,11 +202,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -256,9 +238,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -266,11 +246,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
@@ -303,9 +282,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -313,11 +290,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -350,9 +326,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -360,11 +334,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -398,9 +371,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -408,11 +379,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -446,9 +416,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -456,11 +424,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -493,9 +460,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -503,11 +468,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
@@ -548,9 +512,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -558,11 +520,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
@@ -603,9 +564,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -613,11 +572,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -658,9 +616,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -668,11 +624,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -714,9 +669,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
@@ -724,11 +677,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv6 routes over IPv4 session",
@@ -770,9 +722,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
@@ -780,11 +730,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes over IPv6 session",
@@ -823,9 +772,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 
 			BeforeAll(func() {
-				var err error
-				tempDirPath, err = os.MkdirTemp(server.TempDir, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
 
 				kindCluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{
 					Name:         "bgp-annotations",
@@ -852,11 +799,10 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				err := e2e.GetLogs(ctx, kindCluster.Client, tempDirPath, kindCluster.Name)
-				Expect(err).ToNot(HaveOccurred())
-				server.RemovePeers(ctx, gobgpPeers)
-				kindCluster.Delete()
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
