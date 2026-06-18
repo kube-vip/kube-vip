@@ -24,7 +24,7 @@ type Server struct {
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
-func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
+func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error) {
 	if c.AS == 0 {
 		return nil, fmt.Errorf("you need to provide AS")
 	}
@@ -38,7 +38,7 @@ func NewBGPServer(c kubevip.BGPConfig) (b *Server, err error) {
 	}
 	bgpLogger := log.Default()
 	lvl := &log.LevelVar{}
-	lvl.Set(log.LevelInfo)
+	lvl.Set(logLevel)
 
 	b = &Server{
 		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),

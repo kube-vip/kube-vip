@@ -227,8 +227,7 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		if err != nil {
 			return nil, err
 		}
-
-		bgpServer, err = bgp.NewBGPServer(config.BGPConfig)
+		bgpServer, err = bgp.NewBGPServer(config.BGPConfig, log.Level(config.Logging))
 		if err != nil {
 			return nil, fmt.Errorf("creating BGP server: %w", err)
 		}
