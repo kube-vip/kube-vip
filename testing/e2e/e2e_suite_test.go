@@ -71,8 +71,7 @@ var _ = SynchronizedBeforeSuite(
 			return nil
 		}
 
-		tmpDir, err := os.MkdirTemp("", fmt.Sprintf("%s-bgp-shared", testDirPrefix))
-		Expect(err).NotTo(HaveOccurred())
+		tmpDir := MustMkdirTemp("", fmt.Sprintf("%s-bgp-shared", testDirPrefix))
 
 		srv := bgp.NewServer(tmpDir)
 

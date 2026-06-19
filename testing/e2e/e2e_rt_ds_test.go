@@ -45,10 +45,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 		})
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-rt-ds", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
-
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-rt-ds", testDirPrefix))
 		})
 
 		AfterAll(func() {
@@ -70,9 +67,7 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "rt-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)

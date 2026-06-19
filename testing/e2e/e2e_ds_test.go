@@ -53,9 +53,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 		})
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
 		})
 
 		AfterAll(func() {
@@ -77,9 +75,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv4-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
@@ -205,9 +201,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv6-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
@@ -333,9 +327,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipdual-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)

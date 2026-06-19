@@ -102,9 +102,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 		})
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-arp", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp", testDirPrefix))
 		})
 
 		AfterAll(func() {
@@ -140,20 +138,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv4", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, 1)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It(clusterName+" provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
@@ -188,9 +182,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -199,11 +191,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 VIP address for service",
@@ -275,9 +265,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -286,11 +274,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 VIP address for service",
@@ -309,7 +295,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 				cpVIP       string
 				client      kubernetes.Interface
 				clusterName string
-				clusterCfg  *rest.Config
 				tempDirPath string
 				dsNumber    int
 			)
@@ -332,24 +317,18 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
-				clusterName, client, clusterCfg = prepareCluster(ctx, tempDirPath, "ipv6", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "ipv6", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 3, nil, dsNumber)
 			})
 
 			AfterAll(func() {
-				c, err := kubernetes.NewForConfig(clusterCfg)
-				Expect(err).ToNot(HaveOccurred())
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, c, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It(clusterName+"provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
@@ -384,9 +363,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -395,11 +372,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 VIP address for service",
@@ -459,9 +434,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -470,11 +443,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 VIP address for service",
@@ -515,9 +486,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -526,11 +495,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It(clusterName+" provides a DualStack VIP addresses for the Kubernetes control plane nodes", func() {
@@ -565,9 +532,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -576,11 +541,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
@@ -641,9 +604,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -652,11 +613,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
@@ -699,9 +658,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -710,11 +667,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It(clusterName+" provides a DualStack VIP addresses for the Kubernetes control plane nodes", func() {
@@ -751,9 +706,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -762,11 +715,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP addresses for service",
@@ -829,9 +780,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -840,11 +789,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an IPv6 VIP address for service",
@@ -885,9 +832,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 1
 
@@ -896,11 +841,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			It(clusterName+" uses hostname fallback while providing an IPv4 VIP address for the Kubernetes control plane nodes", func() {
@@ -935,9 +878,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				dsNumber = 3
 
@@ -946,11 +887,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an single IPv6 VIP address for multiple services",
@@ -992,20 +931,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					EnableNodeLabeling: "false",
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "svc-el-m-ds", k8sImagePath, v129,
 					kubeVIPManifestTemplate, logger, manifestValues, networking, 2, nil, 3)
 			})
 
 			AfterAll(func() {
-				By(fmt.Sprintf("saving logs to %q", tempDirPath))
-				Eventually(func() error {
-					return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
-				}, "60s", "5s").Should(Succeed())
-				cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
 			})
 
 			DescribeTable("configures an single IPv4 and IPv6 VIP address for multiple services",
@@ -1680,4 +1615,18 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 			}
 		}
 	}
+}
+
+func SaveLogsAndCleanup(ctx context.Context, client kubernetes.Interface, tempDirPath, clusterName string, cleanup func()) {
+	By(fmt.Sprintf("saving logs to %q", tempDirPath))
+	Eventually(func() error {
+		return e2e.GetLogs(ctx, client, tempDirPath, clusterName)
+	}, "60s", "5s").Should(Succeed())
+	cleanup()
+}
+
+func MustMkdirTemp(dir, prefix string) string {
+	tempDirPath, err := os.MkdirTemp(dir, prefix)
+	Expect(err).NotTo(HaveOccurred())
+	return tempDirPath
 }

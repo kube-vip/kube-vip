@@ -45,9 +45,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 		})
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-bgp-ds", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-bgp-ds", testDirPrefix))
 		})
 
 		AfterAll(func() {
@@ -68,11 +66,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 				networking := &kindconfigv1alpha4.Networking{
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
-
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-ds", testDirPrefix))
-				Expect(err).NotTo(HaveOccurred())
-
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-ds", testDirPrefix))
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
 			})
@@ -246,9 +240,7 @@ var _ = Describe("kube-vip BGP when deployed as a regular pod", Ordered, func() 
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-bgp-v6", testDirPrefix))
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, fmt.Sprintf("%s-bgp-v6", testDirPrefix))
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "bgp-ds-v6", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
