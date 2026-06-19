@@ -117,7 +117,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	}
 
 	if err := election.RunOrDie(objLease.Ctx, run, c); err != nil {
-		objLease.Cancel()
+		cluster.Stop()
 		return fmt.Errorf("leaderelection failed: %w", err)
 	}
 
