@@ -119,9 +119,6 @@ func (m *Manager) StartAdvertisement(ctx context.Context, killFunc func()) {
 		var wg sync.WaitGroup
 		defer wg.Wait()
 
-		watchCtx, cancelWatch := context.WithCancel(ctx)
-		defer cancelWatch()
-
 		log.Info("[ARP manager] starting watching network device", "interface", m.config.Interface)
 
 		duration := time.Duration(m.config.LoseLeadershipTimeoutSeconds) * time.Second
@@ -132,14 +129,13 @@ func (m *Manager) StartAdvertisement(ctx context.Context, killFunc func()) {
 			select {
 			case <-timeout.C:
 				killFunc()
-			case <-watchCtx.Done():
+			case <-ctx.Done():
 				return
 			}
 		})
 
 		wg.Go(func() {
-			defer cancelWatch()
-			if err := watch(watchCtx, m.config.Interface, func(s netlink.LinkOperState) {
+			if err := watch(ctx, m.config.Interface, func(s netlink.LinkOperState) {
 				if isUp(s) {
 					timeout.Stop()
 					return
