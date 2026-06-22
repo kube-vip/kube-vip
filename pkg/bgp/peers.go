@@ -280,7 +280,8 @@ func getIPv6LinkLocalNeighborAddress(ctx context.Context, peerInterface string) 
 			return "", fmt.Errorf("failed to get link-local address of interface %s: %w", peerInterface, neighCtx.Err())
 		default:
 			dur := bo.Duration()
-			neighborAddress, err := oc.GetIPv6LinkLocalNeighborAddress(peerInterface)
+			var neighborAddress string
+			neighborAddress, err = oc.GetIPv6LinkLocalNeighborAddress(peerInterface)
 			if err != nil && bo.Attempt() >= maxAttempts {
 				return "", fmt.Errorf("failed to get link-local address of interface %s: %w", peerInterface, err)
 			}
