@@ -276,8 +276,8 @@ github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9de
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.etcd.io/etcd/api/v3 v3.6.12 h1:OLOZUKEuAA36TR48F0cIaa8FdzrWygjyfrJxXg4iDgs=
 go.etcd.io/etcd/api/v3 v3.6.12/go.mod h1:p14EIQXHbuOQbVvL/WEes5uqKnxP9AgKJgpjbMVvzvE=
-go.etcd.io/etcd/client/pkg/v3 v3.6.11 h1:e41mp315Yn3QMGPmEzCyLsMINgJXTY/dX8kM++1csxU=
-go.etcd.io/etcd/client/pkg/v3 v3.6.11/go.mod h1:DysuMe/inqRyC/1tjRR6hReH/VV9Lufs27YKSKBWWJg=
+go.etcd.io/etcd/client/pkg/v3 v3.6.12 h1:36zzB+pQOdHbhN+kH2iJz/K8bJn0ZLtLfPPO7jozTDo=
+go.etcd.io/etcd/client/pkg/v3 v3.6.12/go.mod h1:hh2+ZXtfLzs3o6mn92ntgNPBrTJJOvXqICM5g3L3DMY=
 go.etcd.io/etcd/client/v3 v3.6.11 h1:LAByD96VmmeuairkvdAcE0RZnrmGz/q3ceeWePo9bwc=
 go.etcd.io/etcd/client/v3 v3.6.11/go.mod h1:vOTDMCo+fGPEClJqcFEFSqZ+8e7WKV7AyqJjX//HR2w=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
