@@ -186,7 +186,24 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 				for entry := range *backendMap {
 					log.Debug("entry.Check() for entry", "entry", entry)
-					if entry.Check() {
+					var healthy bool
+					if c.ControlPlaneHealthCheck.Address != "" {
+						req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, c.ControlPlaneHealthCheck.Address, nil)
+						if reqErr != nil {
+							log.Error("create health check request", "err", reqErr)
+						} else if resp, doErr := cluster.healthCheckHTTPClient.Do(req); doErr != nil {
+							log.Error("health check request failed", "url", c.ControlPlaneHealthCheck.Address, "err", doErr)
+						} else {
+							resp.Body.Close()
+							healthy = resp.StatusCode == http.StatusOK
+							if !healthy {
+								log.Warn("health check returned non-200 status", "url", c.ControlPlaneHealthCheck.Address, "status", resp.StatusCode)
+							}
+						}
+					} else {
+						healthy = entry.Check()
+					}
+					if healthy {
 						log.Debug("entry.Check() true")
 						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
 						_, err = network.AddIP(true, false)
