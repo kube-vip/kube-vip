@@ -59,7 +59,7 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 
 		for stateName, stateValue := range api.PeerState_SessionState_value {
 			metricValue := 0.0
-			if int(p.Peer.State.SessionState) == int(stateValue) {
+			if int(p.Peer.State.SessionState) == int(stateValue)-1 {
 
 				metricValue = 1
 			}
