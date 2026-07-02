@@ -3,6 +3,7 @@ package bgp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strconv"
@@ -51,6 +52,16 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 			RemoteAddress: peer.Address,
 			RemotePort:    defaultBGPPort,
 		},
+	}
+
+	if peer.BFDEnabled {
+		p.Bfd = &api.BfdPeerConfig{
+			Enabled:                  true,
+			DesiredMinimumTxInterval: peer.BFDTransmitInterval,
+			RequiredMinimumReceive:   peer.BFDReceiveInterval,
+			DetectionMultiplier:      peer.BFDDetectMultiplier,
+			Port:                     3784, // TODO: Should this be configurable??
+		}
 	}
 
 	if peer.Interface != "" {
@@ -131,7 +142,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 	if err := b.s.AddPeer(ctx, &api.AddPeerRequest{Peer: p}); err != nil {
 		return fmt.Errorf("failed to add peer: %v", err)
 	}
-
+	slog.Info("[BGP]", "peer", p.Conf.NeighborAddress, "AS", p.Conf.PeerAsn, "BFD", p.Bfd)
 	return nil
 }
 
