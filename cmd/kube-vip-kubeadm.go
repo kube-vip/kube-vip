@@ -23,20 +23,36 @@ func init() {
 var kubeKubeadm = &cobra.Command{
 	Use:   "kubeadm",
 	Short: "Kubeadm functions",
-	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
+	Long: `This command group provides utilities for generating static Pod manifests specifically tailored for the kubeadm bootstrapping process.
+	It contains two subcommands:
+  		- init:  Generates a manifest to be used during 'kubeadm init' on the first control-plane node.
+  		- join:  Generates a manifest to be used during 'kubeadm join' for additional control-plane nodes.
+
+The generated YAML manifest should be saved to the kubeadm static Pod directory (typically /etc/kubernetes/manifests/) so that kubeadm launches the kube-vip static Pod automatically.`,
+	Run: func(cmd *cobra.Command, _ []string) {
 		_ = cmd.Help()
-		// TODO - A load of text detailing what's actually happening
 	},
 }
 
 var kubeKubeadmInit = &cobra.Command{
 	Use:   "init",
 	Short: "kube-vip init",
-	Long:  "The \"init\" subcommand will generate the Kubernetes manifest that will be started by kubeadm through the kubeadm init process",
-	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
+	Long: `The 'init' subcommand generates a Kubernetes Pod manifest that kubeadm will start as a static Pod during the cluster initialisation phase.
+
+This manifest runs kube-vip on the first control-plane node to advertise the Virtual IP (VIP) for the API server. The VIP is typically configured using ARP (Layer 2) or BGP (dynamic routing).
+
+Required flags for this command:
+  --interface   : The network interface to bind the VIP to (e.g., eth0).
+  --vip or --address : The Virtual IP address or DNS name to use.
+
+Example:
+  kube-vip kubeadm init --interface eth0 --vip 192.168.1.100 --controlplane
+
+The output YAML should be written to the kubeadm manifests directory, e.g.:
+  kube-vip kubeadm init ... > /etc/kubernetes/manifests/kube-vip.yaml`,
+	Run: func(cmd *cobra.Command, _ []string) {
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
-		// TODO - A load of text detailing what's actually happening
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing environment", "err", err)
@@ -81,10 +97,21 @@ var kubeKubeadmInit = &cobra.Command{
 var kubeKubeadmJoin = &cobra.Command{
 	Use:   "join",
 	Short: "kube-vip join",
-	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
+	Long: `The 'join' subcommand generates a Kubernetes Pod manifest for additional control-plane nodes joining an existing cluster via 'kubeadm join'.
+
+It functions identically to the 'init' subcommand, but is intended for secondary control-plane nodes. It validates that the kubeconfig file (specified by --config, defaulting to /etc/kubernetes/admin.conf) exists on the node to ensure the node can authenticate with the cluster.
+
+Required flags for this command:
+  --interface   : The network interface to bind the VIP to.
+  --vip or --address : The Virtual IP address or DNS name (must match the VIP used during 'init').
+
+Example:
+  kube-vip kubeadm join --interface eth0 --vip 192.168.1.100
+
+The output YAML should be saved to the kubeadm manifests directory on the joining node.`,
+	Run: func(cmd *cobra.Command, _ []string) {
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
-		// TODO - A load of text detailing what's actually happening
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
 			log.Error("parsing environment", "err", err)
