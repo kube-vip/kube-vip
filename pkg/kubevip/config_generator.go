@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -647,6 +648,15 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			},
 		}
 		newEnvironment = append(newEnvironment, preserveVIPOnLeadershipLoss...)
+	}
+
+	if c.DebounceTime != debouncer.DefaultTime {
+		debTime := corev1.EnvVar{
+			Name:  debounceTime,
+			Value: c.DebounceTime,
+		}
+
+		newEnvironment = append(newEnvironment, debTime)
 	}
 
 	newManifest := &corev1.Pod{

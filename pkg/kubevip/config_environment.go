@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/detector"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"sigs.k8s.io/yaml"
@@ -988,6 +989,11 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	// Load balancers slice
 	if len(baseConfig.LoadBalancers) == 0 && len(fileConfig.LoadBalancers) > 0 {
 		baseConfig.LoadBalancers = fileConfig.LoadBalancers
+	}
+
+	// Debounce time for watch events
+	if baseConfig.DebounceTime == debouncer.DefaultTime && fileConfig.DebounceTime != debouncer.DefaultTime {
+		baseConfig.DebounceTime = fileConfig.DebounceTime
 	}
 }
 

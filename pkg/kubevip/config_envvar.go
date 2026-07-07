@@ -256,4 +256,7 @@ const (
 
 	// configFile defines the path to a JSON/YAML configuration file
 	configFile = "config_file"
+
+	// debounceTime defines what time should the event debouncer wait for events
+	debounceTime = "debounce_time"
 )

@@ -19,6 +19,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/manager"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
@@ -147,6 +148,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnableEndpoints, "enableEndpoints", false, "If enabled, kube-vip will only advertise services, but will use the (deprecated since v1.33) endpoints for IP addresses")
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.LoInterfaceGlobalScope, "loInterfaceGlobalScope", false, "If true, kube-vip will set global scope when using the lo interface, otherwise a host scope will be used by default")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.HealthCheckPort, "healthCheckPort", 0, "If set to non-zero (> 1024), then this is the port that the healthcheck will listen on")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.DebounceTime, "debounceTime", debouncer.DefaultTime,
+		"Configures the time that the event debouncer will wait for the events arrival (default 0s - debouncer disabled, enable with min. 200ms)")
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
