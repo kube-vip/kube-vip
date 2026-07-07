@@ -1,3 +1,6 @@
+// Some code in this file is copied or based on
+// https://github.com/telekom/multi-networkpolicy-nftables/blob/f037e79605643e5a9f6debef55297a7170800c51/pkg/server/netfilterrules.go
+
 package vip
 
 import (
@@ -12,6 +15,9 @@ import (
 
 	log "log/slog"
 
+	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
+	"github.com/google/nftables/expr"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
@@ -20,20 +26,22 @@ import (
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	nfinternal "github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 )
 
 const (
-	defaultValidLft         = 60
-	iptablesComment         = "%s kube-vip load balancer IP"
-	iptablesCommentMarkRule = "kube-vip load balancer IP set mark for masquerade"
+	defaultValidLft = 60
+	iptablesComment = "%s kube-vip load balancer IP"
 
 	DefaultMaskIPv4 = 32
 	DefaultMaskIPv6 = 128
 
 	NoLifetime = 0
+
+	vipIPVSMark uint32 = 10042
 )
 
 // Network is an interface that enable managing operations for a given IP
@@ -63,6 +71,7 @@ type Network interface {
 	ARPName() string
 	GetPossibleSubnets() string
 	DHCPFamily() string
+	IPVSMark() uint32
 }
 
 // network - This allows network configuration
@@ -79,8 +88,7 @@ type network struct {
 	dnsName string
 	isDDNS  bool
 
-	forwardMethod   string
-	iptablesBackend string
+	forwardMethod string
 
 	routeTable       int
 	routingTableType int
@@ -94,13 +102,21 @@ type network struct {
 
 	// used by DHCP to get address of proper family
 	dhcpFamily string
+
+	// use internal nftables implementation instead of iptables based one
+	nftables bool
+
+	// ipvsMark is used to mark IPVS connections for further processing
+	ipvsMark uint32
+
+	ipvsPort uint16
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
 func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool,
 	dhcpMode string, requireDualStack, isDualStack bool, tableID int, tableType int, routingProtocol int,
-	dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled, enableSecurity bool,
-	intfMgr *networkinterface.Manager) ([]Network, error) {
+	dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool, ipvsPort uint16, enableSecurity bool,
+	intfMgr *networkinterface.Manager, nftables bool) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -110,6 +126,8 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 
 	networkLink := intfMgr.Get(link)
 
+	ipvsMark := vipIPVSMark
+
 	if utils.IsIP(address) {
 		result := &network{
 			link:             networkLink,
@@ -117,10 +135,12 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			routingTableType: tableType,
 			routingProtocol:  routingProtocol,
 			forwardMethod:    forwardMethod,
-			iptablesBackend:  iptablesBackend,
 			ipvsEnabled:      ipvsEnabled,
 			enableSecurity:   enableSecurity,
 			possibleSubnets:  subnet,
+			nftables:         nftables,
+			ipvsMark:         ipvsMark,
+			ipvsPort:         ipvsPort,
 		}
 
 		subnet, err = SelectSubnet(address, subnet)
@@ -166,13 +186,15 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 						routingTableType: tableType,
 						routingProtocol:  routingProtocol,
 						forwardMethod:    forwardMethod,
-						iptablesBackend:  iptablesBackend,
 						isDDNS:           isDDNS,
 						dnsName:          address,
 						ipvsEnabled:      ipvsEnabled,
 						enableSecurity:   enableSecurity,
 						possibleSubnets:  subnet,
 						dhcpFamily:       utils.IPv4Family,
+						nftables:         nftables,
+						ipvsMark:         ipvsMark,
+						ipvsPort:         ipvsPort,
 					}
 
 					networks = append(networks, result)
@@ -185,13 +207,15 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 						routingTableType: tableType,
 						routingProtocol:  routingProtocol,
 						forwardMethod:    forwardMethod,
-						iptablesBackend:  iptablesBackend,
 						isDDNS:           isDDNS,
 						dnsName:          address,
 						ipvsEnabled:      ipvsEnabled,
 						enableSecurity:   enableSecurity,
 						possibleSubnets:  subnet,
 						dhcpFamily:       utils.IPv6Family,
+						nftables:         nftables,
+						ipvsMark:         ipvsMark,
+						ipvsPort:         ipvsPort,
 					}
 
 					networks = append(networks, result)
@@ -209,12 +233,14 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 				routingTableType: tableType,
 				routingProtocol:  routingProtocol,
 				forwardMethod:    forwardMethod,
-				iptablesBackend:  iptablesBackend,
 				isDDNS:           isDDNS,
 				dnsName:          address,
 				ipvsEnabled:      ipvsEnabled,
 				enableSecurity:   enableSecurity,
 				possibleSubnets:  subnet,
+				nftables:         nftables,
+				ipvsMark:         ipvsMark,
+				ipvsPort:         ipvsPort,
 			}
 
 			s, err := SelectSubnet(ip, subnet)
@@ -407,9 +433,17 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", configurator.link.Intf.Attrs().Name))
 	}
 
-	if err := configurator.configureIPTables(); err != nil {
-		return true, errors.Wrap(err, "could not configure IPTables")
+	if configurator.nftables {
+		if err := configurator.configureNFTables(); err != nil {
+			return true, errors.Wrap(err, "could not configure NFTables")
+		}
+	} else {
+		if err := configurator.configureIPTables(); err != nil {
+			return true, errors.Wrap(err, "could not configure IPTables")
+		}
 	}
+
+	log.Debug("IP CONFIGURED", "address", configurator.address)
 
 	return true, nil
 }
@@ -422,10 +456,46 @@ func (configurator *network) configureIPTables() error {
 	}
 
 	// It seems that masquerading is only required with IPv4 for IPVS to work.
-	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
+	if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 		if err := configurator.addIptablesRulesForMasquerade(); err != nil {
 			return errors.Wrap(err, "could not add iptables rules for masquerade")
 		}
+	}
+
+	return nil
+}
+
+func (configurator *network) configureNFTables() error {
+	log.Debug("configureNFTables", "security enabled", configurator.enableSecurity, "ignore security", configurator.ignoreSecurity,
+		"ports", configurator.ports)
+
+	opt := nftables.TableFamilyIPv4
+	if utils.IsIPv6(configurator.IP()) {
+		opt = nftables.TableFamilyIPv6
+	}
+
+	c, err := nfinternal.NewClient(opt)
+	if err != nil {
+		return fmt.Errorf("unable to create nftables client: %w", err)
+	}
+
+	comment := fmt.Sprintf(iptablesComment, "control-plane")
+
+	if configurator.enableSecurity && !configurator.ignoreSecurity && len(configurator.ports) > 0 {
+		if err := configurator.addNftablesRulesToLimitTrafficPorts(c, comment); err != nil {
+			return errors.Wrap(err, "could not add nftables rules to limit traffic ports")
+		}
+	}
+
+	// It seems that masquerading is only required with IPv4 for IPVS to work.
+	if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
+		if err := configurator.addNftablesRulesForMasquerade(c, comment); err != nil {
+			return errors.Wrap(err, "could not add nftables rules for masquerade")
+		}
+	}
+
+	if err := c.Close(); err != nil {
+		return fmt.Errorf("failed to close nftables client: %w", err)
 	}
 
 	return nil
@@ -450,6 +520,24 @@ func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
 	log.Debug("add iptables rules", "vip", vip, "ports", configurator.ports)
 	if err := configurator.insertIPTablesRulesForServicePorts(ipt, vip, comment); err != nil {
 		return fmt.Errorf("could not add iptables rules for service ports: %v", err)
+	}
+
+	return nil
+}
+
+func (configurator *network) addNftablesRulesToLimitTrafficPorts(c *nfinternal.Client, comment string) error {
+
+	firstRule, err := insertCommonNFTablesRules(c, configurator.IP(), comment)
+	if err != nil {
+		return fmt.Errorf("could not add common nftables rules: %w", err)
+	}
+
+	if err := configurator.insertNFTablesRulesForServicePorts(c, configurator.IP(), comment, firstRule.Handle); err != nil {
+		return fmt.Errorf("could not add nftables rules for service ports: %v", err)
+	}
+
+	if err := c.Close(); err != nil {
+		return fmt.Errorf("failed to close client: %w", err)
 	}
 
 	return nil
@@ -512,6 +600,133 @@ func (configurator *network) insertIPTablesRulesForServicePorts(ipt *iptables.IP
 	return nil
 }
 
+func (configurator *network) insertNFTablesRulesForServicePorts(c *nfinternal.Client, vip, comment string, handle uint64) error {
+	chain, err := c.GetChain(nfinternal.TableFilter, iptables.ChainInput)
+	if err != nil {
+		return fmt.Errorf("failed to get chain %q in table %q: %w", iptables.ChainInput, nfinternal.TableFilter, err)
+	}
+
+	portsTCP := []nftables.SetElement{}
+	portsUDP := []nftables.SetElement{}
+	portsSCTP := []nftables.SetElement{}
+	for _, p := range configurator.ports {
+		switch p.Protocol {
+		case v1.ProtocolTCP:
+			portsTCP = append(portsTCP, nftables.SetElement{
+				Key: binaryutil.BigEndian.PutUint16(uint16(p.Port)), //nolint:gosec
+			})
+		case v1.ProtocolUDP:
+			portsUDP = append(portsUDP, nftables.SetElement{
+				Key: binaryutil.BigEndian.PutUint16(uint16(p.Port)), //nolint:gosec
+			})
+		case v1.ProtocolSCTP:
+			portsSCTP = append(portsSCTP, nftables.SetElement{
+				Key: binaryutil.BigEndian.PutUint16(uint16(p.Port)), //nolint:gosec
+			})
+		}
+	}
+
+	if err := addNFTPortRule(c, chain, vip, portsTCP, unix.IPPROTO_TCP, comment, handle); err != nil {
+		return fmt.Errorf("failed to add TCP ports for VIP %q: %w", vip, err)
+	}
+
+	if err := addNFTPortRule(c, chain, vip, portsUDP, unix.IPPROTO_UDP, comment, handle); err != nil {
+		return fmt.Errorf("failed to add UDP ports for VIP %q: %w", vip, err)
+	}
+
+	if err := addNFTPortRule(c, chain, vip, portsSCTP, unix.IPPROTO_SCTP, comment, handle); err != nil {
+		return fmt.Errorf("failed to add SCTP ports for VIP %q: %w", vip, err)
+	}
+
+	return nil
+}
+
+func addNFTPortRule(c *nfinternal.Client, chain *nftables.Chain, vip string,
+	ports []nftables.SetElement, protocol int, comment string, handle uint64) error {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	protocolString := ""
+	switch protocol {
+	case unix.IPPROTO_UDP:
+		protocolString = "UDP"
+	case unix.IPPROTO_SCTP:
+		protocolString = "SCTP"
+	default:
+		protocolString = "TCP"
+	}
+
+	setComment := fmt.Sprintf("%s - %s ports", comment, protocolString)
+
+	set, err := c.NewSet(chain, setComment)
+	if err != nil {
+		return fmt.Errorf("failed to create set: %w", err)
+	}
+
+	if err := c.UpdateSet(set, ports); err != nil {
+		return fmt.Errorf("failed to update set for TCP ports")
+	}
+
+	ip := net.ParseIP(vip)
+
+	if ip.To4() != nil {
+		ip = ip.To4()
+	} else {
+		ip = ip.To16()
+	}
+
+	r := &nftables.Rule{
+		Table:    chain.Table,
+		Chain:    chain,
+		UserData: nfinternal.UserDataComment(setComment),
+		Position: handle,
+		Exprs: []expr.Any{
+			&expr.Payload{
+				DestRegister: 0x1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       c.GetDstOffset(),
+				Len:          c.GetLen(),
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 0x1,
+				Data:     []byte(ip),
+			},
+			&expr.Meta{
+				Key:      expr.MetaKeyL4PROTO,
+				Register: 1,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint32(uint32(protocol)), //nolint:gosec
+			},
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       2, // l4 offset
+				Len:          2, // l4 offset
+			},
+			&expr.Lookup{
+				SetName:        set.Name,
+				SetID:          set.ID,
+				SourceRegister: 0x1,
+			},
+			&expr.Counter{},
+			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 0x1},
+		},
+	}
+
+	if _, err := c.AddUnique(r); err != nil {
+		return fmt.Errorf("failed to create rule for ports: %w", err)
+	}
+
+	c.Flush()
+
+	return nil
+}
+
 func insertCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) error {
 	if err := ipt.InsertUnique(iptables.TableFilter, iptables.ChainInput, 1, "-d", vip, "-p",
 		string(v1.ProtocolUDP), "--dport", dhcpClientPort, "-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
@@ -526,6 +741,120 @@ func insertCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) erro
 	return nil
 }
 
+func insertCommonNFTablesRules(c *nfinternal.Client, vip, comment string) (*nftables.Rule, error) {
+	ch, err := c.GetChain(nfinternal.TableFilter, iptables.ChainInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain %q in table %q: %w", iptables.ChainInput, nfinternal.TableFilter, err)
+	}
+
+	ip := net.ParseIP(vip)
+
+	port, err := strconv.ParseUint(dhcpClientPort, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert DHCP port to int: %w", err)
+	}
+
+	if ip.To4() != nil {
+		ip = ip.To4()
+	} else {
+		ip = ip.To16()
+	}
+
+	r := &nftables.Rule{
+		Table:    ch.Table,
+		Chain:    ch,
+		UserData: nfinternal.UserDataComment(fmt.Sprintf("%s - DHCP", comment)),
+		Exprs: []expr.Any{
+			&expr.Payload{
+				DestRegister: 0x1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       c.GetDstOffset(),
+				Len:          c.GetLen(),
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 0x1,
+				Data:     []byte(ip),
+			},
+			&expr.Meta{
+				Key:      expr.MetaKeyL4PROTO,
+				Register: 1,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{unix.IPPROTO_UDP},
+			},
+			&expr.Payload{
+				OperationType: expr.PayloadLoad,
+				Len:           2,
+				Base:          expr.PayloadBaseTransportHeader,
+				Offset:        2,
+				DestRegister:  1,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     binaryutil.BigEndian.PutUint16(uint16(port)),
+			},
+			&expr.Counter{},
+			&expr.Verdict{
+				Kind: expr.VerdictAccept,
+			},
+		},
+	}
+
+	firstRule, err := c.InsertUnique(r)
+	if err != nil {
+		return firstRule, fmt.Errorf("failed to insert DHCP rule: %w", err)
+	}
+
+	c.Flush()
+
+	firstRule, err = c.FindRuleByComment(ch.Table, ch, fmt.Sprintf("%s - DHCP", comment))
+	if err != nil {
+		return nil, fmt.Errorf("initial rule not found: %w", err)
+	}
+
+	if firstRule == nil {
+		return nil, fmt.Errorf("ninitial rule not present")
+	}
+
+	r2 := &nftables.Rule{
+		Table:    ch.Table,
+		Chain:    ch,
+		Position: firstRule.Handle,
+		UserData: nfinternal.UserDataComment(fmt.Sprintf("%s - drop", comment)),
+		Exprs: []expr.Any{
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       c.GetDstOffset(), // IPv4 destination address
+				Len:          c.GetLen(),
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte(ip),
+			},
+
+			&expr.Counter{},
+
+			&expr.Verdict{
+				Kind: expr.VerdictDrop,
+			},
+		},
+	}
+
+	if _, err := c.AddUnique(r2); err != nil {
+		return firstRule, fmt.Errorf("failed to insert DROP rule: %w", err)
+	}
+
+	c.Flush()
+
+	return firstRule, nil
+}
+
 func deleteCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) error {
 	if err := ipt.DeleteIfExists(iptables.TableFilter, iptables.ChainInput, "-d", vip, "-p",
 		string(v1.ProtocolUDP), "--dport", dhcpClientPort, "-m", "comment", "--comment", comment, "-j", "ACCEPT"); err != nil {
@@ -537,6 +866,79 @@ func deleteCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) erro
 		"--comment", comment, "-j", "DROP"); err != nil {
 		return fmt.Errorf("could not delete iptables rule to drop the traffic to VIP %s: %v", vip, err)
 	}
+	return nil
+}
+
+func deleteCommonNFTablesRules(c *nfinternal.Client, comment string) error {
+
+	table := c.GetTable(iptables.TableFilter)
+
+	chain, err := c.GetChain(table.Name, iptables.ChainInput)
+	if err != nil {
+		return fmt.Errorf("failed to find chain: %w", err)
+	}
+
+	ruleDHCP, err := c.FindRuleByComment(table, chain, fmt.Sprintf("%s - DHCP", comment))
+	if err != nil {
+		return fmt.Errorf("failed to find the rule: %w", err)
+	}
+
+	if ruleDHCP == nil {
+		return nil
+	}
+
+	if err := c.DeleteRule(ruleDHCP); err != nil {
+		return fmt.Errorf("failed to delete common rule for DHCP: %w", err)
+	}
+
+	ruleDrop, err := c.FindRuleByComment(table, chain, fmt.Sprintf("%s - drop", comment))
+	if err != nil {
+		return fmt.Errorf("failed to find the rule: %w", err)
+	}
+
+	if ruleDrop == nil {
+		return nil
+	}
+
+	if err := c.DeleteRule(ruleDrop); err != nil {
+		return fmt.Errorf("failed to delete common rule for Drop action: %w", err)
+	}
+
+	c.Flush()
+
+	return nil
+}
+
+func deleteNFTPortRule(c *nfinternal.Client, comment string) error {
+
+	table := c.GetTable(iptables.TableFilter)
+
+	chain, err := c.GetChain(table.Name, iptables.ChainInput)
+	if err != nil {
+		return fmt.Errorf("failed to find chain: %w", err)
+	}
+
+	for _, t := range []string{"TCP", "UDP", "SCTP"} {
+		rule, err := c.FindRuleByComment(table, chain, fmt.Sprintf("%s - %s ports", comment, t))
+		if err != nil {
+			return fmt.Errorf("failed to find the rule: %w", err)
+		}
+
+		if rule == nil {
+			continue
+		}
+
+		if err := c.DeleteRule(rule); err != nil {
+			return fmt.Errorf("failed to delete common rule for Drop action: %w", err)
+		}
+
+		if err := c.DeleteSet(rule.Table, fmt.Sprintf("%s - %s ports", comment, t)); err != nil {
+			return fmt.Errorf("failed to delete ports set: %w", err)
+		}
+	}
+
+	c.Flush()
+
 	return nil
 }
 
@@ -564,6 +966,23 @@ func (configurator *network) removeIptablesRuleToLimitTrafficPorts() error {
 	return nil
 }
 
+func (configurator *network) removeNftablesRuleToLimitTrafficPorts(c *nfinternal.Client) error {
+
+	vip := configurator.address.IP.String()
+	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
+
+	if err := deleteCommonNFTablesRules(c, comment); err != nil {
+		return fmt.Errorf("could not delete common iptables rules: %w", err)
+	}
+
+	log.Debug("remove nftables rules", "vip", vip, "ports", configurator.ports)
+	if err := deleteNFTPortRule(c, comment); err != nil {
+		return fmt.Errorf("faield to remove port rule: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteIP - Remove an IP address from the interface
 func (configurator *network) DeleteIP() (bool, error) {
 	configurator.link.Lock.Lock()
@@ -583,15 +1002,44 @@ func (configurator *network) DeleteIP() (bool, error) {
 		return false, errors.Wrap(err, "could not delete ip")
 	}
 
-	if configurator.enableSecurity && !configurator.ignoreSecurity {
-		if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
-			return true, errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
-		}
-	}
+	if configurator.nftables {
+		vip := configurator.address.IP.String()
 
-	if configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
-		if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
-			return true, errors.Wrap(err, "could not remove iptables masquerade rules ")
+		opt := nftables.TableFamilyIPv4
+		if utils.IsIPv6(vip) {
+			opt = nftables.TableFamilyIPv6
+		}
+		c, err := nfinternal.NewClient(opt)
+		if err != nil {
+			return false, fmt.Errorf("unable to create nftables client: %w", err)
+		}
+
+		if configurator.enableSecurity && !configurator.ignoreSecurity {
+			if err := configurator.removeNftablesRuleToLimitTrafficPorts(c); err != nil {
+				return true, errors.Wrap(err, "could not remove nftables rules to limit traffic ports")
+			}
+		}
+
+		if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
+			if err := configurator.removeNftablesRulesForMasquerade(c); err != nil {
+				return true, errors.Wrap(err, "could not remove nftables masquerade rules")
+			}
+		}
+
+		if err := c.Close(); err != nil {
+			return true, errors.Wrap(err, "failed to close nftables client")
+		}
+	} else {
+		if configurator.enableSecurity && !configurator.ignoreSecurity {
+			if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
+				return true, errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
+			}
+		}
+
+		if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
+			if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
+				return true, errors.Wrap(err, "could not remove iptables masquerade rules ")
+			}
 		}
 	}
 
@@ -618,6 +1066,111 @@ func (configurator *network) addIptablesRulesForMasquerade() error {
 	return nil
 }
 
+// TO DO: It seems it is not be possible to use google/nftables with IPVS due to lack of IPVS matcher in nft
+func (configurator *network) addNftablesRulesForMasquerade(c *nfinternal.Client, comment string) error {
+	cmt := fmt.Sprintf("%s - IPVS, VIP %s, MARK %d", comment, configurator.IP(), configurator.IPVSMark())
+
+	table := c.GetTable(iptables.TableMangle)
+
+	markChain := &nftables.Chain{
+		Name:     "ipvs_prerouting",
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityMangle,
+	}
+
+	log.Debug("adding IPVS rule", "table", markChain.Table.Name, "chain", markChain.Name, "comment", cmt)
+
+	markChain = c.AddChain(markChain)
+
+	ip := net.ParseIP(configurator.IP())
+
+	if ip.To4() != nil {
+		ip = ip.To4()
+	} else {
+		ip = ip.To16()
+	}
+
+	port := binaryutil.BigEndian.PutUint16(configurator.ipvsPort)
+
+	mark := binaryutil.NativeEndian.PutUint32(configurator.IPVSMark())
+
+	markRule := &nftables.Rule{
+		Table:    markChain.Table,
+		Chain:    markChain,
+		UserData: nfinternal.UserDataComment(cmt),
+		Exprs: []expr.Any{
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       c.GetDstOffset(),
+				Len:          c.GetLen(),
+			},
+			&expr.Cmp{
+				Register: 1,
+				Data:     ip,
+			},
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       2,
+				Len:          2,
+			},
+			&expr.Cmp{
+				Register: 1,
+				Data:     port,
+			},
+			&expr.Immediate{
+				Register: 1,
+				Data:     mark,
+			},
+			&expr.Meta{
+				Key:            expr.MetaKeyMARK,
+				Register:       1,
+				SourceRegister: true,
+			},
+		},
+	}
+
+	if _, err := c.AddUnique(markRule); err != nil {
+		return fmt.Errorf("failed to add mark rule for IPVS: %w", err)
+	}
+
+	chain, err := c.GetChain(iptables.TableNat, iptables.ChainPOSTROUTING)
+	if err != nil {
+		return fmt.Errorf("failed to get chain %s in table %s: %w", iptables.ChainPOSTROUTING, iptables.TableNat, err)
+	}
+
+	log.Debug("adding IPVS rule", "table", chain.Table.Name, "chain", chain.Name, "comment", cmt)
+
+	rule := &nftables.Rule{
+		Table:    chain.Table,
+		Chain:    chain,
+		UserData: nfinternal.UserDataComment(cmt),
+		Exprs: []expr.Any{
+			&expr.Meta{
+				Key:      expr.MetaKeyMARK,
+				Register: 1,
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     mark,
+			},
+			&expr.Masq{},
+		},
+	}
+
+	if _, err := c.InsertUnique(rule); err != nil {
+		return fmt.Errorf("failed to insert nftables rule %q: %w", comment, err)
+	}
+
+	c.Flush()
+
+	return nil
+}
+
 // addIptablesRulesForMasquerade add iptables rules for MASQUERADE
 // insert example
 func (configurator *network) removeIptablesRulesForMasquerade() error {
@@ -636,6 +1189,54 @@ func (configurator *network) removeIptablesRulesForMasquerade() error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (configurator *network) removeNftablesRulesForMasquerade(c *nfinternal.Client) error {
+	chain, err := c.GetChain(iptables.TableNat, iptables.ChainPOSTROUTING)
+	if err != nil {
+		return fmt.Errorf("failed to get chain %s in table %s: %w", iptables.ChainPOSTROUTING, iptables.TableNat, err)
+	}
+
+	comment := fmt.Sprintf(iptablesComment, "control-plane")
+	cmt := fmt.Sprintf("%s - IPVS, VIP %s, MARK %d", comment, configurator.IP(), configurator.IPVSMark())
+
+	r, err := c.FindRuleByComment(chain.Table, chain, cmt)
+	if err != nil {
+		return fmt.Errorf("failed to find rule %q for deletion: %w", cmt, err)
+	}
+
+	if err := c.DeleteRule(r); err != nil {
+		return fmt.Errorf("failed to delete rule %q: %w", cmt, err)
+	}
+
+	markChain, err := c.GetChain(iptables.TableMangle, "ipvs_prerouting")
+	if err != nil {
+		return fmt.Errorf("failed to get chain %s in table %s: %w", "ipvs_prerouting", iptables.TableMangle, err)
+	}
+
+	markRule, err := c.FindRuleByComment(markChain.Table, markChain, cmt)
+	if err != nil {
+		return fmt.Errorf("failed to find rule %q for deletion: %w", cmt, err)
+	}
+
+	if err := c.DeleteRule(markRule); err != nil {
+		return fmt.Errorf("failed to delete rule %q: %w", cmt, err)
+	}
+
+	c.Flush()
+
+	existing, err := c.List(markChain.Table, markChain)
+	if err != nil {
+		return fmt.Errorf("failed to list rules %s in table %s: %w", "ipvs_prerouting", iptables.TableMangle, err)
+	}
+
+	if len(existing) == 0 {
+		c.DeleteChain(markChain)
+	}
+
+	c.Flush()
 
 	return nil
 }
@@ -940,6 +1541,10 @@ func (configurator *network) GetPossibleSubnets() string {
 
 func (configurator *network) DHCPFamily() string {
 	return configurator.dhcpFamily
+}
+
+func (configurator *network) IPVSMark() uint32 {
+	return configurator.ipvsMark
 }
 
 // SelectSubnet formats an IP address with the appropriate CIDR based on the input.

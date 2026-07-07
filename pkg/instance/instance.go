@@ -400,6 +400,8 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			}
 		}
 
+		instance.VIPConfigs[i].EgressWithNftables = config.EgressWithNftables
+
 		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr, routeMgr, nodeLabelMgr)
 		if err != nil {
 			log.Error("failed to add service", "err", err)

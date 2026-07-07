@@ -261,7 +261,7 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 				return fmt.Errorf("[%s] failed to find an instance for service %s/%s", p.provider.GetLabel(), service.Namespace, service.Name)
 			}
 			for x := range inst.VIPConfigs {
-				log.Debug("starting loadbalancer for service", "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
+				log.Debug("starting loadbalancer for service", "provider", p.provider.GetLabel(), "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
 				if err := inst.Clusters[x].StartLoadBalancerService(svcCtx.Ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(service), wg); err != nil {
 					return fmt.Errorf("failed to start lb: %w", err)
 				}

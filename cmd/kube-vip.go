@@ -166,6 +166,8 @@ func init() {
 	// Configuration file flag
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ConfigFile, "config-file", "", "Path to a JSON/YAML configuration file to load settings from")
 
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "Use nftables-based egress implementation")
+
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
 	kubeVipCmd.AddCommand(kubeVipManager)

@@ -30,6 +30,7 @@ type KubevipManifestValues struct {
 	ControlPlaneHealthCheckTimeoutSeconds   int
 	ControlPlaneHealthCheckFailureThreshold int
 	ControlPlaneHealthCheckCAPath           string
+	EnableServiceSecurity                   string
 }
 
 type BGPPeerValues struct {

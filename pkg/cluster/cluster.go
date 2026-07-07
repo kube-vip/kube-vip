@@ -80,7 +80,8 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 	for _, addr := range addresses {
 		network, err := vip.NewConfig(addr, c.Interface, c.LoInterfaceGlobalScope, c.VIPSubnet, c.DDNS, c.DHCPMode,
 			c.RequireDualStack, c.IsDualStack, c.RoutingTableID, c.RoutingTableType, c.RoutingProtocol, c.DNSMode,
-			c.LoadBalancerForwardingMethod, c.IptablesBackend, c.EnableLoadBalancer, c.EnableServiceSecurity, intfMgr)
+			c.LoadBalancerForwardingMethod, c.IptablesBackend, c.EnableLoadBalancer, c.LoadBalancerPort,
+			c.EnableServiceSecurity, intfMgr, c.EgressWithNftables)
 		if err != nil {
 			return nil, err
 		}

@@ -53,7 +53,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Build image with iptables
-        run: make dockerx86ActionIPTables
+        run: make dockerx86Action
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:

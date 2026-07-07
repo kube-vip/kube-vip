@@ -56,9 +56,10 @@ type IPVSLoadBalancer struct {
 	family              ipvs.AddressFamily
 }
 
-func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMethod string, backendHealthCheckInterval int,
-	killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
-	log.Info("Starting IPVS LoadBalancer", "address", address)
+func NewIPVSLB(ctx context.Context, network vip.Network, port uint16, forwardingMethod string, backendHealthCheckInterval int,
+	nftables bool, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+	address := network.IP()
+	log.Info("Starting IPVS LoadBalancer", "address", network)
 
 	// Create IPVS client
 	c, err := ipvs.New()
@@ -100,6 +101,12 @@ func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMetho
 		netMask = netmask.MaskFrom(128, vip.DefaultMaskIPv6) // For ipv6
 	}
 
+	var fwmark uint32
+
+	if nftables && forwardingMethod == "masquerade" && family == ipvs.INET {
+		fwmark = network.IPVSMark()
+	}
+
 	// Generate out API Server LoadBalancer instance
 	svc := ipvs.Service{
 		Netmask:   netMask,
@@ -108,6 +115,7 @@ func NewIPVSLB(ctx context.Context, address string, port uint16, forwardingMetho
 		Port:      port,
 		Address:   ip,
 		Scheduler: ROUNDROBIN,
+		FWMark:    fwmark,
 	}
 
 	var m ipvs.ForwardType
