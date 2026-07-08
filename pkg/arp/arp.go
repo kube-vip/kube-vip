@@ -142,7 +142,8 @@ func (m *Manager) StartAdvertisement(ctx context.Context, killFunc func()) {
 				}
 				timeout.Reset(duration)
 			}); err != nil {
-				log.Warn("[ARP manager] stopped watching interface", "err", err)
+				log.Error("[ARP manager] stopped watching interface", "err", err)
+				killFunc()
 			}
 		})
 	}
