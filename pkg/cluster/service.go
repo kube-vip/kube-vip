@@ -172,6 +172,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			}
 		}
 
+		backend.SetKubeConfigPath(c.K8sConfigFile)
 		backend.Watch(ctx, c.BackendHealthCheckInterval, func() {
 			for i := range cluster.Network {
 				network := cluster.Network[i]
