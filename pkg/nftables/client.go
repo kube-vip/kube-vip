@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
@@ -60,8 +61,13 @@ func (c *Client) GetTable(name string) *nftables.Table {
 }
 
 func (c *Client) GetChain(table, chain string) (*nftables.Chain, error) {
-	ch, err := c.conn.ListChain(c.GetTable(table), chain)
+	t := c.GetTable(table)
+	ch, err := c.conn.ListChain(t, chain)
 	if err != nil {
+		log.Error(err.Error())
+		if strings.Contains(err.Error(), "no such file") {
+			return nil, ErrChainNotFound
+		}
 		return nil, err
 	}
 	return ch, nil
@@ -73,9 +79,10 @@ func (c *Client) CheckChain(table, chain string) bool {
 }
 
 func (c *Client) AddChain(chain *nftables.Chain) *nftables.Chain {
-	ch, _ := c.GetChain(chain.Table.Name, chain.Name)
+	ch, err := c.GetChain(chain.Table.Name, chain.Name)
 
-	if ch == nil {
+	if errors.Is(err, ErrChainNotFound) {
+		log.Debug("adding chain", "name", chain.Name)
 		ch = c.conn.AddChain(chain)
 		c.Flush()
 	}
@@ -368,3 +375,5 @@ func exprEqual[V *expr.Meta | *expr.Lookup | *expr.Verdict | *expr.Cmp | *expr.P
 func UserDataComment(comment string) []byte {
 	return userdata.AppendString([]byte{}, userdata.TypeComment, comment)
 }
+
+var ErrChainNotFound = errors.New("chain not found")
