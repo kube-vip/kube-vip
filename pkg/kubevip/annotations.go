@@ -37,6 +37,9 @@ const (
 	// The current active endpoint(pod) for the Egress VIP (v6)
 	ActiveEndpointIPv6 = "kube-vip.io/active-endpoint-ipv6"
 
+	// The nftables egress table base name that owns this Service's SNAT chain
+	EgressNftablesTable = "kube-vip.io/egress-nftables-table"
+
 	// Flush the conntrack rules (remove existing sessions) once Egress is configured
 	FlushContrack = "kube-vip.io/flush-conntrack"
 

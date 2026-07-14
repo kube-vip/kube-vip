@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,7 +16,9 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 )
 
 // DEBUG
@@ -143,7 +146,10 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
-func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) error {
+func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string, applied *bool) error {
+	if applied != nil {
+		*applied = false
+	}
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -234,10 +240,17 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 			allowCIDRs = append(allowCIDRs, networks...)
 		}
 
+		currentTableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
 		// Apply the SNAT rules
-		err := nftables.ApplySNAT(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP))
+		err := nftables.ApplySNATWithTable(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP), currentTableName)
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
+		}
+		if err := nftables.DeleteSNATFromOtherTables(utils.IsIPv6(vipIP), serviceUUID, currentTableName); err != nil {
+			return fmt.Errorf("cleaning stale nftables egress chains: %w", err)
+		}
+		if applied != nil {
+			*applied = true
 		}
 		return nil
 	}
@@ -346,9 +359,17 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	return nil
 }
 
+func (p *Processor) prepareEgressNftablesTable(serviceUID string, ipv6 bool) error {
+	tableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
+	if err := nftables.DeleteSNATFromTableIfExists(ipv6, serviceUID, tableName); err != nil {
+		return fmt.Errorf("preparing nftables table %q for egress reconciliation: %w", tableName, err)
+	}
+	return nil
+}
+
 func (p *Processor) AutoDiscoverCIDRs(ctx context.Context) (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
-	options := v1.ListOptions{
+	options := metav1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
 	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(ctx, options)
@@ -373,4 +394,45 @@ func (p *Processor) AutoDiscoverCIDRs(ctx context.Context) (serviceCIDR, podCIDR
 	}
 
 	return
+}
+
+func (p *Processor) updateEgressNftablesTableAnnotation(ctx context.Context, service *corev1.Service) error {
+	tableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		currentService, err := p.clientSet.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if currentService.Annotations[kubevip.EgressNftablesTable] == tableName {
+			return nil
+		}
+
+		serviceCopy := currentService.DeepCopy()
+		if serviceCopy.Annotations == nil {
+			serviceCopy.Annotations = make(map[string]string)
+		}
+		serviceCopy.Annotations[kubevip.EgressNftablesTable] = tableName
+		_, err = p.clientSet.CoreV1().Services(service.Namespace).Update(ctx, serviceCopy, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("updating nftables table annotation on Service %s/%s: %w", service.Namespace, service.Name, err)
+	}
+	return nil
+}
+
+func (p *Processor) cleanupStaleEgressNftablesChains(service *corev1.Service) error {
+	if service.Annotations[kubevip.Egress] != "true" ||
+		(service.Annotations[kubevip.EgressInternal] == "" && !p.config.EgressWithNftables) {
+		return nftables.DeleteSNATFromAllTables(string(service.UID))
+	}
+
+	tableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
+	if service.Annotations[kubevip.EgressNftablesTable] != tableName {
+		return nil
+	}
+	return errors.Join(
+		nftables.DeleteSNATFromOtherTables(false, string(service.UID), tableName),
+		nftables.DeleteSNATFromOtherTables(true, string(service.UID), tableName),
+	)
 }

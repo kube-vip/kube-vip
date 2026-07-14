@@ -388,7 +388,8 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	if sm.config.EnableServices {
 		// This will tidy any dangling kube-vip iptables rules
 		if sm.config.EgressClean {
-			err := nftables.ClearTables()
+			tableName := nftables.EgressTableBaseNameForInstance(sm.config.InstanceName)
+			err := nftables.ClearTablesWithName(tableName)
 			if err != nil {
 				log.Warn("[egress]", "mode", "nftables-internal", "clearing error", err)
 			} else {

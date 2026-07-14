@@ -33,6 +33,9 @@ const (
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
 
+	// instanceName identifies this kube-vip deployment when naming host-global resources
+	instanceName = "instance_name"
+
 	// vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 

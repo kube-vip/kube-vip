@@ -116,6 +116,15 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		return nil
 	}
 
+	// The Service annotation is cluster-wide while nftables state is local to
+	// each node. Reconcile stale per-Service chains on every node after a table
+	// migration, even when this kube-vip pod is not the Service leader.
+	if svc.Annotations[kubevip.EgressNftablesTable] != "" {
+		if err := p.cleanupStaleEgressNftablesChains(svc); err != nil {
+			log.Warn("failed to clean stale nftables egress chains", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+		}
+	}
+
 	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
 
 	// We only care about LoadBalancer services that have been allocated an address
