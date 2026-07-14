@@ -941,7 +941,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 					ConfigPath:            configPath,
 					SvcEnable:             "true",
 					SvcElectionEnable:     "true",
-					EnableEndpoints:       "true",
+					EnableEndpoints:       "false",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
 				}
