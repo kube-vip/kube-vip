@@ -390,6 +390,23 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 		newEnvironment = append(newEnvironment, leaderElection...)
 	}
 
+	if c.LoseLeadership {
+		loseLeadership := []corev1.EnvVar{
+			{
+				Name:  vipLoseLeadership,
+				Value: strconv.FormatBool(c.LoseLeadership),
+			},
+		}
+
+		if c.LoseLeadershipTimeoutSeconds > 0 {
+			loseLeadership = append(loseLeadership, corev1.EnvVar{
+				Name:  vipLoseLeadership,
+				Value: fmt.Sprintf("%d", c.LoseLeadershipTimeoutSeconds),
+			})
+		}
+		newEnvironment = append(newEnvironment, loseLeadership...)
+	}
+
 	// If we're enabling node labeling on leader election
 	if c.EnableNodeLabeling {
 		EnableNodeLabeling := []corev1.EnvVar{

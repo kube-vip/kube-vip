@@ -36,6 +36,12 @@ const (
 	// vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 
+	// vipLoseLeadership - defines if leader should lose leadership if network interface is down
+	vipLoseLeadership = "vip_loseleadership"
+
+	// vipLoseLeadershipTimeout - defines the timeout for lose leadership
+	vipLoseLeadershipTimeoutSeconds = "vip_loseleadership_timeout_seconds"
+
 	// vipInterfaceLoGlobal - defines if the lo interface (if used) should have a global scope
 	vipInterfaceLoGlobal = "vip_interfaceloglobal"
 

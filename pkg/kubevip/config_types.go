@@ -54,6 +54,12 @@ type Config struct {
 	// If false, VIP addresses are deleted on leadership loss (legacy behavior)
 	PreserveVIPOnLeadershipLoss bool `yaml:"preserveVipOnLeadershipLoss"`
 
+	// LoseLeadership enables leadership loss if VIP interface(physical) is down
+	LoseLeadership bool `yaml:"loseLeadership"`
+
+	// LoseLeadershipTimeoutSeconds defines the timeout after which interface will be considered down. Default is 30s
+	LoseLeadershipTimeoutSeconds int `yaml:"loseLeadershipTimeoutSeconds"`
+
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
 	Annotations string
 
