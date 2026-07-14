@@ -21,6 +21,16 @@ type Entry struct {
 
 type Map map[Entry]bool
 
+// kubeConfigPath is an explicitly configured kubeconfig used by Check when
+// set; static pod deployments configure it since neither admin.conf nor
+// in-cluster config are available there.
+var kubeConfigPath string
+
+// SetKubeConfigPath configures the kubeconfig used by backend health checks.
+func SetKubeConfigPath(path string) {
+	kubeConfigPath = path
+}
+
 func (e *Entry) Check() bool {
 	var client *kubernetes.Clientset
 	var err error
@@ -38,6 +48,12 @@ func (e *Entry) Check() bool {
 	}
 
 	switch {
+	case kubeConfigPath != "" && utils.FileExists(kubeConfigPath):
+		config, err = k8s.NewRestConfig(kubeConfigPath, false, k8sAddr)
+		if err != nil {
+			log.Error("create k8s REST config", "path", kubeConfigPath, "err", err)
+			return false
+		}
 	case utils.FileExists(adminConfigPath):
 		config, err = k8s.NewRestConfig(adminConfigPath, false, k8sAddr)
 		if err != nil {

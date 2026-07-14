@@ -118,6 +118,20 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	switch {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
+	case config.K8sConfigFile != "" && utils.FileExists(config.K8sConfigFile):
+		// An explicitly configured kubeconfig (k8s_config_file env or
+		// --k8sConfigPath) takes precedence over the well-known host paths.
+		// KubernetesAddr, when set, overrides the API endpoint - static pods
+		// on control plane hosts use it to reach their local API server
+		// instead of a VIP that may not be up yet.
+		clientConfig, err = k8s.NewRestConfig(config.K8sConfigFile, false, config.KubernetesAddr)
+		if err != nil {
+			return nil, fmt.Errorf("could not create k8s REST config from file %q: %w", config.K8sConfigFile, err)
+		}
+		if clientset, err = k8s.NewClientset(clientConfig); err != nil {
+			return nil, fmt.Errorf("could not create k8s clientset: %w", err)
+		}
+		log.Info("Using Kubernetes configuration from explicit file", "path", config.K8sConfigFile, "address", config.KubernetesAddr)
 	case utils.FileExists(adminConfigPath):
 		if config.KubernetesAddr != "" {
 			log.Info("k8s address", "address", config.KubernetesAddr)
