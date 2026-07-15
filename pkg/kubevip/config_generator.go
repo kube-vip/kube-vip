@@ -233,6 +233,17 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 		newEnvironment = append(newEnvironment, svcInterface...)
 	}
 
+	// Tolerate a down interface
+	if c.AllowInterfaceNotUp {
+		allowIface := []corev1.EnvVar{
+			{
+				Name:  vipAllowInterfaceNotUp,
+				Value: strconv.FormatBool(c.AllowInterfaceNotUp),
+			},
+		}
+		newEnvironment = append(newEnvironment, allowIface...)
+	}
+
 	// If a subnet is required for the VIP
 	if c.VIPSubnet != "" {
 		// build environment variables

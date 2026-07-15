@@ -70,6 +70,16 @@ func ParseEnvironment(c *Config) error {
 		c.ServicesInterface = env
 	}
 
+	// Tolerate a down interface
+	env = os.Getenv(vipAllowInterfaceNotUp)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.AllowInterfaceNotUp = b
+	}
+
 	// Find Kubernetes Leader Election configuration
 	env = os.Getenv(vipLeaderElection)
 	if env != "" {

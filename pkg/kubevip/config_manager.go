@@ -1,6 +1,7 @@
 package kubevip
 
 import (
+	"errors"
 	"fmt"
 
 	log "log/slog"
@@ -11,6 +12,8 @@ import (
 const (
 	Auto = "auto"
 )
+
+var ErrInterfaceNotUp = errors.New("interface is not up")
 
 func (c *Config) CheckSubnetExists() error {
 	if c.VIPSubnet == "" && c.VIP != "" && c.Address == "" {
@@ -23,13 +26,21 @@ func (c *Config) CheckSubnetExists() error {
 func (c *Config) CheckInterface() error {
 	if c.Interface != "" {
 		if err := isValidInterface(c.Interface); err != nil {
-			return fmt.Errorf("%s is not valid interface, reason: %w", c.Interface, err)
+			if errors.Is(err, ErrInterfaceNotUp) && c.AllowInterfaceNotUp {
+				log.Warn("interface is not up, continuing as allowInterfaceNotUp is set", "interface", c.Interface)
+			} else {
+				return fmt.Errorf("%s is not valid interface, reason: %w", c.Interface, err)
+			}
 		}
 	}
 
 	if c.ServicesInterface != "" {
 		if err := isValidInterface(c.ServicesInterface); err != nil {
-			return fmt.Errorf("%s is not valid interface, reason: %w", c.ServicesInterface, err)
+			if errors.Is(err, ErrInterfaceNotUp) && c.AllowInterfaceNotUp {
+				log.Warn("interface is not up, continuing as allowInterfaceNotUp is set", "interface", c.ServicesInterface)
+			} else {
+				return fmt.Errorf("%s is not valid interface, reason: %w", c.ServicesInterface, err)
+			}
 		}
 	}
 
@@ -58,7 +69,7 @@ func isValidInterface(iface string) error {
 			iface,
 		)
 	} else if attrs.OperState != netlink.OperUp {
-		return fmt.Errorf("%s is not up", iface)
+		return fmt.Errorf("%s %w", iface, ErrInterfaceNotUp)
 	}
 
 	return nil
