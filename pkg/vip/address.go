@@ -48,6 +48,7 @@ const (
 type Network interface {
 	AddIP(precheck bool, skipDAD bool, minLifetime ...int) (bool, error)
 	AddRoute(precheck bool) (bool, error)
+	ReplaceRoute() error
 	DeleteIP() (bool, error)
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
@@ -93,6 +94,11 @@ type network struct {
 	routeTable       int
 	routingTableType int
 	routingProtocol  int
+
+	// reassertToggle alternates the inert realm attribute between two values
+	// on every ReplaceRoute so each re-assertion is a real kernel change and
+	// therefore a netlink event visible to listening routing daemons.
+	reassertToggle bool
 
 	ipvsEnabled bool
 
@@ -358,6 +364,25 @@ func (configurator *network) routeExists(route *netlink.Route) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// ReplaceRoute - (re-)assert the route in the route table. The kernel emits
+// no netlink notification for a no-op replace, so alternate an inert
+// attribute (the routing realm) to make every re-assertion a visible event:
+// routing daemons (e.g. FRR's zebra) can lose the original route event when
+// the same-prefix interface address is processed in the same netlink batch,
+// leaving the route in the kernel but never redistributed.
+func (configurator *network) ReplaceRoute() error {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
+	route := configurator.PrepareRoute()
+	configurator.reassertToggle = !configurator.reassertToggle
+	if configurator.reassertToggle {
+		route.Realm = 1
+	} else {
+		route.Realm = 2
+	}
+	return netlink.RouteReplace(route)
 }
 
 // DeleteRoute - Delete an IP address from a route table
