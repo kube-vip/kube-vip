@@ -103,7 +103,7 @@ func (b *BGP) ConfigureServices() {
 
 func (b *BGP) StartServices(ctx context.Context) error {
 	if b.config.EnableServicesElection {
-		if err := b.PerServiceLeader(ctx); err != nil {
+		if err := b.PerServiceLeader(ctx, false); err != nil {
 			return err
 		}
 	} else {

@@ -5,3 +5,4 @@ bin
 testing/e2e/etcd/certs
 pkg/etcd/etcd.pid
 pkg/etcd/etcd-data
+testing/e2e/e2e.test

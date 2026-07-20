@@ -24,7 +24,7 @@ import (
 )
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback) error {
+func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) error {
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -102,7 +102,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback) 
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			if err := p.AddOrModify(watcherCtx, event, serviceFunc, &wg); err != nil {
+			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg); err != nil {
 				if errors.Is(err, &utils.PanicError{}) {
 					return fmt.Errorf("add/modify service error: %w", err)
 				} else {
@@ -110,7 +110,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback) 
 				}
 			}
 		case watch.Deleted:
-			if err := p.Delete(event); err != nil {
+			if err := p.Delete(event, forcedOnly); err != nil {
 				if errors.Is(err, &utils.PanicError{}) {
 					return fmt.Errorf("delete service error: %w", err)
 				} else {
