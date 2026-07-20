@@ -171,6 +171,8 @@ func init() {
 
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "Use nftables-based egress implementation")
 
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.PerServiceElectionOnDemand, "perServiceElectionOnDemand", false, "Allow kube-vip to use per-service election for annotated services")
+
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
 	kubeVipCmd.AddCommand(kubeVipManager)

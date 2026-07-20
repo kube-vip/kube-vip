@@ -70,7 +70,7 @@ func (t *Table) StartServices(ctx context.Context) error {
 	log.Debug("starting Services")
 
 	if t.config.EnableServicesElection {
-		if err := t.PerServiceLeader(ctx); err != nil {
+		if err := t.PerServiceLeader(ctx, false); err != nil {
 			return err
 		}
 	} else if t.config.EnableLeaderElection {

@@ -104,7 +104,7 @@ func (w *WireGuard) ConfigureServices() {
 func (w *WireGuard) StartServices(ctx context.Context) error {
 	if w.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
-		err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+		err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	})
 
 	if w.config.EnableServices && !w.config.EnableServicesElection {
-		if err := w.svcProcessor.ServicesWatcher(ctx, services.NewCallback(w.svcProcessor.SyncServices, false)); err != nil {
+		if err := w.svcProcessor.ServicesWatcher(ctx, services.NewCallback(w.svcProcessor.SyncServices, false), false); err != nil {
 			log.Error("failed to start services watcher", "err", err)
 		}
 	}
