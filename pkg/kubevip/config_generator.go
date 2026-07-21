@@ -202,6 +202,12 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			},
 		},
 	}
+	if c.InstanceName != "" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  instanceName,
+			Value: c.InstanceName,
+		})
+	}
 
 	// If we're specifically saying which interface to use then add it to the manifest
 	if c.Interface != "" {

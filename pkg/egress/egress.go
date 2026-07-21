@@ -19,15 +19,13 @@ func Teardown(podIP, vipIP, namespace, serviceUUID string, annotations map[strin
 	internalEgress := annotations[kubevip.EgressInternal]
 
 	protocol := iptables.ProtocolIPv4
-	IPv6 := false
 	if utils.IsIPv6(podIP) {
 		protocol = iptables.ProtocolIPv6
-		IPv6 = true
 	}
 
 	// Use the internal egress implementation
 	if internalEgress != "" || useNftables {
-		return nftables.DeleteSNAT(IPv6, serviceUUID)
+		return nftables.DeleteSNATFromAllTables(serviceUUID)
 	}
 
 	i, err := vip.CreateIptablesClient(useNftables, namespace, protocol)

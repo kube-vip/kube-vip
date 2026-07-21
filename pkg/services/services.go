@@ -27,6 +27,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -305,6 +306,9 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 		}
 		var podIP string
 		errList := []error{}
+		configuredRules := 0
+		useInternalNftables := svc.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
+		preparedFamilies := map[bool]bool{}
 
 		// Should egress be IPv6
 		if svc.Annotations[kubevip.EgressIPv6] == "true" {
@@ -314,11 +318,21 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 					if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 
 						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
+						if useInternalNftables && !preparedFamilies[true] {
+							if err := p.prepareEgressNftablesTable(string(svc.UID), true); err != nil {
+								errList = append(errList, err)
+								continue
+							}
+							preparedFamilies[true] = true
+						}
 
-						err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
+						applied := false
+						err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
 						if err != nil {
 							errList = append(errList, err)
 							log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+						} else if applied {
+							configuredRules++
 						}
 					}
 				}
@@ -329,14 +343,31 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
 				}
-				err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
+				ipv6 := utils.IsIPv6(serviceIP)
+				if useInternalNftables && !preparedFamilies[ipv6] {
+					if err := p.prepareEgressNftablesTable(string(svc.UID), ipv6); err != nil {
+						errList = append(errList, err)
+						continue
+					}
+					preparedFamilies[ipv6] = true
+				}
+				applied := false
+				err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
 				if err != nil {
 					errList = append(errList, err)
 					log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				} else if applied {
+					configuredRules++
 				}
 			}
 		}
 		if len(errList) == 0 {
+			if configuredRules > 0 && useInternalNftables {
+				if err := p.updateEgressNftablesTableAnnotation(ctx, svc); err != nil {
+					return err
+				}
+			}
+
 			var provider providers.Provider
 			if p.config.EnableEndpoints {
 				provider = providers.NewEndpoints()
@@ -431,6 +462,13 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		}
 	}
 
+	internalNftablesEgress := serviceInstance.ServiceSnapshot.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
+	if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" && internalNftablesEgress {
+		if err := nftables.DeleteSNATFromAllTables(string(serviceInstance.ServiceSnapshot.UID)); err != nil {
+			log.Error("[service] nftables egress teardown", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
+		}
+	}
+
 	if !shared {
 		for x := range serviceInstance.Clusters {
 			serviceInstance.Clusters[x].Stop()
@@ -469,7 +507,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		}
 
 		// We will need to tear down the egress
-		if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" {
+		if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" && !internalNftablesEgress {
 			if serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint] != "" {
 				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
 				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
@@ -545,6 +583,9 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 	// Apply new egress rules with updated endpoint
 	serviceIPs, _ := instance.FetchServiceAddresses(svc)
 	errList := []error{}
+	configuredRules := 0
+	useInternalNftables := svc.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
+	preparedFamilies := map[bool]bool{}
 
 	// Check if egress should be IPv6
 	if svc.Annotations[kubevip.EgressIPv6] == "true" {
@@ -553,10 +594,20 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 			for _, serviceIP := range serviceIPs {
 				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 					podIP := newIPv6
-					err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations)
+					if useInternalNftables && !preparedFamilies[true] {
+						if err := p.prepareEgressNftablesTable(string(svc.UID), true); err != nil {
+							errList = append(errList, err)
+							continue
+						}
+						preparedFamilies[true] = true
+					}
+					applied := false
+					err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
 					if err != nil {
 						errList = append(errList, err)
 						log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					} else if applied {
+						configuredRules++
 					}
 				}
 			}
@@ -567,16 +618,32 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 			if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 				podIPs = newIPv6
 			}
-			err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations)
+			ipv6 := utils.IsIPv6(serviceIP)
+			if useInternalNftables && !preparedFamilies[ipv6] {
+				if err := p.prepareEgressNftablesTable(string(svc.UID), ipv6); err != nil {
+					errList = append(errList, err)
+					continue
+				}
+				preparedFamilies[ipv6] = true
+			}
+			applied := false
+			err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
 			if err != nil {
 				errList = append(errList, err)
 				log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			} else if applied {
+				configuredRules++
 			}
 		}
 	}
 
 	if len(errList) > 0 {
 		return fmt.Errorf("errors configuring egress: %v", errList)
+	}
+	if configuredRules > 0 && useInternalNftables {
+		if err := p.updateEgressNftablesTableAnnotation(ctx, svc); err != nil {
+			return err
+		}
 	}
 
 	// Update the service snapshot to reflect the new state

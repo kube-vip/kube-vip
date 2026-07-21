@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	NatTable  = "kube_vip_%s"
-	SNatChain = "kube_vip_snat_%s"
+	NatTable               = "kube_vip_%s"
+	SNatChain              = "kube_vip_snat_%s"
+	DefaultEgressTableName = "kube_vip"
 )
 
 const (
@@ -54,33 +55,33 @@ const (
 const connmarkOffset = 0x10000 // 65536 - added to listenPort to get our connmark value
 
 func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool) error {
+	return ApplySNATWithTable(podIP, vipIP, service, destinationPorts, ignoreCIDR, allowCIDR, IPv6, "")
+}
+
+// ApplySNATWithTable applies an egress SNAT rule in the configured table.
+func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool, tableName string) error {
 	conn, err := nftables.New()
 	if err != nil {
 		return err
 	}
 
-	var tableName string
-	if IPv6 {
-		tableName = fmt.Sprintf(NatTable, "v6")
-	} else {
-		tableName = fmt.Sprintf(NatTable, "v4")
-	}
+	resolvedTableName := egressTableName(tableName, IPv6)
 	// Look up the table
-	if t, err := FilterTable(conn, tableName, IPv6); err != nil {
+	if t, err := FilterTable(conn, resolvedTableName, IPv6); err != nil {
 		if t == nil {
 			// If it doesn't exist then create it
-			slog.Debug("[egress]", "Creating Table", tableName)
-			conn.AddTable(GetTable(IPv6))
+			slog.Debug("[egress]", "Creating Table", resolvedTableName)
+			conn.AddTable(GetEgressTable(IPv6, tableName))
 		}
 	}
 	slog.Debug("[egress]", "Creating Chain for service", service, utils.IPv6Family, IPv6)
-	conn.AddChain(GetSNatChain(IPv6, service))
+	conn.AddChain(GetSNatChainForTable(IPv6, service, tableName))
 	err = conn.Flush()
 	if err != nil {
 		return err
 	}
 
-	portExpressions, err := portSet(conn, IPv6, destinationPorts)
+	portExpressions, err := portSet(conn, IPv6, destinationPorts, tableName)
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 			// Create our nftables rule
 			if len(allowCIDR) == 0 {
 				// No allowed CIDRs
-				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, portExpressions[x])
+				rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, portExpressions[x], tableName)
 				if err != nil {
 					return err
 				}
@@ -99,7 +100,7 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 			} else {
 				// Create a rule for each allowed CIDR
 				for y := range allowCIDR {
-					rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, portExpressions[x])
+					rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, portExpressions[x], tableName)
 					if err != nil {
 						return err
 					}
@@ -113,7 +114,7 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 		// Create our nftables rule
 		if len(allowCIDR) == 0 {
 			// No allowed CIDRs
-			rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, nil)
+			rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, nil, tableName)
 			if err != nil {
 				return err
 			}
@@ -122,7 +123,7 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 		} else {
 			// Create a rule for each allowed CIDR
 			for y := range allowCIDR {
-				rule, err = CreateRule(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, nil)
+				rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, nil, tableName)
 				if err != nil {
 					return err
 				}
@@ -140,10 +141,10 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 	return conn.CloseLasting() // Close out any remaining netlink communication
 }
 
-func portSet(conn *nftables.Conn, IPv6 bool, destinationPorts string) (setExpression [][]expr.Any, err error) {
+func portSet(conn *nftables.Conn, IPv6 bool, destinationPorts, tableName string) (setExpression [][]expr.Any, err error) {
 	// If we filter on ports protocols then parse them
 	if destinationPorts != "" {
-		table := GetTable(IPv6)
+		table := GetEgressTable(IPv6, tableName)
 		fixedPorts := strings.Split(destinationPorts, ",")
 
 		// Create an element using our pod IP
@@ -303,6 +304,11 @@ func portSet(conn *nftables.Conn, IPv6 bool, destinationPorts string) (setExpres
 }
 
 func DeleteSNAT(IPv6 bool, service string) error {
+	return DeleteSNATFromTable(IPv6, service, "")
+}
+
+// DeleteSNATFromTable deletes an egress SNAT chain from the configured table.
+func DeleteSNATFromTable(IPv6 bool, service, tableName string) error {
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -311,7 +317,7 @@ func DeleteSNAT(IPv6 bool, service string) error {
 	var chainName = fmt.Sprintf(SNatChain, service)
 	slog.Info("[egress]", "Looking for", chainName)
 
-	chain, err := conn.ListChain(GetTable(IPv6), chainName)
+	chain, err := conn.ListChain(GetEgressTable(IPv6, tableName), chainName)
 	if err != nil {
 		return err
 	}
@@ -325,13 +331,96 @@ func DeleteSNAT(IPv6 bool, service string) error {
 	return fmt.Errorf("unable to find chain [%s]", chainName)
 }
 
-func GetTable(IPv6 bool) *nftables.Table {
-	var tableName string
-	if IPv6 {
-		tableName = fmt.Sprintf(NatTable, "v6")
-	} else {
-		tableName = fmt.Sprintf(NatTable, "v4")
+// DeleteSNATFromTableIfExists deletes a Service's egress SNAT chain when it is
+// present. It is used while migrating a Service between instance-owned tables.
+func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return err
 	}
+
+	table := GetEgressTable(IPv6, tableName)
+	chainName := fmt.Sprintf(SNatChain, service)
+	chains, err := conn.ListChainsOfTableFamily(table.Family)
+	if err != nil {
+		return fmt.Errorf("failed to list nftables chains: %w", err)
+	}
+
+	for _, chain := range chains {
+		if chain.Table != nil && chain.Table.Name == table.Name && chain.Name == chainName {
+			slog.Info("[egress] deleting service chain", "table", table.Name, "chain", chainName)
+			conn.DelChain(chain)
+			return conn.Flush()
+		}
+	}
+
+	return nil
+}
+
+// DeleteSNATFromOtherTables removes a Service's SNAT chain from every table in
+// one address family except the table currently owned by this kube-vip
+// instance. Chain names include the Service UID, so cleanup remains
+// service-scoped even when the legacy table is shared by multiple instances.
+func DeleteSNATFromOtherTables(IPv6 bool, service, keepTableName string) error {
+	return deleteSNATFromTables(IPv6, service, EgressTableBaseName(keepTableName))
+}
+
+// DeleteSNATFromAllTables removes a Service's SNAT chain from all IPv4 and
+// IPv6 tables. This does not depend on endpoint data and is safe for teardown
+// of IPv4-only, IPv6-only, and dual-stack Services.
+func DeleteSNATFromAllTables(service string) error {
+	return errors.Join(
+		deleteSNATFromTables(false, service, ""),
+		deleteSNATFromTables(true, service, ""),
+	)
+}
+
+func deleteSNATFromTables(IPv6 bool, service, keepTableName string) error {
+	conn, err := nftables.New()
+	if err != nil {
+		return err
+	}
+
+	family := nftables.TableFamilyIPv4
+	if IPv6 {
+		family = nftables.TableFamilyIPv6
+	}
+	keepTable := ""
+	if keepTableName != "" {
+		keepTable = GetEgressTable(IPv6, keepTableName).Name
+	}
+	chainName := fmt.Sprintf(SNatChain, service)
+	chains, err := conn.ListChainsOfTableFamily(family)
+	if err != nil {
+		return fmt.Errorf("failed to list nftables chains: %w", err)
+	}
+
+	deleted := false
+	for _, chain := range chains {
+		if !shouldDeleteSNATChain(chain, chainName, keepTable) {
+			continue
+		}
+		slog.Info("[egress] deleting stale service chain", "table", chain.Table.Name, "chain", chainName)
+		conn.DelChain(chain)
+		deleted = true
+	}
+	if deleted {
+		return conn.Flush()
+	}
+	return nil
+}
+
+func shouldDeleteSNATChain(chain *nftables.Chain, chainName, keepTable string) bool {
+	return chain.Table != nil && chain.Name == chainName && chain.Table.Name != keepTable
+}
+
+func GetTable(IPv6 bool) *nftables.Table {
+	return GetEgressTable(IPv6, "")
+}
+
+// GetEgressTable returns the family-specific egress table.
+func GetEgressTable(IPv6 bool, tableName string) *nftables.Table {
+	tableName = egressTableName(tableName, IPv6)
 	// Default to IPv4
 	table := &nftables.Table{
 		Family: nftables.TableFamilyIPv4,
@@ -345,12 +434,42 @@ func GetTable(IPv6 bool) *nftables.Table {
 	return table
 }
 
+func egressTableName(baseName string, IPv6 bool) string {
+	family := "v4"
+	if IPv6 {
+		family = "v6"
+	}
+	return EgressTableBaseName(baseName) + "_" + family
+}
+
+// EgressTableBaseName returns the effective table base name. An empty
+// configured value retains the legacy kube_vip table names.
+func EgressTableBaseName(baseName string) string {
+	if baseName == "" {
+		return DefaultEgressTableName
+	}
+	return baseName
+}
+
+// EgressTableBaseNameForInstance returns the egress table base owned by a
+// kube-vip instance. An empty instance name retains the legacy table names.
+func EgressTableBaseNameForInstance(instanceName string) string {
+	if instanceName == "" {
+		return DefaultEgressTableName
+	}
+	return DefaultEgressTableName + "_" + instanceName
+}
+
 func GetSNatChain(IPv6 bool, service string) *nftables.Chain {
+	return GetSNatChainForTable(IPv6, service, "")
+}
+
+func GetSNatChainForTable(IPv6 bool, service, tableName string) *nftables.Chain {
 	var chainName = fmt.Sprintf(SNatChain, service)
 	policy := nftables.ChainPolicyAccept
 	return &nftables.Chain{
 		Name:     chainName,
-		Table:    GetTable(IPv6),
+		Table:    GetEgressTable(IPv6, tableName),
 		Type:     nftables.ChainTypeNAT,
 		Hooknum:  nftables.ChainHookPostrouting,
 		Priority: nftables.ChainPriorityNATSource,
@@ -367,33 +486,42 @@ func FilterTable(conn *nftables.Conn, tableName string, IPv6 bool) (*nftables.Ta
 
 // ClearTable will remove the original tables and create new empty ones
 func ClearTables() error {
+	return ClearTablesWithName("")
+}
+
+// ClearTablesWithName clears only the egress tables owned by this kube-vip instance.
+func ClearTablesWithName(tableName string) error {
 	conn, err := nftables.New()
 	if err != nil {
 		return err
 	}
-	tableName := fmt.Sprintf(NatTable, "v6")
-	if t, err := FilterTable(conn, tableName, false); err != nil {
+	ipv6TableName := egressTableName(tableName, true)
+	if t, err := FilterTable(conn, ipv6TableName, true); err != nil {
 		slog.Debug("[egress]", "Cleaning IPv6 finding tables error", err)
 	} else if t != nil {
 		conn.DelTable(t)
 	}
 
 	// These don't return errors, so not 100% sure how to guarantee things were created
-	conn.AddTable(GetTable(true))
-	tableName = fmt.Sprintf(NatTable, "v4")
-	if t, err := FilterTable(conn, tableName, true); err != nil {
+	conn.AddTable(GetEgressTable(true, tableName))
+	ipv4TableName := egressTableName(tableName, false)
+	if t, err := FilterTable(conn, ipv4TableName, false); err != nil {
 		slog.Debug("[egress]", "Cleaning IPv4 finding tables error", err)
 	} else if t != nil {
 		conn.DelTable(t)
 	}
 
 	// These don't return errors, so not 100% sure how to guarantee things were created
-	conn.AddTable(GetTable(false))
-	return nil
+	conn.AddTable(GetEgressTable(false, tableName))
+	return conn.Flush()
 }
 
 // Create our nftables rule
 func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, allowCIDR string, conn *nftables.Conn, IPv6 bool, portExpression []expr.Any) (*nftables.Rule, error) {
+	return CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowCIDR, conn, IPv6, portExpression, "")
+}
+
+func CreateRuleForTable(podIP, vipIP, service string, ignoreCIDR []string, allowCIDR string, conn *nftables.Conn, IPv6 bool, portExpression []expr.Any, tableName string) (*nftables.Rule, error) {
 
 	// Validate pod IP
 	if net.ParseIP(podIP) == nil {
@@ -406,7 +534,7 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, allowCIDR str
 	}
 
 	// Get the kube-vip table
-	table := GetTable(IPv6)
+	table := GetEgressTable(IPv6, tableName)
 
 	// Create our rule
 	rule := &nftables.Rule{
@@ -414,7 +542,7 @@ func CreateRule(podIP, vipIP, service string, ignoreCIDR []string, allowCIDR str
 		Exprs: []expr.Any{},
 	}
 	// Set the correct chain
-	rule.Chain = GetSNatChain(IPv6, service)
+	rule.Chain = GetSNatChainForTable(IPv6, service, tableName)
 
 	// Create a set for our original/source address
 	set := &nftables.Set{

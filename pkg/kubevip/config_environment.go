@@ -32,6 +32,13 @@ func ParseEnvironment(c *Config) error {
 		c.Logging = int32(logLevel)
 	}
 
+	if env = os.Getenv(instanceName); env == "" {
+		env = os.Getenv(strings.ToUpper(instanceName))
+	}
+	if env != "" {
+		c.InstanceName = env
+	}
+
 	// Find interface
 	env = os.Getenv(vipInterface)
 	if env != "" {
@@ -908,7 +915,6 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.ServicesLeaseName == "" && fileConfig.ServicesLeaseName != "" {
 		baseConfig.ServicesLeaseName = fileConfig.ServicesLeaseName
 	}
-
 	// LoadBalancer configuration
 	if baseConfig.LoadBalancerPort == 0 && fileConfig.LoadBalancerPort != 0 {
 		baseConfig.LoadBalancerPort = fileConfig.LoadBalancerPort
@@ -970,6 +976,11 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 		baseConfig.HealthCheckPort = fileConfig.HealthCheckPort
 	}
 
+	// Instance configuration
+	if baseConfig.InstanceName == "" && fileConfig.InstanceName != "" {
+		baseConfig.InstanceName = fileConfig.InstanceName
+	}
+
 	// Egress configuration
 	if baseConfig.EgressPodCidr == "" && fileConfig.EgressPodCidr != "" {
 		baseConfig.EgressPodCidr = fileConfig.EgressPodCidr
@@ -977,7 +988,6 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.EgressServiceCidr == "" && fileConfig.EgressServiceCidr != "" {
 		baseConfig.EgressServiceCidr = fileConfig.EgressServiceCidr
 	}
-
 	// Mirror configuration
 	if baseConfig.MirrorDestInterface == "" && fileConfig.MirrorDestInterface != "" {
 		baseConfig.MirrorDestInterface = fileConfig.MirrorDestInterface

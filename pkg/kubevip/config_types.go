@@ -91,6 +91,9 @@ type Config struct {
 	// Namespace will define which namespace the control plane pods will run in
 	Namespace string `yaml:"namespace"`
 
+	// InstanceName identifies this kube-vip deployment when naming host-global resources.
+	InstanceName string `yaml:"instanceName"`
+
 	// Namespace will define which namespace the control plane pods will run in
 	ServiceNamespace string `yaml:"serviceNamespace"`
 

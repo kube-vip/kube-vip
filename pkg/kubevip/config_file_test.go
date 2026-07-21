@@ -34,6 +34,7 @@ address: "192.168.1.100"
 port: 6443
 interface: "eth0"
 namespace: "kube-system"
+instanceName: "release_a"
 vipSubnet: "192.168.1.0/24"
 leaseName: "test-lease"
 leaseDuration: 15
@@ -50,6 +51,7 @@ prometheusHTTPServer: ":2112"
 				Port:                 6443,
 				Interface:            "eth0",
 				Namespace:            "kube-system",
+				InstanceName:         "release_a",
 				VIPSubnet:            "192.168.1.0/24",
 				PrometheusHTTPServer: ":2112",
 				KubernetesLeaderElection: KubernetesLeaderElection{
@@ -239,6 +241,9 @@ bgpConfig:
 			if config.Interface != tt.expectedConfig.Interface {
 				t.Errorf("Interface = %v, expected %v", config.Interface, tt.expectedConfig.Interface)
 			}
+			if config.InstanceName != tt.expectedConfig.InstanceName {
+				t.Errorf("InstanceName = %v, expected %v", config.InstanceName, tt.expectedConfig.InstanceName)
+			}
 
 			// Test BGP config if present
 			if tt.expectedConfig.EnableBGP {
@@ -420,16 +425,18 @@ func TestMergeConfigValues(t *testing.T) {
 				Port:    0, // Should be overridden
 			},
 			fileConfig: &Config{
-				Logging:   2,
-				Port:      6443,
-				Interface: "eth0",
-				Address:   "192.168.1.100",
+				Logging:      2,
+				Port:         6443,
+				Interface:    "eth0",
+				Address:      "192.168.1.100",
+				InstanceName: "release_a",
 			},
 			expectedBase: &Config{
-				Logging:   5,               // From base (non-zero)
-				Port:      6443,            // From file (base was zero)
-				Interface: "eth0",          // From file (base was empty)
-				Address:   "192.168.1.100", // From file (base was empty)
+				Logging:      5,               // From base (non-zero)
+				Port:         6443,            // From file (base was zero)
+				Interface:    "eth0",          // From file (base was empty)
+				Address:      "192.168.1.100", // From file (base was empty)
+				InstanceName: "release_a",     // From file (base was empty)
 			},
 		},
 		{
@@ -515,6 +522,9 @@ func TestMergeConfigValues(t *testing.T) {
 			}
 			if tt.baseConfig.Interface != tt.expectedBase.Interface {
 				t.Errorf("Interface = %v, expected %v", tt.baseConfig.Interface, tt.expectedBase.Interface)
+			}
+			if tt.baseConfig.InstanceName != tt.expectedBase.InstanceName {
+				t.Errorf("InstanceName = %v, expected %v", tt.baseConfig.InstanceName, tt.expectedBase.InstanceName)
 			}
 			if tt.baseConfig.EnableARP != tt.expectedBase.EnableARP {
 				t.Errorf("EnableARP = %v, expected %v", tt.baseConfig.EnableARP, tt.expectedBase.EnableARP)

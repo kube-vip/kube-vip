@@ -46,6 +46,7 @@ func (sm *Manager) dumpConfigSection() {
 	fmt.Printf("VIP Subnet: %s\n", sm.config.VIPSubnet)
 	fmt.Printf("Port: %d\n", sm.config.Port)
 	fmt.Printf("Namespace: %s\n", sm.config.Namespace)
+	fmt.Printf("Instance Name: %s\n", sm.config.InstanceName)
 	fmt.Printf("Service Namespace: %s\n", sm.config.ServiceNamespace)
 	fmt.Printf("Interface: %s\n", sm.config.Interface)
 	fmt.Printf("Services Interface: %s\n", sm.config.ServicesInterface)
@@ -218,6 +219,7 @@ func (sm *Manager) dumpRuntimeSection() {
 	fmt.Printf("Egress Clean Enabled: %t\n", sm.config.EgressClean)
 	if sm.config.EgressClean {
 		fmt.Printf("Egress with nftables: %t\n", sm.config.EgressWithNftables)
+		fmt.Printf("Egress nftables table name: %s\n", nftables.EgressTableBaseNameForInstance(sm.config.InstanceName))
 		fmt.Printf("Egress Pod CIDR: %s\n", sm.config.EgressPodCidr)
 		fmt.Printf("Egress Service CIDR: %s\n", sm.config.EgressServiceCidr)
 	}
