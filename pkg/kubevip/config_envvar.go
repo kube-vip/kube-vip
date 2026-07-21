@@ -48,6 +48,9 @@ const (
 	// vipServicesInterface - defines the interface that the service vips should bind too
 	vipServicesInterface = "vip_servicesinterface"
 
+	// vipAllowInterfaceNotUp - defines if kube-vip should tolerate a down interface
+	vipAllowInterfaceNotUp = "vip_allow_interface_not_up"
+
 	// vipSubnet - defines the subnet that the vip will use
 	vipSubnet = "vip_subnet"
 

@@ -112,6 +112,9 @@ type Config struct {
 	// ServicesInterface is the network interface to bind to for services (optional)
 	ServicesInterface string `yaml:"servicesInterface,omitempty"`
 
+	// AllowInterfaceNotUp allows kube-vip to start even when the interface is not up
+	AllowInterfaceNotUp bool `yaml:"allowInterfaceNotUp,omitempty"`
+
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
 
