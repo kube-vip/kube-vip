@@ -25,7 +25,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
 	go.etcd.io/etcd/api/v3 v3.6.12
-	go.etcd.io/etcd/client/pkg/v3 v3.6.13
+	go.etcd.io/etcd/client/pkg/v3 v3.7.0
 	go.etcd.io/etcd/client/v3 v3.6.12
 	go.uber.org/zap v1.28.0
 	golang.org/x/exp v0.0.0-20250103183323-7d7fa50e5329
@@ -53,7 +53,7 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
-	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
