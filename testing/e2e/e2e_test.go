@@ -1589,9 +1589,11 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		time.Sleep(time.Second)
 	}
 
-	for i, addr := range lbAddresses {
-		checkIPAddressByLease(ctx, lease, leaseNamespace, addr, true, client)
-		assertConnection("http", addr, strconv.Itoa(80+i), "", 3*time.Second, 60*time.Second)
+	for i := range services {
+		for _, addr := range lbAddresses {
+			checkIPAddressByLease(ctx, lease, leaseNamespace, addr, true, client)
+			assertConnection("http", addr, strconv.Itoa(80+i), "", 3*time.Second, 60*time.Second)
+		}
 	}
 
 	container := e2e.GetLeaseHolder(ctx, lease, leaseNamespace, client)

@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -24,10 +25,15 @@ type Map map[Entry]bool
 // kubeConfigPath is an explicitly configured kubeconfig used by Check when
 // set; static pod deployments configure it since neither admin.conf nor
 // in-cluster config are available there.
-var kubeConfigPath string
+var (
+	kubeConfigPath string
+	pathMtx        sync.Mutex
+)
 
 // SetKubeConfigPath configures the kubeconfig used by backend health checks.
 func SetKubeConfigPath(path string) {
+	pathMtx.Lock()
+	defer pathMtx.Unlock()
 	kubeConfigPath = path
 }
 

@@ -443,8 +443,6 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 		}
 	}
 
-	log.Debug("IP CONFIGURED", "address", configurator.address)
-
 	return true, nil
 }
 
@@ -466,8 +464,8 @@ func (configurator *network) configureIPTables() error {
 }
 
 func (configurator *network) configureNFTables() error {
-	log.Debug("configureNFTables", "security enabled", configurator.enableSecurity, "ignore security", configurator.ignoreSecurity,
-		"ports", configurator.ports)
+	log.Debug("configure nftables", "security enabled", configurator.enableSecurity, "ignore security", configurator.ignoreSecurity,
+		"ports", configurator.ports, "service-name", configurator.serviceName)
 
 	opt := nftables.TableFamilyIPv4
 	if utils.IsIPv6(configurator.IP()) {
@@ -480,6 +478,9 @@ func (configurator *network) configureNFTables() error {
 	}
 
 	comment := fmt.Sprintf(iptablesComment, "control-plane")
+	if configurator.serviceName != "" {
+		comment = fmt.Sprintf(iptablesComment, configurator.serviceName)
+	}
 
 	if configurator.enableSecurity && !configurator.ignoreSecurity && len(configurator.ports) > 0 {
 		if err := configurator.addNftablesRulesToLimitTrafficPorts(c, comment); err != nil {
@@ -526,6 +527,23 @@ func (configurator *network) addIptablesRulesToLimitTrafficPorts() error {
 }
 
 func (configurator *network) addNftablesRulesToLimitTrafficPorts(c *nfinternal.Client, comment string) error {
+	if _, err := c.GetChain(nfinternal.TableFilter, iptables.ChainInput); err != nil {
+		if errors.Is(err, nfinternal.ErrChainNotFound) {
+			p := nftables.ChainPolicyAccept
+			ch := &nftables.Chain{
+				Table:    c.GetTable(nfinternal.TableFilter),
+				Name:     iptables.ChainInput,
+				Hooknum:  nftables.ChainHookInput,
+				Type:     nftables.ChainTypeFilter,
+				Priority: nftables.ChainPriorityFilter,
+				Policy:   &p,
+			}
+			_ = c.AddChain(ch)
+			c.Flush()
+		} else {
+			return fmt.Errorf("failed to get table: %s", nfinternal.TableFilter)
+		}
+	}
 
 	firstRule, err := insertCommonNFTablesRules(c, configurator.IP(), comment)
 	if err != nil {
@@ -534,10 +552,6 @@ func (configurator *network) addNftablesRulesToLimitTrafficPorts(c *nfinternal.C
 
 	if err := configurator.insertNFTablesRulesForServicePorts(c, configurator.IP(), comment, firstRule.Handle); err != nil {
 		return fmt.Errorf("could not add nftables rules for service ports: %v", err)
-	}
-
-	if err := c.Close(); err != nil {
-		return fmt.Errorf("failed to close client: %w", err)
 	}
 
 	return nil
@@ -714,7 +728,9 @@ func addNFTPortRule(c *nfinternal.Client, chain *nftables.Chain, vip string,
 				SourceRegister: 0x1,
 			},
 			&expr.Counter{},
-			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 0x1},
+			&expr.Verdict{
+				Kind: expr.VerdictAccept,
+			},
 		},
 	}
 
@@ -870,12 +886,14 @@ func deleteCommonIPTablesRules(ipt *iptables.IPTables, vip, comment string) erro
 }
 
 func deleteCommonNFTablesRules(c *nfinternal.Client, comment string) error {
-
 	table := c.GetTable(iptables.TableFilter)
-
 	chain, err := c.GetChain(table.Name, iptables.ChainInput)
 	if err != nil {
-		return fmt.Errorf("failed to find chain: %w", err)
+		// if there is no chain there's nothing to delete
+		if errors.Is(err, nfinternal.ErrChainNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to find chain %q: %w", iptables.ChainInput, err)
 	}
 
 	ruleDHCP, err := c.FindRuleByComment(table, chain, fmt.Sprintf("%s - DHCP", comment))
@@ -912,16 +930,19 @@ func deleteCommonNFTablesRules(c *nfinternal.Client, comment string) error {
 func deleteNFTPortRule(c *nfinternal.Client, comment string) error {
 
 	table := c.GetTable(iptables.TableFilter)
-
 	chain, err := c.GetChain(table.Name, iptables.ChainInput)
 	if err != nil {
-		return fmt.Errorf("failed to find chain: %w", err)
+		// if there is no chain there's nothing to delete
+		if errors.Is(err, nfinternal.ErrChainNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to find chain %q: %w", iptables.ChainInput, err)
 	}
 
 	for _, t := range []string{"TCP", "UDP", "SCTP"} {
 		rule, err := c.FindRuleByComment(table, chain, fmt.Sprintf("%s - %s ports", comment, t))
 		if err != nil {
-			return fmt.Errorf("failed to find the rule: %w", err)
+			log.Warn("failed to find the rule", "error", err)
 		}
 
 		if rule == nil {
@@ -971,11 +992,12 @@ func (configurator *network) removeNftablesRuleToLimitTrafficPorts(c *nfinternal
 	vip := configurator.address.IP.String()
 	comment := fmt.Sprintf(iptablesComment, configurator.serviceName)
 
+	log.Debug("remove nftables common rules", "vip", vip)
 	if err := deleteCommonNFTablesRules(c, comment); err != nil {
-		return fmt.Errorf("could not delete common iptables rules: %w", err)
+		return fmt.Errorf("could not delete common nftables rules: %w", err)
 	}
 
-	log.Debug("remove nftables rules", "vip", vip, "ports", configurator.ports)
+	log.Debug("remove nftables port rules", "vip", vip, "ports", configurator.ports)
 	if err := deleteNFTPortRule(c, comment); err != nil {
 		return fmt.Errorf("faield to remove port rule: %w", err)
 	}
@@ -1016,13 +1038,13 @@ func (configurator *network) DeleteIP() (bool, error) {
 
 		if configurator.enableSecurity && !configurator.ignoreSecurity {
 			if err := configurator.removeNftablesRuleToLimitTrafficPorts(c); err != nil {
-				return true, errors.Wrap(err, "could not remove nftables rules to limit traffic ports")
+				log.Warn("could not remove nftables rules to limit traffic ports", "error", err)
 			}
 		}
 
 		if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 			if err := configurator.removeNftablesRulesForMasquerade(c); err != nil {
-				return true, errors.Wrap(err, "could not remove nftables masquerade rules")
+				log.Warn("could not remove nftables masquerade rules", "error", err)
 			}
 		}
 
@@ -1070,11 +1092,9 @@ func (configurator *network) addIptablesRulesForMasquerade() error {
 func (configurator *network) addNftablesRulesForMasquerade(c *nfinternal.Client, comment string) error {
 	cmt := fmt.Sprintf("%s - IPVS, VIP %s, MARK %d", comment, configurator.IP(), configurator.IPVSMark())
 
-	table := c.GetTable(iptables.TableMangle)
-
 	markChain := &nftables.Chain{
 		Name:     "ipvs_prerouting",
-		Table:    table,
+		Table:    c.GetTable(iptables.TableMangle),
 		Type:     nftables.ChainTypeFilter,
 		Hooknum:  nftables.ChainHookPrerouting,
 		Priority: nftables.ChainPriorityMangle,
@@ -1139,6 +1159,19 @@ func (configurator *network) addNftablesRulesForMasquerade(c *nfinternal.Client,
 
 	chain, err := c.GetChain(iptables.TableNat, iptables.ChainPOSTROUTING)
 	if err != nil {
+		if errors.Is(err, nfinternal.ErrChainNotFound) {
+			p := nftables.ChainPolicyAccept
+			ch := &nftables.Chain{
+				Table:    c.GetTable(iptables.TableNat),
+				Name:     iptables.ChainPOSTROUTING,
+				Hooknum:  nftables.ChainHookPostrouting,
+				Type:     nftables.ChainTypeFilter,
+				Priority: nftables.ChainPriorityMangle,
+				Policy:   &p,
+			}
+			_ = c.AddChain(ch)
+		}
+
 		return fmt.Errorf("failed to get chain %s in table %s: %w", iptables.ChainPOSTROUTING, iptables.TableNat, err)
 	}
 
@@ -1200,6 +1233,9 @@ func (configurator *network) removeNftablesRulesForMasquerade(c *nfinternal.Clie
 	}
 
 	comment := fmt.Sprintf(iptablesComment, "control-plane")
+	if configurator.serviceName != "" {
+		comment = fmt.Sprintf(iptablesComment, configurator.serviceName)
+	}
 	cmt := fmt.Sprintf("%s - IPVS, VIP %s, MARK %d", comment, configurator.IP(), configurator.IPVSMark())
 
 	r, err := c.FindRuleByComment(chain.Table, chain, cmt)

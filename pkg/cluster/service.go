@@ -408,7 +408,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			if _, err = network.AddIP(false, false); err != nil {
 				log.Warn(err.Error())
 			} else {
-				log.Info("successful add IP")
+				log.Info("successful add IP", "address", network.IP())
 			}
 		}
 

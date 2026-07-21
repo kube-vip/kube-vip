@@ -193,18 +193,23 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		c.leaseMgr.Delete(leaseID, objectName)
 	}()
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	run := &election.RunConfig{
 		Config:           config,
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
-			objLease.Elected.Store(true)
-			objLease.Unlock()
-			close(objLease.Started)
-			a.OnStartedLeading(ctx)
-			metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
-			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
+			wg.Go(func() {
+				objLease.Elected.Store(true)
+				objLease.Unlock()
+				close(objLease.Started)
+				a.OnStartedLeading(ctx)
+				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
+				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
+			})
 		},
 		OnStoppedLeading: func() {
 			objLease.Elected.Store(false)
