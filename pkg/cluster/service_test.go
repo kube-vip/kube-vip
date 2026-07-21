@@ -345,6 +345,7 @@ func (m *mockNetwork) isPresent() bool {
 	return m.present
 }
 func (m *mockNetwork) AddRoute(bool) (bool, error)     { return false, nil }
+func (m *mockNetwork) ReplaceRoute() error             { return nil }
 func (m *mockNetwork) DeleteRoute() error              { return nil }
 func (m *mockNetwork) UpdateRoutes() (bool, error)     { return false, nil }
 func (m *mockNetwork) IsSet() (*netlink.Addr, error)   { return nil, nil }

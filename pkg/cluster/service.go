@@ -220,6 +220,16 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 							log.Warn(err.Error())
 						} else if err == nil && !(*backendMap)[entry] {
 							log.Info("added route", "route", network.PrepareRoute())
+						} else if err == nil || errors.Is(err, fs.ErrExist) {
+							// Re-assert the route on every healthy cycle: routing daemons
+							// (e.g. zebra) can miss the single netlink event for the route,
+							// leaving it unadvertised even though it exists in the kernel.
+							// RouteReplace is idempotent and regenerates that event.
+							if replaceErr := network.ReplaceRoute(); replaceErr != nil {
+								log.Warn("re-asserting route", "err", replaceErr)
+							} else {
+								log.Debug("re-asserted route", "route", network.PrepareRoute())
+							}
 						}
 
 						(*backendMap)[entry] = true
