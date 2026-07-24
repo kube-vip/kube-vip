@@ -359,21 +359,38 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Determine the kube-vip mode
-		var mode string
+		var (
+			mode         string
+			modesEnabled int
+		)
 		if initConfig.EnableARP {
 			mode = "ARP"
+			modesEnabled++
 		}
 
 		if initConfig.EnableBGP {
 			mode = "BGP"
+			modesEnabled++
 		}
 
 		if initConfig.EnableWireguard {
 			mode = "Wireguard"
+			modesEnabled++
 		}
 
 		if initConfig.EnableRoutingTable {
 			mode = "Routing Table"
+			modesEnabled++
+		}
+
+		if mode == "" {
+			log.Error("no valid kube-vip mode detected, ensure a supported mode is configured")
+			return
+		}
+
+		if modesEnabled > 1 {
+			log.Error("multiple kube-vip modes detected, ensure only one mode is configured")
+			return
 		}
 
 		// Provide configuration to output/logging
