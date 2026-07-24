@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"text/template"
 	"time"
 
@@ -553,7 +554,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
-				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4", k8sImagePath, v129,
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4-no-election", k8sImagePath, v129,
 					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
 			})
 
@@ -578,6 +579,69 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
+		Describe("kube-vip IPv4 services routing table mode functionality with mixed election", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
+
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv4Family,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:            cpVIP,
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					ControlPlaneEnable:         "false",
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					VipElectionEnable:          "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
+				}
+
+				var err error
+				svcElection, err = strconv.ParseBool(manifestValues.SvcElectionEnable)
+				Expect(err).ToNot(HaveOccurred())
+
+				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol}
+
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv4-mixed", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
+			})
+
+			DescribeTable("configures an IPv4 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					lbAddresses := []string{}
+					for range 2 {
+						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork))
+					}
+					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
+						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -646,6 +710,69 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
+		Describe("kube-vip IPv6 services routing table mode functionality with mixed election", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
+
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateVIP(utils.IPv6Family, SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.IPv6Family,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:            cpVIP,
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					ControlPlaneEnable:         "false",
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					VipElectionEnable:          "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
+				}
+
+				var err error
+				svcElection, err = strconv.ParseBool(manifestValues.SvcElectionEnable)
+				Expect(err).ToNot(HaveOccurred())
+
+				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol}
+
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-svc-ipv6-mixed", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
+			})
+
+			DescribeTable("configures an IPv6 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					lbAddresses := []string{}
+					for range 2 {
+						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork))
+					}
+					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
+						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -721,6 +848,69 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			)
 		})
 
+		Describe("kube-vip DualStack services routing table mode functionality with mixed election - IPv4 primary", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
+
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateDualStackVIP(SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily: kindconfigv1alpha4.DualStackFamily,
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:            cpVIP,
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					ControlPlaneEnable:         "false",
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					VipElectionEnable:          "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
+				}
+
+				var err error
+				svcElection, err = strconv.ParseBool(manifestValues.SvcElectionEnable)
+				Expect(err).ToNot(HaveOccurred())
+
+				ipFamily = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
+
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv4-mixed", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
+			})
+
+			DescribeTable("configures an IPv4 and IPv6 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					lbAddresses := []string{}
+					for range 2 {
+						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
+					}
+					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
+						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
 		Describe("kube-vip DualStack services routing table mode functionality - IPv6 primary", Ordered, func() {
 			var (
 				cpVIP       string
@@ -786,6 +976,71 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 					lbAddress := e2e.GenerateDualStackVIP(offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
+		Describe("kube-vip DualStack services routing table mode functionality with mixed election - IPv6 primary", Ordered, func() {
+			var (
+				cpVIP       string
+				clusterName string
+				client      kubernetes.Interface
+				svcElection bool
+				ipFamily    []corev1.IPFamily
+				tempDirPath string
+
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				cpVIP = e2e.GenerateDualStackVIP(SOffset.Get(), defaultNetwork)
+
+				networking := &kindconfigv1alpha4.Networking{
+					IPFamily:      kindconfigv1alpha4.DualStackFamily,
+					PodSubnet:     "fd00:10:244::/56,10.244.0.0/16",
+					ServiceSubnet: "fd00:10:96::/112,10.96.0.0/16",
+				}
+
+				manifestValues := &e2e.KubevipManifestValues{
+					ControlPlaneVIP:            cpVIP,
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					ControlPlaneEnable:         "false",
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					VipElectionEnable:          "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
+				}
+
+				var err error
+				svcElection, err = strconv.ParseBool(manifestValues.SvcElectionEnable)
+				Expect(err).ToNot(HaveOccurred())
+
+				ipFamily = []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}
+
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
+
+				clusterName, client, _ = prepareCluster(ctx, tempDirPath, "rt-ds-svc-ipv6-mixed", k8sImagePath, v129,
+					kubeVIPRoutingTableManifestTemplate, logger, manifestValues, networking, nodesNumber, nil, dsNumber)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, client, tempDirPath, clusterName, func() {
+					cleanupCluster(clusterName, defaultNetwork, ConfigMtx, logger)
+				})
+			})
+
+			DescribeTable("configures an IPv6 and IPv4 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					lbAddresses := []string{}
+					for range 2 {
+						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
+					}
+					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
+						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1439,7 +1694,7 @@ func testServiceRT(ctx context.Context, svcName, lbAddress, leaseName, leaseName
 			svcLease = leaseName
 		}
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, svcLease, dsNumber, false)
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, svcLease, dsNumber, false, false)
 		time.Sleep(time.Second)
 	}
 
@@ -1498,6 +1753,68 @@ func testServiceRT(ctx context.Context, svcName, lbAddress, leaseName, leaseName
 				By(withTimestamp(fmt.Sprintf("getting lease holder for lease '%s/%s' - expected: %t", leaseNamespace, leaseName, expected)))
 				e2e.CheckLeasePresence(ctx, leaseName, leaseNamespace, client, expected)
 			}
+		}
+	}
+}
+
+func testServiceRTMixedElection(ctx context.Context, svcName string, lbAddress []string, globalLeaseName, globalLeaseNamespace, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
+	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfGlobalServices, numberOfElectedServices int, dsNumber int, deleteDS bool, clusterName string) {
+	services := []serviceWithLease{}
+	for i := range numberOfGlobalServices {
+		services = append(services, serviceWithLease{
+			name:           fmt.Sprintf("%s-global-%d", svcName, i),
+			lease:          globalLeaseName,
+			leaseNamespace: globalLeaseNamespace,
+			election:       false,
+			lbAddress:      lbAddress[i],
+		})
+	}
+
+	for i := range numberOfElectedServices {
+		services = append(services, serviceWithLease{
+			name:           fmt.Sprintf("%s-%d", svcName, i),
+			lease:          fmt.Sprintf("%s-%d", leaseName, i),
+			leaseNamespace: leaseNamespace,
+			election:       true,
+			lbAddress:      lbAddress[i+numberOfGlobalServices],
+		})
+	}
+
+	for _, svc := range services {
+		createTestService(ctx, svc.name, dsNamespace, dsName, svc.lbAddress,
+			client, corev1.IPFamilyPolicyPreferDualStack, ipFamily, trafficPolicy, "", dsNumber, false, svc.election)
+		time.Sleep(time.Second)
+	}
+
+	for _, svc := range services {
+		container := fmt.Sprintf("%s-control-plane", clusterName)
+		if svc.election {
+			By(withTimestamp(fmt.Sprintf("getting lease holder for lease '%s/%s'", svc.leaseNamespace, svc.lease)))
+			container = e2e.GetLeaseHolder(ctx, svc.lease, leaseNamespace, client)
+		}
+
+		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
+			By(withTimestamp(fmt.Sprintf("checking route presence for address %q on container %q", addr, container)))
+			e2e.CheckRoutePresence(addr, container, true)
+		}
+	}
+
+	for i, svc := range services {
+		By(withTimestamp(fmt.Sprintf("deleting service %s/%s\n", dsNamespace, svc.name)))
+
+		container := fmt.Sprintf("%s-control-plane", clusterName)
+		if svc.election {
+			container = e2e.GetLeaseHolder(ctx, svc.lease, svc.leaseNamespace, client)
+		}
+
+		err := client.CoreV1().Services(dsNamespace).Delete(ctx, svc.name, metav1.DeleteOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		time.Sleep(time.Second)
+
+		expected := i < len(services)-1
+		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
+			By(withTimestamp(fmt.Sprintf("checking route presence for address %q on container %q - expected: %t", addr, container, expected)))
+			e2e.CheckRoutePresence(addr, container, expected)
 		}
 	}
 }

@@ -71,6 +71,9 @@ const (
 	// Name of the service lease object
 	ServiceLease = "kube-vip.io/leaseName"
 
+	// Forces kube-vip to use per service election for this particular service
+	ForcePerServiceElection = "kube-vip.io/forcePerServiceElection"
+
 	// Allow service reconciliation even when no endpoints are present (Cluster policy only)
 	AllowReconcileWithoutEndpoints = "kube-vip.io/allow-reconcile-without-endpoints"
 

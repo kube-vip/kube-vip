@@ -413,19 +413,19 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		}
 	}
 
-	if serviceInstance.LabelAdded {
-		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
-		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
-			return fmt.Errorf("error removing label from node: %w", err)
-		}
-	}
-
 	// If we've been through all services and not found the correct one then error
 	if !found {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
 		log.Warn("unable to find/stop service", "uid", uid)
 		return nil
+	}
+
+	if serviceInstance.LabelAdded {
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
+		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
+			return fmt.Errorf("error removing label from node: %w", err)
+		}
 	}
 
 	for _, c := range serviceInstance.Clusters {

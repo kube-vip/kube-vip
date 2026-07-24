@@ -72,7 +72,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-cp-ipv4", false, true, false)
+					&gobgpClient, logger, nodesNumber, "", "bgp-cp-ipv4", false, true, false, false)
 			})
 
 			AfterAll(func() {
@@ -103,7 +103,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-cp-ipv4", false, true, false)
+					&gobgpClient, logger, nodesNumber, "", "bgp-cp-ipv4", false, true, false, false)
 			})
 
 			AfterAll(func() {
@@ -135,7 +135,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "cp-mpbgp-ipv4", false, true, false)
+					&gobgpClient, logger, nodesNumber, "fixed", "cp-mpbgp-ipv4", false, true, false, false)
 			})
 
 			AfterAll(func() {
@@ -167,7 +167,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "cp-mpbgp-ipv6", false, true, false)
+					&gobgpClient, logger, nodesNumber, "fixed", "cp-mpbgp-ipv6", false, true, false, false)
 			})
 
 			AfterAll(func() {
@@ -198,7 +198,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false, false, true)
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -227,6 +227,42 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
+		Describe("kube-vip IPv4 services BGP mode functionality with mixed election", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv4Family, utils.IPv4Family,
+					[]string{utils.IPv4Family}, &gobgpPeers,
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4-mixed", false, false, true, true)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			DescribeTable("advertise IPv4 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGPMixedElection(ctx, offset, utils.IPv4Family, api.Family_AFI_IP,
+						[]corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+						trafficPolicy, kindCluster.Client, gobgpClient, "")
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
 		Describe("kube-vip IPv6 services BGP mode functionality", Ordered, func() {
 			var (
 				cpVIP       string
@@ -242,7 +278,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false, false, true)
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -271,6 +307,42 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			)
 		})
 
+		Describe("kube-vip IPv6 services BGP mode functionality with mixed election", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv6Family, utils.IPv6Family,
+					[]string{utils.IPv6Family}, &gobgpPeers,
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv6-mixed", false, false, true, true)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			DescribeTable("advertise IPv6 routes for services",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGPMixedElection(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6,
+						[]corev1.IPFamily{corev1.IPv6Protocol}, svcName,
+						trafficPolicy, kindCluster.Client, gobgpClient, "")
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
 		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv6 over IPv4 - fixed nexthop", Ordered, func() {
 			var (
 				cpVIP       string
@@ -286,7 +358,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv4", false, false, true)
+					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv4", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -330,7 +402,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv6", false, false, true)
+					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv6", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -375,7 +447,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", false, false, true)
+					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -420,7 +492,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", false, false, true)
+					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", false, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -464,7 +536,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv4Family, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true, false, true)
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -516,7 +588,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, utils.IPv6Family, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true, false, true)
+					&gobgpClient, logger, nodesNumber, "", "bgp-ipv4", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -568,7 +640,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv4", true, false, true)
+					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv4", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -620,7 +692,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv6", true, false, true)
+					&gobgpClient, logger, nodesNumber, "fixed", "mpbgp-ipv6", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -673,7 +745,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, _, containerIP = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamily, utils.IPv4Family,
 					[]string{utils.IPv4Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", true, false, true)
+					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv4", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -726,7 +798,7 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				kindCluster, containerIP, _ = setupEnv(ctx, &cpVIP,
 					server, e2e.DualstackFamilyIPv6, utils.IPv6Family,
 					[]string{utils.IPv6Family}, &gobgpPeers,
-					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", true, false, true)
+					&gobgpClient, logger, nodesNumber, "auto_sourceif", "mpbgp-if-ipv6", true, false, true, false)
 			})
 
 			AfterAll(func() {
@@ -829,12 +901,29 @@ func testBGP(ctx context.Context, offset uint, lbFamily string, afiFamily api.Fa
 	testServiceBGP(ctx, svcName, lbAddress, trafficPolicy, client, svcFamily, numberOfServices, gobgpClient, routeCheckFamily, expectedNexthop, serviceLease)
 }
 
+func testBGPMixedElection(ctx context.Context, offset uint, lbFamily string, afiFamily api.Family_Afi, svcFamily []corev1.IPFamily,
+	svcName string, trafficPolicy corev1.ServiceExternalTrafficPolicy, client kubernetes.Interface,
+	gobgpClient api.GoBgpServiceClient, expectedNexthop string,
+) {
+	lbAddresses := []string{}
+	for range 2 {
+		lbAddresses = append(lbAddresses, e2e.GenerateVIP(lbFamily, offset, defaultNetwork))
+	}
+	routeCheckFamily := &api.Family{
+		Afi:  afiFamily,
+		Safi: api.Family_SAFI_UNICAST,
+	}
+	testServiceBGPMixedElection(ctx, svcName, lbAddresses,
+		"plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
+		trafficPolicy, client, svcFamily, 1, 1, gobgpClient, routeCheckFamily, expectedNexthop)
+}
+
 func setupEnv(ctx context.Context, cpVIP *string,
 	server *bgp.Server, clusterAddrFamily, bgpClientAddrFamily string,
 	peerAddrFamily []string, gobgpPeers *[]*e2e.BGPPeerValues,
 	gobgpClient *api.GoBgpServiceClient, logger log.Logger,
 	nodesNumber int, mpbgpnexthop, clusterNameSuffix string,
-	serviceElection, cpEnable, svcEnable bool,
+	serviceElection, cpEnable, svcEnable, perServiceElectionOnDemand bool,
 ) (*e2e.Cluster, string, string) {
 	*cpVIP = e2e.GenerateVIP(clusterAddrFamily, SOffset.Get(), defaultNetwork)
 
@@ -868,17 +957,18 @@ func setupEnv(ctx context.Context, cpVIP *string,
 	}
 
 	manifestValues := e2e.KubevipManifestValues{
-		ControlPlaneVIP:       *cpVIP,
-		ControlPlaneEnable:    fmt.Sprintf("%t", cpEnable),
-		SvcEnable:             fmt.Sprintf("%t", svcEnable),
-		SvcElectionEnable:     fmt.Sprintf("%t", serviceElection),
-		EnableNodeLabeling:    "false",
-		BGPAS:                 bgp.KubevipAS,
-		BGPPeers:              bgp.PeerStrings(kvPeers),
-		MPBGPNexthop:          mpbgpnexthop,
-		MPBGPNexthopIPv4:      defaultFixedNexthopv4,
-		MPBGPNexthopIPv6:      defaultFixedNexthopv6,
-		EnableServiceSecurity: "true",
+		ControlPlaneVIP:            *cpVIP,
+		ControlPlaneEnable:         fmt.Sprintf("%t", cpEnable),
+		SvcEnable:                  fmt.Sprintf("%t", svcEnable),
+		SvcElectionEnable:          fmt.Sprintf("%t", serviceElection),
+		EnableNodeLabeling:         "false",
+		BGPAS:                      bgp.KubevipAS,
+		BGPPeers:                   bgp.PeerStrings(kvPeers),
+		MPBGPNexthop:               mpbgpnexthop,
+		MPBGPNexthopIPv4:           defaultFixedNexthopv4,
+		MPBGPNexthopIPv6:           defaultFixedNexthopv6,
+		EnableServiceSecurity:      "true",
+		PerServiceElectionOnDemand: fmt.Sprintf("%t", perServiceElectionOnDemand),
 	}
 
 	By(manifestValues.BGPPeers)
@@ -926,7 +1016,7 @@ func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolic
 
 	for _, svc := range services {
 		createTestService(ctx, svc, dsNamespace, dsName, lbAddress,
-			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, serviceLease, 80, false)
+			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, serviceLease, 80, false, false)
 		time.Sleep(time.Second)
 	}
 
@@ -963,6 +1053,85 @@ func testServiceBGP(ctx context.Context, svcName, lbAddress string, trafficPolic
 	for _, addr := range lbAddresses {
 		By(withTimestamp(fmt.Sprintf("checking bgp route for address %q - should be deleted", addr)))
 		bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 0)
+	}
+}
+
+func testServiceBGPMixedElection(ctx context.Context, svcName string, lbAddress []string,
+	globalLeaseName, globalLeaseNamespace, leaseName, leaseNamespace string,
+	trafficPolicy corev1.ServiceExternalTrafficPolicy,
+	client kubernetes.Interface, serviceAddrFamily []corev1.IPFamily,
+	numberOfGlobalServices, numberOfElectedServices int,
+	gobgpClient api.GoBgpServiceClient, gobgpFamily *api.Family, expectedNexthop string,
+) {
+	services := []serviceWithLease{}
+	for i := range numberOfGlobalServices {
+		services = append(services, serviceWithLease{
+			name:           fmt.Sprintf("%s-global-%d", svcName, i),
+			lease:          globalLeaseName,
+			leaseNamespace: globalLeaseNamespace,
+			election:       false,
+			lbAddress:      lbAddress[i],
+		})
+	}
+
+	for i := range numberOfElectedServices {
+		services = append(services, serviceWithLease{
+			name:           fmt.Sprintf("%s-%d", svcName, i),
+			lease:          fmt.Sprintf("%s-%d", leaseName, i),
+			leaseNamespace: leaseNamespace,
+			election:       true,
+			lbAddress:      lbAddress[i+numberOfGlobalServices],
+		})
+	}
+
+	for _, svc := range services {
+		svcLease := ""
+		if svc.election && trafficPolicy != corev1.ServiceExternalTrafficPolicyLocal {
+			svcLease = svc.lease
+		}
+		createTestService(ctx, svc.name, dsNamespace, dsName, svc.lbAddress,
+			client, corev1.IPFamilyPolicyPreferDualStack, serviceAddrFamily, trafficPolicy, svcLease, 80, false, svc.election)
+		time.Sleep(time.Second)
+	}
+
+	for _, svc := range services {
+		if svc.election {
+			Expect(e2e.CheckLeasePresence(ctx, svc.lease, svc.leaseNamespace, client, true)).ToNot(BeNil())
+		}
+
+		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
+			By(withTimestamp(fmt.Sprintf("checking bgp route for address %q", addr)))
+			paths := bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 1)
+			Expect(paths).ToNot(BeNil())
+			Expect(paths).ToNot(BeEmpty())
+			Expect(strings.Contains(paths[0].Prefix, addr)).To(BeTrue())
+			if expectedNexthop != "" {
+				Expect(strings.Contains(paths[0].String(), fmt.Sprintf("next_hop:\"%s\"", expectedNexthop)) || strings.Contains(paths[0].String(), fmt.Sprintf("next_hops:\"%s\"", expectedNexthop))).To(BeTrue())
+			}
+		}
+	}
+
+	for i, svc := range services {
+		By(withTimestamp(fmt.Sprintf("deleting service '%s/%s'", dsNamespace, svc.name)))
+		err := client.CoreV1().Services(dsNamespace).Delete(ctx, svc.name, metav1.DeleteOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		time.Sleep(time.Second)
+
+		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
+			if i < len(services)-1 {
+				By(withTimestamp(fmt.Sprintf("checking bgp route for address %q", addr)))
+				paths := bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 1)
+				Expect(paths).ToNot(BeNil())
+				Expect(paths).ToNot(BeEmpty())
+				Expect(strings.Contains(paths[0].Prefix, addr)).To(BeTrue())
+				if expectedNexthop != "" {
+					Expect(strings.Contains(paths[0].String(), fmt.Sprintf("next_hop:\"%s\"", expectedNexthop)) || strings.Contains(paths[0].String(), fmt.Sprintf("next_hops:\"%s\"", expectedNexthop))).To(BeTrue())
+				}
+			} else {
+				By(withTimestamp(fmt.Sprintf("checking bgp route for address %q - should be deleted", addr)))
+				bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 0)
+			}
+		}
 	}
 }
 

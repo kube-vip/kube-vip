@@ -218,6 +218,9 @@ type Config struct {
 
 	// DebounceTime defines how long will event debouncer wait for the events to arrive
 	DebounceTime string `yaml:"debounceTime"`
+
+	// PerServiceElectionOnDemand will enable kube-vip to handle services with per-service election when annotation is used
+	PerServiceElectionOnDemand bool `yaml:"perServiceElectionOnDemand"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

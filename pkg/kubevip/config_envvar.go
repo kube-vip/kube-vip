@@ -63,6 +63,9 @@ const (
 	// egressWithNftables - enables using nftables over iptables
 	egressWithNftables = "egress_withnftables"
 
+	// perServiceElectionOnDemand - enables kube-vip to use per-service election for annotated services
+	perServiceElectionOnDemand = "per_service_election_on_demand"
+
 	/////////////////////////////////////
 	// TO DO:
 	// Determine how to tidy this mess up
