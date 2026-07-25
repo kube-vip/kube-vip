@@ -60,6 +60,7 @@ func init() {
 	// Basic flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AllowInterfaceNotUp, "allowInterfaceNotUp", false, "Allow kube-vip to start even if the interface is not up")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc.. (Default to 32 for IPv4 and 128 for IPv6)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.NodeName, "nodeName", "", "Name to be used for lease holder. Must be unique for each node/instance")
