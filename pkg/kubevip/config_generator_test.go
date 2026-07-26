@@ -54,6 +54,35 @@ func TestParseEnvironmentInstanceName(t *testing.T) {
 	}
 }
 
+func TestParseEnvironmentBGPAttachIPToInterface(t *testing.T) {
+	t.Setenv(bgpAttachIPToInterface, "true")
+
+	config := &Config{}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	if !config.BGPAttachIPToInterface {
+		t.Fatal("BGPAttachIPToInterface = false, want true")
+	}
+}
+
+func TestGeneratePodSpecBGPAttachIPToInterface(t *testing.T) {
+	pod, err := generatePodSpec(&Config{
+		EnableBGP:              true,
+		BGPAttachIPToInterface: true,
+	}, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+	if err != nil {
+		t.Fatalf("generatePodSpec() error = %v", err)
+	}
+
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.Name == bgpAttachIPToInterface && env.Value == "true" {
+			return
+		}
+	}
+	t.Fatalf("%s=true is missing from generated pod environment", bgpAttachIPToInterface)
+}
+
 func TestGeneratePodSpecInstanceName(t *testing.T) {
 	tests := []struct {
 		name         string
