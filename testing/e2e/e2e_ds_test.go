@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	docker "github.com/docker/docker/client"
+	"github.com/osrg/gobgp/v4/pkg/config/oc"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +24,8 @@ import (
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/log"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/docker/docker/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -541,6 +546,43 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 		families = []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}
 	}
 
+	// wait for neighbor to be discovered
+	bgpPeers := strings.Split(manifestValues.BGPPeers, ":")
+	if bgpPeers[0] == "unnumbered" {
+		cli, err := docker.NewClientWithOpts(docker.FromEnv)
+		Expect(err).ToNot(HaveOccurred())
+
+		cnts, err := cli.ContainerList(ctx, container.ListOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		id := ""
+		for _, c := range cnts {
+			if slices.ContainsFunc(c.Names, func(s string) bool {
+				return strings.Contains(s, clusterName)
+			}) {
+				id = c.ID
+			}
+		}
+		Expect(id).ToNot(BeEmpty())
+
+		inspect, err := cli.ContainerInspect(ctx, id)
+		Expect(err).ToNot(HaveOccurred())
+
+		containerNs, err := ns.GetNS(inspect.NetworkSettings.SandboxKey)
+		Expect(err).ToNot(HaveOccurred())
+		defer containerNs.Close()
+
+		By(withTimestamp("waiting for the neighbor to be discovered"))
+
+		Eventually(func() error {
+			return containerNs.Do(func(ns.NetNS) error {
+				_, err := oc.GetIPv6LinkLocalNeighborAddress(bgpPeers[1])
+				return err
+			})
+		}, "120s").Should(Succeed())
+
+	}
+
 	var cpVips, svcVips, services []string
 	var cpHost, svcHost, svcVip string
 
@@ -988,7 +1030,7 @@ func prepareClusterForDS(tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePa
 	err := os.Setenv(kindNetworkEnv, clusterName)
 	Expect(err).ToNot(HaveOccurred())
 
-	By(withTimestamp("creating a kind cluster with multiple control plane nodes"))
+	By(withTimestamp("creating a kind cluster with multiple control plane nodes, name " + clusterName))
 	client, cfg, err := createKindCluster(logger, &clusterConfig, clusterName)
 	Expect(err).ToNot(HaveOccurred())
 
