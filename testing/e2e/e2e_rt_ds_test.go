@@ -86,29 +86,12 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 			It(clusterName+" exits gracefully on exit when only control plane is enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "true",
-					VipElectionEnable:     "false",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "false",
-					SvcElectionEnable:     "false",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
-				}
-
-				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
-			})
-
-			It(clusterName+" exits gracefully on exit when only services are enabled without leaderelection", func() {
-				manifestValues := &e2e.KubevipManifestValues{
 					Mode:               Mode,
-					ControlPlaneEnable: "false",
+					ControlPlaneEnable: "true",
 					VipElectionEnable:  "false",
 					ImagePath:          imagePath,
 					ConfigPath:         configPath,
-					SvcEnable:          "true",
+					SvcEnable:          "false",
 					SvcElectionEnable:  "false",
 					EnableEndpoints:    "false",
 					EnableNodeLabeling: "false",
@@ -117,18 +100,36 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
 			})
 
+			It(clusterName+" exits gracefully on exit when only services are enabled without leaderelection", func() {
+				manifestValues := &e2e.KubevipManifestValues{
+					Mode:                       Mode,
+					ControlPlaneEnable:         "false",
+					VipElectionEnable:          "false",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					PerServiceElectionOnDemand: "true",
+				}
+
+				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
+			})
+
 			It(clusterName+" exits gracefully on exit when only services are enabled with leaderelection", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "false",
-					VipElectionEnable:     "true",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "true",
-					SvcElectionEnable:     "false",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
+					Mode:                       Mode,
+					ControlPlaneEnable:         "false",
+					VipElectionEnable:          "true",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -136,16 +137,17 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 			It(clusterName+" exits gracefully on exit when only services are enabled with leaderelection per service", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "false",
-					VipElectionEnable:     "true",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "true",
-					SvcElectionEnable:     "true",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
+					Mode:                       Mode,
+					ControlPlaneEnable:         "false",
+					VipElectionEnable:          "true",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "true",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -153,16 +155,17 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 			It(clusterName+" exits gracefully on exit when control-plane and services are enabled without leaderelection", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "true",
-					VipElectionEnable:     "false",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "true",
-					SvcElectionEnable:     "false",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
+					Mode:                       Mode,
+					ControlPlaneEnable:         "true",
+					VipElectionEnable:          "false",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -170,16 +173,17 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 			It(clusterName+" exits gracefully on exit when control-plane and services are enabled with leaderelection", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "true",
-					VipElectionEnable:     "true",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "true",
-					SvcElectionEnable:     "false",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
+					Mode:                       Mode,
+					ControlPlaneEnable:         "true",
+					VipElectionEnable:          "true",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "false",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -187,16 +191,17 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 
 			It(clusterName+" exits gracefully when control-plane and services are enabled with leaderelection per service", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:                  Mode,
-					ControlPlaneEnable:    "true",
-					VipElectionEnable:     "true",
-					ImagePath:             imagePath,
-					ConfigPath:            configPath,
-					SvcEnable:             "true",
-					SvcElectionEnable:     "true",
-					EnableEndpoints:       "false",
-					EnableNodeLabeling:    "false",
-					EnableServiceSecurity: "true",
+					Mode:                       Mode,
+					ControlPlaneEnable:         "true",
+					VipElectionEnable:          "true",
+					ImagePath:                  imagePath,
+					ConfigPath:                 configPath,
+					SvcEnable:                  "true",
+					SvcElectionEnable:          "true",
+					EnableEndpoints:            "false",
+					EnableNodeLabeling:         "false",
+					EnableServiceSecurity:      "true",
+					PerServiceElectionOnDemand: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)

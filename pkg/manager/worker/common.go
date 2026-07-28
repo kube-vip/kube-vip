@@ -66,9 +66,14 @@ func (c *Common) InitControlPlane() error {
 	return nil
 }
 
-func (c *Common) PerServiceLeader(ctx context.Context) error {
-	log.Info("beginning watching services, leaderelection will happen for every service")
-	err := c.svcProcessor.StartServicesWatchForLeaderElection(ctx)
+func (c *Common) PerServiceLeader(ctx context.Context, forcedOnly bool) error {
+	if forcedOnly {
+		log.Info(fmt.Sprintf("beginning watching services, leaderelection will happen for services annotated with '%s = \"true\"'", kubevip.ForcePerServiceElection))
+	} else {
+		log.Info("beginning watching services, leaderelection will happen for every service")
+	}
+
+	err := c.svcProcessor.StartServicesWatchForLeaderElection(ctx, forcedOnly)
 	if err != nil {
 		return err
 	}
@@ -76,12 +81,42 @@ func (c *Common) PerServiceLeader(ctx context.Context) error {
 }
 
 func (c *Common) GlobalLeader(ctx context.Context, leaseName string) {
-	c.runGlobalElection(ctx, c, leaseName, c.config, c.electionMgr)
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	servicesCtx, servicesCtxCancel := context.WithCancel(ctx)
+	defer servicesCtxCancel()
+
+	if c.config.PerServiceElectionOnDemand {
+		wg.Go(func() {
+			if err := c.PerServiceLeader(servicesCtx, true); err != nil {
+				log.Error("per-service leader election failed with", "error", err)
+				servicesCtxCancel()
+			}
+		})
+	}
+
+	c.runGlobalElection(servicesCtx, c, leaseName, c.config, c.electionMgr)
 }
 
 func (c *Common) ServicesNoLeader(ctx context.Context) error {
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	servicesCtx, servicesCtxCancel := context.WithCancel(ctx)
+	defer servicesCtxCancel()
+
+	if c.config.PerServiceElectionOnDemand {
+		wg.Go(func() {
+			if err := c.PerServiceLeader(servicesCtx, true); err != nil {
+				log.Error("per-service leader election failed with", "error", err)
+				servicesCtxCancel()
+			}
+		})
+	}
+
 	log.Info("beginning watching services without leader election")
-	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false))
+	err := c.svcProcessor.ServicesWatcher(servicesCtx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
 	if err != nil {
 		return fmt.Errorf("error while watching services: %w", err)
 	}
@@ -93,7 +128,7 @@ func (c *Common) Cleanup() {
 }
 
 func (c *Common) OnStartedLeading(ctx context.Context) {
-	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false))
+	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
 	if err != nil {
 		log.Error("service watcher", "err", err)
 		c.killFunc()
@@ -122,6 +157,7 @@ func (c *Common) OnNewLeader(identity string) {
 func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leaseName string,
 	config *kubevip.Config, electionManager *election.Manager) {
 
+	log.Debug("starting global election")
 	ns, leaseName := lease.NamespaceName(leaseName, config)
 
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)

@@ -59,7 +59,7 @@ func (a *ARP) StartServices(ctx context.Context) error {
 	// Start a services watcher (all kube-vip pods will watch services), upon a new service
 	// a lock based upon that service is created that they will all leaderElection on
 	if a.config.EnableServicesElection {
-		if err := a.PerServiceLeader(ctx); err != nil {
+		if err := a.PerServiceLeader(ctx, false); err != nil {
 			return err
 		}
 	} else {

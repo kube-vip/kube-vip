@@ -110,6 +110,10 @@ spec:
     - name: enable_service_security
       value: "{{ .EnableServiceSecurity }}"
 {{- end }}
+{{- if .PerServiceElectionOnDemand }}
+    - name: per_service_election_on_demand
+      value: "{{ .PerServiceElectionOnDemand }}"
+{{- end }}
     image: "{{ .ImagePath }}"
     imagePullPolicy: Never
     securityContext:
