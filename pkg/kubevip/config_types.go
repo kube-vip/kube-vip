@@ -162,6 +162,9 @@ type Config struct {
 	// EgressServiceCidr, this contains the service cidr range to ignore
 	EgressServiceCidr string
 
+	// EnableInternalSNAT, this will enable the internal SNAT rule that kube-vip adds to the egress chain
+	EnableInternalSNAT bool
+
 	// EgressWithNftables, this will use the iptables-nftables OVER iptables
 	EgressWithNftables bool
 

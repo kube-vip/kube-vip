@@ -31,6 +31,9 @@ const (
 	// Networks that we wont Egress for
 	EgressDeniedNetworks = "kube-vip.io/egress-denied-networks"
 
+	// EgressInternalTraffic, this will ensure that we allow internal traffic to still be source natted
+	EgressInternalTraffic = "kube-vip.io/egress-internal-traffic"
+
 	// The current active endpoint(pod) for the Egress VIP
 	ActiveEndpoint = "kube-vip.io/active-endpoint"
 
