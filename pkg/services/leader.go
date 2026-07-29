@@ -72,10 +72,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	// This is important for proper cleanup when a service is deleted - it ensures that
 	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
 	// Without this, RunOrDie would continue running until leadership is naturally lost.
-	wg.Go(func() {
+	//
+	// This must NOT be tracked by wg: it only completes once the service is deleted
+	// (svcCtx.Ctx.Done()), which is normally long after this function itself returns
+	// e.g. on an ordinary leadership loss such as a lease renewal failure. If it were
+	// added to wg, the deferred wg.Wait() above would block this function and with it
+	// the leader-election restart loop in startLeaderElection that calls it forever,
+	// until the Service was deleted (and recreated), even though the endpoint was still
+	// healthy and a new election should have started immediately.
+	go func() {
 		<-svcCtx.Ctx.Done()
 		p.leaseMgr.Delete(id, objectName)
-	})
+	}()
 
 	select {
 	case <-svcCtx.Ctx.Done():
