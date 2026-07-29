@@ -17,7 +17,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: All checks
@@ -29,7 +29,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Run tests
@@ -41,7 +41,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Run tests
