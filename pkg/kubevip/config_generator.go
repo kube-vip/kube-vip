@@ -476,6 +476,12 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: strconv.FormatBool(c.EnableBGP),
 			},
 		}
+		if c.BGPAttachIPToInterface {
+			bgp = append(bgp, corev1.EnvVar{
+				Name:  bgpAttachIPToInterface,
+				Value: strconv.FormatBool(c.BGPAttachIPToInterface),
+			})
+		}
 		newEnvironment = append(newEnvironment, bgp...)
 	}
 

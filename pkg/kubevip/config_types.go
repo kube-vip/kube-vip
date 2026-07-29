@@ -11,6 +11,9 @@ type Config struct {
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`
 
+	// BGPAttachIPToInterface assigns BGP-advertised service VIPs to the configured interface
+	BGPAttachIPToInterface bool `yaml:"bgpAttachIPToInterface"`
+
 	// EnableWireguard, will use wireguard to advertise the VIP address
 	EnableWireguard bool `yaml:"enableWireguard"`
 
