@@ -129,7 +129,7 @@ func getARPLinkParams(ifaceName string) (arpLinkParams, error) {
 
 	switch hwType {
 	case unix.ARPHRD_INFINIBAND:
-		log.Info("using ipoib", "iface", ifaceName)
+		log.Debug("using ipoib", "iface", ifaceName)
 		bcastAddr, err := getInterfaceBroadcastAddress(ifaceName)
 		if err != nil {
 			return arpLinkParams{}, fmt.Errorf("failed to get broadcast address: %w", err)
@@ -139,7 +139,7 @@ func getARPLinkParams(ifaceName string) (arpLinkParams, error) {
 		}
 		return arpLinkParams{hwType, ipoibHwLen, bcastAddr}, nil
 	case unix.ARPHRD_ETHER:
-		log.Info("using ethernet", "iface", ifaceName)
+		log.Debug("using ethernet", "iface", ifaceName)
 		return arpLinkParams{hwType, ethHwLen, ethernetBroadcast}, nil
 	default:
 		log.Warn("unexpected hardware type, falling back to ethernet", "iface", ifaceName, "hwType", hwType)

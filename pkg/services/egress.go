@@ -159,6 +159,25 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	deniedNetworks := annotations[kubevip.EgressDeniedNetworks]
 	allowedNetworks := annotations[kubevip.EgressAllowedNetworks]
 	internalEgress := annotations[kubevip.EgressInternal]
+	noInternalTraffic := annotations[kubevip.EgressNoInternalTraffic]
+	detectAPIServer := annotations[kubevip.EgressDetectAPIServer]
+
+	// If the user has requested that we detect the API server, then we will attempt to add it to the denied networks for egress
+	if detectAPIServer != "" || strings.ToLower(detectAPIServer) == "true" {
+		apiServerHost := os.Getenv("KUBERNETES_SERVICE_HOST")
+		if apiServerHost == "" {
+			log.Warn("KUBERNETES_SERVICE_HOST is not set, unable to detect API server IP")
+		} else {
+			if !utils.IsIPv6(apiServerHost) {
+				deniedNetworks = strings.TrimSpace(deniedNetworks)
+				if deniedNetworks == "" {
+					deniedNetworks = apiServerHost + "/32"
+				} else {
+					deniedNetworks += "," + apiServerHost + "/32"
+				}
+			}
+		}
+	}
 
 	if p.config.EgressPodCidr == "" || p.config.EgressServiceCidr == "" {
 		autoServiceCIDR, autoPodCIDR, discoverErr = p.AutoDiscoverCIDRs(ctx)
@@ -181,6 +200,7 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		if !utils.IsIPv4(podIP) {
 			return fmt.Errorf("error with the CIDR [%s]", podIP)
 		}
+		//
 		podCidr = defaultPodCIDR
 	}
 
@@ -220,10 +240,13 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 
 	// Use the internal egress implementation
 	if internalEgress != "" || p.config.EgressWithNftables {
+		var ignoreCIDRs []string
 		// Create an array of CIDRs that we wont SNAT to.
-		ignoreCIDRs := []string{
-			podCidr,
-			serviceCidr,
+		if noInternalTraffic == "" || strings.Clone(noInternalTraffic) == "false" || p.config.EnableInternalSNAT {
+			ignoreCIDRs = append(ignoreCIDRs, []string{
+				podCidr,
+				serviceCidr,
+			}...)
 		}
 
 		// Add any specifically denied networks

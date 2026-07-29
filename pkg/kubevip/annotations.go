@@ -31,6 +31,12 @@ const (
 	// Networks that we wont Egress for
 	EgressDeniedNetworks = "kube-vip.io/egress-denied-networks"
 
+	// EgressNoInternalTraffic, when enabled will prevent any internal traffic from being SNATed to the egress VIP, even if the internal SNAT rule is enabled
+	EgressNoInternalTraffic = "kube-vip.io/egress-no-internal-traffic"
+
+	// EgressDetectAPIServer, this will attempt to detect the API server and add it to the allowed networks for egress
+	EgressDetectAPIServer = "kube-vip.io/egress-detect-api-server"
+
 	// The current active endpoint(pod) for the Egress VIP
 	ActiveEndpoint = "kube-vip.io/active-endpoint"
 

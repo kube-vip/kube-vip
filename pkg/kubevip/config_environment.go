@@ -726,6 +726,16 @@ func ParseEnvironment(c *Config) error {
 		c.PerServiceElectionOnDemand = b
 	}
 
+	// if this is set then we're enabling the internal SNAT rule that kube-vip adds to the egress chain
+	env = os.Getenv(egressEnableInternalSNAT)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableInternalSNAT = b
+	}
+
 	// check to see if we're using a specific path to the Kubernetes config file
 	env = os.Getenv(k8sConfigFile)
 	if env != "" {
