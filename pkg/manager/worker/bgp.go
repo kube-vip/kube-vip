@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
+	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -53,9 +55,14 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 
 	log.Info("Starting the BGP server to advertise VIP routes to BGP peers")
 	if err := b.bgpServer.Start(ctx, func(p *apiutil.WatchEventMessage_PeerEvent) {
+		if p.Type != apiutil.PEER_EVENT_STATE {
+			return
+		}
+
 		ipaddr := p.Peer.State.NeighborAddress.String()
-		port := uint64(179)
-		peerDescription := fmt.Sprintf("%s:%d", ipaddr, port)
+
+		port := 179
+		peerDescription := net.JoinHostPort(ipaddr, strconv.Itoa(port))
 
 		for stateName, stateValue := range api.PeerState_SessionState_value {
 			metricValue := 0.0
