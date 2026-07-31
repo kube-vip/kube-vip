@@ -118,7 +118,8 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	switch {
 	case config.LeaderElectionType == "etcd":
 		// Do nothing, we don't construct a k8s client for etcd leader election
-	case config.K8sConfigFile != "" && utils.FileExists(config.K8sConfigFile):
+	case config.K8sConfigFile != "" && config.K8sConfigFile != adminConfigPath &&
+		config.K8sConfigFile != homeConfigPath && utils.FileExists(config.K8sConfigFile):
 		// An explicitly configured kubeconfig (k8s_config_file env or
 		// --k8sConfigPath) takes precedence over the well-known host paths.
 		// KubernetesAddr, when set, overrides the API endpoint - static pods
