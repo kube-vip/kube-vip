@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/cloudflare/ipvs v0.12.0
+	github.com/containernetworking/plugins v1.9.1
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/florianl/go-conntrack v0.7.0
