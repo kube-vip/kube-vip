@@ -58,8 +58,9 @@ type IPVSLoadBalancer struct {
 
 func NewIPVSLB(ctx context.Context, network vip.Network, port uint16, forwardingMethod string, backendHealthCheckInterval int,
 	nftables bool, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+	log.Info("Starting IPVS LoadBalancer", "network", network)
+
 	address := network.IP()
-	log.Info("Starting IPVS LoadBalancer", "address", network)
 
 	// Create IPVS client
 	c, err := ipvs.New()
