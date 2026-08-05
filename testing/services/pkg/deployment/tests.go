@@ -745,6 +745,15 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 0); err != nil {
 			return err
 		}
+
+		// With a local traffic policy and no endpoints anywhere, the VIP has to be
+		// given up rather than left black-holing traffic. Only assert this once,
+		// the remaining cycles are there to accumulate election loops.
+		if i == 1 {
+			if err := waitForVIPReleased(lbAddress); err != nil {
+				return err
+			}
+		}
 		time.Sleep(time.Second * 2)
 
 		slog.Infof("🔁 flap %d: scaling deployment [%s] back up", i, config.DeploymentName)
@@ -825,6 +834,85 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 
 	if err := waitForElectionProgress(before, v1.NamespaceDefault, config.ServiceName); err != nil {
 		return err
+	}
+
+	// Fault 5: a service change that tears the service down and rebuilds it.
+	// Flipping the external traffic policy makes serviceChanged cancel the service
+	// context and drop it from svcMap, so the next event has to build a fresh
+	// context and a fresh lease. Same desync class as fault 2, different trigger.
+	for _, policy := range []v1.ServiceExternalTrafficPolicy{
+		v1.ServiceExternalTrafficPolicyCluster,
+		v1.ServiceExternalTrafficPolicyLocal,
+	} {
+		slog.Infof("💥 setting externalTrafficPolicy of service [%s] to [%s]", config.ServiceName, policy)
+		if err := setExternalTrafficPolicy(ctx, clientset, config.ServiceName, policy); err != nil {
+			return err
+		}
+
+		if err := config.checkConverged(ctx, clientset, leaseName, lbAddress,
+			fmt.Sprintf("externalTrafficPolicy change to %s", policy)); err != nil {
+			return err
+		}
+	}
+
+	// Fault 6: a burst of service events. This drives the same spawn-once
+	// invariant as fault 1 from the service watch instead of the endpoint watch.
+	slog.Infof("💥 annotating service [%s] repeatedly", config.ServiceName)
+	for i := range 15 {
+		if err := annotateServiceValue(ctx, clientset, config.ServiceName, fmt.Sprintf("storm-%d", i)); err != nil {
+			return err
+		}
+		time.Sleep(time.Millisecond * 200)
+	}
+
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "service event storm"); err != nil {
+		return err
+	}
+
+	// Fault 7: partition a node that is not the leader. The leader has to keep the
+	// lease and keep serving, and the returning node must not leak a loop or end up
+	// advertising the same address.
+	follower, err := followerNode(ctx, clientset, leaseName)
+	if err != nil {
+		return err
+	}
+
+	if follower == "" {
+		slog.Infof("⏭️  no follower node to partition, skipping")
+	} else {
+		holderBefore, err := leaseHolder(ctx, clientset, leaseName)
+		if err != nil {
+			return err
+		}
+
+		slog.Infof("💥 blocking API server access from follower node [%s]", follower)
+		if err := setAPIServerReachable(follower, false); err != nil {
+			return err
+		}
+
+		// The leader must keep serving while the follower is cut off.
+		time.Sleep(time.Second * 25)
+		if err := httpTest(lbAddress); err != nil {
+			return fmt.Errorf("service on %q stopped serving while a follower was partitioned: %w", lbAddress, err)
+		}
+
+		slog.Infof("🔌 restoring API server access on node [%s]", follower)
+		if err := setAPIServerReachable(follower, true); err != nil {
+			return err
+		}
+
+		if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "follower partition"); err != nil {
+			return err
+		}
+
+		holderAfter, err := leaseHolder(ctx, clientset, leaseName)
+		if err != nil {
+			return err
+		}
+		if holderAfter != holderBefore {
+			return fmt.Errorf("lease moved from %q to %q while only a follower was partitioned",
+				holderBefore, holderAfter)
+		}
 	}
 
 	config.SuccessCounter++
@@ -942,12 +1030,81 @@ func waitForElectionProgress(before map[string]float64, namespace, name string) 
 
 // annotateService writes an annotation to force a service watch event.
 func annotateService(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
-	patch := []byte(`{"metadata":{"annotations":{"e2e.kube-vip.io/probe":"1"}}}`)
+	return annotateServiceValue(ctx, clientset, name, "1")
+}
+
+// annotateServiceValue writes a given annotation value to force a service watch
+// event. The value has to change for the API server to emit a Modified event.
+func annotateServiceValue(ctx context.Context, clientset *kubernetes.Clientset, name, value string) error {
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"e2e.kube-vip.io/probe":%q}}}`, value)
 	if _, err := clientset.CoreV1().Services(v1.NamespaceDefault).Patch(ctx, name,
 		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("failed to annotate service %q: %w", name, err)
 	}
 	return nil
+}
+
+// setExternalTrafficPolicy changes the traffic policy of a service, which makes
+// kube-vip treat the service as changed and rebuild it.
+func setExternalTrafficPolicy(ctx context.Context, clientset *kubernetes.Clientset, name string,
+	policy v1.ServiceExternalTrafficPolicy) error {
+	patch := fmt.Appendf(nil, `{"spec":{"externalTrafficPolicy":%q}}`, policy)
+	if _, err := clientset.CoreV1().Services(v1.NamespaceDefault).Patch(ctx, name,
+		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("failed to set externalTrafficPolicy of service %q to %q: %w", name, policy, err)
+	}
+	return nil
+}
+
+// waitForVIPReleased waits until the address stops answering. With a local
+// traffic policy and no endpoints, the VIP has to be given up instead of being
+// left to black-hole traffic.
+func waitForVIPReleased(address string) error {
+	deadline := time.Now().Add(time.Second * 60)
+
+	for {
+		if err := tcpProbe(address); err != nil {
+			slog.Infof("🔎 address [%s] was released after the endpoints went away", address)
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("address %q still answers after all endpoints went away", address)
+		}
+		time.Sleep(time.Second * 2)
+	}
+}
+
+// tcpProbe reports whether the address accepts a connection on the service port.
+func tcpProbe(address string) error {
+	target := net.JoinHostPort(address, "80")
+	conn, err := net.DialTimeout("tcp", target, time.Second*2)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+// followerNode returns a node that runs kube-vip but does not hold the lease.
+func followerNode(ctx context.Context, clientset *kubernetes.Clientset, leaseName string) (string, error) {
+	holder, err := leaseHolder(ctx, clientset, leaseName)
+	if err != nil {
+		return "", err
+	}
+
+	pods, err := clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=kube-vip-ds",
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list kube-vip pods: %w", err)
+	}
+
+	for x := range pods.Items {
+		if node := pods.Items[x].Spec.NodeName; node != holder {
+			return node, nil
+		}
+	}
+	return "", nil
 }
 
 // leaseHolder waits until the lease exists and reports a holder, and returns it.
