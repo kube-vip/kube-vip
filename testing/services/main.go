@@ -37,6 +37,7 @@ func main() {
 	flag.BoolVar(&t.LeaderFailover, "leaderFailover", false, "Perform a failover of the leader test")
 	flag.BoolVar(&t.LeaderActive, "leaderActive", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.LocalDeploy, "localDeploy", false, "Perform a test on the active leader")
+	flag.BoolVar(&t.FlapEndpoints, "endpointFlap", false, "Perform a test that repeatedly removes and restores the endpoints")
 	flag.BoolVar(&t.Egress, "egress", false, "Perform an egress test")
 	flag.BoolVar(&t.EgressInternal, "egressInternal", false, "Perform an egress test, using the internal functionality")
 	flag.BoolVar(&t.EgressIPv6, "egressIPv6", false, "Perform an egress test")

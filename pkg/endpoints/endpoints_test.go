@@ -3,10 +3,13 @@ package endpoints
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -130,4 +133,79 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 		}
 		run(t, service, true, false, true, false)
 	})
+}
+
+// TestAddOrModify_ServicesElectionStartsOnce asserts that repeated endpoint events
+// for the same service start the leader-election restart loop exactly once.
+//
+// AddOrModify runs on every EndpointSlice add/modify/resync event, and the loop it
+// starts only returns once the service context is cancelled. Starting it per event
+// therefore accumulates duplicate goroutines that all contend on the same lease.
+//
+// See https://github.com/kube-vip/kube-vip/issues/1665.
+func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
+	config := &kubevip.Config{
+		EnableServicesElection: true,
+		LeaderElectionType:     "kubernetes",
+	}
+
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-svc", Namespace: "default", UID: "test-uid"},
+		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	leaseMgr := lease.NewManager()
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	svcLease := leaseMgr.Add(ctx, lease.NewID(config.LeaderElectionType, leaseNamespace, serviceLease))
+
+	svcCtx := servicecontext.New(svcLease.Ctx)
+
+	// The started loops only return once the service context is cancelled, so it has
+	// to be cancelled before waiting on them.
+	wg := &sync.WaitGroup{}
+	defer wg.Wait()
+	defer svcCtx.Cancel()
+
+	p := &Processor{
+		config:   config,
+		provider: providers.NewEndpointslices(),
+		worker:   &fakeWorker{endpoints: []string{"10.0.0.1"}},
+		leaseMgr: leaseMgr,
+	}
+
+	// starts counts the restart loops. The real StartServicesLeaderElection blocks
+	// until the service context is cancelled, so each loop parks in a single call.
+	var starts atomic.Int64
+	serviceFunc := func(svcCtx *servicecontext.Context, _ *v1.Service, _ *sync.WaitGroup, _ bool) error {
+		starts.Add(1)
+		<-svcCtx.Ctx.Done()
+		return nil
+	}
+
+	// Three endpoint events, as a flapping backend pod would produce.
+	for range 3 {
+		restart, err := p.AddOrModify(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+			new(string), service, "node-1", serviceFunc, wg, nil, nil)
+		if err != nil {
+			t.Fatalf("AddOrModify returned error: %v", err)
+		}
+		if restart {
+			t.Fatal("AddOrModify unexpectedly requested restart")
+		}
+	}
+
+	// Give every loop that is going to start a chance to reach serviceFunc.
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if starts.Load() > 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := starts.Load(); got != 1 {
+		t.Errorf("leader election started %d times, want 1", got)
+	}
 }

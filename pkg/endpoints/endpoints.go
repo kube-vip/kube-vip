@@ -6,7 +6,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -74,8 +73,6 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	// If we have a local endpoint then begin the leader Election, unless it's already running
 	//
 
-	les := atomic.Int64{}
-
 	// Check that we have local endpoints
 	if len(endpoints) != 0 {
 		// Ignore IPv4
@@ -85,7 +82,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 
 		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
 
-		if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg, &les); err != nil {
+		if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg); err != nil {
 			return true, err
 		}
 
@@ -103,7 +100,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	} else {
 		if allowReconcileWithoutEndpoints {
 			// Explicit opt-in for controllers that create LoadBalancer services without endpoints
-			if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg, &les); err != nil {
+			if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg); err != nil {
 				return true, err
 			}
 			svcCtx.SignalReadiness()
@@ -245,11 +242,14 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 }
 
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
-	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup, les *atomic.Int64) error {
+	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) error {
 	if p.config.EnableServicesElection {
-		wg.Go(func() {
-			les.Add(1)
-			p.startLeaderElection(svcCtx, service, serviceFunc, wg)
+		// startLeaderElection restarts itself until the service context is cancelled,
+		// so start it only once instead of on every endpoint event.
+		svcCtx.StartLeaderElectionOnce(func() {
+			wg.Go(func() {
+				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
+			})
 		})
 		return nil
 	}

@@ -13,6 +13,7 @@ type Context struct {
 	ConfiguredNetworks sync.Map
 	EndpointsReady     chan any
 	epReady            sync.Once
+	leaderElection     sync.Once
 	Signalled          atomic.Bool
 	LeaderCancel       context.CancelFunc
 }
@@ -39,6 +40,14 @@ func (ctx *Context) HasConfiguredNetworks() bool {
 func (ctx *Context) IsNetworkConfigured(ip string) bool {
 	_, exists := ctx.ConfiguredNetworks.Load(ip)
 	return exists
+}
+
+// StartLeaderElectionOnce runs f only on its first call for this service context.
+// The leader-election loop restarts itself internally until the context is
+// cancelled, so it must be started exactly once per service lifetime. Unlike
+// readiness, this is never reset: the loop outlives individual endpoint events.
+func (ctx *Context) StartLeaderElectionOnce(f func()) {
+	ctx.leaderElection.Do(f)
 }
 
 func (ctx *Context) SignalReadiness() {

@@ -88,6 +88,15 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		}
 	}
 
+	if config.FlapEndpoints {
+		// endpoint churn tests
+		err = config.EndpointFlap(ctx, clientset)
+		if err != nil {
+			slog.Error(err)
+			errs = append(errs, err)
+		}
+	}
+
 	if config.Egress {
 		// Egress test
 		err = config.EgressDeployment(ctx, clientset, false)

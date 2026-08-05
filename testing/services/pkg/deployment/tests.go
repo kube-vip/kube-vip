@@ -34,6 +34,7 @@ type TestConfig struct {
 	LeaderFailover     bool
 	LeaderActive       bool
 	LocalDeploy        bool
+	FlapEndpoints      bool
 	DualStack          bool
 	Egress             bool
 	EgressInternal     bool
@@ -650,6 +651,162 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 			} else if err != nil {
 				return fmt.Errorf("failed to wait for the deployment %q to be deleted: %w", name, err)
 			}
+		}
+	}
+}
+
+// EndpointFlap reproduces https://github.com/kube-vip/kube-vip/issues/1665.
+//
+// With svc_election enabled, every EndpointSlice event used to start another
+// permanent leader-election restart loop for the same service. Scaling the
+// backend 1 -> 0 -> 1 repeatedly therefore accumulated duplicate loops that all
+// contended on the same lease, and the service could end up with a lease that
+// never reacquired a holder.
+//
+// The test asserts two things after the flapping: the VIP still serves traffic,
+// and the lease has a holder again.
+func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernetes.Clientset) error {
+	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "endpoint-flap")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		slog.Infof("saving logs to %q", tempDirPath)
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+			slog.Infof("🧪 ---> endpoint flap logs err <---: %s", err.Error())
+			return err
+		}
+
+		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
+		if err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{}); err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
+		}
+		return nil
+	}() //nolint
+
+	slog.Infof("🧪 ---> endpoint flapping (local policy) <---")
+	deploy := Deployment{
+		name:         config.DeploymentName,
+		nodeAffinity: config.Affinity,
+		replicas:     1,
+		server:       true,
+	}
+	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
+		return err
+	}
+
+	svc := Service{
+		name:        config.ServiceName,
+		policyLocal: true,
+		testHTTP:    true,
+		timeout:     30,
+	}
+	_, lbAddresses, err := svc.CreateService(ctx, clientset)
+	if err != nil {
+		return err
+	}
+	if len(lbAddresses) == 0 {
+		return fmt.Errorf("no load balancer address found for service %s", config.ServiceName)
+	}
+	lbAddress := lbAddresses[0]
+
+	// Take the endpoints away and bring them back a few times. Each cycle is a
+	// zero-endpoint teardown followed by the endpoint becoming healthy again.
+	for i := 1; i <= 5; i++ {
+		slog.Infof("🔁 flap %d: scaling deployment [%s] to zero endpoints", i, config.DeploymentName)
+		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 0); err != nil {
+			return err
+		}
+
+		slog.Infof("🔁 flap %d: scaling deployment [%s] back up", i, config.DeploymentName)
+		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 1); err != nil {
+			return err
+		}
+	}
+
+	// The VIP has to be served again once the endpoint is healthy.
+	if err := httpTest(lbAddress); err != nil {
+		return fmt.Errorf("service %q did not recover after endpoint flapping: %w", config.ServiceName, err)
+	}
+
+	// A lease without a holder is the symptom reported in issue #1665.
+	if err := waitForLeaseHolder(ctx, clientset, fmt.Sprintf("kubevip-%s", config.ServiceName)); err != nil {
+		return err
+	}
+
+	config.SuccessCounter++
+
+	return nil
+}
+
+// scaleDeployment sets the replica count and waits for the endpoints to follow.
+func scaleDeployment(ctx context.Context, clientset *kubernetes.Clientset, name string, replicas int32) error {
+	scale, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).GetScale(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get scale of deployment %q: %w", name, err)
+	}
+
+	scale.Spec.Replicas = replicas
+	if _, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).UpdateScale(ctx, name, scale, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to scale deployment %q to %d: %w", name, replicas, err)
+	}
+
+	return waitForReadyEndpoints(ctx, clientset, name, replicas > 0)
+}
+
+// waitForReadyEndpoints waits until the deployment has ready pods, or none left.
+func waitForReadyEndpoints(ctx context.Context, clientset *kubernetes.Clientset, name string, wantReady bool) error {
+	checkCtx, cancel := context.WithTimeout(ctx, time.Second*60)
+	defer cancel()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
+	for {
+		d, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get deployment %q: %w", name, err)
+		}
+
+		if (d.Status.ReadyReplicas > 0) == wantReady {
+			return nil
+		}
+
+		select {
+		case <-checkCtx.Done():
+			return fmt.Errorf("timed out waiting for deployment %q to have readyEndpoints=%t", name, wantReady)
+		case <-t.C:
+		}
+	}
+}
+
+// waitForLeaseHolder waits until the service lease reports a holder again.
+func waitForLeaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+	checkCtx, cancel := context.WithTimeout(ctx, time.Second*60)
+	defer cancel()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
+	for {
+		l, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get lease %q: %w", name, err)
+		}
+		if err == nil && l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity != "" {
+			slog.Infof("🔎 lease [%s] is held by [%s]", name, *l.Spec.HolderIdentity)
+			return nil
+		}
+
+		select {
+		case <-checkCtx.Done():
+			return fmt.Errorf("lease %q never reacquired a holder after endpoint flapping", name)
+		case <-t.C:
 		}
 	}
 }
