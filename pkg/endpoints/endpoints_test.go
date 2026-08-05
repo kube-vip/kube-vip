@@ -3,10 +3,13 @@ package endpoints
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -130,4 +133,94 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 		}
 		run(t, service, true, false, true, false)
 	})
+}
+
+// TestAddOrModify_ServicesElectionStartsLeaderElectionOnce guards against a
+// regression where startServiceHandlingIfNeeded spawns a new, permanently
+// running startLeaderElection goroutine on every AddOrModify call that sees
+// non-zero endpoints, instead of exactly once per service lifetime. Before
+// the fix, repeated endpoint churn (endpoints flipping non-zero -> zero ->
+// non-zero, e.g. during a backend pod's rolling restart) accumulates
+// duplicate restart-loop goroutines racing on the same shared Lease; one of
+// the observed effects in production was a service Lease that never
+// reacquired a holder after a legitimate teardown, even though a healthy
+// endpoint had come back.
+func TestAddOrModify_ServicesElectionStartsLeaderElectionOnce(t *testing.T) {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "svc-under-test", Namespace: "default"},
+	}
+
+	leaseNamespace, leaseName := lease.ServiceName(service)
+	config := &kubevip.Config{EnableServicesElection: true}
+	id := lease.NewID(config.LeaderElectionType, leaseNamespace, leaseName)
+
+	leaseMgr := lease.NewManager()
+	l := leaseMgr.Add(context.Background(), id)
+
+	worker := &fakeWorker{endpoints: []string{"10.0.0.5"}}
+	p := &Processor{
+		config:   config,
+		provider: providers.NewEndpointslices(),
+		worker:   worker,
+		leaseMgr: leaseMgr,
+	}
+
+	svcCtx := servicecontext.New(l.Ctx)
+
+	var calls int32
+	started := make(chan struct{}, 8)
+	block := make(chan struct{})
+	// Stands in for services.StartServicesLeaderElection: records that a
+	// leader-election attempt started, then blocks - simulating a goroutine
+	// that has become (or is trying to become) the active leader and won't
+	// return until it loses leadership or is torn down.
+	serviceFunc := func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error {
+		atomic.AddInt32(&calls, 1)
+		started <- struct{}{}
+		<-block
+		return nil
+	}
+
+	wg := &sync.WaitGroup{}
+	lastKnownGoodEndpoint := new(string)
+
+	// Simulate the endpoint being (re-)observed as non-zero three times in a
+	// row, as happens across repeated EndpointSlice add/modify/resync events
+	// for the same still-healthy service.
+	for range 3 {
+		if _, err := p.AddOrModify(
+			svcCtx,
+			watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+			lastKnownGoodEndpoint,
+			service,
+			"node-1",
+			serviceFunc,
+			wg,
+			nil,
+			nil,
+		); err != nil {
+			t.Fatalf("AddOrModify returned error: %v", err)
+		}
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first leader-election attempt to start")
+	}
+
+	select {
+	case <-started:
+		t.Fatalf("a second leader-election restart-loop goroutine started for the same service (got %d serviceFunc calls) - startServiceHandlingIfNeeded must only spawn it once per service lifetime", atomic.LoadInt32(&calls))
+	case <-time.After(200 * time.Millisecond):
+		// No second spawn observed - expected.
+	}
+
+	close(block)
+	svcCtx.Cancel()
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected exactly 1 leader-election attempt across 3 AddOrModify calls, got %d", got)
+	}
 }

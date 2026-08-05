@@ -15,6 +15,12 @@ type Context struct {
 	epReady            sync.Once
 	Signalled          atomic.Bool
 	LeaderCancel       context.CancelFunc
+	// LeaderElectionStarted tracks whether the per-service leader-election
+	// restart-loop goroutine has already been spawned for this context's
+	// lifetime. That goroutine runs until Ctx is cancelled, re-attempting
+	// election forever on its own, so it must be started at most once per
+	// service - not once per AddOrModify call with non-zero endpoints.
+	LeaderElectionStarted bool
 }
 
 func New(ctx context.Context) *Context {

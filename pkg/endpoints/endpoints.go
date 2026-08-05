@@ -247,10 +247,21 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup, les *atomic.Int64) error {
 	if p.config.EnableServicesElection {
-		wg.Go(func() {
-			les.Add(1)
-			p.startLeaderElection(svcCtx, service, serviceFunc, wg)
-		})
+		// startLeaderElection runs a forever loop (until svcCtx.Ctx is
+		// cancelled) that re-attempts election on its own whenever the lease
+		// becomes free, so it must only ever be spawned once per service.
+		// AddOrModify is invoked repeatedly for the same service (every
+		// endpoint-slice add/modify/resync event, including transitions back
+		// from zero endpoints), so without this guard a duplicate restart-loop
+		// goroutine gets spawned on every such event, piling up concurrent,
+		// redundant loops racing on the same shared Lease.
+		if !svcCtx.LeaderElectionStarted {
+			svcCtx.LeaderElectionStarted = true
+			wg.Go(func() {
+				les.Add(1)
+				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
+			})
+		}
 		return nil
 	}
 
