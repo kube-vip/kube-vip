@@ -673,12 +673,12 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 //     it from svcMap, so later events reused a cancelled context and could never
 //     re-add the lease. kube_vip_service_election_errors_total{reason="no_lease"}
 //     must stay at zero.
-//   - lease loss (#1650): deleting the lease, and blanking its holderIdentity,
-//     makes the election client lose leadership the ordinary way. The restart loop
-//     used to wedge on a WaitGroup at that point, so the election attempt counter
-//     must keep advancing and the lease must get a holder back.
-//   - API server loss: the apiserver is blocked from the leader for longer than
-//     the lease duration, exercising the same loss path through a real partition.
+//   - lease object faults: the lease is deleted, and its holderIdentity blanked.
+//     The election client recovers these itself, so these only assert convergence.
+//   - leadership loss (#1650): the apiserver is blocked from the leader for longer
+//     than the lease duration, which drives OnStoppedLeading and returns the
+//     election. The restart loop used to wedge on a WaitGroup exactly there, so
+//     kube_vip_service_election_attempts_total must advance afterwards.
 //
 // After every fault the service has to converge: a live election loop, a held
 // lease, and a VIP that serves traffic.
@@ -774,24 +774,14 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	// Fault 3 (#1650): ordinary leadership loss, by removing the lease and by
-	// blanking its holder. The election attempt counter has to keep advancing,
-	// which it cannot do if the restart loop is wedged.
-	before, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", v1.NamespaceDefault, config.ServiceName)
-	if err != nil {
-		return err
-	}
-
+	// Fault 3: lease object faults. Deleting the lease and blanking its holder are
+	// recovered by the election client itself, so this only asserts convergence.
 	slog.Infof("💥 deleting lease [%s]", leaseName)
 	if err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Delete(ctx, leaseName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete lease %q: %w", leaseName, err)
 	}
 
 	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "lease deletion"); err != nil {
-		return err
-	}
-
-	if err := waitForElectionProgress(before, v1.NamespaceDefault, config.ServiceName); err != nil {
 		return err
 	}
 
@@ -804,9 +794,16 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	// Fault 4: partition the leader from the apiserver for longer than the lease
-	// duration, then heal it.
+	// Fault 4 (#1650): a real leadership loss, by partitioning the leader from the
+	// apiserver for longer than the lease duration. That drives OnStoppedLeading
+	// and returns the election, so the restart loop has to make a new attempt
+	// afterwards. A wedged loop never does, which is the #1650 deadlock.
 	leader, err := leaseHolder(ctx, clientset, leaseName)
+	if err != nil {
+		return err
+	}
+
+	before, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", v1.NamespaceDefault, config.ServiceName)
 	if err != nil {
 		return err
 	}
@@ -823,6 +820,10 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	}
 
 	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "API server disruption"); err != nil {
+		return err
+	}
+
+	if err := waitForElectionProgress(before, v1.NamespaceDefault, config.ServiceName); err != nil {
 		return err
 	}
 
