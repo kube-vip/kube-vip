@@ -947,28 +947,33 @@ func (config *TestConfig) checkConverged(ctx context.Context, clientset *kuberne
 // checkNoDuplicateElectionLoops asserts that no node runs more than one election
 // loop for the service. More than one means loops leaked, which is issue #1665.
 func checkNoDuplicateElectionLoops(namespace, name, fault string) error {
-	// Sample a few times: a loop that is about to be started may not be visible
-	// in a single scrape, and a leaked one never goes away.
-	var loops map[string]float64
+	// A fault that rebuilds the service context legitimately has the old and the
+	// new loop alive at the same moment, so poll until the count settles. A leaked
+	// loop only exits with its service context, so it never settles.
+	deadline := time.Now().Add(time.Second * 45)
 
-	for range 3 {
-		var err error
-		loops, err = scrapeElectionLoops(namespace, name)
+	for {
+		loops, err := scrapeElectionLoops(namespace, name)
 		if err != nil {
 			return fmt.Errorf("after %s: %w", fault, err)
 		}
 
-		for node, count := range loops {
-			if count > 1 {
-				return fmt.Errorf("node %q runs %v leader election loops for service %q after %s, want at most 1",
-					node, count, name, fault)
-			}
+		busiest := 0.0
+		for _, count := range loops {
+			busiest = max(busiest, count)
 		}
-		time.Sleep(time.Second * 2)
-	}
 
-	slog.Infof("🔎 election loops per node after %s: %v", fault, loops)
-	return nil
+		if busiest <= 1 {
+			slog.Infof("🔎 election loops per node after %s: %v", fault, loops)
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("a node still runs %v leader election loops for service %q after %s, "+
+				"want at most 1, loops leaked (%v)", busiest, name, fault, loops)
+		}
+		time.Sleep(time.Second * 3)
+	}
 }
 
 // checkLeaseErrorsStable asserts the election error counter stopped growing.
