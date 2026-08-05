@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gookit/slog"
@@ -12,6 +14,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -655,16 +658,23 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 	}
 }
 
-// EndpointFlap reproduces https://github.com/kube-vip/kube-vip/issues/1665.
+// EndpointFlap exercises the per-service leader election of #1665 under faults.
 //
-// With svc_election enabled, every EndpointSlice event used to start another
-// permanent leader-election restart loop for the same service. Scaling the
-// backend 1 -> 0 -> 1 repeatedly therefore accumulated duplicate loops that all
-// contended on the same lease, and the service could end up with a lease that
-// never reacquired a holder.
+// Three faults are injected in sequence against a svc_election service:
 //
-// The test asserts two things after the flapping: the VIP still serves traffic,
-// and the lease has a holder again.
+//  1. endpoint churn: the backend is scaled 1 -> 0 -> 1 repeatedly, which is
+//     what drove the duplicate election loops reported in the issue.
+//  2. lease faults: the service Lease is deleted, and then blanked by clearing
+//     its holderIdentity, which is the exact state observed in the report.
+//  3. API server faults: the apiserver is made unreachable from the leader for
+//     a while, so every election client on that node loses its backend.
+//
+// After each fault the service has to converge again: the Lease is held by a
+// node and the VIP serves traffic. Those are properties of the feature rather
+// than of the current implementation, so the test stays meaningful if the
+// election internals change. Duplicate election loops are not observable from
+// outside the process; that part is pinned by the unit test in
+// pkg/endpoints/endpoints_test.go.
 func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernetes.Clientset) error {
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "endpoint-flap")
@@ -689,7 +699,7 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 		return nil
 	}() //nolint
 
-	slog.Infof("🧪 ---> endpoint flapping (local policy) <---")
+	slog.Infof("🧪 ---> endpoint and lease faults (local policy) <---")
 	deploy := Deployment{
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
@@ -714,9 +724,11 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 		return fmt.Errorf("no load balancer address found for service %s", config.ServiceName)
 	}
 	lbAddress := lbAddresses[0]
+	leaseName := fmt.Sprintf("kubevip-%s", config.ServiceName)
 
-	// Take the endpoints away and bring them back a few times. Each cycle is a
-	// zero-endpoint teardown followed by the endpoint becoming healthy again.
+	// Fault 1: endpoint churn. Each cycle is a zero-endpoint teardown followed by
+	// the endpoint becoming healthy again, which is what accumulated duplicate
+	// election loops before the fix.
 	for i := 1; i <= 5; i++ {
 		slog.Infof("🔁 flap %d: scaling deployment [%s] to zero endpoints", i, config.DeploymentName)
 		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 0); err != nil {
@@ -729,18 +741,128 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 		}
 	}
 
-	// The VIP has to be served again once the endpoint is healthy.
-	if err := httpTest(lbAddress); err != nil {
-		return fmt.Errorf("service %q did not recover after endpoint flapping: %w", config.ServiceName, err)
+	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "endpoint flapping"); err != nil {
+		return err
 	}
 
-	// A lease without a holder is the symptom reported in issue #1665.
-	if err := waitForLeaseHolder(ctx, clientset, fmt.Sprintf("kubevip-%s", config.ServiceName)); err != nil {
+	// Fault 2a: delete the lease outright and make sure it is recreated and held.
+	slog.Infof("💥 deleting lease [%s]", leaseName)
+	if err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Delete(ctx, leaseName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete lease %q: %w", leaseName, err)
+	}
+
+	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "lease deletion"); err != nil {
+		return err
+	}
+
+	// Fault 2b: blank the holder. This is the state reported in #1665, where the
+	// lease existed with holderIdentity "" and never got a holder back.
+	slog.Infof("💥 clearing holderIdentity on lease [%s]", leaseName)
+	if err := clearLeaseHolder(ctx, clientset, leaseName); err != nil {
+		return err
+	}
+
+	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "lease holder being cleared"); err != nil {
+		return err
+	}
+
+	// Fault 3: cut the leader off from the API server for longer than the lease
+	// duration, so its election client loses leadership, then restore it.
+	leader, err := leaseHolder(ctx, clientset, leaseName)
+	if err != nil {
+		return err
+	}
+
+	slog.Infof("💥 blocking API server access from node [%s]", leader)
+	if err := setAPIServerReachable(leader, false); err != nil {
+		return err
+	}
+	time.Sleep(time.Second * 20)
+
+	slog.Infof("🔌 restoring API server access on node [%s]", leader)
+	if err := setAPIServerReachable(leader, true); err != nil {
+		return err
+	}
+
+	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "API server disruption"); err != nil {
 		return err
 	}
 
 	config.SuccessCounter++
 
+	return nil
+}
+
+// checkServiceConverged asserts the service is healthy again after a fault: the
+// lease is held by a node and the VIP serves traffic.
+func checkServiceConverged(ctx context.Context, clientset *kubernetes.Clientset, leaseName, lbAddress, fault string) error {
+	holder, err := leaseHolder(ctx, clientset, leaseName)
+	if err != nil {
+		return fmt.Errorf("after %s: %w", fault, err)
+	}
+	slog.Infof("🔎 lease [%s] is held by [%s] after %s", leaseName, holder, fault)
+
+	if err := httpTest(lbAddress); err != nil {
+		return fmt.Errorf("service on %q did not serve traffic after %s: %w", lbAddress, fault, err)
+	}
+	return nil
+}
+
+// leaseHolder waits until the lease exists and reports a holder, and returns it.
+// An empty or missing holder is the symptom reported in #1665.
+func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) (string, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, time.Second*120)
+	defer cancel()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
+	for {
+		l, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("failed to get lease %q: %w", name, err)
+		}
+		if err == nil && l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity != "" {
+			return *l.Spec.HolderIdentity, nil
+		}
+
+		select {
+		case <-checkCtx.Done():
+			return "", fmt.Errorf("lease %q never reacquired a holder", name)
+		case <-t.C:
+		}
+	}
+}
+
+// clearLeaseHolder blanks the holderIdentity of a lease, reproducing the state
+// reported in #1665.
+func clearLeaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+	patch := []byte(`{"spec":{"holderIdentity":null}}`)
+	if _, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Patch(ctx, name,
+		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to clear holder of lease %q: %w", name, err)
+	}
+	return nil
+}
+
+// setAPIServerReachable blocks or unblocks the kubernetes API server port from
+// inside a kind node, to fault the election clients running on it.
+func setAPIServerReachable(node string, reachable bool) error {
+	// The node hostnames are changed to "<node>-modified", the container keeps
+	// the original name.
+	container := strings.TrimSuffix(node, "-modified")
+
+	action := "-I"
+	if reachable {
+		action = "-D"
+	}
+
+	// kind nodes reach the API server on the control plane's 6443.
+	cmd := exec.Command("docker", "exec", container, "iptables", action, "OUTPUT",
+		"-p", "tcp", "--dport", "6443", "-j", "REJECT") //nolint
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set apiserver reachable=%t on %q: %w: %s", reachable, container, err, out)
+	}
 	return nil
 }
 
@@ -780,32 +902,6 @@ func waitForReadyEndpoints(ctx context.Context, clientset *kubernetes.Clientset,
 		select {
 		case <-checkCtx.Done():
 			return fmt.Errorf("timed out waiting for deployment %q to have readyEndpoints=%t", name, wantReady)
-		case <-t.C:
-		}
-	}
-}
-
-// waitForLeaseHolder waits until the service lease reports a holder again.
-func waitForLeaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
-	checkCtx, cancel := context.WithTimeout(ctx, time.Second*60)
-	defer cancel()
-
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-
-	for {
-		l, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to get lease %q: %w", name, err)
-		}
-		if err == nil && l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity != "" {
-			slog.Infof("🔎 lease [%s] is held by [%s]", name, *l.Spec.HolderIdentity)
-			return nil
-		}
-
-		select {
-		case <-checkCtx.Done():
-			return fmt.Errorf("lease %q never reacquired a holder after endpoint flapping", name)
 		case <-t.C:
 		}
 	}
