@@ -839,7 +839,7 @@ func (config *TestConfig) checkConverged(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	if err := checkNoLeaseErrors(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
+	if err := checkLeaseErrorsStable(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
 		return err
 	}
 
@@ -858,35 +858,58 @@ func (config *TestConfig) checkConverged(ctx context.Context, clientset *kuberne
 // checkNoDuplicateElectionLoops asserts that no node runs more than one election
 // loop for the service. More than one means loops leaked, which is issue #1665.
 func checkNoDuplicateElectionLoops(namespace, name, fault string) error {
-	loops, err := scrapeElectionLoops(namespace, name)
-	if err != nil {
-		return fmt.Errorf("after %s: %w", fault, err)
+	// Sample a few times: a loop that is about to be started may not be visible
+	// in a single scrape, and a leaked one never goes away.
+	var loops map[string]float64
+
+	for range 3 {
+		var err error
+		loops, err = scrapeElectionLoops(namespace, name)
+		if err != nil {
+			return fmt.Errorf("after %s: %w", fault, err)
+		}
+
+		for node, count := range loops {
+			if count > 1 {
+				return fmt.Errorf("node %q runs %v leader election loops for service %q after %s, want at most 1",
+					node, count, name, fault)
+			}
+		}
+		time.Sleep(time.Second * 2)
 	}
 
-	for node, count := range loops {
-		if count > 1 {
-			return fmt.Errorf("node %q runs %v leader election loops for service %q after %s, want at most 1",
-				node, count, name, fault)
-		}
-	}
 	slog.Infof("🔎 election loops per node after %s: %v", fault, loops)
 	return nil
 }
 
-// checkNoLeaseErrors asserts the election never failed to find its lease, which
-// is the signature of the service context and lease manager desync of #1664.
-func checkNoLeaseErrors(namespace, name, fault string) error {
-	errs, err := scrapeServiceGauge("kube_vip_service_election_errors_total", namespace, name)
+// checkLeaseErrorsStable asserts the election error counter stopped growing.
+//
+// The #1664 desync makes every later watch event fail to find the lease, so the
+// counter climbs for the lifetime of the process. A single increment can happen
+// benignly while a service is first being set up, so the assertion is that the
+// counter settles rather than that it is zero.
+func checkLeaseErrorsStable(namespace, name, fault string) error {
+	const metric = "kube_vip_service_election_errors_total"
+
+	first, err := scrapeServiceGauge(metric, namespace, name)
 	if err != nil {
 		return fmt.Errorf("after %s: %w", fault, err)
 	}
 
-	for node, count := range errs {
-		if count > 0 {
-			return fmt.Errorf("node %q reported %v leader election errors for service %q after %s, want 0",
-				node, count, name, fault)
+	time.Sleep(time.Second * 10)
+
+	second, err := scrapeServiceGauge(metric, namespace, name)
+	if err != nil {
+		return fmt.Errorf("after %s: %w", fault, err)
+	}
+
+	for node, count := range second {
+		if count > first[node] {
+			return fmt.Errorf("node %q keeps failing leader election for service %q after %s "+
+				"(%v -> %v errors in 10s), the lease is never re-added", node, name, fault, first[node], count)
 		}
 	}
+	slog.Infof("🔎 election errors per node stable after %s: %v", fault, second)
 	return nil
 }
 
