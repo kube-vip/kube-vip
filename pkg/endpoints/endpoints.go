@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -273,6 +274,14 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 }
 
 func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
+	// Track this loop for the lifetime of the goroutine. There has to be at most
+	// one per service, so a value above 1 means loops leaked.
+	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
+	loops.Inc()
+	defer loops.Dec()
+
+	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
+
 	// This is a blocking function, that will restart (in the event of failure)
 	for {
 		select {
@@ -286,6 +295,7 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 
 			if !l.Elected.Load() {
 				l.Unlock()
+				attempts.Inc()
 				err := serviceFunc(svcCtx, service, wg, true)
 				if err != nil {
 					log.Error(err.Error())

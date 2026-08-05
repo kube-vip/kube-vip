@@ -35,6 +35,21 @@ var (
 		prometheus.GaugeOpts{Name: "kube_vip_is_leader", Help: "1 if this node currently holds the lease"},
 		[]string{"node", "lease_name"},
 	)
+	ServiceElectionLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_service_election_loops",
+			Help: "Live per-service leader election restart loops on this node; more than 1 per service means loops leaked"},
+		[]string{"namespace", "name"},
+	)
+	ServiceElectionAttemptsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_service_election_attempts_total",
+			Help: "Election attempts made by the per-service leader election restart loop"},
+		[]string{"namespace", "name"},
+	)
+	ServiceElectionErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_service_election_errors_total",
+			Help: "Per-service leader election failures by reason"},
+		[]string{"namespace", "name", "reason"},
+	)
 
 	// This is a prometheus gauge indicating the state of the sessions.
 	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
@@ -61,6 +76,9 @@ func RegisterPrometheusMetrics() {
 		ServiceReconcileDuration,
 		LeaderTransitionsTotal,
 		IsLeader,
+		ServiceElectionLoops,
+		ServiceElectionAttemptsTotal,
+		ServiceElectionErrorsTotal,
 		BGPSessionInfoGauge,
 		BuildInfo,
 		CountServiceWatchEvent,

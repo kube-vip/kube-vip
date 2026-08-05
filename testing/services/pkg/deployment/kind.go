@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -300,4 +301,70 @@ func checkNodesForDuplicateAddresses(nodes []nodeAddresses, address string) erro
 		return fmt.Errorf("‼️ multiple nodes [%s] have address [%s]", strings.Join(foundOnNode, " "), address)
 	}
 	return nil
+}
+
+// scrapeElectionLoops returns, per node, the value of the
+// kube_vip_service_election_loops gauge for a service. There has to be at most
+// one live election loop per service per node.
+func scrapeElectionLoops(namespace, name string) (map[string]float64, error) {
+	return scrapeServiceGauge("kube_vip_service_election_loops", namespace, name)
+}
+
+// scrapeServiceGauge sums the samples of a {namespace,name}-labelled metric per
+// node, by curl-ing each kind node's kube-vip metrics endpoint from inside it.
+func scrapeServiceGauge(metric, namespace, name string) (map[string]float64, error) {
+	values := map[string]float64{}
+
+	nodes, err := provider.ListNodes("services")
+	if err != nil {
+		return values, err
+	}
+
+	wantLabels := []string{
+		fmt.Sprintf(`namespace="%s"`, namespace),
+		fmt.Sprintf(`name="%s"`, name),
+	}
+
+	for x := range nodes {
+		var out bytes.Buffer
+		cmd := nodes[x].Command("curl", "-s", "--max-time", "5", "http://127.0.0.1:2112/metrics")
+		cmd.SetStdout(&out)
+		cmd.SetStderr(&bytes.Buffer{})
+		if err := cmd.Run(); err != nil {
+			// A node without a kube-vip pod, or one that is restarting, has no
+			// endpoint to scrape. That is not a failure of the metric itself.
+			slog.Debugf("could not scrape metrics on node %s: %v", nodes[x].String(), err)
+			continue
+		}
+
+		total := 0.0
+		for _, line := range strings.Split(out.String(), "\n") {
+			if !strings.HasPrefix(line, metric+"{") {
+				continue
+			}
+			matches := true
+			for _, l := range wantLabels {
+				if !strings.Contains(line, l) {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			fields := strings.Fields(line)
+			v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+			if err != nil {
+				return values, fmt.Errorf("failed to parse %q: %w", line, err)
+			}
+			total += v
+		}
+		values[nodes[x].String()] = total
+	}
+
+	if len(values) == 0 {
+		return values, fmt.Errorf("could not scrape %q from any node", metric)
+	}
+
+	return values, nil
 }

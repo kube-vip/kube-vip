@@ -37,7 +37,7 @@ type TestConfig struct {
 	LeaderFailover     bool
 	LeaderActive       bool
 	LocalDeploy        bool
-	FlapEndpoints      bool
+	FaultElection      bool
 	DualStack          bool
 	Egress             bool
 	EgressInternal     bool
@@ -658,33 +658,40 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 	}
 }
 
-// EndpointFlap exercises the per-service leader election of #1665 under faults.
+// ElectionFaults injects the failure modes of the per-service leader election
+// and proves the service recovers from each one.
 //
-// Three faults are injected in sequence against a svc_election service:
+// Each fault targets a specific reported bug, and each is asserted with a signal
+// that is actually broken when the bug is present, so the test fails against
+// unfixed code instead of only documenting the happy path:
 //
-//  1. endpoint churn: the backend is scaled 1 -> 0 -> 1 repeatedly, which is
-//     what drove the duplicate election loops reported in the issue.
-//  2. lease faults: the service Lease is deleted, and then blanked by clearing
-//     its holderIdentity, which is the exact state observed in the report.
-//  3. API server faults: the apiserver is made unreachable from the leader for
-//     a while, so every election client on that node loses its backend.
+//   - endpoint churn (issue #1665): the backend is scaled 1 -> 0 -> 1 five times.
+//     Every EndpointSlice event used to start another permanent election loop, so
+//     kube_vip_service_election_loops must stay at most 1 per node.
+//   - endpoint object deletion (#1663, fixed in #1664): deleting the EndpointSlice
+//     ends the endpoint watcher and cancels the service context without dropping
+//     it from svcMap, so later events reused a cancelled context and could never
+//     re-add the lease. kube_vip_service_election_errors_total{reason="no_lease"}
+//     must stay at zero.
+//   - lease loss (#1650): deleting the lease, and blanking its holderIdentity,
+//     makes the election client lose leadership the ordinary way. The restart loop
+//     used to wedge on a WaitGroup at that point, so the election attempt counter
+//     must keep advancing and the lease must get a holder back.
+//   - API server loss: the apiserver is blocked from the leader for longer than
+//     the lease duration, exercising the same loss path through a real partition.
 //
-// After each fault the service has to converge again: the Lease is held by a
-// node and the VIP serves traffic. Those are properties of the feature rather
-// than of the current implementation, so the test stays meaningful if the
-// election internals change. Duplicate election loops are not observable from
-// outside the process; that part is pinned by the unit test in
-// pkg/endpoints/endpoints_test.go.
-func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernetes.Clientset) error {
+// After every fault the service has to converge: a live election loop, a held
+// lease, and a VIP that serves traffic.
+func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kubernetes.Clientset) error {
 	defer func() error {
-		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "endpoint-flap")
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "election-faults")
 		if err != nil {
 			slog.Fatal(err)
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
 		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
-			slog.Infof("🧪 ---> endpoint flap logs err <---: %s", err.Error())
+			slog.Infof("🧪 ---> election faults logs err <---: %s", err.Error())
 			return err
 		}
 
@@ -699,7 +706,7 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 		return nil
 	}() //nolint
 
-	slog.Infof("🧪 ---> endpoint and lease faults (local policy) <---")
+	slog.Infof("🧪 ---> leader election faults (local policy) <---")
 	deploy := Deployment{
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
@@ -726,48 +733,79 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 	lbAddress := lbAddresses[0]
 	leaseName := fmt.Sprintf("kubevip-%s", config.ServiceName)
 
-	// Fault 1: endpoint churn. Each cycle is a zero-endpoint teardown followed by
-	// the endpoint becoming healthy again, which is what accumulated duplicate
-	// election loops before the fix.
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "startup"); err != nil {
+		return err
+	}
+
+	// Fault 1 (#1665): endpoint churn. Sleep between transitions so the endpoint
+	// debouncer does not coalesce them into a single event, otherwise no duplicate
+	// loop would be started even by the unfixed code.
 	for i := 1; i <= 5; i++ {
 		slog.Infof("🔁 flap %d: scaling deployment [%s] to zero endpoints", i, config.DeploymentName)
 		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 0); err != nil {
 			return err
 		}
+		time.Sleep(time.Second * 2)
 
 		slog.Infof("🔁 flap %d: scaling deployment [%s] back up", i, config.DeploymentName)
 		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 1); err != nil {
 			return err
 		}
+		time.Sleep(time.Second * 2)
 	}
 
-	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "endpoint flapping"); err != nil {
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "endpoint flapping"); err != nil {
 		return err
 	}
 
-	// Fault 2a: delete the lease outright and make sure it is recreated and held.
+	// Fault 2 (#1664): end the endpoint watcher by deleting the EndpointSlice, then
+	// drive another service event so the stale service context would be reused.
+	slog.Infof("💥 deleting endpointslices of service [%s]", config.ServiceName)
+	if err := clientset.DiscoveryV1().EndpointSlices(v1.NamespaceDefault).DeleteCollection(ctx, metav1.DeleteOptions{},
+		metav1.ListOptions{LabelSelector: "kubernetes.io/service-name=" + config.ServiceName}); err != nil {
+		return fmt.Errorf("failed to delete endpointslices of service %q: %w", config.ServiceName, err)
+	}
+
+	if err := annotateService(ctx, clientset, config.ServiceName); err != nil {
+		return err
+	}
+
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "endpointslice deletion"); err != nil {
+		return err
+	}
+
+	// Fault 3 (#1650): ordinary leadership loss, by removing the lease and by
+	// blanking its holder. The election attempt counter has to keep advancing,
+	// which it cannot do if the restart loop is wedged.
+	before, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", v1.NamespaceDefault, config.ServiceName)
+	if err != nil {
+		return err
+	}
+
 	slog.Infof("💥 deleting lease [%s]", leaseName)
 	if err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Delete(ctx, leaseName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete lease %q: %w", leaseName, err)
 	}
 
-	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "lease deletion"); err != nil {
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "lease deletion"); err != nil {
 		return err
 	}
 
-	// Fault 2b: blank the holder. This is the state reported in #1665, where the
-	// lease existed with holderIdentity "" and never got a holder back.
+	if err := waitForElectionProgress(before, v1.NamespaceDefault, config.ServiceName); err != nil {
+		return err
+	}
+
 	slog.Infof("💥 clearing holderIdentity on lease [%s]", leaseName)
 	if err := clearLeaseHolder(ctx, clientset, leaseName); err != nil {
 		return err
 	}
 
-	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "lease holder being cleared"); err != nil {
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "lease holder being cleared"); err != nil {
 		return err
 	}
 
-	// Fault 3: cut the leader off from the API server for longer than the lease
-	// duration, so its election client loses leadership, then restore it.
+	// Fault 4: partition the leader from the apiserver for longer than the lease
+	// duration, then heal it.
 	leader, err := leaseHolder(ctx, clientset, leaseName)
 	if err != nil {
 		return err
@@ -784,7 +822,7 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 		return err
 	}
 
-	if err := checkServiceConverged(ctx, clientset, leaseName, lbAddress, "API server disruption"); err != nil {
+	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "API server disruption"); err != nil {
 		return err
 	}
 
@@ -793,9 +831,18 @@ func (config *TestConfig) EndpointFlap(ctx context.Context, clientset *kubernete
 	return nil
 }
 
-// checkServiceConverged asserts the service is healthy again after a fault: the
-// lease is held by a node and the VIP serves traffic.
-func checkServiceConverged(ctx context.Context, clientset *kubernetes.Clientset, leaseName, lbAddress, fault string) error {
+// checkConverged asserts the service is healthy after a fault: at most one
+// election loop per node, no lease lookup failures, a held lease, and a VIP that
+// serves traffic.
+func (config *TestConfig) checkConverged(ctx context.Context, clientset *kubernetes.Clientset, leaseName, lbAddress, fault string) error {
+	if err := checkNoDuplicateElectionLoops(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
+		return err
+	}
+
+	if err := checkNoLeaseErrors(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
+		return err
+	}
+
 	holder, err := leaseHolder(ctx, clientset, leaseName)
 	if err != nil {
 		return fmt.Errorf("after %s: %w", fault, err)
@@ -804,6 +851,77 @@ func checkServiceConverged(ctx context.Context, clientset *kubernetes.Clientset,
 
 	if err := httpTest(lbAddress); err != nil {
 		return fmt.Errorf("service on %q did not serve traffic after %s: %w", lbAddress, fault, err)
+	}
+	return nil
+}
+
+// checkNoDuplicateElectionLoops asserts that no node runs more than one election
+// loop for the service. More than one means loops leaked, which is issue #1665.
+func checkNoDuplicateElectionLoops(namespace, name, fault string) error {
+	loops, err := scrapeElectionLoops(namespace, name)
+	if err != nil {
+		return fmt.Errorf("after %s: %w", fault, err)
+	}
+
+	for node, count := range loops {
+		if count > 1 {
+			return fmt.Errorf("node %q runs %v leader election loops for service %q after %s, want at most 1",
+				node, count, name, fault)
+		}
+	}
+	slog.Infof("🔎 election loops per node after %s: %v", fault, loops)
+	return nil
+}
+
+// checkNoLeaseErrors asserts the election never failed to find its lease, which
+// is the signature of the service context and lease manager desync of #1664.
+func checkNoLeaseErrors(namespace, name, fault string) error {
+	errs, err := scrapeServiceGauge("kube_vip_service_election_errors_total", namespace, name)
+	if err != nil {
+		return fmt.Errorf("after %s: %w", fault, err)
+	}
+
+	for node, count := range errs {
+		if count > 0 {
+			return fmt.Errorf("node %q reported %v leader election errors for service %q after %s, want 0",
+				node, count, name, fault)
+		}
+	}
+	return nil
+}
+
+// waitForElectionProgress asserts the restart loop keeps attempting election
+// after a leadership loss. A wedged loop stops incrementing, which is #1650.
+func waitForElectionProgress(before map[string]float64, namespace, name string) error {
+	deadline := time.Now().Add(time.Second * 60)
+
+	for {
+		after, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", namespace, name)
+		if err != nil {
+			return err
+		}
+
+		for node, count := range after {
+			if count > before[node] {
+				slog.Infof("🔎 node [%s] election attempts advanced %v -> %v", node, before[node], count)
+				return nil
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no node made a new leader election attempt for service %q after losing the lease, "+
+				"the restart loop is stuck (before=%v after=%v)", name, before, after)
+		}
+		time.Sleep(time.Second * 2)
+	}
+}
+
+// annotateService writes an annotation to force a service watch event.
+func annotateService(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+	patch := []byte(`{"metadata":{"annotations":{"e2e.kube-vip.io/probe":"1"}}}`)
+	if _, err := clientset.CoreV1().Services(v1.NamespaceDefault).Patch(ctx, name,
+		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("failed to annotate service %q: %w", name, err)
 	}
 	return nil
 }
@@ -857,7 +975,6 @@ func setAPIServerReachable(node string, reachable bool) error {
 		action = "-D"
 	}
 
-	// kind nodes reach the API server on the control plane's 6443.
 	cmd := exec.Command("docker", "exec", container, "iptables", action, "OUTPUT",
 		"-p", "tcp", "--dport", "6443", "-j", "REJECT") //nolint
 	if out, err := cmd.CombinedOutput(); err != nil {

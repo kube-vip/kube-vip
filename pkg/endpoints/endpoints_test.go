@@ -10,7 +10,9 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -207,5 +209,10 @@ func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
 
 	if got := starts.Load(); got != 1 {
 		t.Errorf("leader election started %d times, want 1", got)
+	}
+
+	// The gauge the e2e fault tests assert on has to agree with the call count.
+	if got := testutil.ToFloat64(metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)); got != 1 {
+		t.Errorf("kube_vip_service_election_loops is %v, want 1", got)
 	}
 }

@@ -88,9 +88,9 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		}
 	}
 
-	if config.FlapEndpoints {
-		// endpoint churn tests
-		err = config.EndpointFlap(ctx, clientset)
+	if config.FaultElection {
+		// leader election fault injection
+		err = config.ElectionFaults(ctx, clientset)
 		if err != nil {
 			slog.Error(err)
 			errs = append(errs, err)
