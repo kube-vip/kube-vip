@@ -25,7 +25,7 @@ func LookupHost(dnsName, dnsMode string, requireDualStack bool) ([]string, error
 		return nil, errors.Errorf("empty address for %s", dnsName)
 	}
 	addrs := []string{}
-	switch dnsMode {
+	switch strings.ToLower(dnsMode) {
 	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), DualFamily:
 		a, err := getIPbyFamily(result, dnsMode, requireDualStack)
 		if err != nil {

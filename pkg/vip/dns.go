@@ -31,21 +31,25 @@ func NewIPUpdater(vip Network) IPUpdater {
 
 // Run runs the IP updater
 func (d *ipUpdater) Run(ctx context.Context) {
+	mode := utils.IPv4Family
+	if utils.IsIPv6(d.vip.IP()) {
+		mode = utils.IPv6Family
+	}
+
+	dnsName := d.vip.DNSName()
+
+	t := time.NewTicker(defaultInterval * time.Second)
+	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("stop ipUpdater")
 			return
-		default:
-			mode := "ipv4"
-			if utils.IsIPv6(d.vip.IP()) {
-				mode = "ipv6"
-			}
-
-			ip, err := utils.LookupHost(d.vip.DNSName(), mode, true)
+		case <-t.C:
+			ip, err := utils.LookupHost(dnsName, mode, true)
 			if err != nil {
-				log.Warn("cannot lookup", "name", d.vip.DNSName(), "err", err)
+				log.Warn("cannot lookup", "name", dnsName, "err", err)
 				// fallback to renewing the existing IP
 				ip = []string{d.vip.IP()}
 			}
@@ -58,8 +62,6 @@ func (d *ipUpdater) Run(ctx context.Context) {
 			if _, err := d.vip.AddIP(true, false, defaultInterval); err != nil {
 				log.Error("error adding virtual IP", "err", err)
 			}
-
 		}
-		time.Sleep(defaultInterval * time.Second)
 	}
 }
