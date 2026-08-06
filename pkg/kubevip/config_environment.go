@@ -406,6 +406,16 @@ func ParseEnvironment(c *Config) error {
 		c.CleanRoutingTable = b
 	}
 
+	// Skip Duplicate Address Detection when adding the VIP address
+	env = os.Getenv(vipSkipDAD)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.SkipDAD = b
+	}
+
 	// DNS mode
 	env = os.Getenv(dnsMode)
 	if env != "" {
