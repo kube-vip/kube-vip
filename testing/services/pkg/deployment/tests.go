@@ -1117,7 +1117,7 @@ func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name stri
 	checkCtx, cancel := context.WithTimeout(ctx, time.Second*120)
 	defer cancel()
 
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(time.Second * 2)
 	defer t.Stop()
 
 	for {

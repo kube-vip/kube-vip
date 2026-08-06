@@ -126,6 +126,12 @@ func main() {
 		if err != nil {
 			slog.Fatalf("could not create k8s REST config from external file: %q: %v", homeConfigPath, err)
 		}
+		// The fault tests poll the API a lot while waiting for convergence, which
+		// exhausts client-go's default 5 QPS budget and turns a slow poll into a
+		// rate limiter timeout. Raise it for the test harness.
+		config.QPS = 50
+		config.Burst = 100
+
 		clientset, err := k8s.NewClientset(config)
 		if err != nil {
 			slog.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
