@@ -37,7 +37,10 @@ func NewManager() *Manager {
 func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if _, exists := m.leases[id.NamespacedName()]; !exists {
+
+	// A lease whose context is already cancelled cannot be handed out again:
+	// anything derived from it would be cancelled straight away. Replace it.
+	if l, exists := m.leases[id.NamespacedName()]; !exists || l.Ctx.Err() != nil {
 		leaseCtx, leaseCancel := context.WithCancel(ctx)
 		m.leases[id.NamespacedName()] = newLease(leaseCtx, leaseCancel)
 	}
@@ -45,17 +48,51 @@ func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	return m.leases[id.NamespacedName()]
 }
 
-// Delete removes the lease and cancels it if the lease counter equals 0.
-func (m *Manager) Delete(id ID, objectName string) {
+// Delete removes the object from the lease it was added to and cancels that lease
+// once its last object is gone. With a common lease, the siblings that still use
+// it keep it alive.
+//
+// The lease the caller was given has to be passed in, because cleanup is usually
+// deferred to a goroutine that runs long after the object went away. By then the
+// lease of that name may already have been replaced, for instance because the
+// service was torn down and rebuilt, and cancelling the replacement would leave
+// the service unhandled. A stale caller is therefore ignored.
+//
+// Teardown paths have to call this synchronously rather than leaving it to the
+// deferred cleanup: until the lease is out of the map, Add hands the same
+// instance back, so a service that is rebuilt straight away gets parented to a
+// lease that the pending cleanup is about to cancel.
+func (m *Manager) Delete(id ID, objectName string, l *Lease) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if _, exist := m.leases[id.NamespacedName()]; exist {
-		m.leases[id.NamespacedName()].delete(objectName)
-		if m.leases[id.NamespacedName()].cnt.Load() < 1 {
-			m.leases[id.NamespacedName()].Cancel()
-			delete(m.leases, id.NamespacedName())
-		}
+
+	current := m.currentFor(id, l)
+	if current == nil {
+		return
 	}
+
+	current.delete(objectName)
+	if current.cnt.Load() < 1 {
+		m.retire(id, current)
+	}
+}
+
+// currentFor returns the registered lease for id, or nil when the caller is
+// stale, meaning the lease it holds is no longer the registered one. Callers have
+// to hold m.lock.
+func (m *Manager) currentFor(id ID, l *Lease) *Lease {
+	current, exist := m.leases[id.NamespacedName()]
+	if !exist || (l != nil && current != l) {
+		return nil
+	}
+	return current
+}
+
+// retire cancels the lease and drops it from the manager. Callers have to hold
+// m.lock.
+func (m *Manager) retire(id ID, l *Lease) {
+	l.Cancel()
+	delete(m.leases, id.NamespacedName())
 }
 
 // Get returns lease for the service.

@@ -175,7 +175,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		select {
 		case <-ctx.Done():
 			// Service was deleted
-			c.leaseMgr.Delete(leaseID, objectName)
+			c.leaseMgr.Delete(leaseID, objectName, objLease)
 		case <-objLease.Ctx.Done():
 			// Leader election ended (leadership lost or context cancelled)
 		}
@@ -226,7 +226,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		// 1. Leadership loss (e.g., network timeout)
 		// 2. Context cancellation
 		// 3. Any other reason RunOrDie returns
-		c.leaseMgr.Delete(leaseID, objectName)
+		c.leaseMgr.Delete(leaseID, objectName, objLease)
 	}()
 
 	wg := sync.WaitGroup{}
