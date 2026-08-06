@@ -196,6 +196,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 				// in theory this should never fail
 				p.svcMap.Delete(svc.UID)
+				// Retire the lease as well, so the replacement context below is not
+				// parented to a lease the pending cleanup is about to cancel.
+				ns, name := lease.ServiceName(svc)
+				p.leaseMgr.Retire(lease.NewID(p.config.LeaderElectionType, ns, name), nil)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil

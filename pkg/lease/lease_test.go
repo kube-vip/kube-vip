@@ -976,3 +976,43 @@ func TestManager_Delete_DoesNotCancelRecreatedLease(t *testing.T) {
 		t.Error("cleanup for the torn down lease removed the recreated lease")
 	}
 }
+
+// TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease reproduces the
+// second half of the service rebuild race.
+//
+// A teardown cancels the service context but leaves the lease in the manager,
+// because the cleanup that removes it is deferred to a goroutine. If the
+// replacement service context is built before that goroutine runs, Add hands
+// back the very same lease instance, so the replacement is parented to a lease
+// that is about to be cancelled. The instance guard in Delete cannot help,
+// because the doomed lease and the current lease are the same object.
+//
+// Retiring the lease synchronously during teardown is what makes Add return a
+// genuinely fresh instance.
+func TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("test-svc", "default", nil)
+	ctx, id := getSvcData(svc)
+	objectName := ServiceNamespacedName(svc)
+
+	old := mgr.Add(ctx, id)
+	old.Add(objectName)
+
+	// Teardown retires the lease, so the rebuild that follows cannot be parented
+	// to it even though the deferred cleanup has not run yet.
+	mgr.Retire(id, old)
+
+	fresh := mgr.Add(ctx, id)
+	fresh.Add(objectName)
+
+	if fresh == old {
+		t.Fatal("replacement service context would be parented to the doomed lease")
+	}
+
+	// The deferred cleanup for the old lease now runs and must be a no-op.
+	mgr.Delete(id, objectName, old)
+
+	if fresh.Ctx.Err() != nil {
+		t.Error("late cleanup cancelled the replacement lease")
+	}
+}

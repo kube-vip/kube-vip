@@ -37,7 +37,10 @@ func NewManager() *Manager {
 func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if _, exists := m.leases[id.NamespacedName()]; !exists {
+
+	// A lease whose context is already cancelled cannot be handed out again:
+	// anything derived from it would be cancelled straight away. Replace it.
+	if l, exists := m.leases[id.NamespacedName()]; !exists || l.Ctx.Err() != nil {
 		leaseCtx, leaseCancel := context.WithCancel(ctx)
 		m.leases[id.NamespacedName()] = newLease(leaseCtx, leaseCancel)
 	}
@@ -57,16 +60,49 @@ func (m *Manager) Delete(id ID, objectName string, l *Lease) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	current, exist := m.leases[id.NamespacedName()]
-	if !exist || (l != nil && current != l) {
+	current := m.currentFor(id, l)
+	if current == nil {
 		return
 	}
 
 	current.delete(objectName)
 	if current.cnt.Load() < 1 {
-		current.Cancel()
-		delete(m.leases, id.NamespacedName())
+		m.retire(id, current)
 	}
+}
+
+// Retire drops the lease from the manager and cancels it, so that a later Add
+// creates a fresh instance.
+//
+// Teardown paths have to call this rather than relying on the deferred cleanup
+// goroutine. Until the lease is out of the map, Add hands the same instance back,
+// so a service that is torn down and immediately rebuilt gets parented to a
+// lease that the pending cleanup is about to cancel, and is never handled again.
+func (m *Manager) Retire(id ID, l *Lease) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	if current := m.currentFor(id, l); current != nil {
+		m.retire(id, current)
+	}
+}
+
+// currentFor returns the registered lease for id, or nil when the caller is
+// stale, meaning the lease it holds is no longer the registered one. Callers have
+// to hold m.lock.
+func (m *Manager) currentFor(id ID, l *Lease) *Lease {
+	current, exist := m.leases[id.NamespacedName()]
+	if !exist || (l != nil && current != l) {
+		return nil
+	}
+	return current
+}
+
+// retire cancels the lease and drops it from the manager. Callers have to hold
+// m.lock.
+func (m *Manager) retire(id ID, l *Lease) {
+	l.Cancel()
+	delete(m.leases, id.NamespacedName())
 }
 
 // Get returns lease for the service.
