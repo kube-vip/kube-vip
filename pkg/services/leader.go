@@ -42,6 +42,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	svcLease := p.leaseMgr.Get(id)
 	if svcLease == nil {
+		metrics.ServiceElectionErrorsTotal.WithLabelValues(service.Namespace, service.Name, "no_lease").Inc()
 		return fmt.Errorf("no existing lease found for service %q with UID %q", service.Name, service.UID)
 	}
 

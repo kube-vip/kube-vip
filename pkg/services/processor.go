@@ -344,6 +344,8 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		svcCtx.Cancel()
 		p.svcMap.Delete(svc.UID)
+		// Drop the per-service election series so a recreated service starts clean.
+		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		p.updateActiveServicesMetric()
 	}
 

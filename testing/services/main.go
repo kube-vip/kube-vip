@@ -37,6 +37,7 @@ func main() {
 	flag.BoolVar(&t.LeaderFailover, "leaderFailover", false, "Perform a failover of the leader test")
 	flag.BoolVar(&t.LeaderActive, "leaderActive", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.LocalDeploy, "localDeploy", false, "Perform a test on the active leader")
+	flag.BoolVar(&t.FaultElection, "electionFaults", false, "Perform leader election fault injection tests")
 	flag.BoolVar(&t.Egress, "egress", false, "Perform an egress test")
 	flag.BoolVar(&t.EgressInternal, "egressInternal", false, "Perform an egress test, using the internal functionality")
 	flag.BoolVar(&t.EgressIPv6, "egressIPv6", false, "Perform an egress test")
@@ -125,6 +126,12 @@ func main() {
 		if err != nil {
 			slog.Fatalf("could not create k8s REST config from external file: %q: %v", homeConfigPath, err)
 		}
+		// The fault tests poll the API a lot while waiting for convergence, which
+		// exhausts client-go's default 5 QPS budget and turns a slow poll into a
+		// rate limiter timeout. Raise it for the test harness.
+		config.QPS = 50
+		config.Burst = 100
+
 		clientset, err := k8s.NewClientset(config)
 		if err != nil {
 			slog.Fatalf("could not create k8s clientset from external file: %q: %v", homeConfigPath, err)
