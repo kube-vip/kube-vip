@@ -837,9 +837,8 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	}
 
 	// Fault 5: a service change that tears the service down and rebuilds it.
-	// Flipping the external traffic policy makes serviceChanged cancel the service
-	// context and drop it from svcMap, so the next event has to build a fresh
-	// context and a fresh lease. Same desync class as fault 2, different trigger.
+	// Flipping the traffic policy makes serviceChanged cancel the service context,
+	// so the replacement has to get a fresh lease rather than the retired one.
 	for _, policy := range []v1.ServiceExternalTrafficPolicy{
 		v1.ServiceExternalTrafficPolicyCluster,
 		v1.ServiceExternalTrafficPolicyLocal,
