@@ -49,13 +49,19 @@ func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 }
 
 // Delete removes the object from the lease it was added to and cancels that lease
-// once its last object is gone.
+// once its last object is gone. With a common lease, the siblings that still use
+// it keep it alive.
 //
 // The lease the caller was given has to be passed in, because cleanup is usually
 // deferred to a goroutine that runs long after the object went away. By then the
 // lease of that name may already have been replaced, for instance because the
 // service was torn down and rebuilt, and cancelling the replacement would leave
 // the service unhandled. A stale caller is therefore ignored.
+//
+// Teardown paths have to call this synchronously rather than leaving it to the
+// deferred cleanup: until the lease is out of the map, Add hands the same
+// instance back, so a service that is rebuilt straight away gets parented to a
+// lease that the pending cleanup is about to cancel.
 func (m *Manager) Delete(id ID, objectName string, l *Lease) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -67,22 +73,6 @@ func (m *Manager) Delete(id ID, objectName string, l *Lease) {
 
 	current.delete(objectName)
 	if current.cnt.Load() < 1 {
-		m.retire(id, current)
-	}
-}
-
-// Retire drops the lease from the manager and cancels it, so that a later Add
-// creates a fresh instance.
-//
-// Teardown paths have to call this rather than relying on the deferred cleanup
-// goroutine. Until the lease is out of the map, Add hands the same instance back,
-// so a service that is torn down and immediately rebuilt gets parented to a
-// lease that the pending cleanup is about to cancel, and is never handled again.
-func (m *Manager) Retire(id ID, l *Lease) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	if current := m.currentFor(id, l); current != nil {
 		m.retire(id, current)
 	}
 }

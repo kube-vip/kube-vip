@@ -2,6 +2,7 @@ package lease
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -998,9 +999,9 @@ func TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease(t *testing.T) {
 	old := mgr.Add(ctx, id)
 	old.Add(objectName)
 
-	// Teardown retires the lease, so the rebuild that follows cannot be parented
-	// to it even though the deferred cleanup has not run yet.
-	mgr.Retire(id, old)
+	// Teardown drops the service from its lease synchronously, so the rebuild that
+	// follows cannot be parented to it even though the deferred cleanup has not run.
+	mgr.Delete(id, objectName, old)
 
 	fresh := mgr.Add(ctx, id)
 	fresh.Add(objectName)
@@ -1014,5 +1015,71 @@ func TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease(t *testing.T) {
 
 	if fresh.Ctx.Err() != nil {
 		t.Error("late cleanup cancelled the replacement lease")
+	}
+}
+
+// TestManager_LeaseLifetimeInvariant pins the lifetime rule for the whole
+// Add/Delete surface rather than one scenario: a lease stays usable for exactly as
+// long as at least one object still holds it, and is replaced afterwards.
+//
+// That is the property the common lease depends on, and the one a per-lease
+// teardown breaks: dropping one service must not cancel a lease its siblings are
+// still using. Raised by Patryk in review of #1669.
+func TestManager_LeaseLifetimeInvariant(t *testing.T) {
+	shared := map[string]string{serviceLeaseAnnotation: "shared-lease"}
+
+	for _, tc := range []struct {
+		name    string
+		objects int
+	}{
+		{"single object", 1},
+		{"two objects sharing a lease", 2},
+		{"several objects sharing a lease", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := NewManager()
+			ctx, id := getSvcData(createTestService("svc0", "default", shared))
+
+			objects := make([]string, tc.objects)
+			for i := range objects {
+				objects[i] = ServiceNamespacedName(createTestService(fmt.Sprintf("svc%d", i), "default", shared))
+			}
+
+			l := mgr.Add(ctx, id)
+			for _, o := range objects {
+				if !l.Add(o) {
+					t.Fatalf("object %q was not added", o)
+				}
+			}
+
+			// Drop the objects one at a time. Every drop but the last has to leave
+			// the lease usable, because the rest still depend on it.
+			for i, o := range objects {
+				mgr.Delete(id, o, l)
+
+				if remaining := len(objects) - i - 1; remaining > 0 {
+					if l.Ctx.Err() != nil {
+						t.Fatalf("lease was cancelled with %d object(s) still holding it", remaining)
+					}
+					if mgr.Get(id) != l {
+						t.Fatalf("lease was dropped with %d object(s) still holding it", remaining)
+					}
+					continue
+				}
+
+				if l.Ctx.Err() == nil {
+					t.Error("lease was not cancelled after its last object went away")
+				}
+				if mgr.Get(id) != nil {
+					t.Error("lease was not removed after its last object went away")
+				}
+			}
+
+			// A rebuild has to get a genuinely fresh lease, so nothing derived from it
+			// is cancelled by the teardown that just happened.
+			if fresh := mgr.Add(ctx, id); fresh == l || fresh.Ctx.Err() != nil {
+				t.Error("rebuild reused the retired lease")
+			}
+		})
 	}
 }
