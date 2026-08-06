@@ -82,7 +82,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	// healthy and a new election should have started immediately.
 	go func() {
 		<-svcCtx.Ctx.Done()
-		p.leaseMgr.Delete(id, objectName)
+		p.leaseMgr.Delete(id, objectName, svcLease)
 	}()
 
 	select {

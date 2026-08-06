@@ -99,7 +99,7 @@ func TestManager_Delete_DecrementCounter(t *testing.T) {
 
 	// Delete once - should remove the lease
 
-	mgr.Delete(leaseID1, objectName)
+	mgr.Delete(leaseID1, objectName, nil)
 
 	lease := mgr.Get(getSvcID(svc))
 	if lease != nil {
@@ -127,7 +127,7 @@ func TestManager_Delete_CancelsContext(t *testing.T) {
 	}
 
 	// Delete the lease
-	mgr.Delete(leaseID1, objectName)
+	mgr.Delete(leaseID1, objectName, nil)
 
 	// Verify context is cancelled
 	select {
@@ -149,7 +149,7 @@ func TestManager_Add_AfterDelete_CreatesNewLease(t *testing.T) {
 	lease1 := mgr.Add(ctx1, leaseID1)
 	_ = lease1.Add(objectName)
 
-	mgr.Delete(leaseID1, objectName)
+	mgr.Delete(leaseID1, objectName, nil)
 
 	ctx2, leaseID2 := getSvcData(svc)
 	lease2 := mgr.Add(ctx2, leaseID2)
@@ -244,7 +244,7 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 
 	// After a one delete, lease should be gone
 	lease := mgr.Get(getSvcID(svc))
@@ -427,7 +427,7 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 
 	// Simulate leadership lost - the leader election function should delete the lease
 	// This is the fix: delete the lease when RunOrDie returns
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 
 	// Verify lease is removed
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -496,13 +496,13 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 	}
 
 	// Delete first service - lease should still exist
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 	if mgr.Get(getSvcID(svc1)) == nil {
 		t.Error("expected lease to still exist after first delete")
 	}
 
 	// Delete second service - lease should be removed
-	mgr.Delete(leaseID2, objectName2)
+	mgr.Delete(leaseID2, objectName2, nil)
 	if mgr.Get(getSvcID(svc2)) != nil {
 		t.Error("expected lease to be removed after all services deleted")
 	}
@@ -550,7 +550,7 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 	}
 
 	// Now the first goroutine's defer deletes the lease
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 
 	// The lease should not still exist because same service was processed twice, so we do not increment the counter
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -558,7 +558,7 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 	}
 
 	// Second delete does nothing
-	mgr.Delete(leaseID2, objectName1)
+	mgr.Delete(leaseID2, objectName1, nil)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to not exist")
 	}
@@ -606,17 +606,17 @@ func TestManager_NonCommonLease_MultipleAdds(t *testing.T) {
 	}
 
 	// Need one delete to remove the lease, another delete runs do nothing
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
 
-	mgr.Delete(leaseID2, objectName1)
+	mgr.Delete(leaseID2, objectName1, nil)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
 
-	mgr.Delete(leaseID3, objectName1)
+	mgr.Delete(leaseID3, objectName1, nil)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be deleted")
 	}
@@ -668,8 +668,8 @@ func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
 	}
 
 	// Delete should still work
-	mgr.Delete(leaseID1, objectName1)
-	mgr.Delete(leaseID2, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
+	mgr.Delete(leaseID2, objectName1, nil)
 
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be removed")
@@ -693,7 +693,7 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 	lease1.Cancel()
 
 	// Delete the lease
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 
 	// Verify lease is gone
 	if mgr.Get(getSvcID(svc)) != nil {
@@ -794,11 +794,11 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 	}
 
 	// Now simulate the first leader election ending (defer deletes the lease)
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 
 	// The lease context should now be cancelled (because counter went to 0)
 	// But we added twice, so we need to delete twice
-	mgr.Delete(leaseID2, objectName1)
+	mgr.Delete(leaseID2, objectName1, nil)
 
 	// Now the goroutine should have completed
 	select {
@@ -878,7 +878,7 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 		t.Errorf("expected 100 adds, got %d", addCount)
 	}
 
-	mgr.Delete(leaseID1, objectName1)
+	mgr.Delete(leaseID1, objectName1, nil)
 	if mgr.Get(getSvcID(svc)) != nil {
 		t.Error("expected lease to be removed after first delete")
 	}
@@ -935,5 +935,44 @@ func TestManager_NonCommonLease_ServiceContextCancellation(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Error("goroutine should have unblocked")
+	}
+}
+
+// TestManager_Delete_DoesNotCancelRecreatedLease reproduces the stale-cleanup bug.
+//
+// Every service that starts leader election also starts a goroutine that calls
+// Manager.Delete once the service context is cancelled. When a service is torn
+// down and immediately rebuilt, for instance because its externalTrafficPolicy
+// changed, that goroutine runs after the replacement lease was already created.
+// Deleting by name alone then cancels the live replacement, and the service is
+// never handled again.
+func TestManager_Delete_DoesNotCancelRecreatedLease(t *testing.T) {
+	mgr := NewManager()
+	svc := createTestService("test-svc", "default", nil)
+	ctx, id := getSvcData(svc)
+	objectName := ServiceNamespacedName(svc)
+
+	// The service is set up, and its lease is registered.
+	old := mgr.Add(ctx, id)
+	old.Add(objectName)
+
+	// The service is torn down and rebuilt straight away, so a fresh lease for the
+	// same name exists before the old cleanup goroutine gets to run.
+	mgr.Delete(id, objectName, old)
+	fresh := mgr.Add(ctx, id)
+	fresh.Add(objectName)
+
+	if old == fresh {
+		t.Fatal("expected a new lease instance after delete")
+	}
+
+	// Now the cleanup for the *old* lease finally runs. It has to be a no-op.
+	mgr.Delete(id, objectName, old)
+
+	if fresh.Ctx.Err() != nil {
+		t.Error("cleanup for the torn down lease cancelled the recreated lease")
+	}
+	if got := mgr.Get(id); got == nil {
+		t.Error("cleanup for the torn down lease removed the recreated lease")
 	}
 }

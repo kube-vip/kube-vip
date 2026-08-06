@@ -45,16 +45,27 @@ func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	return m.leases[id.NamespacedName()]
 }
 
-// Delete removes the lease and cancels it if the lease counter equals 0.
-func (m *Manager) Delete(id ID, objectName string) {
+// Delete removes the object from the lease it was added to and cancels that lease
+// once its last object is gone.
+//
+// The lease the caller was given has to be passed in, because cleanup is usually
+// deferred to a goroutine that runs long after the object went away. By then the
+// lease of that name may already have been replaced, for instance because the
+// service was torn down and rebuilt, and cancelling the replacement would leave
+// the service unhandled. A stale caller is therefore ignored.
+func (m *Manager) Delete(id ID, objectName string, l *Lease) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	if _, exist := m.leases[id.NamespacedName()]; exist {
-		m.leases[id.NamespacedName()].delete(objectName)
-		if m.leases[id.NamespacedName()].cnt.Load() < 1 {
-			m.leases[id.NamespacedName()].Cancel()
-			delete(m.leases, id.NamespacedName())
-		}
+
+	current, exist := m.leases[id.NamespacedName()]
+	if !exist || (l != nil && current != l) {
+		return
+	}
+
+	current.delete(objectName)
+	if current.cnt.Load() < 1 {
+		current.Cancel()
+		delete(m.leases, id.NamespacedName())
 	}
 }
 

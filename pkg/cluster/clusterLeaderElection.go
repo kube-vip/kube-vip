@@ -37,7 +37,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	// Without this, RunOrDie would continue running until leadership is naturally lost.
 	wg.Go(func() {
 		<-objLease.Ctx.Done()
-		leaseMgr.Delete(leaseID, objectName)
+		leaseMgr.Delete(leaseID, objectName, objLease)
 	})
 
 	if !isNew {
