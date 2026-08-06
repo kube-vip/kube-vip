@@ -25,9 +25,10 @@ type Service struct {
 	egressIPv6     bool // egress should be IPv6
 	policyLocal    bool // set the policy to local pods
 	testHTTP       bool
-	testDualstack  bool // test dualstack loadbalancer services
-	dhcpBroadcast  bool // test dhcp broadcast flag
-	timeout        int  // how long to wait for the service to be created
+	testDualstack  bool   // test dualstack loadbalancer services
+	dhcpBroadcast  bool   // test dhcp broadcast flag
+	commonLease    string // share a lease with other services under this name
+	timeout        int    // how long to wait for the service to be created
 }
 
 type Deployment struct {
@@ -239,10 +240,16 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 		},
 	}
 
+	svc.Annotations = map[string]string{}
+
 	if s.egress {
-		svc.Annotations = map[string]string{
-			kubevip.Egress: "true",
-		}
+		svc.Annotations[kubevip.Egress] = "true"
+	}
+
+	if s.commonLease != "" {
+		// A common lease is only valid with a cluster traffic policy.
+		svc.Annotations[kubevip.ServiceLease] = s.commonLease
+		svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeCluster
 	}
 
 	if s.egressInternal {

@@ -679,6 +679,18 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 //     than the lease duration, which drives OnStoppedLeading and returns the
 //     election. The restart loop used to wedge on a WaitGroup exactly there, so
 //     kube_vip_service_election_attempts_total must advance afterwards.
+//   - an externalTrafficPolicy flip: tears the service down and rebuilds it, so the
+//     replacement has to get a fresh lease instead of the retired one.
+//   - a burst of service events: the same spawn-once invariant driven from the
+//     service watch instead of the endpoint watch.
+//   - a common lease sibling teardown: deleting one of two services that share a
+//     lease must leave that lease held for the one that stays.
+//   - a partitioned follower: cutting a non-leader off from the apiserver must not
+//     move the lease, stop traffic, or leak a loop on the node that returns.
+//
+// The endpoint churn fault also asserts the yield half of the cycle: with a local
+// traffic policy and no endpoints anywhere, the address has to stop answering
+// instead of being left to black-hole traffic.
 //
 // After every fault the service has to converge: a live election loop, a held
 // lease, and a VIP that serves traffic.
@@ -868,7 +880,14 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	// Fault 7: partition a node that is not the leader. The leader has to keep the
+	// Fault 7: a service sharing its lease with another one is torn down. The
+	// sibling keeps using that lease, so it must not be cancelled underneath it.
+	// This is the case that made the per-lease teardown wrong.
+	if err := config.faultCommonLeaseSibling(ctx, clientset); err != nil {
+		return err
+	}
+
+	// Fault 8: partition a node that is not the leader. The leader has to keep the
 	// lease and keep serving, and the returning node must not leak a loop or end up
 	// advertising the same address.
 	follower, err := followerNode(ctx, clientset, leaseName)
@@ -940,6 +959,76 @@ func (config *TestConfig) checkConverged(ctx context.Context, clientset *kuberne
 	if err := httpTest(lbAddress); err != nil {
 		return fmt.Errorf("service on %q did not serve traffic after %s: %w", lbAddress, fault, err)
 	}
+	return nil
+}
+
+// faultCommonLeaseSibling creates two services that share one lease, tears the
+// first one down, and asserts the second keeps serving on that same lease.
+//
+// A teardown that cancels the lease rather than just releasing the leaving
+// service takes the sibling down with it, which is what review of #1669 caught.
+func (config *TestConfig) faultCommonLeaseSibling(ctx context.Context, clientset *kubernetes.Clientset) error {
+	const (
+		leaseName   = "shared-lease"
+		deployName  = "kube-vip-shared"
+		leavingName = "kube-vip-shared-leaving"
+		stayingName = "kube-vip-shared-staying"
+	)
+
+	defer func() {
+		for _, name := range []string{leavingName, stayingName} {
+			if err := clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, name, metav1.DeleteOptions{}); err != nil &&
+				!apierrors.IsNotFound(err) {
+				slog.Errorf("failed to delete service %q: %v", name, err)
+			}
+		}
+		if err := deleteDeployment(ctx, clientset, deployName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", deployName, err)
+		}
+	}()
+
+	slog.Infof("🧪 ---> common lease sibling teardown <---")
+	deploy := Deployment{
+		name:         deployName,
+		nodeAffinity: config.Affinity,
+		replicas:     1,
+		server:       true,
+	}
+	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
+		return err
+	}
+
+	// Both services share one lease. A common lease requires a cluster traffic
+	// policy, which CreateService sets alongside the annotation.
+	for _, name := range []string{leavingName, stayingName} {
+		svc := Service{name: name, commonLease: leaseName, testHTTP: true, timeout: 30}
+		if _, _, err := svc.CreateService(ctx, clientset); err != nil {
+			return fmt.Errorf("failed to create service %q on the common lease: %w", name, err)
+		}
+	}
+
+	holder, err := leaseHolder(ctx, clientset, leaseName)
+	if err != nil {
+		return fmt.Errorf("common lease never got a holder: %w", err)
+	}
+	slog.Infof("🔎 common lease [%s] is held by [%s]", leaseName, holder)
+
+	// Tear the first service down. The sibling is untouched and still needs the
+	// lease, so the lease has to stay held.
+	slog.Infof("💥 deleting service [%s], which shares lease [%s] with [%s]", leavingName, leaseName, stayingName)
+	if err := clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, leavingName, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("failed to delete service %q: %w", leavingName, err)
+	}
+
+	if _, err := leaseHolder(ctx, clientset, leaseName); err != nil {
+		return fmt.Errorf("common lease lost its holder when a sibling service was deleted: %w", err)
+	}
+
+	if err := checkNoDuplicateElectionLoops(v1.NamespaceDefault, stayingName, "a sibling on the same lease being deleted"); err != nil {
+		return err
+	}
+
+	slog.Infof("🔎 common lease [%s] still held after [%s] was deleted", leaseName, leavingName)
 	return nil
 }
 
