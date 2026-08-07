@@ -129,8 +129,7 @@ func newLease(ctx context.Context, cancel context.CancelFunc) *Lease {
 // Add adds the object to the lease and increments counter
 // it will return true if object was added
 func (l *Lease) Add(name string) bool {
-	if _, exists := l.services.Load(name); !exists {
-		l.services.Store(name, true)
+	if _, exists := l.services.LoadOrStore(name, true); !exists {
 		l.cnt.Add(1)
 		return true
 	}
