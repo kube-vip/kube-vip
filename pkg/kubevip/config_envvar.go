@@ -181,6 +181,9 @@ const (
 	// vipCleanRoutingTable - defines if routing table will be cleaned of redundant routes on kube-vip's start
 	vipCleanRoutingTable = "vip_cleanroutingtable" //nolint
 
+	// vipSkipDAD - defines if Duplicate Address Detection is skipped when adding the VIP address (IFA_F_NODAD)
+	vipSkipDAD = "vip_skipdad" //nolint
+
 	// cpNamespace defines the namespace the control plane pods will run in
 	cpNamespace = "cp_namespace"
 

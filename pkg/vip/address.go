@@ -116,13 +116,17 @@ type network struct {
 	ipvsMark uint32
 
 	ipvsPort uint16
+
+	// dadSkip marks the address with IFA_F_NODAD on every add:
+	// anycast semantics, e.g. ECMP, must not use DAD
+	dadSkip bool
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
 func NewConfig(address string, iface string, loGlobalScope bool, subnet string, isDDNS bool,
 	dhcpMode string, requireDualStack, isDualStack bool, tableID int, tableType int, routingProtocol int,
 	dnsMode, forwardMethod, iptablesBackend string, ipvsEnabled bool, ipvsPort uint16, enableSecurity bool,
-	intfMgr *networkinterface.Manager, nftables bool) ([]Network, error) {
+	intfMgr *networkinterface.Manager, nftables bool, skipDAD bool) ([]Network, error) {
 	networks := []Network{}
 
 	link, err := netlink.LinkByName(iface)
@@ -147,6 +151,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 			nftables:         nftables,
 			ipvsMark:         ipvsMark,
 			ipvsPort:         ipvsPort,
+			dadSkip:          skipDAD,
 		}
 
 		subnet, err = SelectSubnet(address, subnet)
@@ -201,6 +206,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 						nftables:         nftables,
 						ipvsMark:         ipvsMark,
 						ipvsPort:         ipvsPort,
+						dadSkip:          skipDAD,
 					}
 
 					networks = append(networks, result)
@@ -222,6 +228,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 						nftables:         nftables,
 						ipvsMark:         ipvsMark,
 						ipvsPort:         ipvsPort,
+						dadSkip:          skipDAD,
 					}
 
 					networks = append(networks, result)
@@ -247,6 +254,7 @@ func NewConfig(address string, iface string, loGlobalScope bool, subnet string, 
 				nftables:         nftables,
 				ipvsMark:         ipvsMark,
 				ipvsPort:         ipvsPort,
+				dadSkip:          skipDAD,
 			}
 
 			s, err := SelectSubnet(ip, subnet)
@@ -420,6 +428,13 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 	return isUpdated, nil
 }
 
+// shouldSkipDAD returns whether the address must carry the IFA_F_NODAD flag:
+// either because configuration or because the caller requests it for this
+// specific add (e.g. DADFAILED state recovery in ARP mode).
+func (configurator *network) shouldSkipDAD(override bool) bool {
+	return override || configurator.dadSkip
+}
+
 // AddIP - Add an IP address to the interface
 // precheck: if true, check if the IP already exists before adding
 // skipDAD: if true, set IFA_F_NODAD flag for IPv6 addresses to skip Duplicate Address Detection
@@ -447,8 +462,10 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 	// For IPv6 addresses, optionally set NODAD flag to skip Duplicate Address Detection (DAD)
 	// This prevents DADFAILED loops when recovering from a previous DADFAILED state
 	// The flag tells the kernel to skip DAD, which is safe when we're re-adding
-	// an address that we know should be ours (e.g., after DADFAILED recovery)
-	if skipDAD && utils.IsIPv6(configurator.address.IP.String()) {
+	// an address that we know should be ours (e.g., after DADFAILED recovery).
+	// We also allow to globally configure NODAD in case user knows they are running in an
+	// environment where multiple nodes may advertise the same VIP (e.g., ECMP routing).
+	if configurator.shouldSkipDAD(skipDAD) && utils.IsIPv6(configurator.address.IP.String()) {
 		configurator.address.Flags |= unix.IFA_F_NODAD
 		log.Debug("Setting IFA_F_NODAD flag for IPv6 address to skip DAD", "ip", configurator.address.IP.String())
 	}

@@ -142,6 +142,9 @@ type Config struct {
 	// Clean routing table of redundant routes on start
 	CleanRoutingTable bool `yaml:"cleanRoutingTable"`
 
+	// Skip Duplicate Address Detection when adding the VIP address (IFA_F_NODAD)
+	SkipDAD bool `yaml:"skipDAD"`
+
 	// BGP Configuration
 	BGPConfig     BGPConfig
 	BGPPeerConfig BGPPeer
