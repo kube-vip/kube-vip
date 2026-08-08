@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -146,29 +148,41 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		backendMapV6 := backend.Map{}
 		// only check localhost
 
-		ips := []string{}
-		if c.NodeName != "" {
-			if ips, err = getNodeIPs(ctx, c.NodeName, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
-				log.Error("failed to get IP of control-plane node", "err", err)
+		// An explicitly configured Kubernetes API address (static-pod
+		// deployments point it at the local API server, whose loopback
+		// listener is often the only certificate-valid local endpoint)
+		// takes precedence over the Node object's addresses: the check
+		// answers "is the local API server healthy" for every VIP family,
+		// regardless of the transport family of the override itself.
+		if entry := kubernetesAddrBackendEntry(c.KubernetesAddr, c.Port); entry != nil {
+			log.Info("using configured Kubernetes address for backend health checks", "address", c.KubernetesAddr)
+			backendMapV4[*entry] = false
+			backendMapV6[*entry] = false
+		} else {
+			ips := []string{}
+			if c.NodeName != "" {
+				if ips, err = getNodeIPs(ctx, c.NodeName, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+					log.Error("failed to get IP of control-plane node", "err", err)
+				}
 			}
-		}
 
-		if len(ips) == 0 {
-			if !utils.IsIPv6(cluster.Network[0].IP()) {
-				ips = append(ips, "127.0.0.1")
-			} else {
-				ips = append(ips, "::1")
+			if len(ips) == 0 {
+				if !utils.IsIPv6(cluster.Network[0].IP()) {
+					ips = append(ips, "127.0.0.1")
+				} else {
+					ips = append(ips, "::1")
+				}
+
+				log.Info("no IP address found for node - will fallback to use localhost address", "addresses", ips)
 			}
 
-			log.Info("no IP address found for node - will fallback to use localhost address", "addresses", ips)
-		}
-
-		for _, ip := range ips {
-			entry := backend.Entry{Addr: ip, Port: c.Port}
-			if !utils.IsIPv6(ip) {
-				backendMapV4[entry] = false
-			} else {
-				backendMapV6[entry] = false
+			for _, ip := range ips {
+				entry := backend.Entry{Addr: ip, Port: c.Port}
+				if !utils.IsIPv6(ip) {
+					backendMapV4[entry] = false
+				} else {
+					backendMapV6[entry] = false
+				}
 			}
 		}
 
@@ -347,6 +361,27 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		case <-ticker.C:
 		}
 	}
+}
+
+// kubernetesAddrBackendEntry converts an explicitly configured Kubernetes
+// API address override (config.KubernetesAddr, e.g. "https://127.0.0.1:6443"
+// on static-pod deployments) into a backend health-check entry. Returns nil
+// when no usable override is configured.
+func kubernetesAddrBackendEntry(kubernetesAddr string, defaultPort uint16) *backend.Entry {
+	if kubernetesAddr == "" {
+		return nil
+	}
+	u, err := url.Parse(kubernetesAddr)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	port := defaultPort
+	if p := u.Port(); p != "" {
+		if parsed, err := strconv.ParseUint(p, 10, 16); err == nil {
+			port = uint16(parsed)
+		}
+	}
+	return &backend.Entry{Addr: u.Hostname(), Port: port}
 }
 
 func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clientset) ([]string, error) {

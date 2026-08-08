@@ -47,10 +47,10 @@ func (e *Entry) Check() bool {
 	// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 
 	var k8sAddr string
-	if utils.IsIPv4(e.Addr) {
-		k8sAddr = fmt.Sprintf("%s:%v", e.Addr, e.Port)
-	} else {
+	if utils.IsIPv6(e.Addr) {
 		k8sAddr = fmt.Sprintf("[%s]:%v", e.Addr, e.Port)
+	} else {
+		k8sAddr = fmt.Sprintf("%s:%v", e.Addr, e.Port)
 	}
 
 	switch {
