@@ -5,7 +5,7 @@ TARGET := kube-vip
 .DEFAULT_GOAL := $(TARGET)
 
 # These will be provided to the target
-VERSION := v1.2.2
+VERSION := v1.2.3
 
 BUILD := `git rev-parse HEAD`
 
