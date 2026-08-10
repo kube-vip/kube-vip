@@ -328,6 +328,10 @@ func (configurator *network) PrepareRoute() *netlink.Route {
 
 func (configurator *network) RouteHash() string {
 	r := configurator.PrepareRoute()
+	return NetlinkHash(r)
+}
+
+func NetlinkHash(r *netlink.Route) string {
 	h := fnv.New32a()
 	h.Write([]byte(r.String()))
 

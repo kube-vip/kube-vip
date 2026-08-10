@@ -100,7 +100,7 @@ func (t *Table) cleanRoutes() error {
 		if t.config.EnableControlPlane {
 			found = (routes[i].Dst.IP.String() == t.config.Address)
 		} else {
-			found = t.routeMgr.Check(routes[i].String())
+			found = t.routeMgr.Check(vip.NetlinkHash(&(routes[i])))
 		}
 
 		if !found {
