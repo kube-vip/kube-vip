@@ -13,6 +13,8 @@ const (
 	IPv4Family = "IPv4"
 	IPv6Family = "IPv6"
 	DualFamily = "dual"
+	// unused, but kept for documentation purposes, as it is used as user input
+	FirstFamily = "first"
 )
 
 // LookupHost resolves dnsName and return an IP or an error
@@ -25,13 +27,18 @@ func LookupHost(dnsName, dnsMode string, requireDualStack bool) ([]string, error
 		return nil, errors.Errorf("empty address for %s", dnsName)
 	}
 	addrs := []string{}
-	switch strings.ToLower(dnsMode) {
-	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), DualFamily:
-		a, err := getIPbyFamily(result, dnsMode, requireDualStack)
+	// we need to lowercase the dnsMode as in the end it is expected by internal functions
+	// that expects the family to be lowercase, but we want to keep the original case for logging
+	lowerDnsMode := strings.ToLower(dnsMode)
+	switch lowerDnsMode {
+	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), strings.ToLower(DualFamily):
+		a, err := getIPbyFamily(result, lowerDnsMode, requireDualStack)
 		if err != nil {
 			return nil, err
 		}
 		addrs = append(addrs, a...)
+	// if the dnsMode is not one of the expected values,
+	// we will return the `first` address found
 	default:
 		addrs = append(addrs, result[0])
 	}
