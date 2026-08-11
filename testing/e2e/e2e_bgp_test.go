@@ -33,6 +33,7 @@ import (
 )
 
 const (
+	fixedInvalidNexthop   = "invalid"
 	defaultFixedNexthopv6 = "fc00:1000:1000:1000::100"
 	defaultFixedNexthopv4 = "172.18.0.100"
 )
@@ -146,6 +147,38 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 			})
 
 			It("should add paths", func() {
+				addresses := strings.Split(cpVIP, ",")
+				testControlPlaneBGP(ctx, gobgpClient, addresses)
+			})
+		})
+
+		Describe("kube-vip IPv4 control-plane BGP mode functionality, misconfigured MP-BGP failover", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv4Family, utils.IPv4Family,
+					[]string{utils.IPv4Family}, &gobgpPeers,
+					&gobgpClient, logger, nodesNumber, fixedInvalidNexthop, "cp-mpbgp-failover", false, true, false, false)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			It("advertise IPv4 routes even if MP-BGP is misconfigured", func() {
 				addresses := strings.Split(cpVIP, ",")
 				testControlPlaneBGP(ctx, gobgpClient, addresses)
 			})
@@ -425,6 +458,41 @@ var _ = Describe("kube-vip BGP mode", Ordered, func() {
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, defaultFixedNexthopv4, "")
+				},
+				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+			)
+		})
+
+		Describe("kube-vip IPv4 services BGP mode functionality with misconfigured MP-BGP", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+				nodesNumber = 1
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv4Family, utils.IPv4Family,
+					[]string{utils.IPv4Family}, &gobgpPeers,
+					&gobgpClient, logger, nodesNumber, fixedInvalidNexthop, "svc-mpbgp-failover", false, false, true, false)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			DescribeTable("advertise IPv4 routes even if MP-BGP is misconfigured",
+				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
+						trafficPolicy, kindCluster.Client, 1, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -956,6 +1024,13 @@ func setupEnv(ctx context.Context, cpVIP *string,
 		kvPeers = append(kvPeers, &e2e.BGPPeerValues{IP: server.LocalIPv6, AS: bgp.GoBGPAS, IPFamily: utils.IPv6Family})
 	}
 
+	fixedV4Nexthop := defaultFixedNexthopv4
+	fixedV6Nexthop := defaultFixedNexthopv6
+	if mpbgpnexthop == fixedInvalidNexthop {
+		fixedV4Nexthop = fixedInvalidNexthop
+		fixedV6Nexthop = fixedInvalidNexthop
+	}
+
 	manifestValues := e2e.KubevipManifestValues{
 		ControlPlaneVIP:            *cpVIP,
 		ControlPlaneEnable:         fmt.Sprintf("%t", cpEnable),
@@ -965,8 +1040,8 @@ func setupEnv(ctx context.Context, cpVIP *string,
 		BGPAS:                      bgp.KubevipAS,
 		BGPPeers:                   bgp.PeerStrings(kvPeers),
 		MPBGPNexthop:               mpbgpnexthop,
-		MPBGPNexthopIPv4:           defaultFixedNexthopv4,
-		MPBGPNexthopIPv6:           defaultFixedNexthopv6,
+		MPBGPNexthopIPv4:           fixedV4Nexthop,
+		MPBGPNexthopIPv6:           fixedV6Nexthop,
 		EnableServiceSecurity:      "true",
 		PerServiceElectionOnDemand: fmt.Sprintf("%t", perServiceElectionOnDemand),
 	}

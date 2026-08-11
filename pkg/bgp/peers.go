@@ -3,7 +3,7 @@ package bgp
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	log "log/slog"
 	"net"
 	"net/netip"
 	"strconv"
@@ -75,58 +75,64 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 		}
 	}
 
-	if b.c.MpbgpNexthop != "" {
-		p.AfiSafis = []*api.AfiSafi{
-			{
-				Config: &api.AfiSafiConfig{
-					Family: &api.Family{
-						Afi:  api.Family_AFI_IP,
-						Safi: api.Family_SAFI_UNICAST,
-					},
-					Enabled: true,
-				},
-			},
-			{
-				Config: &api.AfiSafiConfig{
-					Family: &api.Family{
-						Afi:  api.Family_AFI_IP6,
-						Safi: api.Family_SAFI_UNICAST,
-					},
-					Enabled: true,
-				},
-			},
-		}
+	mpBGP := b.c.MpbgpNexthop
 
-		peer.SetMpbgpOptions(b.c)
+	if peer.MpbgpNexthop != "" {
+		mpBGP = peer.MpbgpNexthop
+	}
 
+	if mpBGP != "" {
 		ipv4Address, ipv6Address, err := peer.FindMpbgpAddresses(p, b.c)
 		if err != nil {
-			return fmt.Errorf("failed to get MP-BGP addresses: %w", err)
-		}
+			log.Error("failed to get MP-BGP addresses, will not us MP-BGP for this host", "error", err)
+		} else {
+			p.AfiSafis = []*api.AfiSafi{
+				{
+					Config: &api.AfiSafiConfig{
+						Family: &api.Family{
+							Afi:  api.Family_AFI_IP,
+							Safi: api.Family_SAFI_UNICAST,
+						},
+						Enabled: true,
+					},
+				},
+				{
+					Config: &api.AfiSafiConfig{
+						Family: &api.Family{
+							Afi:  api.Family_AFI_IP6,
+							Safi: api.Family_SAFI_UNICAST,
+						},
+						Enabled: true,
+					},
+				},
+			}
 
-		mask := strconv.Itoa(vip.DefaultMaskIPv6)
-		address := ipv4Address
-		family := api.Family_AFI_IP
-		if utils.IsIPv4(p.Conf.NeighborAddress) {
-			mask = strconv.Itoa(vip.DefaultMaskIPv4)
-			address = ipv6Address
-			family = api.Family_AFI_IP6
-		}
+			peer.SetMpbgpOptions(b.c)
 
-		err = b.s.AddDefinedSet(ctx, &api.AddDefinedSetRequest{
-			DefinedSet: &api.DefinedSet{
-				DefinedType: api.DefinedType_DEFINED_TYPE_NEIGHBOR,
-				Name:        fmt.Sprintf("peer-%s", p.Conf.NeighborAddress),
-				List:        []string{fmt.Sprintf("%s/%s", p.Conf.NeighborAddress, mask)},
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to add defined set: %v", err)
-		}
+			mask := strconv.Itoa(vip.DefaultMaskIPv6)
+			address := ipv4Address
+			family := api.Family_AFI_IP
+			if utils.IsIPv4(p.Conf.NeighborAddress) {
+				mask = strconv.Itoa(vip.DefaultMaskIPv4)
+				address = ipv6Address
+				family = api.Family_AFI_IP6
+			}
 
-		if address != "" {
-			if err := insertPolicy(ctx, b.s, address, p, family); err != nil {
-				return fmt.Errorf("failed to add policy: %w", err)
+			err = b.s.AddDefinedSet(ctx, &api.AddDefinedSetRequest{
+				DefinedSet: &api.DefinedSet{
+					DefinedType: api.DefinedType_DEFINED_TYPE_NEIGHBOR,
+					Name:        fmt.Sprintf("peer-%s", p.Conf.NeighborAddress),
+					List:        []string{fmt.Sprintf("%s/%s", p.Conf.NeighborAddress, mask)},
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to add defined set: %v", err)
+			}
+
+			if address != "" {
+				if err := insertPolicy(ctx, b.s, address, p, family); err != nil {
+					return fmt.Errorf("failed to add policy: %w", err)
+				}
 			}
 		}
 	} else {
@@ -142,7 +148,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 	if err := b.s.AddPeer(ctx, &api.AddPeerRequest{Peer: p}); err != nil {
 		return fmt.Errorf("failed to add peer: %v", err)
 	}
-	slog.Info("[BGP]", "peer", p.Conf.NeighborAddress, "AS", p.Conf.PeerAsn, "BFD", p.Bfd)
+	log.Info("[BGP]", "peer", p.Conf.NeighborAddress, "AS", p.Conf.PeerAsn, "BFD", p.Bfd)
 	return nil
 }
 
