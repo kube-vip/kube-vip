@@ -29,10 +29,10 @@ func LookupHost(dnsName, dnsMode string, requireDualStack bool) ([]string, error
 	addrs := []string{}
 	// we need to lowercase the dnsMode as in the end it is expected by internal functions
 	// that expects the family to be lowercase, but we want to keep the original case for logging
-	lowerDnsMode := strings.ToLower(dnsMode)
-	switch lowerDnsMode {
+	lowerDNSMode := strings.ToLower(dnsMode)
+	switch lowerDNSMode {
 	case strings.ToLower(IPv4Family), strings.ToLower(IPv6Family), strings.ToLower(DualFamily):
-		a, err := getIPbyFamily(result, lowerDnsMode, requireDualStack)
+		a, err := getIPbyFamily(result, lowerDNSMode, requireDualStack)
 		if err != nil {
 			return nil, err
 		}
