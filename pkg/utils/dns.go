@@ -49,11 +49,11 @@ func LookupHost(dnsName, dnsMode string, requireDualStack bool) ([]string, error
 func getIPbyFamily(addresses []string, family string, requireDualStack bool) ([]string, error) {
 	var checkers []func(string) bool
 	families := []string{}
-	if family == DualFamily || family == strings.ToLower(IPv4Family) {
+	if strings.EqualFold(family, DualFamily) || strings.EqualFold(family, IPv4Family) {
 		checkers = append(checkers, IsIPv4)
 		families = append(families, IPv4Family)
 	}
-	if family == DualFamily || family == strings.ToLower(IPv6Family) {
+	if strings.EqualFold(family, DualFamily) || strings.EqualFold(family, IPv6Family) {
 		checkers = append(checkers, IsIPv6)
 		families = append(families, IPv6Family)
 	}
