@@ -2,12 +2,14 @@ package cluster_test
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,11 +18,15 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
+	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const testCIDR = "10.0.0.34/32"
@@ -339,6 +345,186 @@ func TestRoutingTableHealthCheck_RemovesVIPWhenUnhealthy(t *testing.T) {
 	healthcheck.setStatus(http.StatusServiceUnavailable)
 	expectEventually(t, func() bool { return !network.isPresent() },
 		"VIP should be removed once health check becomes unhealthy")
+}
+
+func TestRoutingTableHealthCheck_AddsIPv6VIPWithIPv4HealthCheckURL(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+
+	// The health-check URL is IPv4 (127.0.0.1) while the VIP is IPv6; guards against the IPv6 VIP being skipped.
+	network := &mockNetwork{ip: "fd00::1", cidr: "fd00::1/128"}
+	startRoutingTableVipService(t, newRoutingTableConfig(healthcheck.server.URL, healthcheck.caPath), network)
+
+	expectEventually(t, network.isPresent,
+		"IPv6 VIP should be added when the IPv4 health-check URL is healthy")
+}
+
+func TestRoutingTableHealthCheck_HTTPTakesPrecedenceOverKubernetesAddr(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+
+	// When both are set, the HTTP check must drive the VIP; KubernetesAddr points at a closed port and would never report healthy.
+	cfg := newRoutingTableConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg.KubernetesAddr = "127.0.0.1:1"
+
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
+	startRoutingTableVipService(t, cfg, network)
+
+	expectEventually(t, network.isPresent,
+		"VIP should be added because the HTTP health check is healthy, even though KubernetesAddr is set")
+
+	healthcheck.setStatus(http.StatusServiceUnavailable)
+	expectEventually(t, func() bool { return !network.isPresent() },
+		"VIP should be removed once the HTTP health check becomes unhealthy")
+}
+
+func TestRoutingTableInvalidHTTPHealthCheckAddressKillsWithoutFallback(t *testing.T) {
+	t.Parallel()
+	// An invalid ControlPlaneHealthCheck.Address must call killFunc and return an error instead of falling back to KubernetesAddr.
+	cfg := &kubevip.Config{
+		EnableRoutingTable:         true,
+		BackendHealthCheckInterval: 1,
+		KubernetesAddr:             "127.0.0.1:6443",
+		ControlPlaneHealthCheck:    kubevip.HealthCheck{Address: "://bad"},
+	}
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
+	if err != nil {
+		t.Fatalf("InitCluster: %v", err)
+	}
+	c.Network = []vip.Network{&mockNetwork{ip: "10.0.0.1", cidr: testCIDR}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var killCalls atomic.Int32
+	killFunc := func() {
+		killCalls.Add(1)
+		cancel()
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StartVipService(ctx, cfg, nil, nil, killFunc)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "failed to create HTTP backend") {
+			t.Fatalf("StartVipService() error = %v, want \"failed to create HTTP backend\"", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartVipService did not return after an invalid HTTP health-check address")
+	}
+
+	if killCalls.Load() == 0 {
+		t.Fatal("killFunc was not called for an invalid HTTP health-check address")
+	}
+}
+
+func TestRoutingTableInvalidKubernetesAddrFallsBack(t *testing.T) {
+	t.Parallel()
+	// An unparsable KubernetesAddr must be logged and fall back to node/localhost addresses instead of returning an error.
+	cfg := &kubevip.Config{EnableRoutingTable: true, BackendHealthCheckInterval: 1, KubernetesAddr: "://not-a-url"}
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
+	if err != nil {
+		t.Fatalf("InitCluster: %v", err)
+	}
+	c.Network = []vip.Network{&mockNetwork{ip: "10.0.0.1", cidr: testCIDR}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StartVipService(ctx, cfg, nil, nil, func() {})
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("StartVipService returned early: %v", err)
+	case <-time.After(2 * time.Second):
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("StartVipService() error = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartVipService did not stop after context cancellation")
+	}
+}
+
+func TestRoutingTableInvalidNodeAddressFallsBackToLocalhost(t *testing.T) {
+	t.Parallel()
+	// A node InternalIP that backend.New rejects (zoned IPv6 "fe80::1%eth0") must be logged and
+	// skipped, not treated as fatal. When no node address is usable, StartVipService falls back to
+	// a localhost backend and keeps running: it must not return or call killFunc until ctx is cancelled.
+	const nodeName = "test-node"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/nodes/"+nodeName {
+			http.NotFound(w, r)
+			return
+		}
+		node := corev1.Node{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "fe80::1%eth0"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(node)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("kubernetes.NewForConfig: %v", err)
+	}
+	em := &election.Manager{KubernetesClient: client}
+
+	cfg := &kubevip.Config{EnableRoutingTable: true, BackendHealthCheckInterval: 1, NodeName: nodeName}
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
+	if err != nil {
+		t.Fatalf("InitCluster: %v", err)
+	}
+	c.Network = []vip.Network{&mockNetwork{ip: "10.0.0.1", cidr: testCIDR}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var killCalls atomic.Int32
+	killFunc := func() {
+		killCalls.Add(1)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.StartVipService(ctx, cfg, em, nil, killFunc)
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("StartVipService returned early: %v", err)
+	case <-time.After(2 * time.Second):
+	}
+
+	if n := killCalls.Load(); n != 0 {
+		t.Fatalf("killFunc was called %d time(s), want 0 for invalid node address with localhost fallback", n)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("StartVipService() error = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartVipService did not stop after context cancellation")
+	}
 }
 
 var (
