@@ -3,89 +3,90 @@ package backend
 import (
 	"context"
 	"fmt"
-	"sync"
+	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
-	log "log/slog"
-
-	"github.com/kube-vip/kube-vip/pkg/k8s"
 	"github.com/kube-vip/kube-vip/pkg/utils"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
-type Entry struct {
-	Addr    string
-	Port    uint16
-	IsLocal bool
-}
+type BackendType string
 
-type Map map[Entry]bool
-
-// kubeConfigPath is an explicitly configured kubeconfig used by Check when
-// set; static pod deployments configure it since neither admin.conf nor
-// in-cluster config are available there.
-var (
-	kubeConfigPath string
-	pathMtx        sync.Mutex
+const (
+	Discovery BackendType = "discovery"
+	HTTP      BackendType = "http"
 )
 
-// SetKubeConfigPath configures the kubeconfig used by backend health checks.
-func SetKubeConfigPath(path string) {
-	pathMtx.Lock()
-	defer pathMtx.Unlock()
-	kubeConfigPath = path
+type Backend interface {
+	Check(context.Context) bool
+	Address() string
+	Port() uint16
+	IsSameFamily(string) bool
+	IsLocal() bool
 }
 
-func (e *Entry) Check() bool {
-	var client *kubernetes.Clientset
-	var err error
-	var config *rest.Config
-
-	adminConfigPath := "/etc/kubernetes/admin.conf"
-	// TODO: add one more switch case of homeConfigPath if there is such scenario in future
-	// homeConfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-
-	var k8sAddr string
-	if utils.IsIPv6(e.Addr) {
-		k8sAddr = fmt.Sprintf("[%s]:%v", e.Addr, e.Port)
-	} else {
-		k8sAddr = fmt.Sprintf("%s:%v", e.Addr, e.Port)
-	}
-
-	switch {
-	case kubeConfigPath != "" && utils.FileExists(kubeConfigPath):
-		config, err = k8s.NewRestConfig(kubeConfigPath, false, k8sAddr)
-		if err != nil {
-			log.Error("create k8s REST config", "path", kubeConfigPath, "err", err)
-			return false
-		}
-	case utils.FileExists(adminConfigPath):
-		config, err = k8s.NewRestConfig(adminConfigPath, false, k8sAddr)
-		if err != nil {
-			log.Error("create k8s REST config", "path", adminConfigPath, "err", err)
-			return false
-		}
+func New(config *Config) (Backend, error) {
+	switch config.Type {
+	case Discovery:
+		return newDiscoveryBackend(config), nil
+	case HTTP:
+		return kubernetesAddrBackend(config), nil
 	default:
-		config, err = k8s.NewRestConfig("", true, k8sAddr)
-		if err != nil {
-			log.Error("create k8s REST config", "err", err)
-			return false
+		return nil, fmt.Errorf("backend of type %q is currently not supported", config.Type)
+	}
+}
+
+type Config struct {
+	Type           BackendType
+	Address        string
+	Port           uint16
+	KubeConfigPath string
+	Client         *http.Client
+	KeepAddress    bool
+	IsLocal        bool
+}
+
+type generic struct {
+	addr           string
+	port           uint16
+	kubeConfigPath string
+	isLocal        bool
+}
+
+func (g *generic) Address() string {
+	return g.addr
+}
+
+func (g *generic) Port() uint16 {
+	return g.port
+}
+
+func (g *generic) IsSameFamily(addr string) bool {
+	a, err := url.Parse(g.addr)
+	if err != nil {
+		return false
+	}
+	if a.Hostname() != "" {
+		return true
+	}
+
+	return utils.IsIPv6(addr) == utils.IsIPv6(g.addr)
+}
+
+func (g *generic) IsLocal() bool {
+	return g.isLocal
+}
+
+type Map map[Backend]bool
+
+func (m *Map) Find(addr string, port uint16) Backend {
+	for b := range *m {
+		if b.Address() == addr && b.Port() == port {
+			return b
 		}
 	}
-
-	client, err = k8s.NewClientset(config)
-	if err != nil {
-		log.Error("create k8s client", "err", err)
-		return false
-	}
-
-	_, err = client.DiscoveryClient.ServerVersion()
-	if err != nil {
-		log.Error("discover k8s version", "err", err)
-		return false
-	}
-	return true
+	return nil
 }
 
 func Watch(ctx context.Context, interval int, tickAction func()) {
@@ -104,4 +105,34 @@ func Watch(ctx context.Context, interval int, tickAction func()) {
 			tickAction()
 		}
 	}
+}
+
+// kubernetesAddrBackend converts an explicitly configured Kubernetes
+// API address override (config.KubernetesAddr, e.g. "https://127.0.0.1:6443"
+// on static-pod deployments) into a backend health-check entry. Returns nil
+// when no usable override is configured.
+func kubernetesAddrBackend(config *Config) Backend {
+	if config.Address == "" {
+		return nil
+	}
+
+	if config.KeepAddress {
+		config.Port = 0
+		return newHTTPBackend(config)
+	}
+
+	u, err := url.Parse(config.Address)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+
+	if p := u.Port(); p != "" {
+		if parsed, err := strconv.ParseUint(p, 10, 16); err == nil {
+			config.Port = uint16(parsed)
+		}
+	}
+
+	config.Address = u.Hostname()
+
+	return newHTTPBackend(config)
 }
