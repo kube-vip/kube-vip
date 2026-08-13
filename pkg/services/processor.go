@@ -61,6 +61,8 @@ type Processor struct {
 	TunnelMgr *wireguard.TunnelManager
 
 	routeMgr *route.Manager
+
+	killFunc func()
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -68,7 +70,8 @@ type Processor struct {
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager node.Labeler,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Processor {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
+	killFunc func()) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
@@ -88,6 +91,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		electionMgr:      electionMgr,
 		TunnelMgr:        wireguard.NewTunnelManager(),
 		routeMgr:         routeMgr,
+		killFunc:         killFunc,
 	}
 }
 
@@ -257,9 +261,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					provider = providers.NewEndpointslices()
 				}
 				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-					// log.Error(err.Error())
-					log.Error("endpoint watcher failed, cancelling service context", "service", svc.Name, "namespace", svc.Namespace, "err", err)
-                    svcCtx.Cancel()
+					log.Error("endpoint watcher failed, cancelling service context, will kill self", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					// if watch endpoint returns error, kill kube-vip
+					p.killFunc()
 				}
 			})
 

@@ -256,10 +256,7 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	leaseMgr := lease.NewManager()
 	routeMgr := route.NewManager()
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
-		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr)
-
-	return &Manager{
+	m := &Manager{
 		clientSet:   clientset,
 		rwClientSet: rwClientSet,
 		configMap:   configMap,
@@ -271,7 +268,6 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 			Help:      "Count all events fired by the service watcher categorised by event type",
 		}, []string{"type"}),
 		signalChan:       signalChan,
-		svcProcessor:     svcProcessor,
 		intfMgr:          intfMgr,
 		arpMgr:           arpMgr,
 		bgpServer:        bgpServer,
@@ -279,7 +275,12 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		electionMgr:      electionMgr,
 		leaseMgr:         leaseMgr,
 		routeMgr:         routeMgr,
-	}, nil
+	}
+
+	m.svcProcessor = services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
+		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr, m.Kill)
+
+	return m, nil
 }
 
 // Start will begin the Manager, which will start services and watch the configmap

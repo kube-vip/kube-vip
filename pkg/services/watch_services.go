@@ -130,7 +130,8 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 			}
 
 			status := statusErr.ErrStatus
-			log.Error("services", "err", status)
+			log.Error("services watch error, will kill self", "err", status)
+			p.killFunc()
 		default:
 		}
 	}

@@ -91,11 +91,11 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			errObject := apierrors.FromObject(event.Object)
 			statusErr, _ := errObject.(*apierrors.StatusError)
 			err := fmt.Errorf("[%s] watch error received: %w", provider.GetLabel(), statusErr)
-            log.Error("watch error", "err", err)
-            return err
+			log.Error("watch error", "err", err)
+			return err
 		}
 	}
 	err = fmt.Errorf("[%s] endpoint watch channel closed unexpectedly for service %s/%s", provider.GetLabel(), service.Namespace, service.Name)
-    log.Error("watch stopped unexpectedly", "err", err)
-    return err
+	log.Error("watch stopped unexpectedly", "err", err)
+	return err
 }
