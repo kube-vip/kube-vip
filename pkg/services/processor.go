@@ -61,6 +61,8 @@ type Processor struct {
 	TunnelMgr *wireguard.TunnelManager
 
 	routeMgr *route.Manager
+
+	killFunc func()
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -68,7 +70,8 @@ type Processor struct {
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager node.Labeler,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Processor {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager,
+	killFunc func()) *Processor {
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
@@ -88,6 +91,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		electionMgr:      electionMgr,
 		TunnelMgr:        wireguard.NewTunnelManager(),
 		routeMgr:         routeMgr,
+		killFunc:         killFunc,
 	}
 }
 
@@ -258,6 +262,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
 					log.Error(err.Error())
+					// if watch endpoint returns error, kill kube-vip
+					p.killFunc()
 				}
 			})
 
