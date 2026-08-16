@@ -52,7 +52,7 @@ const (
 // For the fwmark, we add an offset (0x10000) to avoid collision with WireGuard's own fwmark.
 // WireGuard sets fwmark=listenPort on its own UDP packets to the peer, so we must use
 // a different mark value for our connmark-based policy routing.
-const connmarkOffset = 0x10000 // 65536 - added to listenPort to get our connmark value
+const fwmarkOffset = 0x10000 // 65536 - added to listenPort to get our fwmark value
 
 func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool) error {
 	return ApplySNATWithTable(podIP, vipIP, service, destinationPorts, ignoreCIDR, allowCIDR, IPv6, "")
@@ -973,7 +973,11 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 	conn.AddRule(masqRule)
 
 	// Add connmark rules
-	fwmark := uint32(tunnelListenPort) + connmarkOffset //nolint:gosec
+	// We use the fwmarkOffset NOT for the connmark, as the results in conn marks with 0x1xxxx
+	// As this 1 is now in the third least-significant byte range, we risk interfering with more software
+	// than necessary. One example is tailscale https://github.com/tailscale/tailscale/pull/19725
+	connmark := uint32(tunnelListenPort) //nolint:gosec
+	fwmark := connmark + fwmarkOffset
 
 	connmarkInRule := &nftables.Rule{
 		Table: table,
@@ -981,7 +985,7 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
-			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(connmark)},
 			&expr.Ct{Key: expr.CtKeyMARK, Register: 1, SourceRegister: true},
 		},
 	}
@@ -994,7 +998,8 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: ifname(wgIf)},
 			&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(connmark)},
+			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
 			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
 		},
 	}
@@ -1005,7 +1010,8 @@ func EnsureTunnelInfrastructure(wgIf string, vipIP string, IPv6 bool, tunnelList
 		Chain: mangleOutChain,
 		Exprs: []expr.Any{
 			&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(connmark)},
+			&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(fwmark)},
 			&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
 		},
 	}
@@ -1392,7 +1398,7 @@ func SetupPolicyRouting(wgIf string, listenPort int) error {
 		return fmt.Errorf("failed to get interface %s: %w", wgIf, err)
 	}
 
-	mark := uint32(listenPort) + connmarkOffset //nolint:gosec // Port range validated
+	mark := uint32(listenPort) + fwmarkOffset //nolint:gosec // Port range validated
 	table := listenPort
 
 	rule := netlink.NewRule()
@@ -1558,7 +1564,7 @@ func bypassRpfilterForInterface(wgIf string) error {
 
 // CleanupPolicyRouting removes the policy routing rule for a specific tunnel
 func CleanupPolicyRouting(listenPort int) error {
-	mark := uint32(listenPort) + connmarkOffset //nolint:gosec // Port range validated
+	mark := uint32(listenPort) + fwmarkOffset //nolint:gosec // Port range validated
 	table := listenPort
 
 	rule := netlink.NewRule()
