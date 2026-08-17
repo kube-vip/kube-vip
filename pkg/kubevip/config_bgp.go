@@ -234,27 +234,44 @@ func ParseBGPPeerConfig(config string) (bgpPeers []BGPPeer, err error) {
 
 func (p *BGPPeer) FindMpbgpAddresses(ap *api.Peer, server *BGPConfig) (string, string, error) {
 	var ipv4Address, ipv6Address string
-	switch p.MpbgpNexthop {
+
+	mode := server.MpbgpNexthop
+	if p.MpbgpNexthop != "" {
+		mode = p.MpbgpNexthop
+	}
+
+	switch mode {
 	case "fixed":
 		ap.Transport.LocalAddress = server.SourceIP
-		if p.MpbgpIPv4 == "" && p.MpbgpIPv6 == "" {
-			return "", "", fmt.Errorf("to use MP-BGP with fixed address at least one IPv4 or IPv6 address has to be provided [current - IPv4: %s, IPv6: %s]",
-				p.MpbgpIPv4, p.MpbgpIPv6)
-		}
 
+		ipv4 := server.MpbgpIPv4
 		if p.MpbgpIPv4 != "" {
-			if net.ParseIP(p.MpbgpIPv4) == nil {
-				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv4 address", p.MpbgpIPv4)
+			ipv4 = p.MpbgpIPv4
+		}
+
+		ipv6 := server.MpbgpIPv6
+		if p.MpbgpIPv6 != "" {
+			ipv6 = p.MpbgpIPv6
+		}
+
+		if ipv4 == "" && ipv6 == "" {
+			return "", "", fmt.Errorf("to use MP-BGP with fixed address at least one IPv4 or IPv6 address has to be provided [current - IPv4: %s, IPv6: %s]",
+				ipv4, ipv6)
+		}
+
+		if ipv4 != "" {
+			if net.ParseIP(ipv4) == nil {
+				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv4 address", ipv4)
 			}
 		}
-		if p.MpbgpIPv6 != "" {
-			if net.ParseIP(p.MpbgpIPv6) == nil {
-				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv6 address", p.MpbgpIPv6)
+		if ipv6 != "" {
+			if net.ParseIP(ipv6) == nil {
+				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv6 address", ipv6)
 			}
 		}
 
-		ipv4Address = p.MpbgpIPv4
-		ipv6Address = p.MpbgpIPv6
+		ipv4Address = ipv4
+		ipv6Address = ipv6
 	case "auto_sourceip":
 		ap.Transport.LocalAddress = server.SourceIP
 
@@ -297,7 +314,7 @@ func (p *BGPPeer) FindMpbgpAddresses(ap *api.Peer, server *BGPConfig) (string, s
 			return "", "", fmt.Errorf("failed to get non link-local IPv6 address: %v", err)
 		}
 	default:
-		return "", "", fmt.Errorf("option %s for MP-BPG nexthop is not supported", server.MpbgpNexthop)
+		return "", "", fmt.Errorf("option %q for MP-BPG nexthop is not supported", mode)
 	}
 
 	return ipv4Address, ipv6Address, nil
