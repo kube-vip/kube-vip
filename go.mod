@@ -13,7 +13,7 @@ require (
 	github.com/google/nftables v0.3.0
 	github.com/gookit/slog v0.7.1
 	github.com/huin/goupnp v1.3.0
-	github.com/insomniacslk/dhcp v0.0.0-20241224095048-b56fa0d5f25d
+	github.com/insomniacslk/dhcp v0.0.0-20260719225207-c76316d4aa82
 	github.com/jpillora/backoff v1.0.0
 	github.com/mdlayher/ndp v1.1.0
 	github.com/onsi/ginkgo/v2 v2.32.1
