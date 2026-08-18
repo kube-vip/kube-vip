@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	log "log/slog"
-
 	"github.com/pkg/errors"
 )
 
@@ -29,7 +27,6 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	log.SetLogLoggerLevel(log.LevelDebug)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	expectSuccess(startEtcd(ctx), "starting etcd")
