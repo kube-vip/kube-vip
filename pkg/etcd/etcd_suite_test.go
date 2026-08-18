@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
+	log "log/slog"
+
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -28,7 +29,7 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	logrus.SetLevel(logrus.DebugLevel)
+	log.SetLogLoggerLevel(log.LevelDebug)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	expectSuccess(startEtcd(ctx), "starting etcd")
