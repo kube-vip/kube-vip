@@ -290,7 +290,12 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 		default:
 			leaseNamespace, serviceLease := lease.ServiceName(service)
 			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+			// The lease is only dropped once its last service is gone, which races
+			// with this loop noticing its own service context is done.
 			l := p.leaseMgr.Get(id)
+			if l == nil {
+				return
+			}
 			l.Lock()
 
 			if !l.Elected.Load() {
