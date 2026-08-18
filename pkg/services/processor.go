@@ -257,7 +257,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					provider = providers.NewEndpointslices()
 				}
 				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-					log.Error(err.Error())
+					// log.Error(err.Error())
+					log.Error("endpoint watcher failed, cancelling service context", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+                    svcCtx.Cancel()
 				}
 			})
 
