@@ -122,7 +122,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		// Block until service context is cancelled
 		<-svcCtx.Ctx.Done()
 
-		if err := p.onStoppedLeading(svcLease, service); err != nil {
+		if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 			log.Error("error on stopped leading", "error", err)
 		}
 
@@ -159,7 +159,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// we can do cleanup here
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
-			if err := p.onStoppedLeading(svcLease, service); err != nil {
+			if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 				metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
 				leaderCancel()
 			}
@@ -195,9 +195,18 @@ func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1
 	return nil
 }
 
-func (p *Processor) onStoppedLeading(svcLease *lease.Lease, service *v1.Service) error {
+func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *lease.Lease, service *v1.Service) error {
+	currentSvcCtx, err := p.getServiceContext(service.UID)
+	if err != nil {
+		return err
+	}
+	if currentSvcCtx != nil && currentSvcCtx != svcCtx {
+		log.Debug("skipping cleanup from superseded service context", "service", service.Name, "uid", service.UID)
+		return nil
+	}
+
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
-	err := p.deleteService(svcLease.Ctx, service.UID)
+	err = p.deleteService(svcLease.Ctx, service.UID)
 	if err != nil {
 		log.Error("service deletion", "err", err)
 		return err
