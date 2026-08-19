@@ -113,7 +113,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 						err = em.NodeWatcher(ctx, lb, c.Port)
 						if err != nil {
 							log.Error("Error watching node labels", "err", err)
-							if errors.Is(err, &utils.PanicError{}) {
+							if utils.IsPanicError(err) {
 								killFunc()
 								return
 							}
@@ -429,7 +429,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if err := network.SetMask(c.VIPSubnet); err != nil {
 			log.Error("failed to set mask", "subnet", c.VIPSubnet, "err", err)
 			lbCancel()
-			return utils.NewPanicError(fmt.Sprintf("failed to set mask for subnet %q: %s", c.VIPSubnet, err.Error()))
+			return utils.WrapPanicError(err, "failed to set mask for subnet %q", c.VIPSubnet)
 		}
 		_, err := network.DeleteIP()
 		if err != nil {

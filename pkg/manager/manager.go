@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -414,7 +413,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 				return nil
 			default:
 				if err = w.StartServices(modeCtx); err != nil {
-					if errors.Is(err, &utils.PanicError{}) {
+					if utils.IsPanicError(err) {
 						sm.Kill()
 						return fmt.Errorf("failed to reconcile services, non-recoverable error: %w", err)
 					} else {
