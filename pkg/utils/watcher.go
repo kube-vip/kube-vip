@@ -7,9 +7,19 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 )
+
+// WatchError converts a Kubernetes watch error object into a safe Go error.
+func WatchError(object runtime.Object) error {
+	errObject := apierrors.FromObject(object)
+	if statusErr, ok := errObject.(*apierrors.StatusError); ok {
+		return statusErr
+	}
+	return fmt.Errorf("unknown watch error object of type %T: %v", object, object)
+}
 
 // watchWithAuthRetry retries watchFn with exponential backoff on transient 403 Forbidden
 // and 401 Unauthorized errors. On joining control plane nodes with K8s 1.34+, the local
@@ -39,7 +49,14 @@ func WatchWithAuthRetry(ctx context.Context, watchFn func(context.Context) (watc
 		return false, nil
 	})
 	if err != nil {
-		return nil, NewPanicError(fmt.Sprintf("watch failed after retries: %q (last: %v)", err.Error(), lastErr))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if lastErr != nil {
+			log.Error("watch auth retries exhausted", "err", lastErr)
+			return nil, lastErr
+		}
+		return nil, WrapPanicError(err, "watch failed after retries (last: %v)", lastErr)
 	}
 	return w, nil
 }

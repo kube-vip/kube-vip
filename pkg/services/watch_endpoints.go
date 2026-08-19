@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -10,28 +11,31 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, service *v1.Service, provider providers.Provider) error {
+func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, service *v1.Service,
+	provider providers.Provider, cancelWatcher context.CancelCauseFunc) error {
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
 	rw, err := provider.CreateRetryWatcher(svcCtx.Ctx, p.rwClientSet, service)
 	if err != nil {
-		return fmt.Errorf("[%s] error watching endpoints: %w", provider.GetLabel(), err)
+		if svcCtx.Ctx.Err() != nil {
+			return nil
+		}
+		return utils.WrapPanicError(err, "[%s] error watching endpoints", provider.GetLabel())
 	}
 
 	d, err := debouncer.New(rw.ResultChan(), p.config.DebounceTime)
 	if err != nil {
 		rw.Stop()
-		return fmt.Errorf("failed to create debouncer for endpoints event: %w", err)
+		return utils.WrapPanicError(err, "failed to create debouncer for endpoints event")
 	}
 
-	wg := sync.WaitGroup{}
-
+	var wg sync.WaitGroup
 	stopChan := make(chan any)
 
 	defer func() {
@@ -46,6 +50,9 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		if d != nil {
 			if err := d.Start(svcCtx.Ctx); err != nil {
 				log.Error("[endpoint watcher] debouncer, cancelling context", "error", err.Error())
+				if svcCtx.Ctx.Err() == nil {
+					cancelWatcher(utils.WrapPanicError(err, "[%s] endpoint debouncer failed", provider.GetLabel()))
+				}
 				svcCtx.Cancel()
 			}
 		}
@@ -88,11 +95,17 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			log.Info("[endpoint watcher] stopping watching - endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 			return nil
 		case watch.Error:
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, _ := errObject.(*apierrors.StatusError)
-			log.Error("watch error", "provider", provider.GetLabel(), "err", statusErr)
+			if svcCtx.Ctx.Err() != nil {
+				return nil
+			}
+			watchErr := utils.WatchError(event.Object)
+			log.Error("watch error", "provider", provider.GetLabel(), "err", watchErr)
+			return utils.WrapPanicError(watchErr, "[%s] endpoint watch failed", provider.GetLabel())
 		}
 	}
+	if svcCtx.Ctx.Err() != nil {
+		return nil
+	}
 	log.Info("[endpoint watcher] stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
-	return nil //nolint:govet
+	return utils.NewPanicError("[%s] endpoint watch channel closed unexpectedly for service %s/%s", provider.GetLabel(), service.Namespace, service.Name)
 }

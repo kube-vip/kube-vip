@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
@@ -91,7 +90,8 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool, wg *sync.WaitGroup) error {
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
@@ -240,7 +240,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				err = serviceFunc.Run(svcCtx, svc, wg)
 				if err != nil {
 					log.Error(err.Error())
-					if errors.Is(err, &utils.PanicError{}) {
+					if utils.IsPanicError(err) {
 						// cancel service context on panic error
 						// TODO:  should we quit kube-vip altogether here?
 						svcCtx.Cancel()
@@ -258,8 +258,11 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				} else {
 					provider = providers.NewEndpointslices()
 				}
-				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-					log.Error(err.Error())
+				if err := p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider, cancelWatcher); err != nil {
+					log.Error("endpoint watcher failed", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					if utils.IsPanicError(err) {
+						cancelWatcher(err)
+					}
 				}
 			})
 

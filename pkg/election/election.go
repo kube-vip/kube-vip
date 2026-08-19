@@ -2,14 +2,12 @@ package election
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	log "log/slog"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/etcd"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -17,7 +15,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -199,7 +196,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
 						if err != nil {
 							log.Error("adding node to load balancer", "node", node.Name, "ip", node.Status.Addresses[x].Address, "err", err)
-							if errors.Is(err, &utils.PanicError{}) {
+							if utils.IsPanicError(err) {
 								return fmt.Errorf("add IPVS backend: %w", err)
 							}
 						}
@@ -233,23 +230,20 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
-
-			// This round trip allows us to handle unstructured status
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, ok := errObject.(*apierrors.StatusError)
-			if !ok {
-				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-			}
-
-			status := statusErr.ErrStatus
-			log.Error("watcher", "status", status)
-			watchErr = fmt.Errorf("node watcher error, status: %s", status.String())
+			watchErr = fmt.Errorf("node watcher error: %w", utils.WatchError(event.Object))
+			log.Error("watcher", "err", watchErr)
 		default:
 		}
 	}
 
 	log.Info("Exiting Node watcher")
-	return watchErr
+	if watchErr != nil {
+		return watchErr
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return utils.NewPanicError("node watcher channel closed unexpectedly")
 }
 
 func checkIfNodeIsReady(node *v1.Node) bool {
