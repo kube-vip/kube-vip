@@ -46,6 +46,14 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return fmt.Errorf("no existing lease found for service %q with UID %q", service.Name, service.UID)
 	}
 
+	// A cancelled service context means this call belongs to a torn-down incarnation of
+	// the service. Its replacement is built as Cancel -> Delete -> Add, so the lease
+	// fetched above may already be the replacement's. Registering on it here would let
+	// the cleanup goroutine below retire a lease that is still in use.
+	if err := svcCtx.Ctx.Err(); err != nil {
+		return fmt.Errorf("service context cancelled before election start: %w", err)
+	}
+
 	isNew := svcLease.Add(objectName)
 
 	svcLease.Lock()

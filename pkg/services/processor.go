@@ -196,9 +196,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 				// in theory this should never fail
 				p.svcMap.Delete(svc.UID)
-				// Drop this service from its lease now, so the replacement context
-				// below is not parented to a lease the pending cleanup is about to
-				// cancel. A lease shared with other services stays alive for them.
+				// Retire the lease before the replacement context is built, so Add below
+				// cannot hand back an instance the pending cleanup is about to cancel.
+				// A lease shared with other services keeps their references and survives.
 				ns, name := lease.ServiceName(svc)
 				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
 				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
@@ -216,8 +216,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	if svcCtx == nil {
 		ns, name := lease.ServiceName(svc)
 		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-		lease := p.leaseMgr.Add(ctx, leaseID)
-		svcCtx = servicecontext.New(lease.Ctx)
+		p.leaseMgr.Add(ctx, leaseID)
+		// The service context is parented to the watcher, not to the lease: losing a
+		// lease must not tear the service down, it has to let the election restart.
+		svcCtx = servicecontext.New(ctx)
 		p.svcMap.Store(svc.UID, svcCtx)
 	}
 
