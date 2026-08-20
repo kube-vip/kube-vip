@@ -92,8 +92,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 				return fmt.Errorf("[%s] error while processing delete event: %w", provider.GetLabel(), err)
 			}
 
-			log.Info("[endpoint watcher] stopping watching - endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
-			return nil
+			log.Info("[endpoint watcher] endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 		case watch.Error:
 			if svcCtx.Ctx.Err() != nil {
 				return nil
