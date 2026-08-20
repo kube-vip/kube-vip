@@ -18,6 +18,8 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 **NOTE:** All documentation of both usage and architecture are now available at [https://kube-vip.io](https://kube-vip.io).
 
+For upgrading an existing install in place (static Pod or DaemonSet), see the [upgrade guide](https://kube-vip.io/docs/upgrade/).
+
 ## Features
 
 Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, over time it has evolved to incorporate that same functionality into Kubernetes service type [load-balancers](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).
