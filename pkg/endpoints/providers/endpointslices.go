@@ -89,7 +89,13 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 	var localEndpoints []string
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
-			if endpoint.Conditions.Serving == nil || !*endpoint.Conditions.Serving {
+			// Per the EndpointConditions godoc a nil Serving defers to Ready, and a nil
+			// Ready is an unknown state that consumers should interpret as ready.
+			serving := endpoint.Conditions.Serving
+			if serving == nil {
+				serving = endpoint.Conditions.Ready
+			}
+			if serving != nil && !*serving {
 				continue
 			}
 			for _, address := range endpoint.Addresses {

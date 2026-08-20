@@ -75,6 +75,43 @@ func TestEndpointslicesReplacingSliceUpdatesState(t *testing.T) {
 	assertEndpoints(t, provider, []string{"10.0.0.2"})
 }
 
+func TestEndpointslicesLocalEndpointConditions(t *testing.T) {
+	yes, no := true, false
+	nodeName := "node-1"
+
+	tests := []struct {
+		name       string
+		conditions discoveryv1.EndpointConditions
+		want       []string
+	}{
+		{"serving true", discoveryv1.EndpointConditions{Serving: &yes}, []string{"10.0.0.1"}},
+		{"serving false", discoveryv1.EndpointConditions{Serving: &no}, nil},
+		{"serving false overrides ready true", discoveryv1.EndpointConditions{Serving: &no, Ready: &yes}, nil},
+		{"nil serving defers to ready true", discoveryv1.EndpointConditions{Ready: &yes}, []string{"10.0.0.1"}},
+		{"nil serving defers to ready false", discoveryv1.EndpointConditions{Ready: &no}, nil},
+		{"both nil is treated as ready", discoveryv1.EndpointConditions{}, []string{"10.0.0.1"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provider := NewEndpointslices().(*Endpointslices)
+			slice := &discoveryv1.EndpointSlice{
+				ObjectMeta:  metav1.ObjectMeta{Name: "slice-1"},
+				AddressType: discoveryv1.AddressTypeIPv4,
+				Endpoints: []discoveryv1.Endpoint{{
+					Addresses:  []string{"10.0.0.1"},
+					Conditions: test.conditions,
+					NodeName:   &nodeName,
+				}},
+			}
+			if err := provider.LoadObject(slice, func() {}); err != nil {
+				t.Fatalf("LoadObject returned error: %v", err)
+			}
+			assertLocalEndpoints(t, provider, nodeName, test.want)
+		})
+	}
+}
+
 func assertEndpoints(t *testing.T, provider *Endpointslices, want []string) {
 	t.Helper()
 	got, err := provider.GetAllEndpoints()
