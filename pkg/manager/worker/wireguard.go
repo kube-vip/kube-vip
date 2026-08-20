@@ -184,9 +184,20 @@ func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *
 		}
 
 		switch event.Type {
-		case watch.Added, watch.Modified, watch.Deleted:
+		case watch.Added, watch.Modified:
 			if err := provider.LoadObject(event.Object, func() {}); err != nil {
 				log.Error("failed to load endpoint object", "err", err)
+				continue
+			}
+			endpoints, _ := provider.GetAllEndpoints()
+			log.Info("kubernetes endpoints changed, updating DNAT rules", "eventType", event.Type, "endpoints", endpoints)
+			if err := w.updateControlPlaneDNAT(tunnelConfig, endpoints); err != nil {
+				log.Error("failed to update control plane DNAT rules", "err", err)
+			}
+		case watch.Deleted:
+			// Remove the deleted slice so it stops counting toward this endpoint set.
+			if err := provider.DeleteObject(event.Object); err != nil {
+				log.Error("failed to delete endpoint object", "err", err)
 				continue
 			}
 			endpoints, _ := provider.GetAllEndpoints()

@@ -20,15 +20,14 @@ import (
 )
 
 type Endpointslices struct {
-	label       string
-	endpointsv4 []discoveryv1.Endpoint
-	endpointsv6 []discoveryv1.Endpoint
-	ports       []discoveryv1.EndpointPort
+	label  string
+	slices map[string]*discoveryv1.EndpointSlice
 }
 
 func NewEndpointslices() Provider {
 	return &Endpointslices{
-		label: "endpointslices",
+		label:  "endpointslices",
+		slices: make(map[string]*discoveryv1.EndpointSlice),
 	}
 }
 
@@ -59,56 +58,57 @@ func (ep *Endpointslices) LoadObject(endpoints runtime.Object, cancel context.Ca
 		return fmt.Errorf("[%s] error casting endpoints to v1.Endpoints struct", ep.label)
 	}
 
-	if eps.AddressType == discoveryv1.AddressTypeIPv6 {
-		ep.endpointsv6 = eps.Endpoints
-	} else {
-		ep.endpointsv4 = eps.Endpoints
+	if ep.slices == nil {
+		ep.slices = make(map[string]*discoveryv1.EndpointSlice)
 	}
+	ep.slices[eps.Name] = eps.DeepCopy()
 
-	// Store ports for resolving named ports
-	ep.ports = eps.Ports
+	return nil
+}
 
+func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
+	eps, ok := endpoints.(*discoveryv1.EndpointSlice)
+	if !ok {
+		return fmt.Errorf("[%s] unable to parse Kubernetes object", ep.GetLabel())
+	}
+	delete(ep.slices, eps.Name)
 	return nil
 }
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
-	for _, e := range ep.endpointsv4 {
-		result = append(result, e.Addresses...)
-	}
-	for _, e := range ep.endpointsv6 {
-		result = append(result, e.Addresses...)
+	for _, eps := range ep.slices {
+		for _, e := range eps.Endpoints {
+			result = append(result, e.Addresses...)
+		}
 	}
 	return result, nil
 }
 
 func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
-	tmpEps := []discoveryv1.Endpoint{}
-
-	tmpEps = append(tmpEps, ep.endpointsv4...)
-	tmpEps = append(tmpEps, ep.endpointsv6...)
-
-	for _, endpoint := range tmpEps {
-		if endpoint.Conditions.Serving == nil || !*endpoint.Conditions.Serving {
-			continue
-		}
-		for _, address := range endpoint.Addresses {
-			// 1. Compare the Nodename
-			if endpoint.NodeName != nil && id == *endpoint.NodeName {
-				if endpoint.Hostname != nil {
-					log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname, "nodename", *endpoint.NodeName)
-				} else {
-					log.Debug("found endpoint", "provider", ep.label, "ip", address, "nodename", *endpoint.NodeName)
-				}
-				localEndpoints = append(localEndpoints, address)
+	for _, eps := range ep.slices {
+		for _, endpoint := range eps.Endpoints {
+			if endpoint.Conditions.Serving == nil || !*endpoint.Conditions.Serving {
 				continue
 			}
+			for _, address := range endpoint.Addresses {
+				// 1. Compare the Nodename
+				if endpoint.NodeName != nil && id == *endpoint.NodeName {
+					if endpoint.Hostname != nil {
+						log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname, "nodename", *endpoint.NodeName)
+					} else {
+						log.Debug("found endpoint", "provider", ep.label, "ip", address, "nodename", *endpoint.NodeName)
+					}
+					localEndpoints = append(localEndpoints, address)
+					continue
+				}
 
-			// 2. Compare the Hostname (only useful if endpoint.NodeName is not available)
-			if endpoint.Hostname != nil && id == *endpoint.Hostname {
-				log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname)
-				localEndpoints = append(localEndpoints, address)
+				// 2. Compare the Hostname (only useful if endpoint.NodeName is not available)
+				if endpoint.Hostname != nil && id == *endpoint.Hostname {
+					log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname)
+					localEndpoints = append(localEndpoints, address)
+				}
 			}
 		}
 	}
@@ -153,9 +153,11 @@ func (ep *Endpointslices) GetLabel() string {
 
 func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
 	return ResolvePortWithLookup(servicePort, func(name string) int32 {
-		for _, p := range ep.ports {
-			if p.Name != nil && *p.Name == name && p.Port != nil {
-				return *p.Port
+		for _, eps := range ep.slices {
+			for _, p := range eps.Ports {
+				if p.Name != nil && *p.Name == name && p.Port != nil {
+					return *p.Port
+				}
 			}
 		}
 		return 0

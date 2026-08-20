@@ -21,6 +21,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -133,9 +134,23 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	return false, nil
 }
 
-func (p *Processor) Delete(ctx context.Context, service *v1.Service, id string) error {
-	if err := p.worker.delete(ctx, service, id); err != nil {
-		return fmt.Errorf("[%s] error deleting service: %w", p.provider.GetLabel(), err)
+func (p *Processor) Delete(svcCtx *servicecontext.Context, service *v1.Service, id string,
+	object runtime.Object, lastKnownGoodEndpoint *string) error {
+	if err := p.provider.DeleteObject(object); err != nil {
+		return fmt.Errorf("[%s] error deleting object: %w", p.provider.GetLabel(), err)
+	}
+
+	endpoints, err := p.worker.getEndpoints(service, id)
+	if err != nil {
+		return err
+	}
+	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
+		log.Error("updating instance", "err", err)
+	}
+
+	if len(endpoints) == 0 && svcCtx.Signalled.Load() && !shouldAllowReconcileWithoutEndpoints(service) {
+		svcCtx.ResetReadiness()
+		p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
 	}
 	return nil
 }

@@ -242,14 +242,6 @@ func (w *wireguardWorker) removeEgress(service *v1.Service, lastKnownGoodEndpoin
 	log.Debug("[wireguard] removeEgress called (no-op)", "service", service.Name)
 }
 
-// delete removes all DNAT rules for a service
-func (w *wireguardWorker) delete(ctx context.Context, service *v1.Service, id string) error {
-	log.Info("[wireguard] deleting DNAT rules for service", "service", service.Name, "namespace", service.Namespace)
-
-	w.clear(nil, nil, service)
-	return nil
-}
-
 // setInstanceEndpointsStatus updates the endpoint status on the service instance
 func (w *wireguardWorker) setInstanceEndpointsStatus(_ context.Context, service *v1.Service, endpoints []string) error {
 	hasEndpoints := len(endpoints) > 0

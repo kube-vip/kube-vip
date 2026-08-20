@@ -82,28 +82,6 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 	}
 }
 
-func (rt *RoutingTable) delete(_ context.Context, service *v1.Service, id string) error {
-	// When no-leader-elecition mode
-	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
-		// find all existing local endpoints
-		endpoints, err := rt.getEndpoints(service, id)
-		if err != nil {
-			return fmt.Errorf("[%s] error getting endpoints: %w", rt.provider.GetLabel(), err)
-		}
-
-		// If there were local endpoints deleted
-		if len(endpoints) > 0 {
-			rt.deleteAction(service)
-		}
-	}
-
-	return nil
-}
-
-func (rt *RoutingTable) deleteAction(service *v1.Service) {
-	ClearRoutes(service, rt.instances, rt.routeMgr)
-}
-
 func (rt *RoutingTable) setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error {
 	inst := instance.FindServiceInstance(service, *rt.instances)
 	if inst == nil {
