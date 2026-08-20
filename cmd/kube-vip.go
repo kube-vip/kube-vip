@@ -191,7 +191,7 @@ func init() {
 func Execute() int {
 	cmd, err := kubeVipCmd.ExecuteC()
 	if err != nil {
-		fmt.Println(err)
+		log.Error("command failed", "err", err)
 		if cmd == kubeVipCmd {
 			_ = cmd.Usage()
 		}
