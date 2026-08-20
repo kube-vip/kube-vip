@@ -454,7 +454,9 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
-	if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+	// ClearRoutesByInstance is reference-counted per route, so calling it here is safe
+	// even when the no-election path in Processor.Delete already cleared it.
+	if p.config.EnableRoutingTable {
 		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances, p.routeMgr); len(errs) > 0 {
 			for _, err := range errs {
 				log.Error("unable to clear routes", "err", err)
