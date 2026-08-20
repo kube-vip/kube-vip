@@ -2,13 +2,11 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	log "log/slog"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
@@ -16,7 +14,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
@@ -62,7 +59,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 		return fmt.Errorf("failed to create debouncer for endpoints event: %w", err)
 	}
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	defer func() {
 		if d != nil {
 			d.Stop()
@@ -71,14 +68,14 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 		wg.Wait()
 	}()
 
-	watcherCtx, watcherCancel := context.WithCancel(ctx)
-	defer watcherCancel()
+	watcherCtx, cancelWatcher := context.WithCancelCause(ctx)
+	defer cancelWatcher(nil)
 
 	wg.Go(func() {
 		if d != nil {
 			if err := d.Start(watcherCtx); err != nil {
 				log.Error("(svcs) debouncer, cancelling context", "error", err.Error())
-				watcherCancel()
+				cancelWatcher(utils.WrapPanicError(err, "service debouncer failed"))
 			}
 		}
 		<-watcherCtx.Done()
@@ -102,41 +99,38 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg); err != nil {
-				if errors.Is(err, &utils.PanicError{}) {
+			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
+				if utils.IsPanicError(err) {
 					return fmt.Errorf("add/modify service error: %w", err)
-				} else {
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
 				}
+				log.Error("service watcher event failed", "type", event.Type, "error", err)
 			}
 		case watch.Deleted:
 			if err := p.Delete(event, forcedOnly); err != nil {
-				if errors.Is(err, &utils.PanicError{}) {
+				if utils.IsPanicError(err) {
 					return fmt.Errorf("delete service error: %w", err)
-				} else {
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
 				}
+				log.Error("service watcher event failed", "type", event.Type, "error", err)
 			}
 		case watch.Bookmark:
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes services")
-
-			// This round trip allows us to handle unstructured status
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, ok := errObject.(*apierrors.StatusError)
-			if !ok {
-				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-			}
-
-			status := statusErr.ErrStatus
-			log.Error("services", "err", status)
+			watchErr := utils.WatchError(event.Object)
+			log.Error("services", "err", watchErr)
+			return utils.WrapPanicError(watchErr, "service watch failed")
 		default:
 		}
 	}
 
+	if ctx.Err() != nil {
+		return nil
+	}
+	if watcherErr := context.Cause(watcherCtx); watcherErr != nil {
+		return watcherErr
+	}
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
-	return nil
+	return utils.NewPanicError("service watch channel closed unexpectedly")
 }
 
 func lbClassFilterLegacy(svc *v1.Service, config *kubevip.Config) bool {

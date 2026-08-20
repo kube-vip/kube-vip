@@ -146,7 +146,7 @@ func getQdiscFromInterfaceByType(nicID int, nicName string, qType string) (uint3
 	// get id through tc qdisc show dev fromNICName
 	qs, err := netlink.QdiscList(&netlink.Ifb{LinkAttrs: netlink.LinkAttrs{Index: nicID}})
 	if err != nil {
-		fmt.Printf("Failed to list qdisc for interface %s: %v", nicName, err)
+		log.Error("failed to list qdisc", "interface", nicName, "err", err)
 		return 0, err
 	}
 	for _, q := range qs {

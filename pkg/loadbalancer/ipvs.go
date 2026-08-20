@@ -240,7 +240,7 @@ func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
 			// Fatal error at this point as IPVS is probably not working
 			log.Error("Unable to create an IPVS service, ensure IPVS kernel modules are loaded")
 			log.Error("IPVS service", "err", err)
-			return utils.NewPanicError(fmt.Sprintf("unable to create an IPVS service - %s", err))
+			return utils.WrapPanicError(err, "unable to create an IPVS service")
 
 		}
 		log.Info("load-Balancer services created", "address", lb.addrString(), "port", lb.Port)

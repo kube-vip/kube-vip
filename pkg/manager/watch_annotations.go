@@ -11,10 +11,9 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 
-	"github.com/davecgh/go-spew/spew"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
@@ -108,22 +107,15 @@ func annotationsWatcher(ctx context.Context, clientSet,
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
-
-			// This round trip allows us to handle unstructured status
-			errObject := apierrors.FromObject(event.Object)
-			statusErr, ok := errObject.(*apierrors.StatusError)
-			if !ok {
-				log.Error(spew.Sprintf("Received an error which is not *metav1.Status but %#+v", event.Object))
-
-			}
-
-			status := statusErr.ErrStatus
-			log.Error(status.String())
+			log.Error("annotations watcher failed", "err", utils.WatchError(event.Object))
 		default:
 		}
 	}
 	log.Info("[annotations] exiting annotations watcher")
-	return nil
+	if ctx.Err() != nil {
+		return nil
+	}
+	return utils.NewPanicError("annotations watcher channel closed unexpectedly")
 }
 
 // parseNodeAnnotations parses the annotations on the node and updates the configuration

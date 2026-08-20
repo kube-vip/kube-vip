@@ -52,8 +52,9 @@ var (
 )
 
 var kubeVipCmd = &cobra.Command{
-	Use:   "kube-vip",
-	Short: "This is a server for providing a Virtual IP and load-balancer for the Kubernetes control-plane",
+	Use:           "kube-vip",
+	Short:         "This is a server for providing a Virtual IP and load-balancer for the Kubernetes control-plane",
+	SilenceErrors: true,
 }
 
 func init() {
@@ -187,11 +188,16 @@ func init() {
 }
 
 // Execute - starts the command parsing process
-func Execute() {
-	if err := kubeVipCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+func Execute() int {
+	cmd, err := kubeVipCmd.ExecuteC()
+	if err != nil {
+		log.Error("command failed", "err", err)
+		if cmd == kubeVipCmd {
+			_ = cmd.Usage()
+		}
+		return 1
 	}
+	return 0
 }
 
 var kubeVipVersion = &cobra.Command{
@@ -215,26 +221,24 @@ var kubeVipSample = &cobra.Command{
 var kubeVipService = &cobra.Command{
 	Use:   "service",
 	Short: "Start the Virtual IP / Load balancer as a service within a Kubernetes cluster",
-	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
+	RunE: func(cmd *cobra.Command, args []string) error { //nolint TODO
+		cmd.SilenceUsage = true
 
 		// Load configuration from file if specified (lowest priority)
 		if initConfig.ConfigFile != "" {
 			err := kubevip.MergeConfigFromFile(&initConfig, initConfig.ConfigFile)
 			if err != nil {
-				log.Error("loading config file", "err", err)
-				return
+				return fmt.Errorf("loading config file: %w", err)
 			}
 		}
 
 		// parse environment variables, these will overwrite anything loaded from config file
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Error("parsing env", "err", err)
-			return
+			return fmt.Errorf("parsing environment: %w", err)
 		}
 		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+			return fmt.Errorf("validating configuration: %w", err)
 		}
 
 		// Change RTN_UNSPEC to default type
@@ -246,8 +250,7 @@ var kubeVipService = &cobra.Command{
 		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Error("checking interface", "err", err)
-			return
+			return fmt.Errorf("checking interface: %w", err)
 		}
 
 		// User Environment variables as an option to make manifest clearer
@@ -260,8 +263,7 @@ var kubeVipService = &cobra.Command{
 		if initConfig.EnableControlPlane &&
 			(initConfig.EnableARP || initConfig.EnableBGP || initConfig.EnableRoutingTable) {
 			if err := initConfig.CheckSubnetExists(); err != nil {
-				log.Error("checking subnet exists if vip_address defined", "err", err)
-				return
+				return fmt.Errorf("checking subnet exists if vip_address defined: %w", err)
 			}
 		}
 
@@ -269,8 +271,7 @@ var kubeVipService = &cobra.Command{
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
-				log.Error("generating CIDR", "err", err)
-				return
+				return fmt.Errorf("generating CIDR: %w", err)
 			}
 		}
 
@@ -280,41 +281,39 @@ var kubeVipService = &cobra.Command{
 		// Define the new service manager
 		mgr, err := manager.New(ctx, configMap, &initConfig)
 		if err != nil {
-			log.Error("new manager", "err", err)
-			return
+			return fmt.Errorf("new manager: %w", err)
 		}
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)
 		if err != nil {
-			log.Error("manager start", "err", err)
-			return
+			return fmt.Errorf("manager start: %w", err)
 		}
+		return nil
 	},
 }
 
 var kubeVipManager = &cobra.Command{
 	Use:   "manager",
 	Short: "Start the kube-vip manager",
-	Run: func(cmd *cobra.Command, args []string) { //nolint TODO
+	RunE: func(cmd *cobra.Command, args []string) error { //nolint TODO
+		cmd.SilenceUsage = true
+
 		// Load configuration from file if specified (lowest priority)
 		if initConfig.ConfigFile != "" {
 			err := kubevip.MergeConfigFromFile(&initConfig, initConfig.ConfigFile)
 			if err != nil {
-				log.Error("loading config file", "err", err)
-				return
+				return fmt.Errorf("loading config file: %w", err)
 			}
 		}
 
 		// parse environment variables, these will overwrite anything loaded from config file
 		err := kubevip.ParseEnvironment(&initConfig)
 		if err != nil {
-			log.Error("parsing environment", "err", err)
-			return
+			return fmt.Errorf("parsing environment: %w", err)
 		}
 		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+			return fmt.Errorf("validating configuration: %w", err)
 		}
 
 		// Change RTN_UNSPEC to default type
@@ -329,8 +328,7 @@ var kubeVipManager = &cobra.Command{
 		if initConfig.EnableControlPlane &&
 			(initConfig.EnableARP || initConfig.EnableBGP || initConfig.EnableRoutingTable) {
 			if err := initConfig.CheckSubnetExists(); err != nil {
-				log.Error("checking subnet exists if vip_address defined", "err", err)
-				return
+				return fmt.Errorf("checking subnet exists if vip_address defined: %w", err)
 			}
 		}
 
@@ -338,8 +336,7 @@ var kubeVipManager = &cobra.Command{
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
-				log.Error("No interface is specified for kube-vip to bind to")
-				return
+				return fmt.Errorf("generating CIDR: %w", err)
 			}
 		}
 
@@ -388,13 +385,11 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		if mode == "" {
-			log.Error("no valid kube-vip mode detected, ensure a supported mode is configured")
-			return
+			return fmt.Errorf("no valid kube-vip mode detected, ensure a supported mode is configured")
 		}
 
 		if modesEnabled > 1 {
-			log.Error("multiple kube-vip modes detected, ensure only one mode is configured")
-			return
+			return fmt.Errorf("multiple kube-vip modes detected, ensure only one mode is configured")
 		}
 
 		// Provide configuration to output/logging
@@ -402,18 +397,15 @@ var kubeVipManager = &cobra.Command{
 
 		// End if nothing is enabled
 		if !initConfig.EnableServices && !initConfig.EnableControlPlane {
-			log.Error("no features are enabled")
-			return
+			return fmt.Errorf("no features are enabled")
 		}
 
 		if !initConfig.EnableARP && strings.Contains(initConfig.VIPSubnet, kubevip.Auto) {
-			log.Error("auto subnet discovery cannot be used outside ARP mode")
-			return
+			return fmt.Errorf("auto subnet discovery cannot be used outside ARP mode")
 		}
 
 		if strings.Contains(initConfig.VIPSubnet, kubevip.Auto) && initConfig.Address != "" {
-			log.Error("auto subnet discovery cannot be used if VIP address was provided")
-			return
+			return fmt.Errorf("auto subnet discovery cannot be used if VIP address was provided")
 		}
 
 		// If we're using wireguard then all traffic goes through the wg0 interface
@@ -430,20 +422,17 @@ var kubeVipManager = &cobra.Command{
 					log.Warn("attempting to create wireguard interface", "interface not found", initConfig.Interface)
 					err = netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: initConfig.Interface}})
 					if err != nil {
-						log.Error("adding link", "err", err)
-						return
+						return fmt.Errorf("adding link: %w", err)
 					}
 					l, err = netlink.LinkByName(initConfig.Interface)
 					if err != nil {
-						log.Error("finding link", "err", err)
-						return
+						return fmt.Errorf("finding link: %w", err)
 					}
 				}
 			}
 			err = netlink.LinkSetUp(l)
 			if err != nil {
-				log.Error("setting link UP", "err", err)
-				return
+				return fmt.Errorf("setting link UP: %w", err)
 			}
 
 		} else { // if we're not using Wireguard then we'll need to use an actual interface
@@ -453,8 +442,7 @@ var kubeVipManager = &cobra.Command{
 				defaultIF, err := vip.GetDefaultGatewayInterface()
 				if err != nil {
 					_ = cmd.Help()
-					log.Error("detecting interface", "err", err)
-					return
+					return fmt.Errorf("detecting interface: %w", err)
 				}
 				initConfig.Interface = defaultIF.Name
 				log.Info("kube-vip bind", "interface", initConfig.Interface)
@@ -470,8 +458,7 @@ var kubeVipManager = &cobra.Command{
 		}
 		// Perform a check on the state of the interface
 		if err := initConfig.CheckInterface(); err != nil {
-			log.Error("checking interface", "err", err)
-			return
+			return fmt.Errorf("checking interface: %w", err)
 		}
 
 		// User Environment variables as an option to make manifest clearer
@@ -483,8 +470,7 @@ var kubeVipManager = &cobra.Command{
 		// Define the new service manager
 		mgr, err := manager.New(ctx, configMap, &initConfig)
 		if err != nil {
-			log.Error("new manager", "err", err)
-			return
+			return fmt.Errorf("new manager: %w", err)
 		}
 
 		metrics.RegisterPrometheusMetrics()
@@ -493,9 +479,9 @@ var kubeVipManager = &cobra.Command{
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)
 		if err != nil {
-			log.Error("start manager", "err", err)
-			return
+			return fmt.Errorf("start manager: %w", err)
 		}
+		return nil
 	},
 }
 

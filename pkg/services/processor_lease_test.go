@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -115,5 +116,39 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 
 	if p.leaseMgr.Get(id) == nil {
 		t.Fatal("expected a new lease to be created once the cancelled service context was dropped")
+	}
+}
+
+func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "example",
+			Namespace: "default",
+			UID:       types.UID("service-uid"),
+		},
+	}
+
+	oldCtx := servicecontext.New(context.Background())
+	replacementCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, replacementCtx)
+	replacementInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+	p.ServiceInstances = []*instance.Instance{replacementInstance}
+
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease))
+
+	if err := p.onStoppedLeading(oldCtx, svcLease, service); err != nil {
+		t.Fatalf("onStoppedLeading returned an error: %v", err)
+	}
+	if got, err := p.getServiceContext(service.UID); err != nil || got != replacementCtx {
+		t.Fatalf("replacement context was changed: got %v, err %v", got, err)
+	}
+	if len(p.ServiceInstances) != 1 || p.ServiceInstances[0] != replacementInstance {
+		t.Fatal("replacement service instance was removed by superseded cleanup")
 	}
 }
