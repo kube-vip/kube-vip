@@ -113,16 +113,14 @@ func (b *BGP) StartServices(ctx context.Context) error {
 		if err := b.PerServiceLeader(ctx, false); err != nil {
 			return err
 		}
+	} else if b.config.EnableLeaderElection {
+		b.GlobalLeader(ctx, b.config.ServicesLeaseName)
 	} else {
 		if err := b.ServicesNoLeader(ctx); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func (b *BGP) ServicesGlobalLeader(ctx context.Context, id string) {
-	// NOT IMPLEMENTED
 }
 
 func (b *BGP) Name() string {
