@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/kube-vip/kube-vip/cmd"
 )
 
@@ -14,5 +16,5 @@ func main() {
 
 	cmd.Release.Version = Version
 	cmd.Release.Build = Build
-	cmd.Execute()
+	os.Exit(cmd.Execute())
 }
