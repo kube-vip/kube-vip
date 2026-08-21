@@ -179,28 +179,41 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 	egressUpdateFunc func(context.Context, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
-		ip := net.ParseIP(*lastKnownGoodEndpoint)
+		if *lastKnownGoodEndpoint != "" {
+			ip := net.ParseIP(*lastKnownGoodEndpoint)
+			expectIPv6 := service.Annotations[kubevip.EgressIPv6] == "true"
+			if ip == nil || (ip.To4() == nil) != expectIPv6 {
+				log.Warn("ignoring active endpoint with unexpected address family",
+					"service", service.Name,
+					"namespace", service.Namespace,
+					"endpoint", *lastKnownGoodEndpoint,
+					"expected_ipv6", expectIPv6)
+				return
+			}
+		}
 
 		// Store old values from ServiceSnapshot to detect if annotation actually changed
 		// We use the ServiceSnapshot instead of the service parameter because the service parameter
 		// may have stale annotations if the last update failed
 		var oldEndpoint, oldEndpointIPv6 string
+		snapshotFound := false
 		if p.instances != nil {
 			serviceInstance := instance.FindServiceInstance(service, *p.instances)
-			if serviceInstance != nil {
+			if serviceInstance != nil && serviceInstance.ServiceSnapshot != nil {
+				snapshotFound = true
 				oldEndpoint = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
 				oldEndpointIPv6 = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 			}
 		}
-		// Fall back to service annotations if we couldn't find the instance
-		if oldEndpoint == "" && oldEndpointIPv6 == "" {
+		// Empty annotations in an existing snapshot are meaningful after a zero-endpoint transition.
+		if !snapshotFound {
 			oldEndpoint = service.Annotations[kubevip.ActiveEndpoint]
 			oldEndpointIPv6 = service.Annotations[kubevip.ActiveEndpointIPv6]
 		}
 
 		// Determine which annotation to update based on IP version
 		var endpoint, endpointIPv6 string
-		if ip.To4() == nil && !p.config.EnableEndpoints {
+		if service.Annotations[kubevip.EgressIPv6] == "true" && !p.config.EnableEndpoints {
 			// IPv6
 			endpointIPv6 = *lastKnownGoodEndpoint
 			endpoint = oldEndpoint // Preserve existing IPv4 if any
