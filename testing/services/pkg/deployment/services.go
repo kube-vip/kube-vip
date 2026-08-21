@@ -274,7 +274,8 @@ func leaderFailover(ctx context.Context, ns string, name, leaderNode *string, cl
 
 		}
 	}
-	return nil
+	// The watch drained without a single post-kill update passing httpTest.
+	return fmt.Errorf("service [%s] never became reachable after leader failover", *name)
 }
 
 func podFailover(ctx context.Context, ns string, name, leaderNode *string, clientset *kubernetes.Clientset) error {
@@ -373,7 +374,8 @@ func podFailover(ctx context.Context, ns string, name, leaderNode *string, clien
 
 		}
 	}
-	return nil
+	// The watch drained without a single post-kill update passing httpTest.
+	return fmt.Errorf("service [%s] never became reachable after pod failover", *name)
 }
 
 func tcpServer(egressAddress *string, timeout int, network string) bool {
