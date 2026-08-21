@@ -1184,14 +1184,19 @@ func checkNoDuplicateElectionLoops(namespace, name, fault string) error {
 func checkLeaseErrorsStable(namespace, name, fault string) error {
 	const metric = "kube_vip_service_election_errors_total"
 
-	// Poll until two consecutive readings are identical; the counter only grows on
-	// the #1664 bug path so we stop as soon as it has been stable for one interval.
+	// The counter only grows on the #1664 bug path, but a failing election retry
+	// loop can pause for a couple of seconds between attempts, so a single quiet
+	// reading is not proof of stability. Require several consecutive quiet
+	// intervals and reset the streak whenever the counter grows.
+	const requiredStableIntervals = 3
+
 	deadline := time.Now().Add(time.Second * 12)
 	prev, err := scrapeServiceGauge(metric, namespace, name)
 	if err != nil {
 		return fmt.Errorf("after %s: %w", fault, err)
 	}
 
+	stableIntervals := 0
 	for {
 		time.Sleep(time.Second * 2)
 
@@ -1210,9 +1215,14 @@ func checkLeaseErrorsStable(namespace, name, fault string) error {
 				}
 			}
 		}
-		if !grew {
-			slog.Infof("🔎 election errors per node stable after %s: %v", fault, curr)
-			return nil
+		if grew {
+			stableIntervals = 0
+		} else {
+			stableIntervals++
+			if stableIntervals >= requiredStableIntervals {
+				slog.Infof("🔎 election errors per node stable after %s: %v", fault, curr)
+				return nil
+			}
 		}
 		prev = curr
 	}
