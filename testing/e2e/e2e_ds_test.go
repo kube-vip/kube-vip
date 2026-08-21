@@ -33,9 +33,11 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
 
-var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular pod", Ordered, func() {
+var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular pod", func() {
 	if Mode == ModeARP {
 		var (
+			ctx             context.Context
+			cancel          context.CancelFunc
 			logger          log.Logger
 			imagePath       string
 			k8sImagePath    string
@@ -43,9 +45,8 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			tempDirPathRoot string
 		)
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeEach(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 
@@ -57,11 +58,11 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 			}
 		})
 
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
 			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}

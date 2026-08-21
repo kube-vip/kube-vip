@@ -11,10 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     name: E2E tests
     timeout-minutes: 120
+    env:
+      GINKGO_PROCS: ${{ matrix.ginkgo-procs }}
     strategy:
+      fail-fast: false
+      max-parallel: 3
       matrix:
-        mode: ["arp", "rt", "bgp"]
-      fail-fast: true
+        include:
+          - mode: arp
+            ginkgo-procs: 4
+          - mode: rt
+            ginkgo-procs: 2
+          - mode: bgp
+            ginkgo-procs: 4
     steps:
       - name: Get current date
         id: date

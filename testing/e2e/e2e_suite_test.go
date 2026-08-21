@@ -22,6 +22,8 @@ const (
 	ModeARP = "arp"
 	ModeRT  = "rt"
 	ModeBGP = "bgp"
+
+	parallelOffsetStride = 1000
 )
 
 var (
@@ -49,7 +51,7 @@ func TestE2E(t *testing.T) {
 	} else {
 		Mode = mode
 	}
-	SOffset = e2e.NewOffset(5)
+	SOffset = e2e.NewOffset(5 + (GinkgoParallelProcess()-1)*parallelOffsetStride)
 	ConfigMtx = &sync.Mutex{}
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "E2E Suite")

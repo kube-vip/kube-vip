@@ -38,23 +38,24 @@ const (
 	defaultFixedNexthopv4 = "172.18.0.100"
 )
 
-var _ = Describe("kube-vip BGP mode", Ordered, func() {
+var _ = Describe("kube-vip BGP mode", func() {
 	if Mode == ModeBGP {
 		var (
+			ctx    context.Context
+			cancel context.CancelFunc
 			logger log.Logger
 			server *bgp.Server
 		)
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 			server = sharedBGPServer
 			Expect(server).ToNot(BeNil(), "SharedBGPServer not initialized")
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			cancel()
 		})
 
@@ -1049,7 +1050,7 @@ func setupEnv(ctx context.Context, cpVIP *string,
 	By(manifestValues.BGPPeers)
 
 	cluster := e2e.CreateCluster(ctx, &e2e.ClusterSpec{
-		Name:       clusterNameSuffix,
+		Name:       fmt.Sprintf("%s-p%d", clusterNameSuffix, GinkgoParallelProcess()),
 		Nodes:      nodesNumber,
 		Networking: networking,
 		KubeVip:    manifestValues,

@@ -56,9 +56,11 @@ const testJSON = `
   path: "/apiServer/certSANs/-"
   value: `
 
-var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
+var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 	if Mode == ModeARP {
 		var (
+			ctx                             context.Context
+			cancel                          context.CancelFunc
 			logger                          log.Logger
 			imagePath                       string
 			k8sImagePath                    string
@@ -69,9 +71,8 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			tempDirPathRoot                 string
 		)
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeEach(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 
@@ -99,11 +100,11 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
 			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp", testDirPrefix))
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}
