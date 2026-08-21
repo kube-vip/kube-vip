@@ -21,7 +21,7 @@ jobs:
           - mode: arp
             ginkgo-procs: 4
           - mode: rt
-            ginkgo-procs: 2
+            ginkgo-procs: 4
           - mode: bgp
             ginkgo-procs: 4
     steps:

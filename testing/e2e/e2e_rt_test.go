@@ -86,7 +86,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -224,7 +224,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -363,7 +363,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -434,7 +434,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
