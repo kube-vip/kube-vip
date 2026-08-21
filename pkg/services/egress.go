@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	log "log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 )
@@ -392,31 +394,88 @@ func (p *Processor) prepareEgressNftablesTable(serviceUID string, ipv6 bool) err
 
 func (p *Processor) AutoDiscoverCIDRs(ctx context.Context) (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
+	serviceCIDR, podCIDR = p.discoverCIDRsFromAPI(ctx)
+	if serviceCIDR == "" {
+		legacyServiceCIDR, legacyErr := p.discoverServiceCIDRFromControllerManager(ctx)
+		if legacyErr != nil {
+			return serviceCIDR, podCIDR, legacyErr
+		}
+		serviceCIDR = legacyServiceCIDR
+	}
+	if podCIDR == "" {
+		return serviceCIDR, podCIDR, fmt.Errorf("unable to determine CNI Pod CIDRs from Node objects; configure egress_podcidr explicitly")
+	}
+
+	return serviceCIDR, podCIDR, nil
+}
+
+func (p *Processor) discoverCIDRsFromAPI(ctx context.Context) (serviceCIDR, podCIDR string) {
+	serviceCIDRs, err := p.clientSet.NetworkingV1().ServiceCIDRs().List(ctx, metav1.ListOptions{})
+	if err == nil {
+		serviceCIDR = serviceCIDRsFromItems(serviceCIDRs.Items)
+	} else {
+		log.Debug("Unable to discover Service CIDRs from ServiceCIDR API", "err", err)
+	}
+
+	nodes, err := p.clientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err == nil {
+		podCIDR = podCIDRsFromNodes(nodes.Items)
+	} else {
+		log.Debug("Unable to discover CNI Pod CIDRs from Node API", "err", err)
+	}
+
+	return serviceCIDR, podCIDR
+}
+
+func (p *Processor) discoverServiceCIDRFromControllerManager(ctx context.Context) (string, error) {
 	options := metav1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
 	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(ctx, options)
 	if err != nil {
-		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
+		return "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
 	}
 	if len(podList.Items) < 1 {
-		return "", "", fmt.Errorf("[Egress] Unable to auto-discover the pod/service CIDRs: kube-controller-manager not found")
+		return "", fmt.Errorf("[Egress] Unable to auto-discover the Service CIDRs: kube-controller-manager not found")
 	}
 
 	pod := podList.Items[0]
-	for flags := range pod.Spec.Containers[0].Command {
-		if strings.Contains(pod.Spec.Containers[0].Command[flags], "--cluster-cidr=") {
-			podCIDR = strings.ReplaceAll(pod.Spec.Containers[0].Command[flags], "--cluster-cidr=", "")
-		}
-		if strings.Contains(pod.Spec.Containers[0].Command[flags], "--service-cluster-ip-range=") {
-			serviceCIDR = strings.ReplaceAll(pod.Spec.Containers[0].Command[flags], "--service-cluster-ip-range=", "")
+	for _, flag := range pod.Spec.Containers[0].Command {
+		if strings.Contains(flag, "--service-cluster-ip-range=") {
+			return strings.ReplaceAll(flag, "--service-cluster-ip-range=", ""), nil
 		}
 	}
-	if podCIDR == "" || serviceCIDR == "" {
-		err = fmt.Errorf("unable to fully determine cluster CIDR configurations")
-	}
+	return "", fmt.Errorf("unable to determine Service CIDR configuration")
+}
 
-	return
+func serviceCIDRsFromItems(items []networkingv1.ServiceCIDR) string {
+	var cidrs []string
+	for _, item := range items {
+		cidrs = appendUnique(cidrs, item.Spec.CIDRs...)
+	}
+	return strings.Join(cidrs, ",")
+}
+
+func podCIDRsFromNodes(nodes []corev1.Node) string {
+	var cidrs []string
+	for _, node := range nodes {
+		if len(node.Spec.PodCIDRs) > 0 {
+			cidrs = appendUnique(cidrs, node.Spec.PodCIDRs...)
+		} else if node.Spec.PodCIDR != "" {
+			cidrs = appendUnique(cidrs, node.Spec.PodCIDR)
+		}
+	}
+	return strings.Join(cidrs, ",")
+}
+
+func appendUnique(values []string, additions ...string) []string {
+	for _, addition := range additions {
+		if addition == "" || slices.Contains(values, addition) {
+			continue
+		}
+		values = append(values, addition)
+	}
+	return values
 }
 
 func (p *Processor) updateEgressNftablesTableAnnotation(ctx context.Context, service *corev1.Service) error {

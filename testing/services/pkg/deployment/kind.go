@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gookit/slog"
 	"github.com/vishvananda/netlink"
@@ -209,12 +208,46 @@ func (config *TestConfig) CreateKind() error {
 		if _, err := cmd.CombinedOutput(); err != nil {
 			return err
 		}
-		cmd = exec.Command("kubectl", "create", "-f", "https://kube-vip.io/manifests/rbac.yaml")
-		if _, err := cmd.CombinedOutput(); err != nil {
-			return err
+		// Replace cluster-wide rbac.yaml with two ClusterRoles:
+		// - kube-vip-nodes: cluster-scoped node access and ServiceCIDR discovery
+		// - kube-vip-services: used when GlobalWatch=true (per-namespace Role is used otherwise)
+		const clusterRolesYAML = `
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-vip-nodes
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list", "get", "watch", "update", "patch"]
+- {apiGroups: ["networking.k8s.io"], resources: ["servicecidrs"], verbs: ["list", "get", "watch"]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-vip-services
+rules:
+- apiGroups: [""]
+  resources: ["services", "services/status", "endpoints", "pods", "events"]
+  verbs: ["list", "get", "watch", "update"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["list", "get", "watch", "update", "create"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["list", "get", "watch"]
+`
+		applyCmd := exec.Command("kubectl", "apply", "-f", "-")
+		applyCmd.Stdin = strings.NewReader(clusterRolesYAML)
+		if out, err := applyCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("kube-vip ClusterRoles: %w\n%s", err, out)
 		}
-		slog.Infof("💤 sleeping for a few seconds to let controllers start")
-		time.Sleep(time.Second * 5)
+		// wait for the cloud provider to be ready before tests begin allocating IPs
+		cmd = exec.Command("kubectl", "rollout", "status", "deployment/kube-vip-cloud-provider",
+			"--namespace", "kube-system", "--timeout", "60s")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("kube-vip-cloud-provider not ready: %w\n%s", err, out)
+		}
 	}
 	return nil
 }

@@ -50,6 +50,8 @@ type TestConfig struct {
 	DeploymentName string
 	ServiceName    string
 	LeaderName     string
+	Namespace      string // each parallel test group gets a unique namespace
+	GlobalWatch    bool   // when true kube-vip watches all namespaces instead of ns only
 
 	// Cilium config
 	Cilium bool
@@ -59,6 +61,64 @@ type TestConfig struct {
 
 	// temp dir root
 	TempDirPath string
+}
+
+// ns returns the test namespace, falling back to "default".
+func (config *TestConfig) ns() string {
+	if config.Namespace != "" {
+		return config.Namespace
+	}
+	return v1.NamespaceDefault
+}
+
+// WithNamespace returns a shallow copy of the config with the given namespace.
+func (config *TestConfig) WithNamespace(ns string) *TestConfig {
+	c := *config
+	c.Namespace = ns
+	return &c
+}
+
+// EnsureNamespace creates the namespace with prometheus disabled (empty metricsAddr).
+func EnsureNamespace(ctx context.Context, clientset *kubernetes.Clientset, ns, imageURL string, globalWatch bool) error {
+	return EnsureNamespaceWithMetrics(ctx, clientset, ns, imageURL, globalWatch, "")
+}
+
+// EnsureNamespaceWithMetrics is like EnsureNamespace but enables the prometheus
+// HTTP server at metricsAddr (e.g. ":2112") when the namespace runs alone.
+func EnsureNamespaceWithMetrics(ctx context.Context, clientset *kubernetes.Clientset, ns, imageURL string, globalWatch bool, metricsAddr string) error {
+	n := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	if _, err := clientset.CoreV1().Namespaces().Create(ctx, n, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	d := Deployment{}
+	return d.CreateNamespacedKVDs(ctx, clientset, imageURL, ns, globalWatch, metricsAddr)
+}
+
+// WaitForNamespaceGone blocks until ns has been fully deleted or 30 s elapses.
+// Returning an error means kube-vip pod termination is stuck and the next phase
+// must not start — doing so risks port-2112 conflicts on the shared host network.
+func WaitForNamespaceGone(ctx context.Context, clientset *kubernetes.Clientset, ns string) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		_, err := clientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %q still terminating after 30 s; kube-vip pod termination is stuck", ns)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// DeleteNamespace removes ns and its per-namespace ClusterRoleBindings.
+func DeleteNamespace(ctx context.Context, clientset *kubernetes.Clientset, ns string) error {
+	_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, "kube-vip-nodes-"+ns, metav1.DeleteOptions{})
+	_ = clientset.RbacV1().ClusterRoleBindings().Delete(ctx, "kube-vip-services-"+ns, metav1.DeleteOptions{})
+	return clientset.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
 }
 
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
@@ -78,12 +138,12 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -92,6 +152,7 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 	var err error
 	slog.Infof("🧪 ---> simple deployment <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     2,
@@ -101,10 +162,14 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 	if err != nil {
 		slog.Fatal(err)
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
-		name:     config.ServiceName,
-		testHTTP: true,
-		timeout:  10,
+		namespace: config.ns(),
+		name:      config.ServiceName,
+		testHTTP:  true,
+		timeout:   10,
 	}
 	_, _, err = svc.CreateService(ctx, clientset)
 	if err != nil {
@@ -136,13 +201,13 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
-			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
+			err = clientset.CoreV1().Services(config.ns()).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
 			if err != nil {
 				slog.Fatal(err)
 			}
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.LeaderName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.LeaderName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -150,6 +215,7 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 
 	slog.Infof("🧪 ---> multiple deployments <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.LeaderName,
 		nodeAffinity: config.Affinity,
 		replicas:     2,
@@ -159,14 +225,15 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 	if err != nil {
 		slog.Fatal(err)
 	}
-	if err != nil {
-		slog.Fatal(err)
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
 	}
 	for i := 1; i < 5; i++ {
 		svc := Service{
-			name:     fmt.Sprintf("%s-%d", config.ServiceName, i),
-			testHTTP: true,
-			timeout:  30,
+			namespace: config.ns(),
+			name:      fmt.Sprintf("%s-%d", config.ServiceName, i),
+			testHTTP:  true,
+			timeout:   30,
 		}
 		_, _, err = svc.CreateService(ctx, clientset)
 		if err != nil {
@@ -195,12 +262,12 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -209,6 +276,7 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	slog.Infof("🧪 ---> leader failover deployment (local policy) <---")
 
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     2,
@@ -218,7 +286,11 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
+		namespace:   config.ns(),
 		name:        config.ServiceName,
 		egress:      false,
 		policyLocal: true,
@@ -234,7 +306,7 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	}
 	lbAddress := lbAddresses[0]
 
-	err = leaderFailover(ctx, &config.ServiceName, &leader, clientset)
+	err = leaderFailover(ctx, config.ns(), &config.ServiceName, &leader, clientset)
 	if err != nil {
 		return err
 	}
@@ -271,12 +343,12 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -284,6 +356,7 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 
 	slog.Infof("🧪 ---> active pod failover deployment (local policy) <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     1,
@@ -293,7 +366,11 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
+		namespace:   config.ns(),
 		name:        config.ServiceName,
 		policyLocal: true,
 		testHTTP:    true,
@@ -304,7 +381,7 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	err = podFailover(ctx, &config.ServiceName, &leader, clientset)
+	err = podFailover(ctx, config.ns(), &config.ServiceName, &leader, clientset)
 	if err != nil {
 		return err
 	}
@@ -329,13 +406,13 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
-			err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
+			err = clientset.CoreV1().Services(config.ns()).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
 			if err != nil {
 				slog.Fatal(err)
 			}
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.LeaderName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.LeaderName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -344,6 +421,7 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 	slog.Infof("🧪 ---> multiple deployments (local policy) <---")
 	timeout := 30
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.LeaderName,
 		nodeAffinity: config.Affinity,
 		replicas:     2,
@@ -353,8 +431,12 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	for i := 1; i < 5; i++ {
 		svc := Service{
+			namespace:   config.ns(),
 			policyLocal: true,
 			name:        fmt.Sprintf("%s-%d", config.ServiceName, i),
 			testHTTP:    true,
@@ -387,6 +469,8 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kubernetes.Clientset, internal bool) error {
 	// egress test
 	var err error
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-deployment")
 		if err != nil {
@@ -394,18 +478,18 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> egress deployment logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -417,6 +501,7 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	timeout := 30
 
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     1,
@@ -438,10 +523,14 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	svc := Service{
-		policyLocal: true,
+		namespace:   config.ns(),
 		name:        config.ServiceName,
+		policyLocal: true,
 		egress:      true,
 		testHTTP:    false,
 		timeout:     30,
@@ -477,6 +566,8 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	// egress v6 test
 
 	var err error
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-v6-deployment")
 		if err != nil {
@@ -484,18 +575,18 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> egress v6 deployment logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -507,6 +598,7 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	timeout := 30
 
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     1,
@@ -528,10 +620,14 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	svc := Service{
-		policyLocal:   true,
+		namespace:     config.ns(),
 		name:          config.ServiceName,
+		policyLocal:   true,
 		egress:        true,
 		egressIPv6:    true,
 		timeout:       timeout,
@@ -578,6 +674,7 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 	// Dualstack loadbalancer test
 	slog.Infof("🧪 ---> testing dualstack loadbalancer service <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     2,
@@ -587,7 +684,11 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
+		namespace:     config.ns(),
 		name:          config.ServiceName,
 		testHTTP:      true,
 		testDualstack: true,
@@ -612,25 +713,25 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 	}
 
 	slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-	err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+	err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
 	if err != nil {
 		slog.Fatal(err)
 	}
 
-	if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+	if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
 		slog.Fatal(err)
 	}
 	return err
 }
 
-func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, ns, name string) error {
 	fgPropagation := metav1.DeletePropagationForeground
 	delOpts := metav1.DeleteOptions{
 		PropagationPolicy: &fgPropagation,
 	}
 
 	slog.Infof("🧹 deleting deployment [%s]", name)
-	if err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Delete(ctx, name, delOpts); err != nil {
+	if err := clientset.AppsV1().Deployments(ns).Delete(ctx, name, delOpts); err != nil {
 		return fmt.Errorf("failed to delete deployment %q: %w", name, err)
 	}
 
@@ -647,7 +748,7 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, name
 			t.Stop()
 			return fmt.Errorf("failed to check deployment's %q deletion: %w", name, ctx.Err())
 		case <-t.C:
-			_, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+			_, err := clientset.AppsV1().Deployments(ns).Get(checkCtx, name, metav1.GetOptions{})
 			if err != nil && apierrors.IsNotFound(err) {
 				slog.Infof("🧹 deployment [%s] was deleted", name)
 				return nil
@@ -708,11 +809,11 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		if err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{}); err != nil {
+		if err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{}); err != nil {
 			slog.Fatal(err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
 			slog.Fatal(err)
 		}
 		return nil
@@ -720,6 +821,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 
 	slog.Infof("🧪 ---> leader election faults (local policy) <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         config.DeploymentName,
 		nodeAffinity: config.Affinity,
 		replicas:     1,
@@ -728,8 +830,12 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
 		return err
 	}
+	if err := deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	svc := Service{
+		namespace:   config.ns(),
 		name:        config.ServiceName,
 		policyLocal: true,
 		testHTTP:    true,
@@ -754,7 +860,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// loop would be started even by the unfixed code.
 	for i := 1; i <= 5; i++ {
 		slog.Infof("🔁 flap %d: scaling deployment [%s] to zero endpoints", i, config.DeploymentName)
-		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 0); err != nil {
+		if err := scaleDeployment(ctx, clientset, config.ns(), config.DeploymentName, 0); err != nil {
 			return err
 		}
 
@@ -769,7 +875,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		time.Sleep(time.Second * 2)
 
 		slog.Infof("🔁 flap %d: scaling deployment [%s] back up", i, config.DeploymentName)
-		if err := scaleDeployment(ctx, clientset, config.DeploymentName, 1); err != nil {
+		if err := scaleDeployment(ctx, clientset, config.ns(), config.DeploymentName, 1); err != nil {
 			return err
 		}
 		time.Sleep(time.Second * 2)
@@ -782,12 +888,12 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// Fault 2 (#1664): end the endpoint watcher by deleting the EndpointSlice, then
 	// drive another service event so the stale service context would be reused.
 	slog.Infof("💥 deleting endpointslices of service [%s]", config.ServiceName)
-	if err := clientset.DiscoveryV1().EndpointSlices(v1.NamespaceDefault).DeleteCollection(ctx, metav1.DeleteOptions{},
+	if err := clientset.DiscoveryV1().EndpointSlices(config.ns()).DeleteCollection(ctx, metav1.DeleteOptions{},
 		metav1.ListOptions{LabelSelector: "kubernetes.io/service-name=" + config.ServiceName}); err != nil {
 		return fmt.Errorf("failed to delete endpointslices of service %q: %w", config.ServiceName, err)
 	}
 
-	if err := annotateService(ctx, clientset, config.ServiceName); err != nil {
+	if err := annotateService(ctx, clientset, config.ns(), config.ServiceName); err != nil {
 		return err
 	}
 
@@ -798,7 +904,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// Fault 3: lease object faults. Deleting the lease and blanking its holder are
 	// recovered by the election client itself, so this only asserts convergence.
 	slog.Infof("💥 deleting lease [%s]", leaseName)
-	if err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Delete(ctx, leaseName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+	if err := clientset.CoordinationV1().Leases(config.ns()).Delete(ctx, leaseName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete lease %q: %w", leaseName, err)
 	}
 
@@ -807,7 +913,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	}
 
 	slog.Infof("💥 clearing holderIdentity on lease [%s]", leaseName)
-	if err := clearLeaseHolder(ctx, clientset, leaseName); err != nil {
+	if err := clearLeaseHolder(ctx, clientset, config.ns(), leaseName); err != nil {
 		return err
 	}
 
@@ -819,12 +925,12 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// apiserver for longer than the lease duration. That drives OnStoppedLeading
 	// and returns the election, so the restart loop has to make a new attempt
 	// afterwards. A wedged loop never does, which is the #1650 deadlock.
-	leader, err := leaseHolder(ctx, clientset, leaseName)
+	leader, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
 	if err != nil {
 		return err
 	}
 
-	before, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", v1.NamespaceDefault, config.ServiceName)
+	before, err := scrapeServiceGauge("kube_vip_service_election_attempts_total", config.ns(), config.ServiceName)
 	if err != nil {
 		return err
 	}
@@ -844,7 +950,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 
-	if err := waitForElectionProgress(before, v1.NamespaceDefault, config.ServiceName); err != nil {
+	if err := waitForElectionProgress(before, config.ns(), config.ServiceName); err != nil {
 		return err
 	}
 
@@ -856,7 +962,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		v1.ServiceExternalTrafficPolicyLocal,
 	} {
 		slog.Infof("💥 setting externalTrafficPolicy of service [%s] to [%s]", config.ServiceName, policy)
-		if err := setExternalTrafficPolicy(ctx, clientset, config.ServiceName, policy); err != nil {
+		if err := setExternalTrafficPolicy(ctx, clientset, config.ns(), config.ServiceName, policy); err != nil {
 			return err
 		}
 
@@ -870,7 +976,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// invariant as fault 1 from the service watch instead of the endpoint watch.
 	slog.Infof("💥 annotating service [%s] repeatedly", config.ServiceName)
 	for i := range 15 {
-		if err := annotateServiceValue(ctx, clientset, config.ServiceName, fmt.Sprintf("storm-%d", i)); err != nil {
+		if err := annotateServiceValue(ctx, clientset, config.ns(), config.ServiceName, fmt.Sprintf("storm-%d", i)); err != nil {
 			return err
 		}
 		time.Sleep(time.Millisecond * 200)
@@ -890,7 +996,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	// Fault 8: partition a node that is not the leader. The leader has to keep the
 	// lease and keep serving, and the returning node must not leak a loop or end up
 	// advertising the same address.
-	follower, err := followerNode(ctx, clientset, leaseName)
+	follower, err := followerNode(ctx, clientset, config.ns(), leaseName)
 	if err != nil {
 		return err
 	}
@@ -898,7 +1004,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	if follower == "" {
 		slog.Infof("⏭️  no follower node to partition, skipping")
 	} else {
-		holderBefore, err := leaseHolder(ctx, clientset, leaseName)
+		holderBefore, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
 		if err != nil {
 			return err
 		}
@@ -923,7 +1029,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 			return err
 		}
 
-		holderAfter, err := leaseHolder(ctx, clientset, leaseName)
+		holderAfter, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
 		if err != nil {
 			return err
 		}
@@ -942,15 +1048,15 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 // election loop per node, no lease lookup failures, a held lease, and a VIP that
 // serves traffic.
 func (config *TestConfig) checkConverged(ctx context.Context, clientset *kubernetes.Clientset, leaseName, lbAddress, fault string) error {
-	if err := checkNoDuplicateElectionLoops(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
+	if err := checkNoDuplicateElectionLoops(config.ns(), config.ServiceName, fault); err != nil {
 		return err
 	}
 
-	if err := checkLeaseErrorsStable(v1.NamespaceDefault, config.ServiceName, fault); err != nil {
+	if err := checkLeaseErrorsStable(config.ns(), config.ServiceName, fault); err != nil {
 		return err
 	}
 
-	holder, err := leaseHolder(ctx, clientset, leaseName)
+	holder, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
 	if err != nil {
 		return fmt.Errorf("after %s: %w", fault, err)
 	}
@@ -977,18 +1083,19 @@ func (config *TestConfig) faultCommonLeaseSibling(ctx context.Context, clientset
 
 	defer func() {
 		for _, name := range []string{leavingName, stayingName} {
-			if err := clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, name, metav1.DeleteOptions{}); err != nil &&
+			if err := clientset.CoreV1().Services(config.ns()).Delete(ctx, name, metav1.DeleteOptions{}); err != nil &&
 				!apierrors.IsNotFound(err) {
 				slog.Errorf("failed to delete service %q: %v", name, err)
 			}
 		}
-		if err := deleteDeployment(ctx, clientset, deployName); err != nil {
+		if err := deleteDeployment(ctx, clientset, config.ns(), deployName); err != nil {
 			slog.Errorf("failed to delete deployment %q: %v", deployName, err)
 		}
 	}()
 
 	slog.Infof("🧪 ---> common lease sibling teardown <---")
 	deploy := Deployment{
+		namespace:    config.ns(),
 		name:         deployName,
 		nodeAffinity: config.Affinity,
 		replicas:     1,
@@ -997,17 +1104,21 @@ func (config *TestConfig) faultCommonLeaseSibling(ctx context.Context, clientset
 	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
 		return err
 	}
+	if err := deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	// Both services share one lease. A common lease requires a cluster traffic
 	// policy, which CreateService sets alongside the annotation.
 	for _, name := range []string{leavingName, stayingName} {
-		svc := Service{name: name, commonLease: leaseName, testHTTP: true, timeout: 30}
+		svc := Service{
+			namespace: config.ns(), name: name, commonLease: leaseName, testHTTP: true, timeout: 30}
 		if _, _, err := svc.CreateService(ctx, clientset); err != nil {
 			return fmt.Errorf("failed to create service %q on the common lease: %w", name, err)
 		}
 	}
 
-	holder, err := leaseHolder(ctx, clientset, leaseName)
+	holder, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
 	if err != nil {
 		return fmt.Errorf("common lease never got a holder: %w", err)
 	}
@@ -1016,11 +1127,11 @@ func (config *TestConfig) faultCommonLeaseSibling(ctx context.Context, clientset
 	// Tear the first service down. The sibling is untouched and still needs the
 	// lease, so the lease has to stay held.
 	slog.Infof("💥 deleting service [%s], which shares lease [%s] with [%s]", leavingName, leaseName, stayingName)
-	if err := clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, leavingName, metav1.DeleteOptions{}); err != nil {
+	if err := clientset.CoreV1().Services(config.ns()).Delete(ctx, leavingName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("failed to delete service %q: %w", leavingName, err)
 	}
 
-	if _, err := leaseHolder(ctx, clientset, leaseName); err != nil {
+	if _, err := leaseHolder(ctx, clientset, config.ns(), leaseName); err != nil {
 		return fmt.Errorf("common lease lost its holder when a sibling service was deleted: %w", err)
 	}
 
@@ -1073,26 +1184,38 @@ func checkNoDuplicateElectionLoops(namespace, name, fault string) error {
 func checkLeaseErrorsStable(namespace, name, fault string) error {
 	const metric = "kube_vip_service_election_errors_total"
 
-	first, err := scrapeServiceGauge(metric, namespace, name)
+	// Poll until two consecutive readings are identical; the counter only grows on
+	// the #1664 bug path so we stop as soon as it has been stable for one interval.
+	deadline := time.Now().Add(time.Second * 12)
+	prev, err := scrapeServiceGauge(metric, namespace, name)
 	if err != nil {
 		return fmt.Errorf("after %s: %w", fault, err)
 	}
 
-	time.Sleep(time.Second * 10)
+	for {
+		time.Sleep(time.Second * 2)
 
-	second, err := scrapeServiceGauge(metric, namespace, name)
-	if err != nil {
-		return fmt.Errorf("after %s: %w", fault, err)
-	}
-
-	for node, count := range second {
-		if count > first[node] {
-			return fmt.Errorf("node %q keeps failing leader election for service %q after %s "+
-				"(%v -> %v errors in 10s), the lease is never re-added", node, name, fault, first[node], count)
+		curr, err := scrapeServiceGauge(metric, namespace, name)
+		if err != nil {
+			return fmt.Errorf("after %s: %w", fault, err)
 		}
+
+		grew := false
+		for node, count := range curr {
+			if count > prev[node] {
+				grew = true
+				if time.Now().After(deadline) {
+					return fmt.Errorf("node %q keeps failing leader election for service %q after %s "+
+						"(%v -> %v errors in 12s), the lease is never re-added", node, name, fault, prev[node], count)
+				}
+			}
+		}
+		if !grew {
+			slog.Infof("🔎 election errors per node stable after %s: %v", fault, curr)
+			return nil
+		}
+		prev = curr
 	}
-	slog.Infof("🔎 election errors per node stable after %s: %v", fault, second)
-	return nil
 }
 
 // waitForElectionProgress asserts the restart loop keeps attempting election
@@ -1121,16 +1244,15 @@ func waitForElectionProgress(before map[string]float64, namespace, name string) 
 	}
 }
 
-// annotateService writes an annotation to force a service watch event.
-func annotateService(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
-	return annotateServiceValue(ctx, clientset, name, "1")
+func annotateService(ctx context.Context, clientset *kubernetes.Clientset, ns, name string) error {
+	return annotateServiceValue(ctx, clientset, ns, name, "1")
 }
 
 // annotateServiceValue writes a given annotation value to force a service watch
 // event. The value has to change for the API server to emit a Modified event.
-func annotateServiceValue(ctx context.Context, clientset *kubernetes.Clientset, name, value string) error {
+func annotateServiceValue(ctx context.Context, clientset *kubernetes.Clientset, ns, name, value string) error {
 	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"e2e.kube-vip.io/probe":%q}}}`, value)
-	if _, err := clientset.CoreV1().Services(v1.NamespaceDefault).Patch(ctx, name,
+	if _, err := clientset.CoreV1().Services(ns).Patch(ctx, name,
 		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("failed to annotate service %q: %w", name, err)
 	}
@@ -1139,10 +1261,10 @@ func annotateServiceValue(ctx context.Context, clientset *kubernetes.Clientset, 
 
 // setExternalTrafficPolicy changes the traffic policy of a service, which makes
 // kube-vip treat the service as changed and rebuild it.
-func setExternalTrafficPolicy(ctx context.Context, clientset *kubernetes.Clientset, name string,
+func setExternalTrafficPolicy(ctx context.Context, clientset *kubernetes.Clientset, ns, name string,
 	policy v1.ServiceExternalTrafficPolicy) error {
 	patch := fmt.Appendf(nil, `{"spec":{"externalTrafficPolicy":%q}}`, policy)
-	if _, err := clientset.CoreV1().Services(v1.NamespaceDefault).Patch(ctx, name,
+	if _, err := clientset.CoreV1().Services(ns).Patch(ctx, name,
 		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("failed to set externalTrafficPolicy of service %q to %q: %w", name, policy, err)
 	}
@@ -1179,8 +1301,8 @@ func tcpProbe(address string) error {
 }
 
 // followerNode returns a node that runs kube-vip but does not hold the lease.
-func followerNode(ctx context.Context, clientset *kubernetes.Clientset, leaseName string) (string, error) {
-	holder, err := leaseHolder(ctx, clientset, leaseName)
+func followerNode(ctx context.Context, clientset *kubernetes.Clientset, ns, leaseName string) (string, error) {
+	holder, err := leaseHolder(ctx, clientset, ns, leaseName)
 	if err != nil {
 		return "", err
 	}
@@ -1202,7 +1324,7 @@ func followerNode(ctx context.Context, clientset *kubernetes.Clientset, leaseNam
 
 // leaseHolder waits until the lease exists and reports a holder, and returns it.
 // An empty or missing holder is the symptom reported in #1665.
-func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) (string, error) {
+func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, ns, name string) (string, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, time.Second*120)
 	defer cancel()
 
@@ -1210,7 +1332,7 @@ func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name stri
 	defer t.Stop()
 
 	for {
-		l, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+		l, err := clientset.CoordinationV1().Leases(ns).Get(checkCtx, name, metav1.GetOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			return "", fmt.Errorf("failed to get lease %q: %w", name, err)
 		}
@@ -1228,9 +1350,9 @@ func leaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name stri
 
 // clearLeaseHolder blanks the holderIdentity of a lease, reproducing the state
 // reported in #1665.
-func clearLeaseHolder(ctx context.Context, clientset *kubernetes.Clientset, name string) error {
+func clearLeaseHolder(ctx context.Context, clientset *kubernetes.Clientset, ns, name string) error {
 	patch := []byte(`{"spec":{"holderIdentity":null}}`)
-	if _, err := clientset.CoordinationV1().Leases(v1.NamespaceDefault).Patch(ctx, name,
+	if _, err := clientset.CoordinationV1().Leases(ns).Patch(ctx, name,
 		types.MergePatchType, patch, metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to clear holder of lease %q: %w", name, err)
 	}
@@ -1258,22 +1380,22 @@ func setAPIServerReachable(node string, reachable bool) error {
 }
 
 // scaleDeployment sets the replica count and waits for the endpoints to follow.
-func scaleDeployment(ctx context.Context, clientset *kubernetes.Clientset, name string, replicas int32) error {
-	scale, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).GetScale(ctx, name, metav1.GetOptions{})
+func scaleDeployment(ctx context.Context, clientset *kubernetes.Clientset, ns, name string, replicas int32) error {
+	scale, err := clientset.AppsV1().Deployments(ns).GetScale(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get scale of deployment %q: %w", name, err)
 	}
 
 	scale.Spec.Replicas = replicas
-	if _, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).UpdateScale(ctx, name, scale, metav1.UpdateOptions{}); err != nil {
+	if _, err := clientset.AppsV1().Deployments(ns).UpdateScale(ctx, name, scale, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("failed to scale deployment %q to %d: %w", name, replicas, err)
 	}
 
-	return waitForReadyEndpoints(ctx, clientset, name, replicas > 0)
+	return waitForReadyEndpoints(ctx, clientset, ns, name, replicas > 0)
 }
 
 // waitForReadyEndpoints waits until the deployment has ready pods, or none left.
-func waitForReadyEndpoints(ctx context.Context, clientset *kubernetes.Clientset, name string, wantReady bool) error {
+func waitForReadyEndpoints(ctx context.Context, clientset *kubernetes.Clientset, ns, name string, wantReady bool) error {
 	checkCtx, cancel := context.WithTimeout(ctx, time.Second*60)
 	defer cancel()
 
@@ -1281,7 +1403,7 @@ func waitForReadyEndpoints(ctx context.Context, clientset *kubernetes.Clientset,
 	defer t.Stop()
 
 	for {
-		d, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Get(checkCtx, name, metav1.GetOptions{})
+		d, err := clientset.AppsV1().Deployments(ns).Get(checkCtx, name, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to get deployment %q: %w", name, err)
 		}

@@ -182,27 +182,39 @@ func httpTest(address string) error {
 	return err
 }
 
-func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *kubernetes.Clientset) error {
+func leaderFailover(ctx context.Context, ns string, name, leaderNode *string, clientset *kubernetes.Clientset) error {
+	killerCtx, cancelKiller := context.WithCancel(ctx)
+	defer cancelKiller()
 	go func() {
 		slog.Infof("💀 killing leader five times")
 		for i := 0; i < 5; i++ {
-			p, err := clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{})
+			if killerCtx.Err() != nil {
+				return
+			}
+			p, err := clientset.CoreV1().Pods("kube-system").List(killerCtx, metav1.ListOptions{})
 			if err != nil {
+				if killerCtx.Err() != nil {
+					return
+				}
 				slog.Fatal(err)
 			}
 
 			for x := range p.Items {
 				if p.Items[x].Spec.NodeName == *leaderNode {
 					if p.Items[x].Spec.Containers[0].Name == "kube-vip" {
-						err = clientset.CoreV1().Pods("kube-system").Delete(ctx, p.Items[x].Name, metav1.DeleteOptions{})
-						if err != nil {
+						err = clientset.CoreV1().Pods("kube-system").Delete(killerCtx, p.Items[x].Name, metav1.DeleteOptions{})
+						if err != nil && killerCtx.Err() == nil {
 							slog.Fatal(err)
 						}
 						slog.Infof("🔪 leader pod [%s] has been deleted", p.Items[x].Name)
 					}
 				}
 			}
-			time.Sleep(time.Second * 5)
+			select {
+			case <-killerCtx.Done():
+				return
+			case <-time.After(time.Second * 5):
+			}
 		}
 	}()
 
@@ -211,7 +223,7 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(ns).Watch(ctx, metav1.ListOptions{})
 		},
 	})
 	if err != nil {
@@ -249,9 +261,13 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
-						return err
+						// Transient failure during annotation updates; keep watching.
+						slog.Warnf("🔍 service [%s] not yet reachable after update: %v", *name, err)
+						continue
 					}
 					*leaderNode = svc.Annotations[kubevip.VipHost]
+					rw.Stop()
+					return nil
 				}
 			}
 		default:
@@ -261,12 +277,20 @@ func leaderFailover(ctx context.Context, name, leaderNode *string, clientset *ku
 	return nil
 }
 
-func podFailover(ctx context.Context, name, leaderNode *string, clientset *kubernetes.Clientset) error {
+func podFailover(ctx context.Context, ns string, name, leaderNode *string, clientset *kubernetes.Clientset) error {
+	killerCtx, cancelKiller := context.WithCancel(ctx)
+	defer cancelKiller()
 	go func() {
 		slog.Infof("💀 killing active pod five times")
 		for i := 0; i < 5; i++ {
-			p, err := clientset.CoreV1().Pods(v1.NamespaceDefault).List(ctx, metav1.ListOptions{})
+			if killerCtx.Err() != nil {
+				return
+			}
+			p, err := clientset.CoreV1().Pods(ns).List(killerCtx, metav1.ListOptions{})
 			if err != nil {
+				if killerCtx.Err() != nil {
+					return
+				}
 				slog.Fatal(err)
 			}
 			found := false
@@ -274,8 +298,8 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 				if p.Items[x].Spec.NodeName == *leaderNode {
 					if p.Items[x].Spec.Containers[0].Name == "kube-vip-web" {
 						found = true
-						err = clientset.CoreV1().Pods(v1.NamespaceDefault).Delete(ctx, p.Items[x].Name, metav1.DeleteOptions{})
-						if err != nil {
+						err = clientset.CoreV1().Pods(ns).Delete(killerCtx, p.Items[x].Name, metav1.DeleteOptions{})
+						if err != nil && killerCtx.Err() == nil {
 							slog.Fatal(err)
 						}
 						slog.Infof("🔪 active pod [%s] on [%s] has been deleted", p.Items[x].Name, p.Items[x].Spec.NodeName)
@@ -285,7 +309,11 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 			if !found {
 				slog.Warnf("😱 No Pod found on [%s]", *leaderNode)
 			}
-			time.Sleep(time.Second * 5)
+			select {
+			case <-killerCtx.Done():
+				return
+			case <-time.After(time.Second * 5):
+			}
 		}
 	}()
 
@@ -294,7 +322,7 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(ns).Watch(ctx, metav1.ListOptions{})
 		},
 	})
 	if err != nil {
@@ -332,9 +360,13 @@ func podFailover(ctx context.Context, name, leaderNode *string, clientset *kuber
 					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
-						slog.Fatal(err)
+						// Transient failure during annotation updates; keep watching.
+						slog.Warnf("🔍 service [%s] not yet reachable after update: %v", *name, err)
+						continue
 					}
 					*leaderNode = svc.Annotations[kubevip.VipHost]
+					rw.Stop()
+					return nil
 				}
 			}
 		default:

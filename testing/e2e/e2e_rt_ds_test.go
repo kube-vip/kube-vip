@@ -20,9 +20,11 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
 
-var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ordered, func() {
+var _ = Describe("kube-vip RT functionality when deployed as a regular pod", func() {
 	if Mode == ModeRT {
 		var (
+			ctx             context.Context
+			cancel          context.CancelFunc
 			logger          log.Logger
 			imagePath       string
 			k8sImagePath    string
@@ -30,9 +32,8 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 			tempDirPathRoot string
 		)
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeEach(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 
@@ -44,11 +45,11 @@ var _ = Describe("kube-vip RT functionality when deployed as a regular pod", Ord
 			}
 		})
 
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
 			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-rt-ds", testDirPrefix))
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}

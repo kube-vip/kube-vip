@@ -56,11 +56,11 @@ const testJSON = `
   path: "/apiServer/certSANs/-"
   value: `
 
-var clusterCreationMtx sync.Mutex
-
-var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
+var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 	if Mode == ModeARP {
 		var (
+			ctx                             context.Context
+			cancel                          context.CancelFunc
 			logger                          log.Logger
 			imagePath                       string
 			k8sImagePath                    string
@@ -71,9 +71,8 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			tempDirPathRoot                 string
 		)
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeEach(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 
@@ -101,11 +100,11 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
 			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp", testDirPrefix))
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}
@@ -1571,9 +1570,6 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	v129 bool, kubeVIPManifestTemplate *template.Template, logger log.Logger,
 	manifestValues *e2e.KubevipManifestValues, networking *kindconfigv1alpha4.Networking, nodesNum int,
 	addSAN *san, dsNumber int) (string, kubernetes.Interface, *rest.Config) {
-	clusterCreationMtx.Lock()
-	defer clusterCreationMtx.Unlock()
-
 	manifestPath := filepath.Join(tempDirPath, fmt.Sprintf("kube-vip-%s.yaml", clusterNameSuffix))
 
 	manifestFile, err := os.Create(manifestPath)
@@ -1642,7 +1638,10 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 
 	clusterName := fmt.Sprintf("%s-%s", filepath.Base(tempDirPath), clusterNameSuffix)
 
+	// os.Unsetenv is process-wide; guard the brief window where it's observed by Kind.
+	ConfigMtx.Lock()
 	err = os.Unsetenv(kindNetworkEnv)
+	ConfigMtx.Unlock()
 	Expect(err).ToNot(HaveOccurred())
 
 	By(withTimestamp("creating a kind cluster with multiple control plane nodes"))

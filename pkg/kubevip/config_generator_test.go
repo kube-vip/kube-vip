@@ -2,9 +2,37 @@ package kubevip
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
+
+	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
 )
+
+func TestGenerateRoleServiceCIDRAccess(t *testing.T) {
+	clusterRole := GenerateRole(&Config{}, false)
+	if !hasServiceCIDRRule(clusterRole) {
+		t.Fatal("generated ClusterRole is missing ServiceCIDR access")
+	}
+
+	role := GenerateRole(&Config{ServiceNamespace: "kube-vip"}, true)
+	if hasServiceCIDRRule(role) {
+		t.Fatal("generated namespaced Role contains ineffective ServiceCIDR access")
+	}
+}
+
+func hasServiceCIDRRule(role *applyRbacV1.RoleApplyConfiguration) bool {
+	for _, rule := range role.Rules {
+		if slices.Contains(rule.APIGroups, "networking.k8s.io") &&
+			slices.Contains(rule.Resources, "servicecidrs") &&
+			slices.Contains(rule.Verbs, "get") &&
+			slices.Contains(rule.Verbs, "list") &&
+			slices.Contains(rule.Verbs, "watch") {
+			return true
+		}
+	}
+	return false
+}
 
 func TestParseEnvironment(t *testing.T) {
 

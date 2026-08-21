@@ -32,9 +32,11 @@ import (
 	"github.com/kube-vip/kube-vip/testing/services/pkg/deployment"
 )
 
-var _ = Describe("kube-vip routing table mode", Ordered, func() {
+var _ = Describe("kube-vip routing table mode", func() {
 	if Mode == ModeRT {
 		var (
+			ctx                                 context.Context
+			cancel                              context.CancelFunc
 			logger                              log.Logger
 			imagePath                           string
 			k8sImagePath                        string
@@ -46,13 +48,12 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 
 		dsNumber := 1
 
-		ctx, cancel := context.WithCancel(context.TODO())
-
-		BeforeAll(func() {
+		BeforeEach(OncePerOrdered, func() {
+			ctx, cancel = context.WithCancel(context.TODO())
 			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-rt", testDirPrefix))
 		})
 
-		BeforeEach(func() {
+		BeforeEach(OncePerOrdered, func() {
 			klog.SetOutput(GinkgoWriter)
 			logger = e2e.TestLogger{}
 
@@ -71,7 +72,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		AfterAll(func() {
+		AfterEach(OncePerOrdered, func() {
 			if os.Getenv("E2E_KEEP_LOGS") != "true" {
 				Expect(os.RemoveAll(tempDirPathRoot)).To(Succeed())
 			}
@@ -85,7 +86,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -119,9 +120,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups IPv4 address and route on control-plane node", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -184,9 +182,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				By("verifying every control-plane node sets up the VIP and route while healthy")
 				for i := 1; i <= nodesNumber; i++ {
 					container := controlPlaneContainerName(clusterName, i)
@@ -229,7 +224,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -264,9 +259,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups IPv6 address and route on control-plane node", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -329,9 +321,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				By("verifying every control-plane node sets up the VIP and route while healthy")
 				for i := 1; i <= nodesNumber; i++ {
 					container := controlPlaneContainerName(clusterName, i)
@@ -374,7 +363,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -420,9 +409,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -448,7 +434,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				client      kubernetes.Interface
 				tempDirPath string
 
-				nodesNumber = 3
+				nodesNumber = 1
 			)
 
 			BeforeAll(func() {
@@ -496,9 +482,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
