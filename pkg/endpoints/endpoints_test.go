@@ -58,9 +58,6 @@ func (f *fakeWorker) clear(_ *servicecontext.Context, _ *string, _ *v1.Service) 
 
 func (f *fakeWorker) getEndpoints(_ *v1.Service, _ string) ([]string, error) { return f.endpoints, nil }
 func (f *fakeWorker) removeEgress(_ *v1.Service, _ *string)                  {}
-func (f *fakeWorker) delete(_ context.Context, _ *v1.Service, _ string) error {
-	return nil
-}
 func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }

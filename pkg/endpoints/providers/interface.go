@@ -18,6 +18,7 @@ type Provider interface {
 	GetLabel() string
 	UpdateServiceAnnotation(context.Context, string, string, *v1.Service, *kubernetes.Clientset) error
 	LoadObject(runtime.Object, context.CancelFunc) error
+	DeleteObject(runtime.Object) error
 	// ResolvePort resolves a service port to the actual target port.
 	// For named ports, it looks up the port number from the endpoint.
 	// For numeric ports, it returns the port as-is.

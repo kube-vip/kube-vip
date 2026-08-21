@@ -2,7 +2,6 @@ package endpoints
 
 import (
 	"context"
-	"fmt"
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -74,32 +73,6 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 
 func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {
 	return b.getAllEndpoints(service, id)
-}
-
-func (b *BGP) delete(ctx context.Context, service *v1.Service, id string) error {
-	// When no-leader-elecition mode
-	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
-		// find all existing local endpoints
-		endpoints, err := b.getEndpoints(service, id)
-		if err != nil {
-			return fmt.Errorf("[%s] error getting endpoints: %w", b.provider.GetLabel(), err)
-		}
-
-		// If there were local endpoints deleted
-		if len(endpoints) > 0 {
-			b.deleteAction(ctx, service)
-		}
-	}
-
-	return nil
-}
-
-func (b *BGP) deleteAction(ctx context.Context, service *v1.Service) {
-	b.clearBGPHosts(ctx, service)
-}
-
-func (b *BGP) clearBGPHosts(ctx context.Context, service *v1.Service) {
-	ClearBGPHosts(ctx, service, b.instances, b.bgpServer)
 }
 
 func (b *BGP) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {

@@ -102,12 +102,15 @@ func (w *WireGuard) ConfigureServices() {
 }
 
 func (w *WireGuard) StartServices(ctx context.Context) error {
+	// WireGuard has no multipath mechanism, so every service must be advertised by
+	// exactly one node: leader election (per-service or global) is required.
 	if w.config.EnableServicesElection {
 		log.Info("beginning watching services, leaderelection will happen for every service")
-		err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx, false)
-		if err != nil {
+		if err := w.svcProcessor.StartServicesWatchForLeaderElection(ctx, false); err != nil {
 			return err
 		}
+	} else {
+		w.GlobalLeader(ctx, w.config.ServicesLeaseName)
 	}
 	return nil
 }
@@ -147,12 +150,6 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	w.endpointWatcherWg.Go(func() {
 		w.watchKubernetesEndpoints(w.endpointWatcherCtx, tunnelConfig)
 	})
-
-	if w.config.EnableServices && !w.config.EnableServicesElection {
-		if err := w.svcProcessor.ServicesWatcher(ctx, services.NewCallback(w.svcProcessor.SyncServices, false), false); err != nil {
-			log.Error("failed to start services watcher", "err", err)
-		}
-	}
 }
 
 // watchKubernetesEndpoints watches the kubernetes service EndpointSlices for changes
@@ -184,9 +181,20 @@ func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *
 		}
 
 		switch event.Type {
-		case watch.Added, watch.Modified, watch.Deleted:
+		case watch.Added, watch.Modified:
 			if err := provider.LoadObject(event.Object, func() {}); err != nil {
 				log.Error("failed to load endpoint object", "err", err)
+				continue
+			}
+			endpoints, _ := provider.GetAllEndpoints()
+			log.Info("kubernetes endpoints changed, updating DNAT rules", "eventType", event.Type, "endpoints", endpoints)
+			if err := w.updateControlPlaneDNAT(tunnelConfig, endpoints); err != nil {
+				log.Error("failed to update control plane DNAT rules", "err", err)
+			}
+		case watch.Deleted:
+			// Remove the deleted slice so it stops counting toward this endpoint set.
+			if err := provider.DeleteObject(event.Object); err != nil {
+				log.Error("failed to delete endpoint object", "err", err)
 				continue
 			}
 			endpoints, _ := provider.GetAllEndpoints()
