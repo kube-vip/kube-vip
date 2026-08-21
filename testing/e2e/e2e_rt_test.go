@@ -118,10 +118,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				})
 			})
 
-			It("setups IPv4 address and route on control-plane node", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
+				It("setups IPv4 address and route on control-plane node", func() {
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -184,9 +181,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				By("verifying every control-plane node sets up the VIP and route while healthy")
 				for i := 1; i <= nodesNumber; i++ {
 					container := controlPlaneContainerName(clusterName, i)
@@ -263,10 +257,7 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 				})
 			})
 
-			It("setups IPv6 address and route on control-plane node", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
+				It("setups IPv6 address and route on control-plane node", func() {
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -329,9 +320,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("withdraws and re-adds the VIP and route when the apiserver health check fails", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				By("verifying every control-plane node sets up the VIP and route while healthy")
 				for i := 1; i <= nodesNumber; i++ {
 					container := controlPlaneContainerName(clusterName, i)
@@ -420,9 +408,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -496,9 +481,6 @@ var _ = Describe("kube-vip routing table mode", Ordered, func() {
 			})
 
 			It("setups DualStack addresses and routes on control-plane nodes", func() {
-				By(withTimestamp("sitting for a few seconds to hopefully allow kube-vip to start"))
-				time.Sleep(30 * time.Second)
-
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {

@@ -56,8 +56,6 @@ const testJSON = `
   path: "/apiServer/certSANs/-"
   value: `
 
-var clusterCreationMtx sync.Mutex
-
 var _ = Describe("kube-vip ARP/NDP broadcast neighbor", Ordered, func() {
 	if Mode == ModeARP {
 		var (
@@ -1571,9 +1569,6 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	v129 bool, kubeVIPManifestTemplate *template.Template, logger log.Logger,
 	manifestValues *e2e.KubevipManifestValues, networking *kindconfigv1alpha4.Networking, nodesNum int,
 	addSAN *san, dsNumber int) (string, kubernetes.Interface, *rest.Config) {
-	clusterCreationMtx.Lock()
-	defer clusterCreationMtx.Unlock()
-
 	manifestPath := filepath.Join(tempDirPath, fmt.Sprintf("kube-vip-%s.yaml", clusterNameSuffix))
 
 	manifestFile, err := os.Create(manifestPath)
@@ -1642,7 +1637,10 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 
 	clusterName := fmt.Sprintf("%s-%s", filepath.Base(tempDirPath), clusterNameSuffix)
 
+	// os.Unsetenv is process-wide; guard the brief window where it's observed by Kind.
+	ConfigMtx.Lock()
 	err = os.Unsetenv(kindNetworkEnv)
+	ConfigMtx.Unlock()
 	Expect(err).ToNot(HaveOccurred())
 
 	By(withTimestamp("creating a kind cluster with multiple control plane nodes"))

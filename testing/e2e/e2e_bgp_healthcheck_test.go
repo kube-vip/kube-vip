@@ -23,10 +23,7 @@ import (
 )
 
 var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
-	if Mode != ModeBGP {
-		return
-	}
-
+	if Mode == ModeBGP {
 	var (
 		server      *bgp.Server
 		kindCluster *e2e.Cluster
@@ -138,6 +135,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 			assertVIPReachable(ctx, server, cpVIP, httpClient)
 		})
 	})
+	} // Mode == ModeBGP
 })
 
 // assertVIPReachable resolves the VIP through GoBGP to get the current
