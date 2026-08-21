@@ -218,8 +218,7 @@ func run() int {
 
 		if t.Egress {
 			ns := "kube-vip-egress"
-			// egress SNAT setup requires global watch: AutoDiscoverCIDRs needs kube-system pod access.
-			if err := deployment.EnsureNamespace(ctx, clientset, ns, t.ImagePath, true); err != nil {
+			if err := deployment.EnsureNamespace(ctx, clientset, ns, t.ImagePath, false); err != nil {
 				slog.Fatalf("failed to create namespace %q: %v", ns, err)
 			}
 			cfg := t.WithNamespace(ns)
@@ -238,8 +237,7 @@ func run() int {
 		}
 		if t.EgressIPv6 {
 			ns := "kube-vip-egressv6"
-			// egress SNAT setup requires global watch: AutoDiscoverCIDRs needs kube-system pod access.
-			if err := deployment.EnsureNamespace(ctx, clientset, ns, t.ImagePath, true); err != nil {
+			if err := deployment.EnsureNamespace(ctx, clientset, ns, t.ImagePath, false); err != nil {
 				slog.Fatalf("failed to create namespace %q: %v", ns, err)
 			}
 			cfg := t.WithNamespace(ns)

@@ -209,7 +209,7 @@ func (config *TestConfig) CreateKind() error {
 			return err
 		}
 		// Replace cluster-wide rbac.yaml with two ClusterRoles:
-		// - kube-vip-nodes: cluster-scoped, always required
+		// - kube-vip-nodes: cluster-scoped node access and ServiceCIDR discovery
 		// - kube-vip-services: used when GlobalWatch=true (per-namespace Role is used otherwise)
 		const clusterRolesYAML = `
 apiVersion: rbac.authorization.k8s.io/v1
@@ -220,6 +220,7 @@ rules:
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["list", "get", "watch", "update", "patch"]
+- {apiGroups: ["networking.k8s.io"], resources: ["servicecidrs"], verbs: ["list", "get", "watch"]}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

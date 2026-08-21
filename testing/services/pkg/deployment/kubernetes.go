@@ -78,6 +78,7 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 		{Name: "vip_arp", Value: "true"},
 		{Name: "vip_subnet", Value: "auto,auto"},
 		{Name: "svc_enable", Value: "true"},
+		{Name: "egress_podcidr", Value: "10.244.0.0/16,fd00:10:244::/56"},
 		{Name: "enable_endpoints", Value: "false"},
 		{Name: "svc_election", Value: "true"},
 		{Name: "EGRESS_CLEAN", Value: "true"},
