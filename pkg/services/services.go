@@ -550,6 +550,16 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 		return fmt.Errorf("service instance not found for %s/%s", svc.Namespace, svc.Name)
 	}
 
+	oldIPv4 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+	newIPv4 := svc.Annotations[kubevip.ActiveEndpoint]
+	oldIPv6 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+	newIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
+
+	// Skip update if endpoints haven't changed, without touching the API.
+	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 {
+		return nil
+	}
+
 	// The svc snapshot may have been captured before the LB IP was assigned.
 	// Refresh from the API so FetchServiceAddresses sees the current ingress.
 	if current, err := p.clientSet.CoreV1().Services(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{}); err == nil {
@@ -561,16 +571,6 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 			current.Annotations[k] = v
 		}
 		svc = current
-	}
-
-	oldIPv4 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
-	newIPv4 := svc.Annotations[kubevip.ActiveEndpoint]
-	oldIPv6 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
-	newIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
-
-	// Skip update if endpoints haven't changed
-	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 {
-		return nil
 	}
 
 	log.Info("[service] updating egress configuration",
