@@ -125,6 +125,13 @@ func GenerateRole(c *Config, role bool) *applyRbacV1.RoleApplyConfiguration {
 			},
 		},
 	}
+	if !role {
+		newManifest.Rules = append(newManifest.Rules, applyRbacV1.PolicyRuleApplyConfiguration{
+			APIGroups: []string{"networking.k8s.io"},
+			Resources: []string{"servicecidrs"},
+			Verbs:     []string{"list", "get", "watch"},
+		})
+	}
 	return newManifest
 }
 
