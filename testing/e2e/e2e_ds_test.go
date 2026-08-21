@@ -988,9 +988,6 @@ func removeDS(ctx context.Context, client kubernetes.Interface, namespace, name 
 func prepareClusterForDS(tempDirPath, clusterNameSuffix, kvImagePath, k8sImagePath string, logger log.Logger,
 	networking *kindconfigv1alpha4.Networking, nodesNum int,
 	addSAN *san) (string, kubernetes.Interface, *rest.Config) {
-	clusterCreationMtx.Lock()
-	defer clusterCreationMtx.Unlock()
-
 	clusterConfig := kindconfigv1alpha4.Cluster{
 		Networking: *networking,
 		Nodes:      []kindconfigv1alpha4.Node{},

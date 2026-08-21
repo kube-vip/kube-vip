@@ -1,10 +1,16 @@
 name: For each PR
 on:
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
     name: E2E tests
+    timeout-minutes: 120
     strategy:
       matrix:
         mode: ["arp", "rt", "bgp"]
@@ -12,7 +18,7 @@ jobs:
     steps:
       - name: Get current date
         id: date
-        run: echo "::set-output name=date::$(date +'%Y-%m-%d-%H-%M')"
+        run: echo "date=$(date +'%Y-%m-%d-%H-%M')" >> "$GITHUB_OUTPUT"
       - name: Ensure fs wont cause issues
         run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Checkout code
@@ -25,21 +31,22 @@ jobs:
         run: make dockerx86Local
       - name: Run Manifest generation tests
         run: make manifest-test
+        if: matrix.mode == 'arp'
       - name: Run ARP mode tests
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-arp
-        if: matrix.mode== 'arp'
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-arp.json" make e2e-tests-arp
+        if: matrix.mode == 'arp'
       - name: Run RT mode tests
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-rt
-        if: matrix.mode== 'rt'
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-rt.json" make e2e-tests-rt
+        if: matrix.mode == 'rt'
       - name: Get GoBGP binaries
         run: make get-gobgp
-        if: matrix.mode== 'bgp'
+        if: matrix.mode == 'bgp'
       - name: Run BGP mode tests
-        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-bgp
-        if: matrix.mode== 'bgp'
+        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-bgp.json" make e2e-tests-bgp
+        if: matrix.mode == 'bgp'
       - name: Change log directory permissions
         run: sudo chmod -R 755 /tmp/kube-vip-test*
-        if: matrix.mode== 'bgp' && always()
+        if: matrix.mode == 'bgp' && always()
       - name: Save logs
         uses: actions/upload-artifact@v7
         with:
@@ -49,10 +56,11 @@ jobs:
   service-e2e-tests:
     runs-on: ubuntu-latest
     name: E2E service tests
+    timeout-minutes: 60
     steps:
       - name: Get current date
         id: date
-        run: echo "::set-output name=date::$(date +'%Y-%m-%d-%H-%M')"
+        run: echo "date=$(date +'%Y-%m-%d-%H-%M')" >> "$GITHUB_OUTPUT"
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Go

@@ -1,11 +1,18 @@
 name: For each commit
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validation:
     runs-on: ubuntu-latest
     name: Checks and linters
+    timeout-minutes: 30
     steps:
       - name: Init
         run: sudo apt-get update && sudo apt-get install -y build-essential &&  sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
@@ -25,6 +32,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     name: Unit tests
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -37,6 +45,7 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -49,10 +58,11 @@ jobs:
   image-vul-check:
     runs-on: ubuntu-latest
     name: Image vulnerability scan
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      - name: Build image with iptables
+      - name: Build image
         run: make dockerx86Action
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master

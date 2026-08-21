@@ -18,6 +18,10 @@ DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
 GO_VERSION := 1.25.6
 K8S_VERSION ?= v1.35.0
+GINKGO_ARGS ?=
+GINKGO_PROCS ?=
+GINKGO_PARALLEL := $(if $(GINKGO_PROCS),--procs=$(GINKGO_PROCS),-p)
+BUILDX_CACHE_FLAGS ?=
 
 .PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
 
@@ -77,17 +81,17 @@ docker:
 # This will build a local docker image (x86 only), use make dockerLocal for all architectures
 dockerx86Local:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@docker buildx build --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerx86Action:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action .
+	@docker buildx build --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerx86ActionIPTables:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --load -t $(REPOSITORY)/$(TARGET):action .
+	@docker buildx build --platform linux/amd64 -f ./Dockerfile_iptables --load -t $(REPOSITORY)/$(TARGET):action $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerLocal:
@@ -138,13 +142,13 @@ integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
 
 e2e-tests-arp: get-whoami
-	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests-rt: get-whoami
-	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests-bgp: get-whoami get-gobgp
-	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
 

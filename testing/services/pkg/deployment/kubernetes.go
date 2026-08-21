@@ -8,6 +8,8 @@ import (
 	"github.com/gookit/slog"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	appsv1 "k8s.io/api/apps/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
@@ -20,6 +22,7 @@ import (
 // service defines the settings for a new service
 type Service struct {
 	name           string
+	namespace      string
 	egress         bool // enable egress
 	egressInternal bool // enable Internal egress
 	egressIPv6     bool // egress should be IPv6
@@ -31,6 +34,13 @@ type Service struct {
 	timeout        int    // how long to wait for the service to be created
 }
 
+func (s *Service) ns() string {
+	if s.namespace != "" {
+		return s.namespace
+	}
+	return v1.NamespaceDefault
+}
+
 type Deployment struct {
 	replicas     int32
 	server       bool
@@ -38,106 +48,130 @@ type Deployment struct {
 	address      string
 	nodeAffinity string
 	name         string
+	namespace    string
 }
 
-func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clientset, imagepath string) error {
-	ds := appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kube-vip-ds",
-			Namespace: "kube-system",
-			Labels: map[string]string{
-				"app.kubernetes.io/name": "kube-vip-ds",
-				"app":                    "kube-vip",
-			},
-		},
+func (d *Deployment) ns() string {
+	if d.namespace != "" {
+		return d.namespace
+	}
+	return v1.NamespaceDefault
+}
+
+// buildKVDsDaemonSet returns the kube-vip DaemonSet spec for ns.
+// metricsAddr sets prometheusHTTPServer; pass empty string to disable prometheus
+// on parallel-test nodes where multiple DaemonSets share the same host network.
+func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) appsv1.DaemonSet {
+	labels := map[string]string{"app.kubernetes.io/name": "kube-vip-ds", "app": "kube-vip"}
+	env := []v1.EnvVar{
+		{Name: "vip_arp", Value: "true"},
+		{Name: "vip_subnet", Value: "auto,auto"},
+		{Name: "svc_enable", Value: "true"},
+		{Name: "enable_endpoints", Value: "false"},
+		{Name: "svc_election", Value: "true"},
+		{Name: "EGRESS_CLEAN", Value: "true"},
+		{Name: "vip_loglevel", Value: "-4"},
+		{Name: "egress_withnftables", Value: "true"},
+		// suppress the default :2112 binding when empty
+		{Name: "prometheusHTTPServer", Value: metricsAddr},
+		{Name: "vip_nodename", ValueFrom: &v1.EnvVarSource{
+			FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
+		}},
+	}
+	if !globalWatch {
+		env = append(env, v1.EnvVar{Name: "svc_namespace", Value: ns})
+	}
+	var gracePeriod int64 = 10
+	return appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-ds", Namespace: ns, Labels: labels},
 		Spec: appsv1.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app.kubernetes.io/name": "kube-vip-ds",
-					"app":                    "kube-vip",
-				},
-			},
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "kube-vip-ds"}},
 			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app.kubernetes.io/name": "kube-vip-ds",
-						"app":                    "kube-vip",
-					},
-				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: v1.PodSpec{
-					ServiceAccountName: "kube-vip",
-					HostNetwork:        true,
-					Containers: []v1.Container{
-						{
-							Args: []string{
-								"manager",
-							},
-							Env: []v1.EnvVar{
-								{
-									Name:  "vip_arp",
-									Value: "true",
-								},
-								{
-									Name:  "vip_subnet",
-									Value: "auto,auto",
-								},
-								{
-									Name:  "svc_enable",
-									Value: "true",
-								},
-								{
-									Name:  "enable_endpoints",
-									Value: "false",
-								},
-								{
-									Name:  "svc_election",
-									Value: "true",
-								},
-								{
-									Name:  "EGRESS_CLEAN",
-									Value: "true",
-								},
-								{
-									Name:  "vip_loglevel",
-									Value: "-4",
-								},
-								{
-									Name:  "egress_withnftables",
-									Value: "true",
-								},
-								{
-									Name: "vip_nodename",
-									ValueFrom: &v1.EnvVarSource{
-										FieldRef: &v1.ObjectFieldSelector{
-											FieldPath: "spec.nodeName",
-										},
-									},
-								},
-							},
-							Image: imagepath,
-							Name:  "kube-vip",
-							SecurityContext: &v1.SecurityContext{
-								Capabilities: &v1.Capabilities{
-									Add: []v1.Capability{
-										"NET_ADMIN",
-										"NET_RAW",
-									},
-								},
-							},
+					TerminationGracePeriodSeconds: &gracePeriod,
+					ServiceAccountName:            "kube-vip",
+					HostNetwork:                   true,
+					Containers: []v1.Container{{
+						Name:  "kube-vip",
+						Image: imageURL,
+						Args:  []string{"manager"},
+						Env:   env,
+						SecurityContext: &v1.SecurityContext{
+							Capabilities: &v1.Capabilities{Add: []v1.Capability{"NET_ADMIN", "NET_RAW"}},
 						},
-					},
+						ImagePullPolicy: v1.PullIfNotPresent,
+					}},
 				},
 			},
 		},
 	}
+}
 
-	_, err := clientset.AppsV1().DaemonSets("kube-system").Create(ctx, &ds, metav1.CreateOptions{})
-	if err != nil {
-		return err
+// CreateNamespacedKVDs creates a kube-vip DaemonSet and all RBAC resources
+// inside ns. The DaemonSet is scoped to watch only ns so no ClusterRole for
+// services or leases is needed; only nodes remain cluster-scoped.
+func (d *Deployment) CreateNamespacedKVDs(ctx context.Context, clientset *kubernetes.Clientset, imageURL, ns string, globalWatch bool, metricsAddr string) error {
+	// ServiceAccount
+	sa := &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "kube-vip", Namespace: ns}}
+	if _, err := clientset.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("serviceaccount: %w", err)
 	}
 
-	return nil
+	// Role or ClusterRole for service/endpoint/lease access
+	if globalWatch {
+		// bind the shared kube-vip-services ClusterRole so this SA can watch across all namespaces
+		serviceCRB := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-services-" + ns},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "kube-vip-services"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "kube-vip", Namespace: ns}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, serviceCRB, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("clusterrolebinding (services): %w", err)
+		}
+	} else {
+		// per-namespace Role limits kube-vip to this namespace only
+		role := &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{Name: "kube-vip", Namespace: ns},
+			Rules: []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"services", "services/status", "endpoints"}, Verbs: []string{"list", "get", "watch", "update"}},
+				{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: []string{"list", "get", "watch", "update", "create"}},
+				{APIGroups: []string{"discovery.k8s.io"}, Resources: []string{"endpointslices"}, Verbs: []string{"list", "get", "watch"}},
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"list"}},
+				{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"create"}},
+			},
+		}
+		if _, err := clientset.RbacV1().Roles(ns).Create(ctx, role, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("role: %w", err)
+		}
 
+		// RoleBinding
+		rb := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "kube-vip", Namespace: ns},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: "kube-vip"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "kube-vip", Namespace: ns}},
+		}
+		if _, err := clientset.RbacV1().RoleBindings(ns).Create(ctx, rb, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("rolebinding: %w", err)
+		}
+	}
+
+	// ClusterRoleBinding giving this namespace's SA access to nodes (cluster-scoped)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-nodes-" + ns},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "kube-vip-nodes"},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "kube-vip", Namespace: ns}},
+	}
+	if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("clusterrolebinding: %w", err)
+	}
+
+	// DaemonSet scoped to this namespace
+	ds := buildKVDsDaemonSet(ns, imageURL, metricsAddr, globalWatch)
+	if _, err := clientset.AppsV1().DaemonSets(ns).Create(ctx, &ds, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("daemonset: %w", err)
+	}
+	return nil
 }
 func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
 	replicas := d.replicas
@@ -206,7 +240,7 @@ func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes
 		deployment.Spec.Template.Spec.NodeName = d.nodeAffinity
 	}
 
-	result, err := clientset.AppsV1().Deployments(v1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
+	result, err := clientset.AppsV1().Deployments(d.ns()).Create(ctx, deployment, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -219,7 +253,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.name,
-			Namespace: "default",
+			Namespace: s.ns(),
 			Labels: map[string]string{
 				"app": "kube-vip",
 			},
@@ -296,14 +330,14 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 	}
 
 	slog.Infof("🌍 creating service [%s]", svc.Name)
-	_, err = clientset.CoreV1().Services(v1.NamespaceDefault).Create(ctx, svc, metav1.CreateOptions{})
+	_, err = clientset.CoreV1().Services(s.ns()).Create(ctx, svc, metav1.CreateOptions{})
 	if err != nil {
 		slog.Fatal(err)
 	}
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
 		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return clientset.CoreV1().Services(v1.NamespaceDefault).Watch(ctx, metav1.ListOptions{})
+			return clientset.CoreV1().Services(s.ns()).Watch(ctx, metav1.ListOptions{})
 		},
 	})
 	if err != nil {
