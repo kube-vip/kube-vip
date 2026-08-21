@@ -66,8 +66,11 @@ func (d *Deployment) ns() string {
 }
 
 // buildKVDsDaemonSet returns the kube-vip DaemonSet spec for ns.
-// metricsAddr sets prometheusHTTPServer; pass empty string to disable prometheus
-// on parallel-test nodes where multiple DaemonSets share the same host network.
+// metricsAddr is passed as the --prometheusHTTPServer container arg; pass empty
+// string to disable prometheus on parallel-test nodes where multiple DaemonSets
+// share the same host network. It has to be an arg: the env var equivalent
+// (prometheus_server) is ignored by ParseEnvironment when empty, so an env var
+// cannot override the :2112 flag default.
 func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) appsv1.DaemonSet {
 	labels := map[string]string{
 		"app":                        "kube-vip",
@@ -87,8 +90,6 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 		// instance_name scopes the nftables egress table to this namespace so
 		// parallel DaemonSets on the same host network don't overwrite each other.
 		{Name: "instance_name", Value: ns},
-		// suppress the default :2112 binding when empty
-		{Name: "prometheusHTTPServer", Value: metricsAddr},
 		{Name: "vip_nodename", ValueFrom: &v1.EnvVarSource{
 			FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
 		}},
@@ -113,7 +114,7 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 					Containers: []v1.Container{{
 						Name:  "kube-vip",
 						Image: imageURL,
-						Args:  []string{"manager"},
+						Args:  []string{"manager", "--prometheusHTTPServer=" + metricsAddr},
 						Env:   env,
 						SecurityContext: &v1.SecurityContext{
 							Capabilities: &v1.Capabilities{Add: []v1.Capability{"NET_ADMIN", "NET_RAW"}},

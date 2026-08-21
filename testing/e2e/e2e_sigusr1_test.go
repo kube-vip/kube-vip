@@ -48,7 +48,7 @@ var _ = Describe("SIGUSR1 Signal Handler", func() {
 				"--address", "192.168.1.100",
 				"--interface", "lo",
 				"--port", "6443",
-				"--bgp", 
+				"--bgp",
 			)
 
 			var err error

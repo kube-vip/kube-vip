@@ -42,16 +42,16 @@ jobs:
         run: make manifest-test
         if: matrix.mode == 'arp'
       - name: Run ARP mode tests
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-arp.json" make e2e-tests-arp
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--output-dir=/tmp --json-report=kube-vip-test-report-arp.json" make e2e-tests-arp
         if: matrix.mode == 'arp'
       - name: Run RT mode tests
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-rt.json" make e2e-tests-rt
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--output-dir=/tmp --json-report=kube-vip-test-report-rt.json" make e2e-tests-rt
         if: matrix.mode == 'rt'
       - name: Get GoBGP binaries
         run: make get-gobgp
         if: matrix.mode == 'bgp'
       - name: Run BGP mode tests
-        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-bgp.json" make e2e-tests-bgp
+        run: sudo -E PATH=$PATH DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--output-dir=/tmp --json-report=kube-vip-test-report-bgp.json" make e2e-tests-bgp
         if: matrix.mode == 'bgp'
       - name: Change log directory permissions
         run: sudo chmod -R 755 /tmp/kube-vip-test*

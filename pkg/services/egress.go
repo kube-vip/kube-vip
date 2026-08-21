@@ -132,6 +132,22 @@ func getSameFamilyCidr(sourceCidrs, ip string) string { //Todo: not sure how thi
 	return cidrs[0]
 }
 
+// getSameFamilyCidrs returns every CIDR in the comma-separated list that has the
+// same IP family as ip.
+func getSameFamilyCidrs(sourceCidrs, ip string) []string {
+	if sourceCidrs == "" {
+		return nil
+	}
+	isV6 := utils.IsIPv6(ip)
+	var matching []string
+	for _, cidr := range strings.Split(sourceCidrs, ",") {
+		if (isV6 && utils.IsIPv6CIDR(cidr)) || (!isV6 && utils.IsIPv4CIDR(cidr)) {
+			matching = append(matching, cidr)
+		}
+	}
+	return matching
+}
+
 func checkCIDR(ip, cidr string) (string, error) {
 	_, ipnetA, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -189,12 +205,12 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		log.Warn("autodiscover CIDR", "err", discoverErr)
 	}
 
-	if p.config.EgressPodCidr != "" {
-		podCidr = getSameFamilyCidr(p.config.EgressPodCidr, podIP)
-	} else {
-		if discoverErr == nil {
-			podCidr = getSameFamilyCidr(autoPodCIDR, podIP)
-		}
+	podCidrSource := p.config.EgressPodCidr
+	if podCidrSource == "" && discoverErr == nil {
+		podCidrSource = autoPodCIDR
+	}
+	if podCidrSource != "" {
+		podCidr = getSameFamilyCidr(podCidrSource, podIP)
 	}
 
 	if podCidr == "" {
@@ -204,6 +220,14 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		}
 		//
 		podCidr = defaultPodCIDR
+	}
+
+	// Pod-to-pod traffic to any pod CIDR must not be SNAT'd. Node auto-discovery
+	// yields one CIDR per node, so collect every same-family CIDR instead of only
+	// the one containing the local pod IP.
+	podCidrs := getSameFamilyCidrs(podCidrSource, podIP)
+	if len(podCidrs) == 0 {
+		podCidrs = []string{podCidr}
 	}
 
 	if p.config.EgressServiceCidr != "" {
@@ -245,10 +269,8 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		var ignoreCIDRs []string
 		// Create an array of CIDRs that we wont SNAT to.
 		if noInternalTraffic == "" || strings.Clone(noInternalTraffic) == "false" || p.config.EnableInternalSNAT {
-			ignoreCIDRs = append(ignoreCIDRs, []string{
-				podCidr,
-				serviceCidr,
-			}...)
+			ignoreCIDRs = append(ignoreCIDRs, podCidrs...)
+			ignoreCIDRs = append(ignoreCIDRs, serviceCidr)
 		}
 
 		// Add any specifically denied networks
@@ -302,9 +324,11 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 			return fmt.Errorf("error creating mangle chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
-	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, podCidr)
-	if err != nil {
-		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+	for _, cidr := range podCidrs {
+		err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, cidr)
+		if err != nil {
+			return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		}
 	}
 
 	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCidr)
@@ -395,15 +419,24 @@ func (p *Processor) prepareEgressNftablesTable(serviceUID string, ipv6 bool) err
 func (p *Processor) AutoDiscoverCIDRs(ctx context.Context) (serviceCIDR, podCIDR string, err error) {
 	log.Debug("Trying to automatically discover Service and Pod CIDRs")
 	serviceCIDR, podCIDR = p.discoverCIDRsFromAPI(ctx)
+	if serviceCIDR != "" && podCIDR != "" {
+		return serviceCIDR, podCIDR, nil
+	}
+
+	// Fall back to the kube-controller-manager flags; e.g. CNIs doing their own
+	// IPAM don't allocate Node PodCIDRs and clusters may lack the ServiceCIDR API.
+	legacyServiceCIDR, legacyPodCIDR, legacyErr := p.discoverCIDRsFromControllerManager(ctx)
 	if serviceCIDR == "" {
-		legacyServiceCIDR, legacyErr := p.discoverServiceCIDRFromControllerManager(ctx)
-		if legacyErr != nil {
-			return serviceCIDR, podCIDR, legacyErr
-		}
 		serviceCIDR = legacyServiceCIDR
 	}
 	if podCIDR == "" {
-		return serviceCIDR, podCIDR, fmt.Errorf("unable to determine CNI Pod CIDRs from Node objects; configure egress_podcidr explicitly")
+		podCIDR = legacyPodCIDR
+	}
+	if serviceCIDR == "" || podCIDR == "" {
+		if legacyErr != nil {
+			return serviceCIDR, podCIDR, legacyErr
+		}
+		return serviceCIDR, podCIDR, fmt.Errorf("unable to fully determine cluster CIDR configurations")
 	}
 
 	return serviceCIDR, podCIDR, nil
@@ -427,25 +460,28 @@ func (p *Processor) discoverCIDRsFromAPI(ctx context.Context) (serviceCIDR, podC
 	return serviceCIDR, podCIDR
 }
 
-func (p *Processor) discoverServiceCIDRFromControllerManager(ctx context.Context) (string, error) {
+func (p *Processor) discoverCIDRsFromControllerManager(ctx context.Context) (serviceCIDR, podCIDR string, err error) {
 	options := metav1.ListOptions{
 		LabelSelector: "component=kube-controller-manager",
 	}
 	podList, err := p.clientSet.CoreV1().Pods("kube-system").List(ctx, options)
 	if err != nil {
-		return "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
+		return "", "", fmt.Errorf("[Egress] Unable to get kube-controller-manager pod: %w", err)
 	}
 	if len(podList.Items) < 1 {
-		return "", fmt.Errorf("[Egress] Unable to auto-discover the Service CIDRs: kube-controller-manager not found")
+		return "", "", fmt.Errorf("[Egress] Unable to auto-discover the pod/service CIDRs: kube-controller-manager not found")
 	}
 
 	pod := podList.Items[0]
 	for _, flag := range pod.Spec.Containers[0].Command {
+		if strings.Contains(flag, "--cluster-cidr=") {
+			podCIDR = strings.ReplaceAll(flag, "--cluster-cidr=", "")
+		}
 		if strings.Contains(flag, "--service-cluster-ip-range=") {
-			return strings.ReplaceAll(flag, "--service-cluster-ip-range=", ""), nil
+			serviceCIDR = strings.ReplaceAll(flag, "--service-cluster-ip-range=", "")
 		}
 	}
-	return "", fmt.Errorf("unable to determine Service CIDR configuration")
+	return serviceCIDR, podCIDR, nil
 }
 
 func serviceCIDRsFromItems(items []networkingv1.ServiceCIDR) string {

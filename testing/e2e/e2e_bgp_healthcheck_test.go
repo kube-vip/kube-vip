@@ -24,117 +24,117 @@ import (
 
 var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 	if Mode == ModeBGP {
-	var (
-		server      *bgp.Server
-		kindCluster *e2e.Cluster
-		cpVIP       string
-		peers       []*e2e.BGPPeerValues
-		tempDirRoot string
-		httpClient  *http.Client
-	)
+		var (
+			server      *bgp.Server
+			kindCluster *e2e.Cluster
+			cpVIP       string
+			peers       []*e2e.BGPPeerValues
+			tempDirRoot string
+			httpClient  *http.Client
+		)
 
-	BeforeAll(func(ctx context.Context) {
-		klog.SetOutput(GinkgoWriter)
+		BeforeAll(func(ctx context.Context) {
+			klog.SetOutput(GinkgoWriter)
 
-		server = sharedBGPServer
-		Expect(server).ToNot(BeNil(), "SharedBGPServer not initialized")
+			server = sharedBGPServer
+			Expect(server).ToNot(BeNil(), "SharedBGPServer not initialized")
 
-		tempDirRoot = MustMkdirTemp("", fmt.Sprintf("%s-bgp-hc", testDirPrefix))
+			tempDirRoot = MustMkdirTemp("", fmt.Sprintf("%s-bgp-hc", testDirPrefix))
 
-		cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
-		kvPeers := []*e2e.BGPPeerValues{
-			{IP: server.LocalIPv4, AS: bgp.GoBGPAS, IPFamily: utils.IPv4Family},
-		}
+			cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
+			kvPeers := []*e2e.BGPPeerValues{
+				{IP: server.LocalIPv4, AS: bgp.GoBGPAS, IPFamily: utils.IPv4Family},
+			}
 
-		kindCluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{
-			Name:       "bgp-hc",
-			Nodes:      2,
-			Networking: kindconfigv1alpha4.Networking{IPFamily: kindconfigv1alpha4.IPv4Family},
-			Logger:     e2e.TestLogger{},
-			ConfigMtx:  ConfigMtx,
-			KubeVip: e2e.KubevipManifestValues{
-				ControlPlaneVIP:                         cpVIP,
-				ControlPlaneEnable:                      "true",
-				SvcEnable:                               "false",
-				BGPAS:                                   bgp.KubevipAS,
-				BGPPeers:                                bgp.PeerStrings(kvPeers),
-				ControlPlaneHealthCheckAddress:          "https://localhost:6443/livez",
-				ControlPlaneHealthCheckPeriodSeconds:    1,
-				ControlPlaneHealthCheckTimeoutSeconds:   1,
-				ControlPlaneHealthCheckFailureThreshold: 3,
-				ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
-				EnableServiceSecurity:                   "true",
-			},
+			kindCluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{
+				Name:       "bgp-hc",
+				Nodes:      2,
+				Networking: kindconfigv1alpha4.Networking{IPFamily: kindconfigv1alpha4.IPv4Family},
+				Logger:     e2e.TestLogger{},
+				ConfigMtx:  ConfigMtx,
+				KubeVip: e2e.KubevipManifestValues{
+					ControlPlaneVIP:                         cpVIP,
+					ControlPlaneEnable:                      "true",
+					SvcEnable:                               "false",
+					BGPAS:                                   bgp.KubevipAS,
+					BGPPeers:                                bgp.PeerStrings(kvPeers),
+					ControlPlaneHealthCheckAddress:          "https://localhost:6443/livez",
+					ControlPlaneHealthCheckPeriodSeconds:    1,
+					ControlPlaneHealthCheckTimeoutSeconds:   1,
+					ControlPlaneHealthCheckFailureThreshold: 3,
+					ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
+					EnableServiceSecurity:                   "true",
+				},
+			})
+
+			peers = server.AddClusterPeers(ctx, kindCluster.Nodes, bgp.KubevipAS, []string{utils.IPv4Family})
+
+			httpClient = &http.Client{
+				Timeout:   3 * time.Second,
+				Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec
+			}
 		})
 
-		peers = server.AddClusterPeers(ctx, kindCluster.Nodes, bgp.KubevipAS, []string{utils.IPv4Family})
-
-		httpClient = &http.Client{
-			Timeout:   3 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec
-		}
-	})
-
-	AfterAll(func(ctx context.Context) {
-		if server != nil {
-			server.RemovePeers(ctx, peers)
-		}
-		if kindCluster != nil {
-			kindCluster.Delete()
-		}
-		if os.Getenv("E2E_KEEP_LOGS") != "true" {
-			_ = os.RemoveAll(tempDirRoot)
-		}
-	})
-
-	When("all nodes are healthy", func() {
-		It("announces BGP routes for all nodes", func(ctx context.Context) {
-			bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 30*time.Second)
-			assertVIPReachable(ctx, server, cpVIP, httpClient)
+		AfterAll(func(ctx context.Context) {
+			if server != nil {
+				server.RemovePeers(ctx, peers)
+			}
+			if kindCluster != nil {
+				kindCluster.Delete()
+			}
+			if os.Getenv("E2E_KEEP_LOGS") != "true" {
+				_ = os.RemoveAll(tempDirRoot)
+			}
 		})
-	})
 
-	When("the apiserver is stopped on a node", func() {
-		It("withdraws and re-announces the BGP route", func(ctx context.Context) {
-			node := kindCluster.Nodes[rand.IntN(len(kindCluster.Nodes))]
-
-			By(fmt.Sprintf("stopping the apiserver on node %s", node.String()))
-			e2e.RunInNode(node, "mv",
-				"/etc/kubernetes/manifests/kube-apiserver.yaml",
-				"/tmp/kube-apiserver.yaml")
-
-			bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes)-1, 30*time.Second)
-			assertVIPReachable(ctx, server, cpVIP, httpClient)
-
-			By(fmt.Sprintf("restoring the apiserver on node %s", node.String()))
-			e2e.RunInNode(node, "mv",
-				"/tmp/kube-apiserver.yaml",
-				"/etc/kubernetes/manifests/kube-apiserver.yaml")
-
-			bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 120*time.Second)
-			assertVIPReachable(ctx, server, cpVIP, httpClient)
+		When("all nodes are healthy", func() {
+			It("announces BGP routes for all nodes", func(ctx context.Context) {
+				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 30*time.Second)
+				assertVIPReachable(ctx, server, cpVIP, httpClient)
+			})
 		})
-	})
 
-	When("kube-vip is stopped on a node", func() {
-		It("withdraws and re-announces the BGP route via graceful shutdown", func(ctx context.Context) {
-			node := kindCluster.Nodes[rand.IntN(len(kindCluster.Nodes))]
+		When("the apiserver is stopped on a node", func() {
+			It("withdraws and re-announces the BGP route", func(ctx context.Context) {
+				node := kindCluster.Nodes[rand.IntN(len(kindCluster.Nodes))]
 
-			By(fmt.Sprintf("stopping kube-vip on node %s", node.String()))
-			e2e.RunInNode(node, "bash", "-c",
-				"cp /etc/kubernetes/manifests/kube-vip.yaml /tmp/kube-vip.yaml && truncate -s 0 /etc/kubernetes/manifests/kube-vip.yaml")
+				By(fmt.Sprintf("stopping the apiserver on node %s", node.String()))
+				e2e.RunInNode(node, "mv",
+					"/etc/kubernetes/manifests/kube-apiserver.yaml",
+					"/tmp/kube-apiserver.yaml")
 
-			bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes)-1, 30*time.Second)
-			assertVIPReachable(ctx, server, cpVIP, httpClient)
+				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes)-1, 30*time.Second)
+				assertVIPReachable(ctx, server, cpVIP, httpClient)
 
-			By(fmt.Sprintf("restoring kube-vip on node %s", node.String()))
-			e2e.RunInNode(node, "bash", "-c",
-				"cp /tmp/kube-vip.yaml /etc/kubernetes/manifests/kube-vip.yaml")
+				By(fmt.Sprintf("restoring the apiserver on node %s", node.String()))
+				e2e.RunInNode(node, "mv",
+					"/tmp/kube-apiserver.yaml",
+					"/etc/kubernetes/manifests/kube-apiserver.yaml")
 
-			bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 120*time.Second)
-			assertVIPReachable(ctx, server, cpVIP, httpClient)
+				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 120*time.Second)
+				assertVIPReachable(ctx, server, cpVIP, httpClient)
+			})
 		})
-	})
+
+		When("kube-vip is stopped on a node", func() {
+			It("withdraws and re-announces the BGP route via graceful shutdown", func(ctx context.Context) {
+				node := kindCluster.Nodes[rand.IntN(len(kindCluster.Nodes))]
+
+				By(fmt.Sprintf("stopping kube-vip on node %s", node.String()))
+				e2e.RunInNode(node, "bash", "-c",
+					"cp /etc/kubernetes/manifests/kube-vip.yaml /tmp/kube-vip.yaml && truncate -s 0 /etc/kubernetes/manifests/kube-vip.yaml")
+
+				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes)-1, 30*time.Second)
+				assertVIPReachable(ctx, server, cpVIP, httpClient)
+
+				By(fmt.Sprintf("restoring kube-vip on node %s", node.String()))
+				e2e.RunInNode(node, "bash", "-c",
+					"cp /tmp/kube-vip.yaml /etc/kubernetes/manifests/kube-vip.yaml")
+
+				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 120*time.Second)
+				assertVIPReachable(ctx, server, cpVIP, httpClient)
+			})
+		})
 	} // Mode == ModeBGP
 })
 

@@ -344,9 +344,9 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		// Drop the per-service election series so a recreated service starts clean.
 		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		p.updateActiveServicesMetric()
-	}
 
-	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+	}
 
 	return nil
 }

@@ -214,6 +214,10 @@ func ResolveVIP(ctx context.Context, c api.GoBgpServiceClient, vip string) []str
 // This counts Destination objects (used by the existing service BGP tests).
 func CheckPaths(ctx context.Context, c api.GoBgpServiceClient, family *api.Family, prefixes []*api.TableLookupPrefix, expectedDests int) []*api.Destination {
 	var paths []*api.Destination
+	// 120s: with ginkgo --procs=4, sibling processes create Kind clusters and load
+	// images concurrently, which can delay kube-vip's endpoint-watch/advertise loop
+	// well past 30s (observed >13s even in passing specs). Matches the timeout the
+	// BGP health-check suite uses for route re-announcement.
 	Eventually(func() error {
 		var err error
 		paths, err = ListPaths(ctx, c, family, prefixes)
@@ -224,7 +228,7 @@ func CheckPaths(ctx context.Context, c api.GoBgpServiceClient, family *api.Famil
 			return fmt.Errorf("expected %d destinations, found %d", expectedDests, len(paths))
 		}
 		return nil
-	}, "30s", "1s").ShouldNot(HaveOccurred(), "should have %d destinations, found %d", expectedDests, len(paths))
+	}, "120s", "1s").ShouldNot(HaveOccurred(), "should have %d destinations, found %d", expectedDests, len(paths))
 	return paths
 }
 
