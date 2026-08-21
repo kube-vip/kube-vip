@@ -124,6 +124,8 @@ func DeleteNamespace(ctx context.Context, clientset *kubernetes.Clientset, ns st
 func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
 
 	// Simple Deployment test
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error { //nolint
 		slog.Infof("🧪 ---> simple deployment defer <---")
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "simple-deployment")
@@ -132,19 +134,19 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> simple deployment logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
@@ -187,6 +189,8 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 	// Multiple deployment tests
 	var err error
 
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error { //nolint
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "multiple-deployments")
 		if err != nil {
@@ -194,21 +198,21 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> multiple deployment logs err <---: %s", err.Error())
 			return err
 		}
 
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
-			err = clientset.CoreV1().Services(config.ns()).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
+			err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
 			if err != nil {
-				slog.Fatal(err)
+				slog.Errorf("failed to delete service %q: %v", fmt.Sprintf("%s-%d", config.ServiceName, i), err)
 			}
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.LeaderName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.LeaderName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.LeaderName, err)
 		}
 		return nil
 	}() //nolint
@@ -249,26 +253,29 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Clientset) error {
 
 	var err error
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "failover")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> failover logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
@@ -330,26 +337,29 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 	// pod Failover tests
 
 	var err error
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "active-failover")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> active failover logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
@@ -392,28 +402,31 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
 	// Multiple deployment tests
 	var err error
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "local-deployment")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> local deployment logs err <---: %s", err.Error())
 			return err
 		}
 
 		for i := 1; i < 5; i++ {
 			slog.Infof("🧹 deleting service [%s]", fmt.Sprintf("%s-%d", config.ServiceName, i))
-			err = clientset.CoreV1().Services(config.ns()).Delete(ctx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
+			err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, fmt.Sprintf("%s-%d", config.ServiceName, i), metav1.DeleteOptions{})
 			if err != nil {
-				slog.Fatal(err)
+				slog.Errorf("failed to delete service %q: %v", fmt.Sprintf("%s-%d", config.ServiceName, i), err)
 			}
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.LeaderName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.LeaderName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.LeaderName, err)
 		}
 		return nil
 	}() //nolint
@@ -474,7 +487,8 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-deployment")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
@@ -486,11 +500,11 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
 		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
@@ -571,7 +585,8 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-v6-deployment")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
@@ -583,11 +598,11 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
 		err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
 		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
@@ -701,25 +716,28 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 
 	config.SuccessCounter++
 
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	tempDirPath, err := os.MkdirTemp(config.TempDirPath, "dualstack-deployment")
 	if err != nil {
-		slog.Fatal(err)
+		slog.Errorf("failed to create temporary log directory: %v", err)
+		return err
 	}
 
 	slog.Infof("saving logs to %q", tempDirPath)
-	if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+	if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 		slog.Infof("🧪 ---> dualstack deployment logs err <---: %s", err.Error())
 		return err
 	}
 
 	slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-	err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+	err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{})
 	if err != nil {
-		slog.Fatal(err)
+		slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 	}
 
-	if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
-		slog.Fatal(err)
+	if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
+		slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 	}
 	return err
 }
@@ -746,7 +764,9 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, ns, 
 		select {
 		case <-checkCtx.Done():
 			t.Stop()
-			return fmt.Errorf("failed to check deployment's %q deletion: %w", name, ctx.Err())
+			// checkCtx carries the timeout; ctx may be uncancelled (e.g. a
+			// cleanup context detached from the errgroup).
+			return fmt.Errorf("failed to check deployment's %q deletion: %w", name, checkCtx.Err())
 		case <-t.C:
 			_, err := clientset.AppsV1().Deployments(ns).Get(checkCtx, name, metav1.GetOptions{})
 			if err != nil && apierrors.IsNotFound(err) {
@@ -796,25 +816,28 @@ func deleteDeployment(ctx context.Context, clientset *kubernetes.Clientset, ns, 
 // After every fault the service has to converge: a live election loop, a held
 // lease, and a VIP that serves traffic.
 func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kubernetes.Clientset) error {
+	// cleanupCtx is not tied to the errgroup so cleanup survives a sibling goroutine failure.
+	cleanupCtx := context.WithoutCancel(ctx)
 	defer func() error {
 		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "election-faults")
 		if err != nil {
-			slog.Fatal(err)
+			slog.Errorf("failed to create temporary log directory: %v", err)
+			return err
 		}
 
 		slog.Infof("saving logs to %q", tempDirPath)
-		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+		if err = e2e.GetLogs(cleanupCtx, clientset, tempDirPath, "services"); err != nil {
 			slog.Infof("🧪 ---> election faults logs err <---: %s", err.Error())
 			return err
 		}
 
 		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
-		if err = clientset.CoreV1().Services(config.ns()).Delete(ctx, config.ServiceName, metav1.DeleteOptions{}); err != nil {
-			slog.Fatal(err)
+		if err = clientset.CoreV1().Services(config.ns()).Delete(cleanupCtx, config.ServiceName, metav1.DeleteOptions{}); err != nil {
+			slog.Errorf("failed to delete service %q: %v", config.ServiceName, err)
 		}
 
-		if err = deleteDeployment(ctx, clientset, config.ns(), config.DeploymentName); err != nil {
-			slog.Fatal(err)
+		if err = deleteDeployment(cleanupCtx, clientset, config.ns(), config.DeploymentName); err != nil {
+			slog.Errorf("failed to delete deployment %q: %v", config.DeploymentName, err)
 		}
 		return nil
 	}() //nolint
