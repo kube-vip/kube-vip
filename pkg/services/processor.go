@@ -105,9 +105,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		return nil
 	}
 
-	// We only care about LoadBalancer services
+	// A tracked LoadBalancer must be torn down when its type changes.
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-		return nil
+		return p.deleteTrackedService(svc)
 	}
 
 	// Check if we ignore this service
@@ -311,23 +311,16 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 		return nil
 	}
 
+	return p.deleteTrackedService(svc)
+}
+
+func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
 	if svcCtx != nil {
-		// We only care about LoadBalancer services
-		if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-			return nil
-		}
-
-		// We can ignore this service
-		if svc.Annotations[kubevip.LoadbalancerIgnore] == "true" {
-			log.Info("(svcs) ignore annotation for kube-vip", "service name", svc.Name)
-			return nil
-		}
-
 		// If no leader election is enabled, delete routes here
 		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
