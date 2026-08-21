@@ -2,12 +2,14 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
@@ -17,6 +19,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 )
 
 func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
@@ -45,6 +48,254 @@ type fakeWorker struct {
 	endpoints     []string
 	clearCalled   bool
 	processCalled bool
+}
+
+type annotationUpdate struct {
+	endpoint     string
+	endpointIPv6 string
+}
+
+type recordingProvider struct {
+	providers.Provider
+	updates   []annotationUpdate
+	updateErr error
+}
+
+func (p *recordingProvider) UpdateServiceAnnotation(_ context.Context, endpoint, endpointIPv6 string,
+	_ *v1.Service, _ *kubernetes.Clientset) error {
+	p.updates = append(p.updates, annotationUpdate{endpoint: endpoint, endpointIPv6: endpointIPv6})
+	return p.updateErr
+}
+
+func TestUpdateAnnotations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		enableEndpoints    bool
+		annotations        map[string]string
+		selectedEndpoint   string
+		providerError      bool
+		wantUpdate         *annotationUpdate
+		wantEgressCallback bool
+	}{
+		{
+			name:               "Endpoints writes initial IPv4 endpoint",
+			enableEndpoints:    true,
+			annotations:        map[string]string{kubevip.Egress: "true"},
+			selectedEndpoint:   "10.0.0.2",
+			wantUpdate:         &annotationUpdate{endpoint: "10.0.0.2"},
+			wantEgressCallback: true,
+		},
+		{
+			name:            "EndpointSlices updates IPv4 and preserves IPv6",
+			enableEndpoints: false,
+			annotations: map[string]string{
+				kubevip.Egress:             "true",
+				kubevip.ActiveEndpoint:     "10.0.0.1",
+				kubevip.ActiveEndpointIPv6: "fd00::1",
+			},
+			selectedEndpoint:   "10.0.0.2",
+			wantUpdate:         &annotationUpdate{endpoint: "10.0.0.2", endpointIPv6: "fd00::1"},
+			wantEgressCallback: true,
+		},
+		{
+			name:            "EndpointSlices updates IPv6 and preserves IPv4",
+			enableEndpoints: false,
+			annotations: map[string]string{
+				kubevip.Egress:             "true",
+				kubevip.EgressIPv6:         "true",
+				kubevip.ActiveEndpoint:     "10.0.0.1",
+				kubevip.ActiveEndpointIPv6: "fd00::1",
+			},
+			selectedEndpoint:   "fd00::2",
+			wantUpdate:         &annotationUpdate{endpoint: "10.0.0.1", endpointIPv6: "fd00::2"},
+			wantEgressCallback: true,
+		},
+		{
+			name:            "EndpointSlices clears IPv4 and preserves IPv6",
+			enableEndpoints: false,
+			annotations: map[string]string{
+				kubevip.Egress:             "true",
+				kubevip.ActiveEndpoint:     "10.0.0.1",
+				kubevip.ActiveEndpointIPv6: "fd00::1",
+			},
+			wantUpdate:         &annotationUpdate{endpointIPv6: "fd00::1"},
+			wantEgressCallback: true,
+		},
+		{
+			name:            "EndpointSlices clears IPv6 and preserves IPv4",
+			enableEndpoints: false,
+			annotations: map[string]string{
+				kubevip.Egress:             "true",
+				kubevip.EgressIPv6:         "true",
+				kubevip.ActiveEndpoint:     "10.0.0.1",
+				kubevip.ActiveEndpointIPv6: "fd00::1",
+			},
+			wantUpdate:         &annotationUpdate{endpoint: "10.0.0.1"},
+			wantEgressCallback: true,
+		},
+		{
+			name:            "unchanged endpoint does not write or reconfigure egress",
+			enableEndpoints: true,
+			annotations: map[string]string{
+				kubevip.Egress:         "true",
+				kubevip.ActiveEndpoint: "10.0.0.1",
+			},
+			selectedEndpoint: "10.0.0.1",
+		},
+		{
+			name:             "failed annotation update does not reconfigure egress",
+			enableEndpoints:  true,
+			annotations:      map[string]string{kubevip.Egress: "true"},
+			selectedEndpoint: "10.0.0.2",
+			providerError:    true,
+			wantUpdate:       &annotationUpdate{endpoint: "10.0.0.2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := providers.NewEndpointslices()
+			if tt.enableEndpoints {
+				provider = providers.NewEndpoints()
+			}
+			recorder := &recordingProvider{Provider: provider}
+			if tt.providerError {
+				recorder.updateErr = errors.New("update failed")
+			}
+
+			p := &Processor{
+				config:   &kubevip.Config{EnableEndpoints: tt.enableEndpoints},
+				provider: recorder,
+			}
+			service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "test-service", Namespace: "default", Annotations: tt.annotations,
+			}}
+
+			callbackCalls := 0
+			var callbackService *v1.Service
+			p.updateAnnotations(service, &tt.selectedEndpoint, nil, func(_ context.Context, svc *v1.Service) error {
+				callbackCalls++
+				callbackService = svc
+				return nil
+			})
+
+			if tt.wantUpdate == nil {
+				if len(recorder.updates) != 0 {
+					t.Fatalf("got %d annotation updates, want none", len(recorder.updates))
+				}
+			} else {
+				if len(recorder.updates) != 1 {
+					t.Fatalf("got %d annotation updates, want one", len(recorder.updates))
+				}
+				if got := recorder.updates[0]; got != *tt.wantUpdate {
+					t.Fatalf("annotation update = %+v, want %+v", got, *tt.wantUpdate)
+				}
+			}
+
+			wantCallbackCalls := 0
+			if tt.wantEgressCallback {
+				wantCallbackCalls = 1
+			}
+			if callbackCalls != wantCallbackCalls {
+				t.Fatalf("egress callback called %d times, want %d", callbackCalls, wantCallbackCalls)
+			}
+			if callbackService != nil && tt.wantUpdate != nil {
+				if got := callbackService.Annotations[kubevip.ActiveEndpoint]; got != tt.wantUpdate.endpoint {
+					t.Errorf("callback IPv4 endpoint = %q, want %q", got, tt.wantUpdate.endpoint)
+				}
+				if got := callbackService.Annotations[kubevip.ActiveEndpointIPv6]; got != tt.wantUpdate.endpointIPv6 {
+					t.Errorf("callback IPv6 endpoint = %q, want %q", got, tt.wantUpdate.endpointIPv6)
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateAnnotations_ZeroEndpointsThenSameEndpoint(t *testing.T) {
+	t.Parallel()
+
+	for _, enableEndpoints := range []bool{true, false} {
+		name := "EndpointSlices"
+		if enableEndpoints {
+			name = "Endpoints"
+		}
+		t.Run(name, func(t *testing.T) {
+			const endpoint = "10.0.0.1"
+			service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "test-service", Namespace: "default", UID: "test-uid",
+				Annotations: map[string]string{
+					kubevip.Egress:         "true",
+					kubevip.ActiveEndpoint: endpoint,
+				},
+			}}
+			serviceInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+			instances := []*instance.Instance{serviceInstance}
+			provider := providers.NewEndpointslices()
+			if enableEndpoints {
+				provider = providers.NewEndpoints()
+			}
+			recorder := &recordingProvider{Provider: provider}
+			p := &Processor{
+				config:    &kubevip.Config{EnableEndpoints: enableEndpoints},
+				provider:  recorder,
+				instances: &instances,
+			}
+
+			updateSnapshot := func(_ context.Context, svc *v1.Service) error {
+				serviceInstance.ServiceSnapshot = svc
+				return nil
+			}
+
+			noEndpoint := ""
+			p.updateAnnotations(service, &noEndpoint, nil, updateSnapshot)
+			repopulatedEndpoint := endpoint
+			p.updateAnnotations(service, &repopulatedEndpoint, nil, updateSnapshot)
+
+			want := []annotationUpdate{{}, {endpoint: endpoint}}
+			if len(recorder.updates) != len(want) {
+				t.Fatalf("got %d annotation updates, want %d", len(recorder.updates), len(want))
+			}
+			for i := range want {
+				if recorder.updates[i] != want[i] {
+					t.Errorf("annotation update %d = %+v, want %+v", i, recorder.updates[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateLastKnownGoodEndpoint_SelectsConfiguredFamily(t *testing.T) {
+	t.Parallel()
+
+	endpoints := []string{"fd00::20", "172.30.2.40"}
+	for _, tt := range []struct {
+		name        string
+		annotations map[string]string
+		want        string
+	}{
+		{
+			name:        "IPv4 egress on dual-stack pods",
+			annotations: map[string]string{kubevip.Egress: "true"},
+			want:        "172.30.2.40",
+		},
+		{
+			name:        "IPv6 egress on dual-stack pods",
+			annotations: map[string]string{kubevip.Egress: "true", kubevip.EgressIPv6: "true"},
+			want:        "fd00::20",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Processor{worker: &fakeWorker{}}
+			service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations}}
+			selected := ""
+			p.updateLastKnownGoodEndpoint(&selected, endpoints, service)
+			if selected != tt.want {
+				t.Fatalf("selected endpoint = %q, want %q", selected, tt.want)
+			}
+		})
+	}
 }
 
 func (f *fakeWorker) processInstance(_ *servicecontext.Context, _ *v1.Service) error {

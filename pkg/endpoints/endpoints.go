@@ -179,28 +179,37 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 	egressUpdateFunc func(context.Context, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
-		ip := net.ParseIP(*lastKnownGoodEndpoint)
-
 		// Store old values from ServiceSnapshot to detect if annotation actually changed
 		// We use the ServiceSnapshot instead of the service parameter because the service parameter
 		// may have stale annotations if the last update failed
 		var oldEndpoint, oldEndpointIPv6 string
+		snapshotFound := false
 		if p.instances != nil {
 			serviceInstance := instance.FindServiceInstance(service, *p.instances)
-			if serviceInstance != nil {
+			if serviceInstance != nil && serviceInstance.ServiceSnapshot != nil {
+				snapshotFound = true
 				oldEndpoint = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
 				oldEndpointIPv6 = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 			}
 		}
-		// Fall back to service annotations if we couldn't find the instance
-		if oldEndpoint == "" && oldEndpointIPv6 == "" {
+		// Fall back to service annotations only if we couldn't find the instance.
+		// Empty annotations in an existing snapshot are meaningful after a
+		// zero-endpoint transition and must not be replaced with values from the
+		// older Service object captured when the endpoint watcher started.
+		if !snapshotFound {
 			oldEndpoint = service.Annotations[kubevip.ActiveEndpoint]
 			oldEndpointIPv6 = service.Annotations[kubevip.ActiveEndpointIPv6]
 		}
 
 		// Determine which annotation to update based on IP version
 		var endpoint, endpointIPv6 string
-		if ip.To4() == nil && !p.config.EnableEndpoints {
+		// Use the configured egress family instead of parsing
+		// lastKnownGoodEndpoint: an empty endpoint is not an IPv6 address, but
+		// net.ParseIP("") returns nil and used to make us preserve a stale IPv4
+		// annotation when EndpointSlices temporarily contained no endpoints.
+		// The legacy Endpoints provider continues to use ActiveEndpoint for
+		// both families.
+		if service.Annotations[kubevip.EgressIPv6] == "true" && !p.config.EnableEndpoints {
 			// IPv6
 			endpointIPv6 = *lastKnownGoodEndpoint
 			endpoint = oldEndpoint // Preserve existing IPv4 if any

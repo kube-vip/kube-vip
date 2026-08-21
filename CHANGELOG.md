@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Prevent stale Service snapshots from clearing active endpoint annotations during egress initialization, preserve empty snapshots across zero-endpoint transitions, and clear the correct address family when EndpointSlices become empty.
 - Add a configurable kube-vip instance name and use it to isolate internal nftables egress tables, persist table ownership on Services, and migrate per-Service chains without affecting other deployments. Fixes #1634.
 - Retry on 403 Forbidden and 401 Unauthorized in `ServicesWatcher` at startup with exponential backoff. Fixes #1464.
 - Reintroduce BGP config via node annotations. Fixes #1488.

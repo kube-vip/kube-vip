@@ -23,7 +23,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
-	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -377,16 +376,11 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				}
 			}
 
-			var provider providers.Provider
-			if p.config.EnableEndpoints {
-				provider = providers.NewEndpoints()
-			} else {
-				provider = providers.NewEndpointslices()
-			}
-			err := provider.UpdateServiceAnnotation(ctx, svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
-			if err != nil {
-				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
-			}
+			// The endpoint watcher owns the active-endpoint annotations. Do not
+			// persist them from here: svc is the Service snapshot captured when
+			// service handling started and can be stale by the time endpoint
+			// discovery completes. Writing it here can overwrite the endpoint
+			// watcher's newer value with an old or empty one.
 		}
 	}
 
