@@ -261,7 +261,9 @@ func leaderFailover(ctx context.Context, ns string, name, leaderNode *string, cl
 					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
-						return err
+						// Transient failure during annotation updates; keep watching.
+						slog.Warnf("🔍 service [%s] not yet reachable after update: %v", *name, err)
+						continue
 					}
 					*leaderNode = svc.Annotations[kubevip.VipHost]
 					rw.Stop()
@@ -358,7 +360,9 @@ func podFailover(ctx context.Context, ns string, name, leaderNode *string, clien
 					slog.Infof("🔍 updated with address [%s] on node [%s]", svc.Status.LoadBalancer.Ingress[0].IP, svc.Annotations[kubevip.VipHost])
 					err = httpTest(svc.Status.LoadBalancer.Ingress[0].IP)
 					if err != nil {
-						slog.Fatal(err)
+						// Transient failure during annotation updates; keep watching.
+						slog.Warnf("🔍 service [%s] not yet reachable after update: %v", *name, err)
+						continue
 					}
 					*leaderNode = svc.Annotations[kubevip.VipHost]
 					rw.Stop()

@@ -162,6 +162,9 @@ func (config *TestConfig) SimpleDeployment(ctx context.Context, clientset *kuber
 	if err != nil {
 		slog.Fatal(err)
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
 		namespace: config.ns(),
 		name:      config.ServiceName,
@@ -222,8 +225,8 @@ func (config *TestConfig) MultipleDeployments(ctx context.Context, clientset *ku
 	if err != nil {
 		slog.Fatal(err)
 	}
-	if err != nil {
-		slog.Fatal(err)
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
 	}
 	for i := 1; i < 5; i++ {
 		svc := Service{
@@ -281,6 +284,9 @@ func (config *TestConfig) Failover(ctx context.Context, clientset *kubernetes.Cl
 	}
 	err = deploy.CreateDeployment(ctx, clientset)
 	if err != nil {
+		return err
+	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
 		return err
 	}
 	svc := Service{
@@ -360,6 +366,9 @@ func (config *TestConfig) ActiveFailover(ctx context.Context, clientset *kuberne
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 	svc := Service{
 		namespace:   config.ns(),
 		name:        config.ServiceName,
@@ -420,6 +429,9 @@ func (config *TestConfig) LocalDeployment(ctx context.Context, clientset *kubern
 	}
 	err = deploy.CreateDeployment(ctx, clientset)
 	if err != nil {
+		return err
+	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
 		return err
 	}
 	for i := 1; i < 5; i++ {
@@ -511,11 +523,14 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	svc := Service{
 		namespace:   config.ns(),
-		policyLocal: true,
 		name:        config.ServiceName,
+		policyLocal: true,
 		egress:      true,
 		testHTTP:    false,
 		timeout:     30,
@@ -605,11 +620,14 @@ func (config *TestConfig) Egressv6Deployment(ctx context.Context, clientset *kub
 	if err != nil {
 		return err
 	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
+		return err
+	}
 
 	svc := Service{
 		namespace:     config.ns(),
-		policyLocal:   true,
 		name:          config.ServiceName,
+		policyLocal:   true,
 		egress:        true,
 		egressIPv6:    true,
 		timeout:       timeout,
@@ -664,6 +682,9 @@ func (config *TestConfig) DualStackDeployment(ctx context.Context, clientset *ku
 	}
 	err := deploy.CreateDeployment(ctx, clientset)
 	if err != nil {
+		return err
+	}
+	if err = deploy.WaitForAvailable(ctx, clientset); err != nil {
 		return err
 	}
 	svc := Service{
@@ -807,6 +828,9 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		server:       true,
 	}
 	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
+		return err
+	}
+	if err := deploy.WaitForAvailable(ctx, clientset); err != nil {
 		return err
 	}
 
@@ -1078,6 +1102,9 @@ func (config *TestConfig) faultCommonLeaseSibling(ctx context.Context, clientset
 		server:       true,
 	}
 	if err := deploy.CreateDeployment(ctx, clientset); err != nil {
+		return err
+	}
+	if err := deploy.WaitForAvailable(ctx, clientset); err != nil {
 		return err
 	}
 

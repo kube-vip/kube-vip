@@ -76,6 +76,15 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		// Egress: when the service reaches ActionNone it means AddCalled is already true.
+		// If ActiveEndpoint is now set (by the endpoint watcher) and the service has a
+		// LB IP, the initial addService call may have missed the SNAT configuration because
+		// ActiveEndpoint was not yet present. Re-run it here.
+		if svc.Annotations[kubevip.Egress] == "true" && svc.Annotations[kubevip.ActiveEndpoint] != "" {
+			if err := p.updateEgressConfiguration(ctx.Ctx, svc); err != nil {
+				log.Warn("[service] egress reconfigure on ActionNone", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			}
+		}
 	}
 	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	return nil
@@ -539,6 +548,19 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 	i := instance.FindServiceInstance(svc, p.ServiceInstances)
 	if i == nil {
 		return fmt.Errorf("service instance not found for %s/%s", svc.Namespace, svc.Name)
+	}
+
+	// The svc snapshot may have been captured before the LB IP was assigned.
+	// Refresh from the API so FetchServiceAddresses sees the current ingress.
+	if current, err := p.clientSet.CoreV1().Services(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{}); err == nil {
+		// Preserve the caller-supplied annotations (ActiveEndpoint etc.) that triggered this call.
+		for k, v := range svc.Annotations {
+			if current.Annotations == nil {
+				current.Annotations = make(map[string]string)
+			}
+			current.Annotations[k] = v
+		}
+		svc = current
 	}
 
 	oldIPv4 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]

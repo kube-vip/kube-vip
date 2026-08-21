@@ -51,6 +51,13 @@ type Deployment struct {
 	namespace    string
 }
 
+func backendLabels(instance string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":     "kube-vip-e2e",
+		"app.kubernetes.io/instance": instance,
+	}
+}
+
 func (d *Deployment) ns() string {
 	if d.namespace != "" {
 		return d.namespace
@@ -62,7 +69,11 @@ func (d *Deployment) ns() string {
 // metricsAddr sets prometheusHTTPServer; pass empty string to disable prometheus
 // on parallel-test nodes where multiple DaemonSets share the same host network.
 func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) appsv1.DaemonSet {
-	labels := map[string]string{"app.kubernetes.io/name": "kube-vip-ds", "app": "kube-vip"}
+	labels := map[string]string{
+		"app":                        "kube-vip",
+		"app.kubernetes.io/name":     "kube-vip-ds",
+		"app.kubernetes.io/instance": ns,
+	}
 	env := []v1.EnvVar{
 		{Name: "vip_arp", Value: "true"},
 		{Name: "vip_subnet", Value: "auto,auto"},
@@ -72,6 +83,9 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 		{Name: "EGRESS_CLEAN", Value: "true"},
 		{Name: "vip_loglevel", Value: "-4"},
 		{Name: "egress_withnftables", Value: "true"},
+		// instance_name scopes the nftables egress table to this namespace so
+		// parallel DaemonSets on the same host network don't overwrite each other.
+		{Name: "instance_name", Value: ns},
 		// suppress the default :2112 binding when empty
 		{Name: "prometheusHTTPServer", Value: metricsAddr},
 		{Name: "vip_nodename", ValueFrom: &v1.EnvVarSource{
@@ -85,7 +99,10 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 	return appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-ds", Namespace: ns, Labels: labels},
 		Spec: appsv1.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "kube-vip-ds"}},
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{
+				"app.kubernetes.io/name":     "kube-vip-ds",
+				"app.kubernetes.io/instance": ns,
+			}},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: v1.PodSpec{
@@ -182,15 +199,11 @@ func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "kube-vip",
-				},
+				MatchLabels: backendLabels(d.ns()),
 			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "kube-vip",
-					},
+					Labels: backendLabels(d.ns()),
 				},
 				Spec: v1.PodSpec{
 					Containers: []v1.Container{
@@ -249,14 +262,36 @@ func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes
 	return nil
 }
 
+// WaitForAvailable blocks until at least one replica of the deployment is ready,
+// or ctx is cancelled. It polls every 2 s with a hard ceiling of 60 s.
+func (d *Deployment) WaitForAvailable(ctx context.Context, clientset *kubernetes.Clientset) error {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		dep, err := clientset.AppsV1().Deployments(d.ns()).Get(ctx, d.name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get deployment %s: %w", d.name, err)
+		}
+		if dep.Status.ReadyReplicas >= 1 {
+			slog.Infof("📝 deployment [%s] has %d ready replica(s)", d.name, dep.Status.ReadyReplicas)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("deployment %s not ready after 60 s", d.name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clientset) (currentLeader string, loadBalancerAddresses []string, err error) {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      s.name,
 			Namespace: s.ns(),
-			Labels: map[string]string{
-				"app": "kube-vip",
-			},
+			Labels:    backendLabels(s.ns()),
 		},
 
 		Spec: v1.ServiceSpec{
@@ -266,9 +301,7 @@ func (s *Service) CreateService(ctx context.Context, clientset *kubernetes.Clien
 					Protocol: v1.ProtocolTCP,
 				},
 			},
-			Selector: map[string]string{
-				"app": "kube-vip",
-			},
+			Selector:  backendLabels(s.ns()),
 			ClusterIP: "",
 			Type:      v1.ServiceTypeLoadBalancer,
 		},

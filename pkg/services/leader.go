@@ -185,8 +185,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	// Mark this service as active (as we've started leading)
-	// we run this in background as it's blocking
 	err := p.SyncServices(svcCtx, service, wg, true)
 	if err != nil {
 		log.Error("service sync", "uid", service.UID, "err", err)
