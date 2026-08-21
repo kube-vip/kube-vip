@@ -119,7 +119,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				})
 			})
 
-				It("setups IPv4 address and route on control-plane node", func() {
+			It("setups IPv4 address and route on control-plane node", func() {
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
@@ -258,7 +258,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				})
 			})
 
-				It("setups IPv6 address and route on control-plane node", func() {
+			It("setups IPv6 address and route on control-plane node", func() {
 				for i := 1; i <= nodesNumber; i++ {
 					var container string
 					if i > 1 {
