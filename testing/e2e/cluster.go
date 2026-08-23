@@ -24,7 +24,8 @@ import (
 // ClusterSpec describes a Kind cluster with kube-vip.
 type ClusterSpec struct {
 	Name           string
-	Nodes          int
+	Nodes          int // control-plane node count
+	WorkerNodes    int
 	Networking     kindconfigv1alpha4.Networking
 	KubeVip        KubevipManifestValues
 	Logger         TestLogger
@@ -118,15 +119,11 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		Networking:                   spec.Networking,
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
-	for i := range spec.Nodes {
-		mPath := manifestPath
-		if i == 0 && v129 {
-			mPath = firstNodeManifestPath
-		}
+	appendNode := func(role kindconfigv1alpha4.NodeRole, manifest string) {
 		node := kindconfigv1alpha4.Node{
-			Role: kindconfigv1alpha4.ControlPlaneRole,
+			Role: role,
 			ExtraMounts: []kindconfigv1alpha4.Mount{{
-				HostPath:      mPath,
+				HostPath:      manifest,
 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
 			}},
 		}
@@ -134,6 +131,16 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 			node.Image = k8sImage
 		}
 		clusterConfig.Nodes = append(clusterConfig.Nodes, node)
+	}
+	for i := 0; i < spec.Nodes; i++ {
+		mPath := manifestPath
+		if i == 0 && v129 {
+			mPath = firstNodeManifestPath
+		}
+		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
+	}
+	for i := 0; i < spec.WorkerNodes; i++ {
+		appendNode(kindconfigv1alpha4.WorkerRole, manifestPath)
 	}
 
 	// Create cluster
@@ -160,7 +167,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	// Discover nodes
 	c.Nodes, err = c.Provider.ListInternalNodes(c.Name)
 	Expect(err).ToNot(HaveOccurred())
-	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes))
+	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes+spec.WorkerNodes))
 
 	// Load kube-vip image
 	c.LoadImage(spec.KubeVip.ImagePath)
