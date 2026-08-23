@@ -35,6 +35,14 @@ var (
 		prometheus.GaugeOpts{Name: "kube_vip_is_leader", Help: "1 if this node currently holds the lease"},
 		[]string{"node", "lease_name"},
 	)
+	WatcherLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_watcher_loops", Help: "Live watcher loops by kind"},
+		[]string{"kind"},
+	)
+	ElectionLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_election_loops", Help: "Live leader election loops by type"},
+		[]string{"type"},
+	)
 	ServiceElectionLoops = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_service_election_loops",
 			Help: "Live per-service leader election restart loops on this node; more than 1 per service means loops leaked"},
@@ -76,6 +84,8 @@ func RegisterPrometheusMetrics() {
 		ServiceReconcileDuration,
 		LeaderTransitionsTotal,
 		IsLeader,
+		WatcherLoops,
+		ElectionLoops,
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
