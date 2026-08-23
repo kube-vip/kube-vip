@@ -51,14 +51,53 @@ func ScrapeMetrics(clusterName, nodeName string) (map[string]float64, error) {
 	return metrics, nil
 }
 
-// MetricValue returns a metric whose labels contain all requested labels.
-func MetricValue(metrics map[string]float64, name string, labels map[string]string) (float64, bool) {
+// MetricValue returns a metric whose labels contain all requested labels and
+// the number of matching series. When matches is greater than one, value is
+// the first matching series in sorted key order and must not be used as a
+// single-series value.
+func MetricValue(metrics map[string]float64, name string, labels map[string]string) (float64, int) {
+	values := matchingMetricValues(metrics, name, labels)
+	if len(values) == 0 {
+		return 0, 0
+	}
+	return values[0], len(values)
+}
+
+// SumMetric returns the sum of all series whose labels contain all requested
+// labels. It returns zero when no series matches.
+func SumMetric(metrics map[string]float64, name string, labels map[string]string) float64 {
+	var total float64
+	for _, value := range matchingMetricValues(metrics, name, labels) {
+		total += value
+	}
+	return total
+}
+
+// MaxMetric returns the maximum value among all series whose labels contain
+// all requested labels. The bool is false when no series matches.
+func MaxMetric(metrics map[string]float64, name string, labels map[string]string) (float64, bool) {
+	values := matchingMetricValues(metrics, name, labels)
+	if len(values) == 0 {
+		return 0, false
+	}
+
+	maximum := values[0]
+	for _, value := range values[1:] {
+		if value > maximum {
+			maximum = value
+		}
+	}
+	return maximum, true
+}
+
+func matchingMetricValues(metrics map[string]float64, name string, labels map[string]string) []float64 {
 	keys := make([]string, 0, len(metrics))
 	for key := range metrics {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
+	values := make([]float64, 0)
 	for _, key := range keys {
 		metricName, metricLabels, ok := parseMetricKey(key)
 		if !ok || metricName != name {
@@ -67,28 +106,29 @@ func MetricValue(metrics map[string]float64, name string, labels map[string]stri
 
 		matches := true
 		for labelName, labelValue := range labels {
-			if metricLabels[labelName] != labelValue {
+			metricLabelValue, exists := metricLabels[labelName]
+			if !exists || metricLabelValue != labelValue {
 				matches = false
 				break
 			}
 		}
 		if matches {
-			return metrics[key], true
+			values = append(values, metrics[key])
 		}
 	}
 
-	return 0, false
+	return values
 }
 
 // CounterDelta returns the difference between two counter samples. Missing
 // samples are treated as unavailable rather than as a counter reset.
-func CounterDelta(before, after map[string]float64, name string, labels map[string]string) float64 {
-	beforeValue, beforeOK := MetricValue(before, name, labels)
-	afterValue, afterOK := MetricValue(after, name, labels)
-	if !beforeOK || !afterOK {
-		return 0
+func CounterDelta(before, after map[string]float64, name string, labels map[string]string) (float64, bool) {
+	beforeValue, beforeMatches := MetricValue(before, name, labels)
+	afterValue, afterMatches := MetricValue(after, name, labels)
+	if beforeMatches != 1 || afterMatches != 1 {
+		return 0, false
 	}
-	return afterValue - beforeValue
+	return afterValue - beforeValue, true
 }
 
 // EventuallyMetric retries a metric scrape until its value satisfies matcher.
@@ -99,31 +139,42 @@ func EventuallyMetric(clusterName, node, name string, labels map[string]string, 
 			return 0, err
 		}
 
-		value, ok := MetricValue(metrics, name, labels)
-		if !ok {
-			return 0, fmt.Errorf("metric %s with labels %v was not found", name, labels)
-		}
-		return value, nil
+		return singleMetricValue(metrics, name, labels)
 	}, timeout, interval).Should(matcher)
 }
 
-// MetricStable returns a metric value after confirming that it is unchanged
-// across samples separated by gap.
-func MetricStable(clusterName, node, name string, labels map[string]string, samples int, gap time.Duration) (float64, error) {
-	if samples < 1 {
-		return 0, fmt.Errorf("samples must be at least 1")
-	}
-
-	var stableValue float64
-	for sample := 0; sample < samples; sample++ {
+// ConsistentlyMetric repeatedly scrapes a metric while its value satisfies
+// matcher.
+func ConsistentlyMetric(clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
+	Consistently(func() (float64, error) {
 		metrics, err := ScrapeMetrics(clusterName, node)
 		if err != nil {
 			return 0, err
 		}
 
-		value, ok := MetricValue(metrics, name, labels)
-		if !ok {
-			return 0, fmt.Errorf("metric %s with labels %v was not found", name, labels)
+		return singleMetricValue(metrics, name, labels)
+	}, timeout, interval).Should(matcher)
+}
+
+// MetricStable returns a metric value after confirming that it is unchanged
+// across samples separated by gap. The observed window is (samples-1)*gap
+// plus scrape latency. A single transient scrape error is retried once for
+// each sample.
+func MetricStable(clusterName, node, name string, labels map[string]string, samples int, gap time.Duration) (float64, error) {
+	if samples < 2 {
+		return 0, fmt.Errorf("samples must be at least 2")
+	}
+
+	var stableValue float64
+	for sample := 0; sample < samples; sample++ {
+		metrics, err := scrapeMetricsRetryOnce(clusterName, node)
+		if err != nil {
+			return 0, err
+		}
+
+		value, err := singleMetricValue(metrics, name, labels)
+		if err != nil {
+			return 0, err
 		}
 		if sample == 0 {
 			stableValue = value
@@ -137,6 +188,31 @@ func MetricStable(clusterName, node, name string, labels map[string]string, samp
 	}
 
 	return stableValue, nil
+}
+
+func singleMetricValue(metrics map[string]float64, name string, labels map[string]string) (float64, error) {
+	value, matches := MetricValue(metrics, name, labels)
+	switch matches {
+	case 0:
+		return 0, fmt.Errorf("metric %s with labels %v was not found", name, labels)
+	case 1:
+		return value, nil
+	default:
+		return 0, fmt.Errorf("metric %s with labels %v matched %d series", name, labels, matches)
+	}
+}
+
+func scrapeMetricsRetryOnce(clusterName, node string) (map[string]float64, error) {
+	metrics, err := ScrapeMetrics(clusterName, node)
+	if err == nil {
+		return metrics, nil
+	}
+
+	retryMetrics, retryErr := ScrapeMetrics(clusterName, node)
+	if retryErr == nil {
+		return retryMetrics, nil
+	}
+	return nil, fmt.Errorf("scrape metrics from %s failed: %v; retry failed: %w", node, err, retryErr)
 }
 
 func parseMetrics(payload string) (map[string]float64, error) {
