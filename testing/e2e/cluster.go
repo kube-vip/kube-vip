@@ -14,11 +14,15 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
+	"sigs.k8s.io/yaml"
 )
 
 // ClusterSpec describes a Kind cluster with kube-vip.
@@ -33,6 +37,9 @@ type ClusterSpec struct {
 	// TemplateName is the kube-vip manifest template filename relative to the
 	// e2e test directory. Defaults to "kube-vip.yaml.tmpl".
 	TemplateName string
+	// UseDaemonSet deploys the rendered kube-vip pod spec as a daemonset rather
+	// than mounting it as a static pod in each Kind node.
+	UseDaemonSet bool
 }
 
 // Cluster holds a running Kind cluster with kube-vip.
@@ -46,7 +53,7 @@ type Cluster struct {
 	ConfigMtx *sync.Mutex
 }
 
-// CreateCluster creates a Kind cluster, renders and mounts the kube-vip
+// CreateCluster creates a Kind cluster, renders and deploys the kube-vip
 // manifest, loads the kube-vip image, and returns the Cluster.
 func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	c := &Cluster{
@@ -119,16 +126,18 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
 	for i := range spec.Nodes {
-		mPath := manifestPath
-		if i == 0 && v129 {
-			mPath = firstNodeManifestPath
-		}
 		node := kindconfigv1alpha4.Node{
 			Role: kindconfigv1alpha4.ControlPlaneRole,
-			ExtraMounts: []kindconfigv1alpha4.Mount{{
+		}
+		if !spec.UseDaemonSet {
+			mPath := manifestPath
+			if i == 0 && v129 {
+				mPath = firstNodeManifestPath
+			}
+			node.ExtraMounts = []kindconfigv1alpha4.Mount{{
 				HostPath:      mPath,
 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
-			}},
+			}}
 		}
 		if k8sImage != "" {
 			node.Image = k8sImage
@@ -164,8 +173,61 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	// Load kube-vip image
 	c.LoadImage(spec.KubeVip.ImagePath)
+	if spec.UseDaemonSet {
+		deployDaemonSet(ctx, c, manifestPath)
+	}
 
 	return c
+}
+
+func deployDaemonSet(ctx context.Context, c *Cluster, manifestPath string) {
+	payload, err := os.ReadFile(manifestPath)
+	Expect(err).NotTo(HaveOccurred())
+
+	var pod corev1.Pod
+	Expect(yaml.Unmarshal(payload, &pod)).To(Succeed())
+	labels := map[string]string{"app": "kube-vip"}
+	pod.Spec.RestartPolicy = corev1.RestartPolicyAlways
+	pod.Spec.Tolerations = append(pod.Spec.Tolerations,
+		corev1.Toleration{
+			Key:      "node-role.kubernetes.io/control-plane",
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+		corev1.Toleration{
+			Key:      "node-role.kubernetes.io/master",
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+	)
+
+	daemonSet := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kube-vip",
+			Namespace: "kube-system",
+			Labels:    labels,
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec:       pod.Spec,
+			},
+		},
+	}
+
+	_, err = c.Client.AppsV1().DaemonSets("kube-system").Create(ctx, daemonSet, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(func() error {
+		current, getErr := c.Client.AppsV1().DaemonSets("kube-system").Get(ctx, daemonSet.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if current.Status.NumberReady != current.Status.DesiredNumberScheduled {
+			return fmt.Errorf("kube-vip daemonset is not ready: %d/%d", current.Status.NumberReady, current.Status.DesiredNumberScheduled)
+		}
+		return nil
+	}, "120s", "2s").Should(Succeed())
 }
 
 // LoadImage loads a Docker image into the Kind cluster.
