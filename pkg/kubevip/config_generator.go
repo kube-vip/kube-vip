@@ -424,7 +424,7 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 
 		if c.LoseLeadershipTimeoutSeconds > 0 {
 			loseLeadership = append(loseLeadership, corev1.EnvVar{
-				Name:  vipLoseLeadership,
+				Name:  vipLoseLeadershipTimeoutSeconds,
 				Value: fmt.Sprintf("%d", c.LoseLeadershipTimeoutSeconds),
 			})
 		}
