@@ -225,6 +225,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, f
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes services")
+			metrics.WatcherRestartsTotal.WithLabelValues("service", "watch_error").Inc()
 			watchErr := utils.WatchError(event.Object)
 			log.Error("services", "err", watchErr)
 			return utils.WrapPanicError(watchErr, "service watch failed")
@@ -238,6 +239,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, f
 	if watcherErr := context.Cause(watcherCtx); watcherErr != nil {
 		return watcherErr
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("service", "channel_closed").Inc()
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return utils.NewPanicError("service watch channel closed unexpectedly")
 }
