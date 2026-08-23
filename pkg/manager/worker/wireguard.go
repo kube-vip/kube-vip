@@ -204,6 +204,7 @@ func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *
 				log.Error("failed to update control plane DNAT rules", "err", err)
 			}
 		case watch.Error:
+			metrics.WatcherRestartsTotal.WithLabelValues("endpoint", "watch_error").Inc()
 			log.Warn("kubernetes endpoint watch error", "event", event)
 		}
 	}

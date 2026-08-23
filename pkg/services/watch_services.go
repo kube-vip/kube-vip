@@ -103,35 +103,36 @@ EventLoop:
 		select {
 		case <-ctx.Done():
 			log.Info("global context done")
+			break EventLoop
 		case <-watcherCtx.Done():
 			log.Info("WatcheConotext done")
 			break EventLoop
 		default:
-			// We need to inspect the event and get ResourceVersion out of it
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
-					if utils.IsPanicError(err) {
-						return fmt.Errorf("add/modify service error: %w", err)
-					}
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
+		// We need to inspect the event and get ResourceVersion out of it
+		switch event.Type {
+		case watch.Added, watch.Modified:
+			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
+				if utils.IsPanicError(err) {
+					return fmt.Errorf("add/modify service error: %w", err)
 				}
-			case watch.Deleted:
-				if err := p.Delete(event, forcedOnly); err != nil {
-					if utils.IsPanicError(err) {
-						return fmt.Errorf("delete service error: %w", err)
-					}
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
-				}
-			case watch.Bookmark:
-				// Un-used
-			case watch.Error:
-				log.Error("Error attempting to watch Kubernetes services")
-				watchErr := utils.WatchError(event.Object)
-				log.Error("services", "err", watchErr)
-				return utils.WrapPanicError(watchErr, "service watch failed")
-			default:
+				log.Error("service watcher event failed", "type", event.Type, "error", err)
 			}
+		case watch.Deleted:
+			if err := p.Delete(event, forcedOnly); err != nil {
+				if utils.IsPanicError(err) {
+					return fmt.Errorf("delete service error: %w", err)
+				}
+				log.Error("service watcher event failed", "type", event.Type, "error", err)
+			}
+		case watch.Bookmark:
+			// Un-used
+		case watch.Error:
+			log.Error("Error attempting to watch Kubernetes services")
+			metrics.WatcherRestartsTotal.WithLabelValues("service", "watch_error").Inc()
+			watchErr := utils.WatchError(event.Object)
+			log.Error("services", "err", watchErr)
+			return utils.WrapPanicError(watchErr, "service watch failed")
+		}
 		}
 	}
 
@@ -141,6 +142,7 @@ EventLoop:
 	if watcherErr := context.Cause(watcherCtx); watcherErr != nil {
 		return watcherErr
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("service", "channel_closed").Inc()
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return utils.NewPanicError("service watch channel closed unexpectedly")
 }
