@@ -320,6 +320,9 @@ func ruleEqual(a, b *nftables.Rule) bool {
 	if !bytes.Equal(a.UserData, b.UserData) {
 		return false
 	}
+	if len(a.Exprs) != len(b.Exprs) {
+		return false
+	}
 
 	for i := range a.Exprs {
 		switch a.Exprs[i].(type) {
@@ -349,6 +352,10 @@ func ruleEqual(a, b *nftables.Rule) bool {
 			}
 		case *expr.Bitwise:
 			if !exprEqual(&expr.Bitwise{}, a.Exprs[i], b.Exprs[i]) {
+				return false
+			}
+		default:
+			if !reflect.DeepEqual(a.Exprs[i], b.Exprs[i]) {
 				return false
 			}
 		}
