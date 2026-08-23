@@ -339,9 +339,47 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 	return nil
 }
 
-func (p *Processor) serviceInstance(service *v1.Service) *instance.Instance {
-	if p.findServiceInstance == nil {
-		return nil
+func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
+	watcherLoops := metrics.WatcherLoops.WithLabelValues("lease")
+	watcherLoops.Inc()
+	defer watcherLoops.Dec()
+
+	// Track this loop for the lifetime of the goroutine. There has to be at most
+	// one per service, so a value above 1 means loops leaked.
+	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
+	loops.Inc()
+	defer loops.Dec()
+
+	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
+
+	// This is a blocking function, that will restart (in the event of failure)
+	for {
+		select {
+		case <-svcCtx.Ctx.Done():
+			return
+		default:
+			leaseNamespace, serviceLease := lease.ServiceName(service)
+			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+			// The lease is retired once its last service is gone, so an absent one means
+			// this loop has nothing left to elect for.
+			l := p.leaseMgr.Get(id)
+			if l == nil {
+				return
+			}
+			l.Lock()
+
+			if !l.Elected.Load() {
+				l.Unlock()
+				attempts.Inc()
+				err := serviceFunc(svcCtx, service, wg, true)
+				if err != nil {
+					log.Error(err.Error())
+				}
+			} else {
+				l.Unlock()
+				time.Sleep(time.Millisecond * 200)
+			}
+		}
 	}
 	return p.findServiceInstance(service)
 }
