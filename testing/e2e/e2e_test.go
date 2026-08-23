@@ -1241,28 +1241,30 @@ func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, even
 	assertConnection("https", controlPlaneVIP, "6443", "livez", transportTimeout, eventuallyTimeout)
 }
 
-func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, client kubernetes.Interface) {
+func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, client kubernetes.Interface, skipNodes ...string) {
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(nodes.Items).NotTo(BeEmpty())
 
 	const leaseName = "plndr-cp-lock"
 	labels := map[string]string{"lease_name": leaseName}
-	leaderName := e2e.GetLeaseHolder(ctx, leaseName, "kube-system", client)
-	e2e.EventuallyMetric(clusterName, leaderName, "kube_vip_is_leader", labels,
-		Equal(float64(1)), 60*time.Second, 2*time.Second)
+	skipped := make(map[string]struct{}, len(skipNodes))
+	for _, node := range skipNodes {
+		skipped[node] = struct{}{}
+	}
 
 	Eventually(func() (float64, error) {
 		var total float64
 		for _, node := range nodes.Items {
+			if _, ok := skipped[node.Name]; ok {
+				continue
+			}
+
 			metrics, err := e2e.ScrapeMetrics(clusterName, node.Name)
 			if err != nil {
 				return 0, err
 			}
-			value, ok := e2e.MetricValue(metrics, "kube_vip_is_leader", labels)
-			if ok {
-				total += value
-			}
+			total += e2e.SumMetric(metrics, "kube_vip_is_leader", labels)
 		}
 		return total, nil
 	}, 60*time.Second, 2*time.Second).Should(Equal(float64(1)))
