@@ -469,9 +469,13 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 	// an address that we know should be ours (e.g., after DADFAILED recovery).
 	// We also allow to globally configure NODAD in case user knows they are running in an
 	// environment where multiple nodes may advertise the same VIP (e.g., ECMP routing).
-	if configurator.shouldSkipDAD(skipDAD) && utils.IsIPv6(configurator.address.IP.String()) {
-		configurator.address.Flags |= unix.IFA_F_NODAD
-		log.Debug("Setting IFA_F_NODAD flag for IPv6 address to skip DAD", "ip", configurator.address.IP.String())
+	if utils.IsIPv6(configurator.address.IP.String()) {
+		if configurator.shouldSkipDAD(skipDAD) {
+			configurator.address.Flags |= unix.IFA_F_NODAD
+			log.Debug("Setting IFA_F_NODAD flag for IPv6 address to skip DAD", "ip", configurator.address.IP.String())
+		} else {
+			configurator.address.Flags &^= unix.IFA_F_NODAD
+		}
 	}
 
 	log.Debug("replacing IP", "address", configurator.address)
