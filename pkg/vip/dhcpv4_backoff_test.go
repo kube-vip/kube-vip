@@ -19,7 +19,7 @@ func TestDHCPv4BackoffExhaustionDoesNotDeadlock(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		client.requestWithBackoff(context.Background())
+		_, _ = client.requestWithBackoff(context.Background())
 		close(done)
 	}()
 
