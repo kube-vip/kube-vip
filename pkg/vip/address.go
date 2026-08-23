@@ -121,6 +121,10 @@ type network struct {
 	// dadSkip marks the address with IFA_F_NODAD on every add:
 	// anycast semantics, e.g. ECMP, must not use DAD
 	dadSkip bool
+
+	// trackedVIPAddresses contains the addresses represented in VIPAddresses.
+	// AddIP and DeleteIP access it while holding link.Lock.
+	trackedVIPAddresses map[string]struct{}
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
@@ -448,6 +452,45 @@ func (configurator *network) shouldSkipDAD(override bool) bool {
 	return override || configurator.dadSkip
 }
 
+func (configurator *network) accountVIPAddressAdd(existing *netlink.Addr) {
+	if existing != nil || configurator.address == nil {
+		return
+	}
+
+	if configurator.trackedVIPAddresses == nil {
+		configurator.trackedVIPAddresses = make(map[string]struct{})
+	}
+	key := configurator.address.String()
+	if _, ok := configurator.trackedVIPAddresses[key]; ok {
+		return
+	}
+
+	family := utils.IPv4Family
+	if utils.IsIPv6(configurator.address.IP.String()) {
+		family = utils.IPv6Family
+	}
+	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Inc()
+	configurator.trackedVIPAddresses[key] = struct{}{}
+}
+
+func (configurator *network) accountVIPAddressDelete() {
+	if configurator.address == nil {
+		return
+	}
+
+	key := configurator.address.String()
+	if _, ok := configurator.trackedVIPAddresses[key]; !ok {
+		return
+	}
+	delete(configurator.trackedVIPAddresses, key)
+
+	family := utils.IPv4Family
+	if utils.IsIPv6(configurator.address.IP.String()) {
+		family = utils.IPv6Family
+	}
+	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Dec()
+}
+
 // AddIP - Add an IP address to the interface
 // precheck: if true, check if the IP already exists before adding
 // skipDAD: if true, set IFA_F_NODAD flag for IPv6 addresses to skip Duplicate Address Detection
@@ -491,11 +534,7 @@ func (configurator *network) AddIP(precheck bool, skipDAD bool, minLifetime ...i
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", configurator.link.Intf.Attrs().Name))
 	}
 
-	family := utils.IPv4Family
-	if utils.IsIPv6(configurator.address.IP.String()) {
-		family = utils.IPv6Family
-	}
-	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Inc()
+	configurator.accountVIPAddressAdd(existing)
 
 	if configurator.nftables {
 		if err := configurator.configureNFTables(); err != nil {
@@ -1085,6 +1124,7 @@ func (configurator *network) DeleteIP() (bool, error) {
 
 	// Nothing to delete
 	if result == nil {
+		configurator.accountVIPAddressDelete()
 		metrics.VIPOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		return false, nil
 	}
@@ -1094,11 +1134,7 @@ func (configurator *network) DeleteIP() (bool, error) {
 		return false, errors.Wrap(err, "could not delete ip")
 	}
 
-	family := utils.IPv4Family
-	if utils.IsIPv6(configurator.address.IP.String()) {
-		family = utils.IPv6Family
-	}
-	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Dec()
+	configurator.accountVIPAddressDelete()
 
 	if configurator.nftables {
 		vip := configurator.address.IP.String()
