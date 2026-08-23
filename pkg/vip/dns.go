@@ -6,6 +6,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
@@ -47,15 +48,22 @@ func (d *ipUpdater) Run(ctx context.Context) {
 			log.Info("stop ipUpdater")
 			return
 		case <-t.C:
+			previousIP := d.vip.IP()
 			ip, err := utils.LookupHost(dnsName, mode, true)
 			if err != nil {
+				metrics.DNSResolutionsTotal.WithLabelValues("error").Inc()
 				log.Warn("cannot lookup", "name", dnsName, "err", err)
 				// fallback to renewing the existing IP
 				ip = []string{d.vip.IP()}
+			} else {
+				metrics.DNSResolutionsTotal.WithLabelValues("ok").Inc()
 			}
 
-			if err := d.vip.SetIP(ip[0]); err != nil {
-				log.Error("setting IP", "address", ip, "err", err)
+			setIPErr := d.vip.SetIP(ip[0])
+			if setIPErr != nil {
+				log.Error("setting IP", "address", ip, "err", setIPErr)
+			} else if previousIP != ip[0] {
+				metrics.DNSIPChangesTotal.Inc()
 			}
 
 			// Normal VIP addition for DNS, use skipDAD=false for normal DAD process
