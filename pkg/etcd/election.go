@@ -157,7 +157,10 @@ watcher:
 			m.isLeader = true
 			m.key = m.election.Key() // by this time, this should already be set, since Campaign has already returned
 			log.Debug("Marking self as leader with key", "id", m.memberID, "key", m.key)
-		case response := <-changes:
+		case response, ok := <-changes:
+			if !ok {
+				break watcher
+			}
 			log.Debug("Leader Changes", "id", m.memberID, "response", response)
 			if len(response.Kvs) == 0 {
 				// There is a race condition where just after we stop being the leader
@@ -221,7 +224,11 @@ func (m *member) tryToBeLeader(ctx context.Context, wg *sync.WaitGroup) {
 	// stop its processes
 	// TODO: is this too cautious?
 	log.Debug("timeout before OnStartedLeading", "id", m.memberID, "timeout", m.leaseTTL)
-	time.Sleep(time.Second * time.Duration(m.leaseTTL))
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Second * time.Duration(m.leaseTTL)):
+	}
 
 	// We are the leader, execute our code
 	m.callbacks.OnStartedLeading(ctx)
