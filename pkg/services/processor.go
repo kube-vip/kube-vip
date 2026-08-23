@@ -352,6 +352,9 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 }
 
 func (p *Processor) Stop() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	for _, instance := range p.ServiceInstances {
 		for _, cluster := range instance.Clusters {
 			cluster.Stop()
