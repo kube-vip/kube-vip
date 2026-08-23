@@ -243,6 +243,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
+			metrics.WatcherRestartsTotal.WithLabelValues("node", "watch_error").Inc()
 			watchErr = fmt.Errorf("node watcher error: %w", utils.WatchError(event.Object))
 			log.Error("watcher", "err", watchErr)
 		default:
@@ -256,6 +257,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 	if ctx.Err() != nil {
 		return nil
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("node", "channel_closed").Inc()
 	return utils.NewPanicError("node watcher channel closed unexpectedly")
 }
 

@@ -55,6 +55,22 @@ var (
 	DNSIPChangesTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{Name: "kube_vip_dns_ip_changes_total", Help: "DNS-driven VIP IP changes"},
 	)
+	BGPRoutesAdvertised = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_bgp_routes_advertised", Help: "BGP routes currently advertised by address family"},
+		[]string{"family"},
+	)
+	BGPRouteOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_bgp_route_operations_total", Help: "BGP route operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	EgressRules = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_egress_rules", Help: "Egress SNAT rules currently configured by table"},
+		[]string{"table"},
+	)
+	EgressOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_egress_operations_total", Help: "Egress SNAT operations by operation and result"},
+		[]string{"op", "result"},
+	)
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -97,6 +113,10 @@ var (
 			Help: "Per-service leader election failures by reason"},
 		[]string{"namespace", "name", "reason"},
 	)
+	WatcherRestartsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_watcher_restarts_total", Help: "Watcher restarts by kind and reason"},
+		[]string{"kind", "reason"},
+	)
 
 	// This is a prometheus gauge indicating the state of the sessions.
 	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
@@ -106,6 +126,9 @@ var (
 		Name:      "bgp_session_info",
 		Help:      "Display state of session by setting metric for label value with current state to 1",
 	}, []string{"state", "peer"},
+	)
+	UPNPMappings = prometheus.NewGauge(
+		prometheus.GaugeOpts{Name: "kube_vip_upnp_mappings", Help: "UPNP mappings currently tracked"},
 	)
 
 	// General Health
@@ -128,6 +151,10 @@ func RegisterPrometheusMetrics() {
 		RouteOperationsTotal,
 		DNSResolutionsTotal,
 		DNSIPChangesTotal,
+		BGPRoutesAdvertised,
+		BGPRouteOperationsTotal,
+		EgressRules,
+		EgressOperationsTotal,
 		LeaderTransitionsTotal,
 		IsLeader,
 		WatcherLoops,
@@ -135,7 +162,9 @@ func RegisterPrometheusMetrics() {
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
+		WatcherRestartsTotal,
 		BGPSessionInfoGauge,
+		UPNPMappings,
 		BuildInfo,
 		CountServiceWatchEvent,
 	)

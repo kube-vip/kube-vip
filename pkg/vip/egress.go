@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
 	ct "github.com/florianl/go-conntrack"
@@ -96,7 +97,9 @@ func (e *Egress) DeleteMangleMarkingForNetwork(podIP, name, network string) erro
 	return e.ipTablesClient.Delete("mangle", name, "-s", podIP, "-d", network, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) DeleteSourceNat(podIP, vip string) error {
+func (e *Egress) DeleteSourceNat(podIP, vip string) (err error) {
+	defer func() { observeSNATOperation("delete", err, -1) }()
+
 	log.Info("[egress] Removing source nat", "podIP", podIP, "vip", vip)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
@@ -107,7 +110,9 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 	return e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
+func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) (err error) {
+	defer func() { observeSNATOperation("delete", err, -1) }()
+
 	log.Info("[egress] Removing source nat", "podIP", podIP, "vip", vip, "destination port", port)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
@@ -165,7 +170,9 @@ func (e *Egress) InsertMangeTableIntoPrerouting(name string) error {
 	return e.ipTablesClient.Insert("mangle", "PREROUTING", 1, "-j", name, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) InsertSourceNat(vip, podIP string) error {
+func (e *Egress) InsertSourceNat(vip, podIP string) (err error) {
+	defer func() { observeSNATOperation("add", err, 1) }()
+
 	log.Info("[egress] Adding source nat", "original source", podIP, "new source", vip)
 	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment); err != nil {
 		return err
@@ -178,7 +185,9 @@ func (e *Egress) InsertSourceNat(vip, podIP string) error {
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) error {
+func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) (err error) {
+	defer func() { observeSNATOperation("add", err, 1) }()
+
 	log.Info("[egress] Adding source nat", "from", podIP, "to", vip, "port", port)
 	natRules, err := e.ipTablesClient.List("nat", "POSTROUTING")
 	if err != nil {
@@ -202,6 +211,16 @@ func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto strin
 	}
 
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
+}
+
+func observeSNATOperation(op string, err error, rulesDelta float64) {
+	result := "ok"
+	if err != nil {
+		result = "error"
+	} else {
+		metrics.EgressRules.WithLabelValues(iptables.TableNat).Add(rulesDelta)
+	}
+	metrics.EgressOperationsTotal.WithLabelValues(op, result).Inc()
 }
 
 func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts, srcPorts string) error {
