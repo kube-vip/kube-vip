@@ -117,6 +117,10 @@ func (q *serviceEventQueue) Wait() {
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, forcedOnly bool) error {
+	loops := metrics.WatcherLoops.WithLabelValues("service")
+	loops.Inc()
+	defer loops.Dec()
+
 	if serviceFunc == nil {
 		return errServiceCallbackRequired
 	}
