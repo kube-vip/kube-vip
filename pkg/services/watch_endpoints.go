@@ -100,6 +100,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			if svcCtx.Ctx.Err() != nil {
 				return nil
 			}
+			metrics.WatcherRestartsTotal.WithLabelValues("endpoint", "watch_error").Inc()
 			watchErr := utils.WatchError(event.Object)
 			log.Error("watch error", "provider", provider.GetLabel(), "err", watchErr)
 			return utils.WrapPanicError(watchErr, "[%s] endpoint watch failed", provider.GetLabel())
@@ -108,6 +109,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	if svcCtx.Ctx.Err() != nil {
 		return nil
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("endpoint", "channel_closed").Inc()
 	log.Info("[endpoint watcher] stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 	return utils.NewPanicError("[%s] endpoint watch channel closed unexpectedly for service %s/%s", provider.GetLabel(), service.Namespace, service.Name)
 }

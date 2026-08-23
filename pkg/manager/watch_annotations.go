@@ -11,6 +11,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
 	v1 "k8s.io/api/core/v1"
@@ -107,6 +108,7 @@ func annotationsWatcher(ctx context.Context, clientSet,
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
+			metrics.WatcherRestartsTotal.WithLabelValues("annotations", "watch_error").Inc()
 			log.Error("annotations watcher failed", "err", utils.WatchError(event.Object))
 		default:
 		}
@@ -115,6 +117,7 @@ func annotationsWatcher(ctx context.Context, clientSet,
 	if ctx.Err() != nil {
 		return nil
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("annotations", "channel_closed").Inc()
 	return utils.NewPanicError("annotations watcher channel closed unexpectedly")
 }
 
