@@ -12,6 +12,8 @@ import (
 
 // knownUnmergedFields records fields which the current hand-written merge does
 // not copy from a file configuration. Each entry is a follow-up tracking note.
+//
+//nolint:gosec // map of Config field names to notes, not credentials
 var knownUnmergedFields = map[string]string{
 	"KubernetesAddr":                                "mergeConfigValues has no Kubernetes API address branch",
 	"LoadBalancerClassOnly":                         "mergeConfigValues has no load balancer class-only branch",
