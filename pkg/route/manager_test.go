@@ -186,6 +186,7 @@ func Test_MultipleRoutesAddDel(t *testing.T) {
 
 type mockRoute struct {
 	added     bool
+	addCalls  int
 	addErr    error
 	updated   bool
 	updateErr error
@@ -195,6 +196,7 @@ type mockRoute struct {
 }
 
 func (mr *mockRoute) AddRoute(_ bool) (bool, error) {
+	mr.addCalls++
 	return mr.added, mr.addErr
 }
 
