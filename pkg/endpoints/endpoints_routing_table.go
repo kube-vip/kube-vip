@@ -66,9 +66,7 @@ func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpo
 
 	rt.clearEgress(lastKnownGoodEndpoint, service)
 
-	if svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
-	}
+	svcCtx.CallLeaderCancel()
 }
 
 func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, error) {

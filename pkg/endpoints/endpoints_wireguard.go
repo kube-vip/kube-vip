@@ -212,9 +212,7 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 		}
 	}
 
-	if svcCtx != nil && svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
-	}
+	svcCtx.CallLeaderCancel()
 }
 
 // getEndpoints retrieves the list of endpoints for a service

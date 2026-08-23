@@ -65,7 +65,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 			select {
 			case <-ctx.Ctx.Done():
 				return nil
-			case <-ctx.EndpointsReady:
+			case <-ctx.GetEndpointsReady():
 			}
 		}
 

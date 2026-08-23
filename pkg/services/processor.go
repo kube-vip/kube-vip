@@ -223,13 +223,13 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	}
 
 	// this goroutine starts service handling function (with or without leaderelection)
-	if !svcCtx.IsWatched {
+	if !svcCtx.IsWatchedLocked() {
 		wg.Go(func() {
 			watchWg := sync.WaitGroup{}
 			defer func() {
 				// wait for the sub-goroutines and tag service as not watched
 				watchWg.Wait()
-				svcCtx.IsWatched = false
+				svcCtx.SetWatched(false)
 			}()
 
 			watchWg.Go(func() {
@@ -268,7 +268,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		})
 
 		// tag service as watched
-		svcCtx.IsWatched = true
+		svcCtx.SetWatched(true)
 	}
 
 	if !p.config.EnableServicesElection {
