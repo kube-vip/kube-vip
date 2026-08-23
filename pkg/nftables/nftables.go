@@ -22,6 +22,7 @@ import (
 const (
 	NatTable               = "kube_vip_%s"
 	SNatChain              = "kube_vip_snat_%s"
+	egressSNATChainPrefix  = "kube_vip_snat_"
 	DefaultEgressTableName = "kube_vip"
 )
 
@@ -67,7 +68,7 @@ func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCI
 		if err != nil {
 			result = "error"
 		} else {
-			metrics.EgressRules.WithLabelValues(resolvedTableName).Inc()
+			setEgressRulesGauge(resolvedTableName, IPv6)
 		}
 		metrics.EgressOperationsTotal.WithLabelValues("add", result).Inc()
 	}()
@@ -321,13 +322,12 @@ func DeleteSNAT(IPv6 bool, service string) error {
 // DeleteSNATFromTable deletes an egress SNAT chain from the configured table.
 func DeleteSNATFromTable(IPv6 bool, service, tableName string) (err error) {
 	resolvedTableName := egressTableName(tableName, IPv6)
-	deleted := false
 	defer func() {
 		result := "ok"
 		if err != nil {
 			result = "error"
-		} else if deleted {
-			metrics.EgressRules.WithLabelValues(resolvedTableName).Dec()
+		} else {
+			setEgressRulesGauge(resolvedTableName, IPv6)
 		}
 		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
 	}()
@@ -348,9 +348,6 @@ func DeleteSNATFromTable(IPv6 bool, service, tableName string) (err error) {
 		slog.Info("[egress]", "Deleting chain", chainName)
 		conn.DelChain(chain)
 		err = conn.Flush()
-		if err == nil {
-			deleted = true
-		}
 		return err
 
 	}
@@ -362,13 +359,12 @@ func DeleteSNATFromTable(IPv6 bool, service, tableName string) (err error) {
 // present. It is used while migrating a Service between instance-owned tables.
 func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) (err error) {
 	resolvedTableName := egressTableName(tableName, IPv6)
-	deleted := false
 	defer func() {
 		result := "ok"
 		if err != nil {
 			result = "error"
-		} else if deleted {
-			metrics.EgressRules.WithLabelValues(resolvedTableName).Dec()
+		} else {
+			setEgressRulesGauge(resolvedTableName, IPv6)
 		}
 		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
 	}()
@@ -390,9 +386,6 @@ func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) (err erro
 			slog.Info("[egress] deleting service chain", "table", table.Name, "chain", chainName)
 			conn.DelChain(chain)
 			err = conn.Flush()
-			if err == nil {
-				deleted = true
-			}
 			return err
 		}
 	}
@@ -426,7 +419,7 @@ func deleteSNATFromTables(IPv6 bool, service, keepTableName string) (err error) 
 			result = "error"
 		} else {
 			for _, tableName := range deletedTables {
-				metrics.EgressRules.WithLabelValues(tableName).Dec()
+				setEgressRulesGauge(tableName, IPv6)
 			}
 		}
 		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
@@ -469,6 +462,40 @@ func deleteSNATFromTables(IPv6 bool, service, keepTableName string) (err error) 
 
 func shouldDeleteSNATChain(chain *nftables.Chain, chainName, keepTable string) bool {
 	return chain.Table != nil && chain.Name == chainName && chain.Table.Name != keepTable
+}
+
+func setEgressRulesGauge(tableName string, IPv6 bool) {
+	conn, err := nftables.New()
+	if err != nil {
+		slog.Debug("[egress] unable to count nftables SNAT rules", "table", tableName, "err", err)
+		return
+	}
+	defer func() { _ = conn.CloseLasting() }()
+
+	family := nftables.TableFamilyIPv4
+	if IPv6 {
+		family = nftables.TableFamilyIPv6
+	}
+	chains, err := conn.ListChainsOfTableFamily(family)
+	if err != nil {
+		slog.Debug("[egress] unable to list nftables SNAT chains", "table", tableName, "err", err)
+		return
+	}
+
+	count := 0
+	for _, chain := range chains {
+		if chain.Table == nil || chain.Table.Name != tableName || !strings.HasPrefix(chain.Name, egressSNATChainPrefix) {
+			continue
+		}
+		rules, err := conn.GetRules(chain.Table, chain)
+		if err != nil {
+			slog.Debug("[egress] unable to list nftables SNAT rules", "table", tableName, "chain", chain.Name, "err", err)
+			return
+		}
+		count += len(rules)
+	}
+
+	metrics.EgressRules.WithLabelValues(tableName).Set(float64(count))
 }
 
 func GetTable(IPv6 bool) *nftables.Table {
