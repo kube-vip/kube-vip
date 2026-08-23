@@ -393,7 +393,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			It(clusterName+"provides an IPv6 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
+				testControlPlaneVIPsWithTimeout(ctx, []string{cpVIP}, clusterName, client, 2*time.Second, 30*time.Second)
 			})
 		})
 
@@ -1695,6 +1695,11 @@ func cleanupCluster(clusterName, network string, configMtx *sync.Mutex, logger l
 }
 
 func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface) {
+	testControlPlaneVIPsWithTimeout(ctx, cpVIPs, clusterName, client, time.Duration(0), 20*time.Second)
+}
+
+func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface,
+	transportTimeout, eventuallyTimeout time.Duration) {
 	Expect(cpVIPs).ToNot(BeEmpty())
 
 	By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned VIP"))
@@ -1702,7 +1707,7 @@ func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName stri
 	// use the default timeout for establishing a connection to the VIP
 	for _, cpVIP := range cpVIPs {
 		By(withTimestamp(fmt.Sprintf("testing connection to VIP: %s", cpVIP)))
-		assertControlPlaneIsRoutable(cpVIP, time.Duration(0), 20*time.Second)
+		assertControlPlaneIsRoutable(cpVIP, transportTimeout, eventuallyTimeout)
 	}
 
 	var leaderName string
@@ -1720,7 +1725,7 @@ func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName stri
 	for _, cpVIP := range cpVIPs {
 		By(withTimestamp(fmt.Sprintf("testing connection to VIP: %s", cpVIP)))
 		// Allow at most 30 seconds of downtime when polling the control plane nodes
-		assertControlPlaneIsRoutable(cpVIP, time.Duration(0), 20*time.Second)
+		assertControlPlaneIsRoutable(cpVIP, transportTimeout, eventuallyTimeout)
 	}
 }
 
