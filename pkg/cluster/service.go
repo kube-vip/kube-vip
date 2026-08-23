@@ -274,6 +274,12 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 				}
 			}
 		})
+
+		for i := range cluster.Network {
+			if err := cluster.routeMgr.Delete(c.NodeName, cluster.Network[i]); err != nil {
+				log.Warn("deleting route", "err", err)
+			}
+		}
 	}
 
 	if c.EnableBGP {
