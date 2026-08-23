@@ -23,7 +23,7 @@ GINKGO_PROCS ?=
 GINKGO_PARALLEL := $(if $(GINKGO_PROCS),--procs=$(GINKGO_PROCS),-p)
 BUILDX_CACHE_FLAGS ?=
 
-.PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
+.PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker e2e-tests-etcd
 
 all: check install
 
@@ -133,7 +133,7 @@ manifest-test:
 	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster
 
 unit-tests:
-	go test -race ./...
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
 unit-tests-docker:
 	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) sh -c "make unit-tests; status=$$?; chmod 666 coverage.out 2>/dev/null || true; exit $$status"
@@ -149,6 +149,9 @@ e2e-tests-rt: get-whoami
 
 e2e-tests-bgp: get-whoami get-gobgp
 	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
+
+e2e-tests-etcd: get-whoami
+	K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e/etcd
 
 e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
 
