@@ -270,6 +270,10 @@ func (c *Cluster) DeleteEtcdMember(ctx context.Context, toDelete, toKeep nodes.N
 }
 
 func (c *Cluster) Delete() {
+	if c == nil {
+		return
+	}
+
 	Expect(c.provider.Delete(c.Name, "")).To(Succeed())
 }
 

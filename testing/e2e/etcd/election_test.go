@@ -36,7 +36,9 @@ func (t *testConfig) cleanup() {
 		return
 	}
 
-	t.cluster.Delete()
+	if t.cluster != nil {
+		t.cluster.Delete()
+	}
 	Expect(os.RemoveAll(t.kubeVipManifestPath)).To(Succeed())
 	Expect(os.RemoveAll(t.etcdCertsFolder)).To(Succeed())
 }
