@@ -16,6 +16,33 @@ var (
 		prometheus.HistogramOpts{Name: "kube_vip_service_reconcile_duration_seconds", Help: "How long AddOrModify takes end-to-end"},
 		[]string{"namespace"},
 	)
+	VIPAddresses = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_vip_addresses", Help: "VIP addresses currently held by interface and address family"},
+		[]string{"interface", "family"},
+	)
+	VIPOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_vip_operations_total", Help: "VIP address operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	ARPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_arp_advertisements_total", Help: "Gratuitous ARP advertisements by result"},
+		[]string{"result"},
+	)
+	NDPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_ndp_advertisements_total", Help: "Gratuitous NDP advertisements by result"},
+		[]string{"result"},
+	)
+	RouteOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_route_operations_total", Help: "Routing table operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	DNSResolutionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_dns_resolutions_total", Help: "DNS resolutions by result"},
+		[]string{"result"},
+	)
+	DNSIPChangesTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{Name: "kube_vip_dns_ip_changes_total", Help: "DNS-driven VIP IP changes"},
+	)
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -82,6 +109,13 @@ func RegisterPrometheusMetrics() {
 		ActiveServices,
 		ServiceReconcileErrorsTotal,
 		ServiceReconcileDuration,
+		VIPAddresses,
+		VIPOperationsTotal,
+		ARPAdvertisementsTotal,
+		NDPAdvertisementsTotal,
+		RouteOperationsTotal,
+		DNSResolutionsTotal,
+		DNSIPChangesTotal,
 		LeaderTransitionsTotal,
 		IsLeader,
 		WatcherLoops,

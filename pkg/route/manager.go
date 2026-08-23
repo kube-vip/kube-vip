@@ -6,6 +6,8 @@ import (
 	log "log/slog"
 	"sync"
 	"syscall"
+
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 )
 
 type Manager struct {
@@ -59,6 +61,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 				// of kube-vip) try to update it if necessary
 				isUpdated, err := r.UpdateRoutes()
 				if err != nil {
+					metrics.RouteOperationsTotal.WithLabelValues("add", "error").Inc()
 					return fmt.Errorf("error updating existing route: %w", err)
 				}
 				if isUpdated {
@@ -66,6 +69,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 				}
 			} else {
 				// If other error occurs, return error
+				metrics.RouteOperationsTotal.WithLabelValues("add", "error").Inc()
 				return fmt.Errorf("error adding route %q: %w", key, err)
 			}
 		}
@@ -79,6 +83,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 
 	log.Debug("[RT] incremented route", "path", key, "object", object, "cnt", len(itm.objects))
 
+	metrics.RouteOperationsTotal.WithLabelValues("add", "ok").Inc()
 	return nil
 }
 
@@ -92,6 +97,7 @@ func (m *Manager) Delete(object string, r route) error {
 	itm, exists := m.tracker[key]
 	if !exists {
 		log.Debug("[RT] deleting route - nothing to delete", "path", key, "object", object)
+		metrics.RouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		return nil
 	}
 
@@ -102,19 +108,24 @@ func (m *Manager) Delete(object string, r route) error {
 	if len(itm.objects) == 0 {
 		if err := r.DeleteRoute(); err != nil {
 			itm.objects[object] = true
+			metrics.RouteOperationsTotal.WithLabelValues("delete", "error").Inc()
 			return fmt.Errorf("failed to delete route: %w", err)
 		}
 		delete(m.tracker, key)
 		log.Debug("[RT] deleted route", "path", key, "object", object)
 	}
 
+	metrics.RouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 	return nil
 }
 
 func (m *Manager) Clear() {
 	for _, itm := range m.tracker {
 		if err := itm.route.DeleteRoute(); err != nil {
+			metrics.RouteOperationsTotal.WithLabelValues("delete", "error").Inc()
 			log.Warn("[RT] failed to delete route", "err", err.Error())
+		} else {
+			metrics.RouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		}
 	}
 	m.tracker = make(map[string]*item)
