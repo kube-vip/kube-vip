@@ -16,7 +16,7 @@ TARGETOS=linux
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
-GO_VERSION := 1.25.6
+GO_VERSION := 1.26.6
 K8S_VERSION ?= v1.35.0
 GINKGO_ARGS ?=
 GINKGO_PROCS ?=
@@ -136,7 +136,7 @@ unit-tests:
 	go test -race ./...
 
 unit-tests-docker:
-	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) make unit-tests
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) sh -c "make unit-tests; status=$$?; chmod 666 coverage.out 2>/dev/null || true; exit $$status"
 
 integration-tests:
 	go test -tags=integration,e2e -v ./pkg/etcd
