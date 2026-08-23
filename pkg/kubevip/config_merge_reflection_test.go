@@ -12,57 +12,7 @@ import (
 
 // knownUnmergedFields records fields which the current hand-written merge does
 // not copy from a file configuration. Each entry is a follow-up tracking note.
-//
-//nolint:gosec // map of Config field names to notes, not credentials
-var knownUnmergedFields = map[string]string{
-	"KubernetesAddr":                                "mergeConfigValues has no Kubernetes API address branch",
-	"LoadBalancerClassOnly":                         "mergeConfigValues has no load balancer class-only branch",
-	"LoadBalancerClassLegacyHandling":               "mergeConfigValues has no legacy class handling branch",
-	"EnableServiceSecurity":                         "mergeConfigValues has no service security branch",
-	"EnableUPNP":                                    "mergeConfigValues has no UPNP branch",
-	"LoseLeadership":                                "mergeConfigValues has no leadership loss branch",
-	"LeaderElectionType":                            "mergeConfigValues has no election backend branch",
-	"KubernetesLeaderElection.EnableLeaderElection": "mergeLeaderElectionConfig does not copy the enable flag",
-	"Etcd.CAFile":                                   "mergeConfigValues has no Etcd branch",
-	"Etcd.ClientCertFile":                           "mergeConfigValues has no Etcd branch",
-	"Etcd.ClientKeyFile":                            "mergeConfigValues has no Etcd branch",
-	"Etcd.Endpoints":                                "mergeConfigValues has no Etcd branch",
-	"AddPeersAsBackends":                            "mergeConfigValues has no RAFT backend branch",
-	"AllowInterfaceNotUp":                           "mergeConfigValues has no interface tolerance branch",
-	"CleanRoutingTable":                             "mergeConfigValues has no routing cleanup branch",
-	"SkipDAD":                                       "mergeConfigValues has no DAD skip branch",
-	"BGPConfig.MpbgpNexthop":                        "mergeBGPConfig has no MP-BGP nexthop branch",
-	"BGPConfig.MpbgpIPv4":                           "mergeBGPConfig has no MP-BGP IPv4 branch",
-	"BGPConfig.MpbgpIPv6":                           "mergeBGPConfig has no MP-BGP IPv6 branch",
-	"BGPConfig.Zebra.Enabled":                       "mergeBGPConfig has no Zebra branch",
-	"BGPConfig.Zebra.URL":                           "mergeBGPConfig has no Zebra branch",
-	"BGPConfig.Zebra.Version":                       "mergeBGPConfig has no Zebra branch",
-	"BGPConfig.Zebra.SoftwareName":                  "mergeBGPConfig has no Zebra branch",
-	"BGPPeerConfig.Address":                         "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.Port":                            "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.Interface":                       "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.AS":                              "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.Password":                        "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.MultiHop":                        "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.MpbgpNexthop":                    "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.MpbgpIPv4":                       "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.MpbgpIPv6":                       "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.BFDEnabled":                      "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.BFDReceiveInterval":              "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.BFDTransmitInterval":             "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeerConfig.BFDDetectMultiplier":             "mergeConfigValues has no standalone BGP peer branch",
-	"BGPPeers":                                      "mergeConfigValues has no legacy BGP peers branch",
-	"EnableInternalSNAT":                            "mergeConfigValues has no internal SNAT branch",
-	"EgressWithNftables":                            "mergeConfigValues has no nftables egress branch",
-	"PerServiceElectionOnDemand":                    "mergeConfigValues has no per-service election branch",
-	"IsDualStack":                                   "mergeConfigValues has no derived dual-stack state branch",
-	"RequireDualStack":                              "mergeConfigValues has no derived dual-stack requirement branch",
-	"DisableServiceUpdates":                         "mergeConfigValues has no service update branch",
-	"EnableEndpoints":                               "mergeConfigValues has no endpoints branch",
-	"LoInterfaceGlobalScope":                        "mergeConfigValues has no loopback scope branch",
-	"EgressClean":                                   "mergeConfigValues has no egress cleanup branch",
-	"ConfigFile":                                    "mergeConfigValues has no nested config file branch",
-}
+var knownUnmergedFields = map[string]string{}
 
 // mergeReflectionBaseDefaults contains production defaults for fields whose
 // merge branches compare against a non-zero value instead of the Go zero value.
