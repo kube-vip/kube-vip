@@ -12,6 +12,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -59,13 +60,23 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 }
 
 // ApplySNATWithTable applies an egress SNAT rule in the configured table.
-func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool, tableName string) error {
+func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool, tableName string) (err error) {
+	resolvedTableName := egressTableName(tableName, IPv6)
+	defer func() {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		} else {
+			metrics.EgressRules.WithLabelValues(resolvedTableName).Inc()
+		}
+		metrics.EgressOperationsTotal.WithLabelValues("add", result).Inc()
+	}()
+
 	conn, err := nftables.New()
 	if err != nil {
 		return err
 	}
 
-	resolvedTableName := egressTableName(tableName, IPv6)
 	// Look up the table
 	if t, err := FilterTable(conn, resolvedTableName, IPv6); err != nil {
 		if t == nil {
@@ -297,7 +308,19 @@ func DeleteSNAT(IPv6 bool, service string) error {
 }
 
 // DeleteSNATFromTable deletes an egress SNAT chain from the configured table.
-func DeleteSNATFromTable(IPv6 bool, service, tableName string) error {
+func DeleteSNATFromTable(IPv6 bool, service, tableName string) (err error) {
+	resolvedTableName := egressTableName(tableName, IPv6)
+	deleted := false
+	defer func() {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		} else if deleted {
+			metrics.EgressRules.WithLabelValues(resolvedTableName).Dec()
+		}
+		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
+	}()
+
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -313,7 +336,11 @@ func DeleteSNATFromTable(IPv6 bool, service, tableName string) error {
 	if chain != nil {
 		slog.Info("[egress]", "Deleting chain", chainName)
 		conn.DelChain(chain)
-		return conn.Flush()
+		err = conn.Flush()
+		if err == nil {
+			deleted = true
+		}
+		return err
 
 	}
 
@@ -322,7 +349,19 @@ func DeleteSNATFromTable(IPv6 bool, service, tableName string) error {
 
 // DeleteSNATFromTableIfExists deletes a Service's egress SNAT chain when it is
 // present. It is used while migrating a Service between instance-owned tables.
-func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) error {
+func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) (err error) {
+	resolvedTableName := egressTableName(tableName, IPv6)
+	deleted := false
+	defer func() {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		} else if deleted {
+			metrics.EgressRules.WithLabelValues(resolvedTableName).Dec()
+		}
+		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
+	}()
+
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -339,7 +378,11 @@ func DeleteSNATFromTableIfExists(IPv6 bool, service, tableName string) error {
 		if chain.Table != nil && chain.Table.Name == table.Name && chain.Name == chainName {
 			slog.Info("[egress] deleting service chain", "table", table.Name, "chain", chainName)
 			conn.DelChain(chain)
-			return conn.Flush()
+			err = conn.Flush()
+			if err == nil {
+				deleted = true
+			}
+			return err
 		}
 	}
 
@@ -364,7 +407,20 @@ func DeleteSNATFromAllTables(service string) error {
 	)
 }
 
-func deleteSNATFromTables(IPv6 bool, service, keepTableName string) error {
+func deleteSNATFromTables(IPv6 bool, service, keepTableName string) (err error) {
+	deletedTables := make([]string, 0)
+	defer func() {
+		result := "ok"
+		if err != nil {
+			result = "error"
+		} else {
+			for _, tableName := range deletedTables {
+				metrics.EgressRules.WithLabelValues(tableName).Dec()
+			}
+		}
+		metrics.EgressOperationsTotal.WithLabelValues("delete", result).Inc()
+	}()
+
 	conn, err := nftables.New()
 	if err != nil {
 		return err
@@ -391,6 +447,7 @@ func deleteSNATFromTables(IPv6 bool, service, keepTableName string) error {
 		}
 		slog.Info("[egress] deleting stale service chain", "table", chain.Table.Name, "chain", chainName)
 		conn.DelChain(chain)
+		deletedTables = append(deletedTables, chain.Table.Name)
 		deleted = true
 	}
 	if deleted {
