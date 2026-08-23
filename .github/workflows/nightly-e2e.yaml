@@ -5,6 +5,9 @@ on:
     - cron: '30 2 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   unit-coverage:
     runs-on: ubuntu-latest
@@ -24,11 +27,12 @@ jobs:
         with:
           name: unit-coverage
           path: coverage.out
+          if-no-files-found: error
+        if: always()
   etcd-e2e:
     runs-on: ubuntu-latest
     name: Etcd E2E tests
     timeout-minutes: 60
-    continue-on-error: true
     steps:
       - name: Ensure fs wont cause issues
         run: sudo sysctl fs.inotify.max_user_instances=8192 && sudo sysctl fs.inotify.max_user_watches=524288
@@ -41,7 +45,14 @@ jobs:
       - name: Build image locally
         run: make dockerx86Local
       - name: Run Etcd tests
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-etcd
+        id: etcd
+        # The suite has been out of CI and may be unstable; keep the workflow green
+        # but surface the failure in the run summary until it is proven reliable.
+        continue-on-error: true
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-etcd.json --output-dir=/tmp" make e2e-tests-etcd
+      - name: Report etcd suite failure
+        if: steps.etcd.outcome == 'failure'
+        run: echo "::warning::etcd e2e suite failed (non-blocking); see the etcd-e2e-logs artifact" && echo "etcd e2e suite FAILED (non-blocking)" >> "$GITHUB_STEP_SUMMARY"
       - name: Save logs
         uses: actions/upload-artifact@v7
         with:
