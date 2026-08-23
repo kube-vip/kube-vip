@@ -1,0 +1,50 @@
+name: Nightly e2e
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  unit-coverage:
+    runs-on: ubuntu-latest
+    name: Unit tests with coverage
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run tests
+        run: make unit-tests
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-coverage
+          path: coverage.out
+  etcd-e2e:
+    runs-on: ubuntu-latest
+    name: Etcd E2E tests
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - name: Ensure fs wont cause issues
+        run: sudo sysctl fs.inotify.max_user_instances=8192 && sudo sysctl fs.inotify.max_user_watches=524288
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build image locally
+        run: make dockerx86Local
+      - name: Run Etcd tests
+        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true make e2e-tests-etcd
+      - name: Save logs
+        uses: actions/upload-artifact@v7
+        with:
+          name: etcd-e2e-logs
+          path: /tmp/kube-vip-test*
+        if: always()
