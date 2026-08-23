@@ -223,7 +223,7 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRoute
 // startRoutingTableVipService launches vipService in routing-table mode with a
 // mock network and a real route.Manager (which only drives the mock network's
 // route methods, so no netlink calls happen). Registers cleanup to stop it.
-func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *mockNetwork) {
+func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *mockNetwork) (context.CancelFunc, <-chan struct{}) {
 	t.Helper()
 
 	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
@@ -244,6 +244,8 @@ func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *moc
 		cancel()
 		<-done
 	})
+
+	return cancel, done
 }
 
 func newRoutingTableConfig(url, caPath string) *kubevip.Config {
@@ -318,13 +320,15 @@ func (m *mockBGPRouteManager) setDelErr(err error) {
 	m.mu.Unlock()
 }
 
-// mockNetwork implements vip.Network with no-op operations.
+// mockNetwork implements vip.Network with in-memory VIP and route state.
 type mockNetwork struct {
 	ip   string
 	cidr string
 
-	mu      sync.Mutex
-	present bool
+	mu               sync.Mutex
+	present          bool
+	routePresent     bool
+	deleteRouteCalls int
 }
 
 func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
@@ -344,9 +348,35 @@ func (m *mockNetwork) isPresent() bool {
 	defer m.mu.Unlock()
 	return m.present
 }
-func (m *mockNetwork) AddRoute(bool) (bool, error)     { return false, nil }
-func (m *mockNetwork) ReplaceRoute() error             { return nil }
-func (m *mockNetwork) DeleteRoute() error              { return nil }
+func (m *mockNetwork) AddRoute(bool) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.routePresent = true
+	return true, nil
+}
+func (m *mockNetwork) ReplaceRoute() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.routePresent = true
+	return nil
+}
+func (m *mockNetwork) DeleteRoute() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteRouteCalls++
+	m.routePresent = false
+	return nil
+}
+func (m *mockNetwork) isRoutePresent() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.routePresent
+}
+func (m *mockNetwork) routeDeleteCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deleteRouteCalls
+}
 func (m *mockNetwork) UpdateRoutes() (bool, error)     { return false, nil }
 func (m *mockNetwork) IsSet() (*netlink.Addr, error)   { return nil, nil }
 func (m *mockNetwork) IP() string                      { return m.ip }
