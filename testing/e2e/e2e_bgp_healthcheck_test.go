@@ -99,17 +99,13 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 				node := kindCluster.Nodes[rand.IntN(len(kindCluster.Nodes))]
 
 				By(fmt.Sprintf("stopping the apiserver on node %s", node.String()))
-				e2e.RunInNode(node, "mv",
-					"/etc/kubernetes/manifests/kube-apiserver.yaml",
-					"/tmp/kube-apiserver.yaml")
+				Expect(e2e.StashPodManifest(kindCluster.Name, node.String(), "kube-apiserver.yaml")).To(Succeed())
 
 				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes)-1, 30*time.Second)
 				assertVIPReachable(ctx, server, cpVIP, httpClient)
 
 				By(fmt.Sprintf("restoring the apiserver on node %s", node.String()))
-				e2e.RunInNode(node, "mv",
-					"/tmp/kube-apiserver.yaml",
-					"/etc/kubernetes/manifests/kube-apiserver.yaml")
+				Expect(e2e.RestorePodManifest(kindCluster.Name, node.String(), "kube-apiserver.yaml")).To(Succeed())
 
 				bgp.CheckPathCount(ctx, server.Client, cpVIP, len(kindCluster.Nodes), 120*time.Second)
 				assertVIPReachable(ctx, server, cpVIP, httpClient)
