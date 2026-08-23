@@ -1,11 +1,13 @@
 package kubevip
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kube-vip/kube-vip/pkg/debouncer"
+	"github.com/kube-vip/kube-vip/pkg/detector"
 )
 
 // knownUnmergedFields records fields which the current hand-written merge does
@@ -58,8 +60,15 @@ var knownUnmergedFields = map[string]string{
 	"LoInterfaceGlobalScope":                        "mergeConfigValues has no loopback scope branch",
 	"EgressClean":                                   "mergeConfigValues has no egress cleanup branch",
 	"ConfigFile":                                    "mergeConfigValues has no nested config file branch",
-	"DHCPBackoffAttempts":                           "mergeConfigValues expects the command-line default in the base config",
-	"DebounceTime":                                  "mergeConfigValues expects the debouncer default in the base config",
+}
+
+// mergeReflectionBaseDefaults contains production defaults for fields whose
+// merge branches compare against a non-zero value instead of the Go zero value.
+// Add future non-zero-default fields here so the reflection test exercises the
+// same merge condition as production.
+var mergeReflectionBaseDefaults = map[string]any{
+	"DHCPBackoffAttempts": uint(DefaultDHCPBackoffAttempts),
+	"DebounceTime":        debouncer.DefaultTime,
 }
 
 type mergeReflectionField struct {
@@ -70,7 +79,7 @@ type mergeReflectionField struct {
 func TestMergeConfigCoversAllFields(t *testing.T) {
 	t.Parallel()
 
-	fields := collectMergeReflectionFields(reflect.TypeOf(Config{}), "")
+	fields := collectMergeReflectionFields(t, reflect.TypeOf(Config{}), "")
 	tested := make(map[string]struct{}, len(fields))
 
 	for _, field := range fields {
@@ -80,15 +89,21 @@ func TestMergeConfigCoversAllFields(t *testing.T) {
 			t.Parallel()
 
 			baseConfig := &Config{}
+			if defaultValue, ok := mergeReflectionBaseDefaults[field.path]; ok {
+				defaultReflectValue := reflect.ValueOf(defaultValue)
+				if defaultReflectValue.Type() != field.value.Type() {
+					t.Fatalf("base default for %s has type %s, want %s; update mergeReflectionBaseDefaults", field.path, defaultReflectValue.Type(), field.value.Type())
+				}
+				setConfigField(baseConfig, field.path, defaultReflectValue)
+			}
 			fileConfig := &Config{}
-			setConfigField(baseConfig, field.path, reflect.Zero(field.value.Type()))
 			setConfigField(fileConfig, field.path, field.value)
 
 			mergeConfigValues(baseConfig, fileConfig)
 			got := configFieldValue(baseConfig, field.path)
 			if reflect.DeepEqual(got.Interface(), field.value.Interface()) {
 				if reason, ok := knownUnmergedFields[field.path]; ok {
-					t.Fatalf("stale allowlist entry for %s: field now merges (%s)", field.path, reason)
+					t.Fatalf("stale allowlist entry for %s: field now merges (%s); delete this knownUnmergedFields entry", field.path, reason)
 				}
 				return
 			}
@@ -98,13 +113,13 @@ func TestMergeConfigCoversAllFields(t *testing.T) {
 				return
 			}
 
-			t.Fatalf("file value for %s was not preserved: got %#v, want %#v", field.path, got.Interface(), field.value.Interface())
+			t.Fatalf("file value for %s was not preserved: got %#v, want %#v; add a merge branch in mergeConfigValues or add the field to knownUnmergedFields", field.path, got.Interface(), field.value.Interface())
 		})
 	}
 
 	for path, reason := range knownUnmergedFields {
 		if _, ok := tested[path]; !ok {
-			t.Errorf("allowlisted field %s was not exercised: %s", path, reason)
+			t.Errorf("stale allowlist entry for %s: field was not exercised (%s); delete this knownUnmergedFields entry", path, reason)
 		}
 	}
 
@@ -120,10 +135,18 @@ func TestMergeConfigCoversAllFields(t *testing.T) {
 	}
 }
 
-func collectMergeReflectionFields(t reflect.Type, prefix string) []mergeReflectionField {
+func collectMergeReflectionFields(t *testing.T, typ reflect.Type, prefix string) []mergeReflectionField {
+	t.Helper()
+
 	var fields []mergeReflectionField
-	for i := 0; i < t.NumField(); i++ {
-		structField := t.Field(i)
+	for i := 0; i < typ.NumField(); i++ {
+		structField := typ.Field(i)
+		if structField.PkgPath != "" {
+			// Unexported fields cannot be set or compared through this test's
+			// reflection helpers.
+			continue
+		}
+
 		path := structField.Name
 		if prefix != "" {
 			path = prefix + "." + path
@@ -131,31 +154,33 @@ func collectMergeReflectionFields(t reflect.Type, prefix string) []mergeReflecti
 
 		switch structField.Type.Kind() {
 		case reflect.Struct:
-			fields = append(fields, collectMergeReflectionFields(structField.Type, path)...)
+			fields = append(fields, collectMergeReflectionFields(t, structField.Type, path)...)
 		case reflect.Slice, reflect.Map:
 			// The merge copies these fields as complete values. Populated values
 			// exercise the slice or map branch and include nested struct fields.
 			fields = append(fields, mergeReflectionField{
 				path:  path,
-				value: nonZeroMergeValue(structField.Type, path),
+				value: nonZeroMergeValue(t, structField.Type, path),
 			})
 		case reflect.Bool, reflect.String,
 			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			fields = append(fields, mergeReflectionField{
 				path:  path,
-				value: nonZeroMergeValue(structField.Type, path),
+				value: nonZeroMergeValue(t, structField.Type, path),
 			})
 		default:
-			panic(fmt.Sprintf("unsupported Config field %s of type %s", path, structField.Type))
+			t.Fatalf("unsupported Config field %s of kind %s; add a reflection case for this kind or skip the field explicitly", path, structField.Type.Kind())
 		}
 	}
 	return fields
 }
 
-func nonZeroMergeValue(t reflect.Type, path string) reflect.Value {
-	value := reflect.New(t).Elem()
-	switch t.Kind() {
+func nonZeroMergeValue(t *testing.T, typ reflect.Type, path string) reflect.Value {
+	t.Helper()
+
+	value := reflect.New(typ).Elem()
+	switch typ.Kind() {
 	case reflect.Bool:
 		value.SetBool(true)
 	case reflect.String:
@@ -165,20 +190,20 @@ func nonZeroMergeValue(t reflect.Type, path string) reflect.Value {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		value.SetUint(17)
 	case reflect.Slice:
-		value = reflect.MakeSlice(t, 1, 1)
-		value.Index(0).Set(nonZeroMergeValue(t.Elem(), path+"[0]"))
+		value = reflect.MakeSlice(typ, 1, 1)
+		value.Index(0).Set(nonZeroMergeValue(t, typ.Elem(), path+"[0]"))
 	case reflect.Map:
-		value = reflect.MakeMapWithSize(t, 1)
-		value.SetMapIndex(nonZeroMergeValue(t.Key(), path+"[key]"), nonZeroMergeValue(t.Elem(), path+"[value]"))
+		value = reflect.MakeMapWithSize(typ, 1)
+		value.SetMapIndex(nonZeroMergeValue(t, typ.Key(), path+"[key]"), nonZeroMergeValue(t, typ.Elem(), path+"[value]"))
 	case reflect.Struct:
-		for i := 0; i < t.NumField(); i++ {
+		for i := 0; i < typ.NumField(); i++ {
 			field := value.Field(i)
 			if field.CanSet() {
-				field.Set(nonZeroMergeValue(t.Field(i).Type, path+"."+t.Field(i).Name))
+				field.Set(nonZeroMergeValue(t, typ.Field(i).Type, path+"."+typ.Field(i).Name))
 			}
 		}
 	default:
-		panic(fmt.Sprintf("unsupported Config value type %s at %s", t, path))
+		t.Fatalf("unsupported Config value type %s of kind %s at %s; add a value-generation case for this kind or skip the field explicitly", typ, typ.Kind(), path)
 	}
 	return value
 }
@@ -204,17 +229,49 @@ type environmentSetting struct {
 	value string
 }
 
+// parseEnvironmentEnvVarNames is the shared inventory of names read by
+// ParseEnvironment. It drives both environment cleanup and the completeness
+// check below. Keep canonical names in sync with the constants in
+// config_envvar.go; the uppercase names are the supported aliases.
+var parseEnvironmentEnvVarNames = []string{
+	vipLogLevel, instanceName, vipInterface, vipInterfaceLoGlobal,
+	vipLoseLeadership, vipLoseLeadershipTimeoutSeconds, vipServicesInterface,
+	vipAllowInterfaceNotUp, vipLeaderElection, vipLeaseName, vipLeaseDuration,
+	vipRenewDeadline, vipRetryPeriod, vipLeaseAnnotations, nodeName, vipAddress,
+	address, port, vipDdns, cpNamespace, cpEnable, cpDetect, kubernetesAddr,
+	svcEnable, svcElection, svcNamespace, svcLeaseName, lbClassOnly, lbClassName,
+	lbClassLegacyHandling, vipSubnet, vipSingleNode, annotations, vipStartLeader,
+	vipArp, vipArpRate, vipPreserveOnLeadershipLoss, vipWireguard, vipRoutingTable,
+	vipRoutingTableID, vipRoutingTableType, vipRoutingProtocol, vipCleanRoutingTable,
+	vipSkipDAD, dnsMode, dhcpMode, dhcpBackoffAttempts, disableServiceUpdates,
+	bgpEnable, bgpAttachIPToInterface, bgpRouterInterface, bgpRouterID, bgpRouterAS,
+	bgpPeerAddress, bgpPeers, bgpPeerAS, bgpPeerPassword, bgpMultiHop, bgpSourceIF,
+	bgpSourceIP, bgpHoldTime, bgpKeepaliveInterval, controlPlaneHealthCheckAddress,
+	controlPlaneHealthCheckPeriodSeconds, controlPlaneHealthCheckTimeoutSeconds,
+	controlPlaneHealthCheckFailureThreshold, controlPlaneHealthCheckCAPath, zebraEnable,
+	zebraURL, zebraVersion, zebraSoftwareName, mpbgpNexthop, mpbgpIPv4, mpbgpIPv6,
+	lbEnable, lbPort, lbForwardingMethod, EnableServiceSecurity,
+	EnableNodeLabeling, prometheusServer, egressPodCidr, egressServiceCidr,
+	egressWithNftables, perServiceElectionOnDemand, egressEnableInternalSNAT,
+	k8sConfigFile, enableEndpoints, mirrorDestInterface, iptablesBackend,
+	backendHealthCheckInterval, healthCheckPort, enableUPNP, egressClean, configFile,
+	strings.ToUpper(instanceName), strings.ToUpper(egressClean),
+}
+
 func TestParseEnvironmentRoundTrip(t *testing.T) {
 	tests := []struct {
-		name  string
-		env   string
-		value string
-		path  string
-		want  any
-		setup []environmentSetting
+		name      string
+		env       string
+		value     string
+		valueFunc func(*testing.T) string
+		path      string
+		want      any
+		wantFunc  func(*testing.T, string) any
+		setup     []environmentSetting
 	}{
 		{name: "logging", env: vipLogLevel, value: "5", path: "Logging", want: int32(5)},
 		{name: "instance name", env: instanceName, value: "release-a", path: "InstanceName", want: "release-a"},
+		{name: "uppercase instance name", env: strings.ToUpper(instanceName), value: "release-uppercase", path: "InstanceName", want: "release-uppercase"},
 		{name: "interface", env: vipInterface, value: "eth9", path: "Interface", want: "eth9"},
 		{name: "loopback global scope", env: vipInterfaceLoGlobal, value: "true", path: "LoInterfaceGlobalScope", want: true},
 		{name: "lose leadership", env: vipLoseLeadership, value: "true", path: "LoseLeadership", want: true},
@@ -227,6 +284,7 @@ func TestParseEnvironmentRoundTrip(t *testing.T) {
 		{name: "renew deadline", env: vipRenewDeadline, value: "12", path: "KubernetesLeaderElection.RenewDeadline", want: 12},
 		{name: "retry period", env: vipRetryPeriod, value: "3", path: "KubernetesLeaderElection.RetryPeriod", want: 3},
 		{name: "lease annotations", env: vipLeaseAnnotations, value: `{"team":"network"}`, path: "KubernetesLeaderElection.LeaseAnnotations", want: map[string]string{"team": "network"}},
+		{name: "node name", env: nodeName, value: "node-a", path: "NodeName", want: "node-a"},
 		{name: "vip address", env: vipAddress, value: "192.0.2.10", path: "VIP", want: "192.0.2.10"},
 		{name: "address", env: address, value: "vip.example.test", path: "Address", want: "vip.example.test"},
 		{name: "port", env: port, value: "6443", path: "Port", want: uint16(6443)},
@@ -262,6 +320,7 @@ func TestParseEnvironmentRoundTrip(t *testing.T) {
 		{name: "disable service updates", env: disableServiceUpdates, value: "true", path: "DisableServiceUpdates", want: true},
 		{name: "bgp enable", env: bgpEnable, value: "true", path: "EnableBGP", want: true},
 		{name: "bgp attach ip", env: bgpAttachIPToInterface, value: "true", path: "BGPAttachIPToInterface", want: true},
+		{name: "bgp router interface", env: bgpRouterInterface, valueFunc: testBGPInterface, path: "BGPConfig.RouterID", wantFunc: testBGPRouterID},
 		{name: "bgp router id", env: bgpRouterID, value: "192.0.2.1", path: "BGPConfig.RouterID", want: "192.0.2.1"},
 		{name: "bgp router as", env: bgpRouterAS, value: "65000", path: "BGPConfig.AS", want: uint32(65000)},
 		{name: "bgp peer as", env: bgpPeerAS, value: "65001", path: "BGPPeerConfig.AS", want: uint32(65001)},
@@ -304,7 +363,28 @@ func TestParseEnvironmentRoundTrip(t *testing.T) {
 		{name: "health check port", env: healthCheckPort, value: "1024", path: "HealthCheckPort", want: 1024},
 		{name: "upnp", env: enableUPNP, value: "true", path: "EnableUPNP", want: true},
 		{name: "egress clean", env: egressClean, value: "true", path: "EgressClean", want: true},
+		{name: "uppercase egress clean", env: strings.ToUpper(egressClean), value: "true", path: "EgressClean", want: true},
 		{name: "config file", env: configFile, value: "/etc/kube-vip/config.yaml", path: "ConfigFile", want: "/etc/kube-vip/config.yaml"},
+	}
+
+	sharedEnvVars := make(map[string]struct{}, len(parseEnvironmentEnvVarNames))
+	for _, env := range parseEnvironmentEnvVarNames {
+		if _, ok := sharedEnvVars[env]; ok {
+			t.Errorf("environment variable %q appears more than once in parseEnvironmentEnvVarNames; remove the duplicate", env)
+		}
+		sharedEnvVars[env] = struct{}{}
+	}
+	testedEnvVars := make(map[string]struct{}, len(tests))
+	for _, tc := range tests {
+		if _, ok := sharedEnvVars[tc.env]; !ok {
+			t.Errorf("round-trip case %q uses environment variable %q outside parseEnvironmentEnvVarNames; add it to the shared list", tc.name, tc.env)
+		}
+		testedEnvVars[tc.env] = struct{}{}
+	}
+	for _, env := range parseEnvironmentEnvVarNames {
+		if _, ok := testedEnvVars[env]; !ok {
+			t.Errorf("environment variable %q is cleared but has no round-trip test; add a TestParseEnvironmentRoundTrip case", env)
+		}
 	}
 
 	for _, tc := range tests {
@@ -314,47 +394,51 @@ func TestParseEnvironmentRoundTrip(t *testing.T) {
 			for _, setting := range tc.setup {
 				t.Setenv(setting.name, setting.value)
 			}
-			t.Setenv(tc.env, tc.value)
+			value := tc.value
+			if tc.valueFunc != nil {
+				value = tc.valueFunc(t)
+			}
+			t.Setenv(tc.env, value)
 
 			config := &Config{}
 			if err := ParseEnvironment(config); err != nil {
-				t.Fatalf("ParseEnvironment() error = %v", err)
+				t.Fatalf("ParseEnvironment() error = %v; fix ParseEnvironment or adjust this test case's environment values", err)
 			}
 
 			got := configFieldValue(config, tc.path)
-			if !reflect.DeepEqual(got.Interface(), tc.want) {
-				t.Fatalf("%s = %#v, want %#v", tc.path, got.Interface(), tc.want)
+			want := tc.want
+			if tc.wantFunc != nil {
+				want = tc.wantFunc(t, value)
+			}
+			if !reflect.DeepEqual(got.Interface(), want) {
+				t.Fatalf("%s = %#v, want %#v; update ParseEnvironment or this test case's expected value", tc.path, got.Interface(), want)
 			}
 		})
 	}
 }
 
+func testBGPInterface(t *testing.T) string {
+	t.Helper()
+
+	interfaceName, _, err := detector.FindIPAddress("")
+	if err != nil {
+		t.Skipf("cannot test %s without a non-loopback interface: %v", bgpRouterInterface, err)
+	}
+	return interfaceName
+}
+
+func testBGPRouterID(t *testing.T, interfaceName string) any {
+	t.Helper()
+
+	_, address, err := detector.FindIPAddress(interfaceName)
+	if err != nil {
+		t.Fatalf("cannot resolve the test BGP interface %q: %v; use a non-loopback interface for this test", interfaceName, err)
+	}
+	return address
+}
+
 func clearParseEnvironmentVariables(t *testing.T) {
-	for _, name := range []string{
-		vipLogLevel, instanceName, vipInterface, vipInterfaceLoGlobal,
-		vipLoseLeadership, vipLoseLeadershipTimeoutSeconds, vipServicesInterface,
-		vipAllowInterfaceNotUp, vipLeaderElection, vipLeaseName, vipLeaseDuration,
-		vipRenewDeadline, vipRetryPeriod, vipLeaseAnnotations, nodeName, vipAddress,
-		address, port, vipDdns, cpNamespace, cpEnable, cpDetect, kubernetesAddr,
-		svcEnable, svcElection, svcNamespace, svcLeaseName, lbClassOnly, lbClassName,
-		lbClassLegacyHandling, vipSubnet, vipSingleNode, annotations, vipStartLeader,
-		vipArp, vipArpRate, vipPreserveOnLeadershipLoss, vipWireguard, vipRoutingTable,
-		vipRoutingTableID, vipRoutingTableType, vipRoutingProtocol, vipCleanRoutingTable,
-		vipSkipDAD, dnsMode, dhcpMode, dhcpBackoffAttempts, disableServiceUpdates,
-		bgpEnable, bgpAttachIPToInterface, bgpRouterInterface, bgpRouterID, bgpRouterAS,
-		bgpPeerAddress, bgpPeers, bgpPeerAS, bgpPeerPassword, bgpMultiHop, bgpSourceIF,
-		bgpSourceIP, bgpHoldTime, bgpKeepaliveInterval, controlPlaneHealthCheckAddress,
-		controlPlaneHealthCheckPeriodSeconds, controlPlaneHealthCheckTimeoutSeconds,
-		controlPlaneHealthCheckFailureThreshold, controlPlaneHealthCheckCAPath, zebraEnable,
-		zebraURL, zebraVersion, zebraSoftwareName, mpbgpNexthop, mpbgpIPv4, mpbgpIPv6,
-		lbEnable, lbPort, lbForwardingMethod, EnableServiceSecurity,
-		EnableNodeLabeling, prometheusServer, egressPodCidr, egressServiceCidr,
-		egressWithNftables, perServiceElectionOnDemand, egressEnableInternalSNAT,
-		k8sConfigFile, enableEndpoints, mirrorDestInterface, iptablesBackend,
-		backendHealthCheckInterval, healthCheckPort, enableUPNP, egressClean, configFile,
-	} {
+	for _, name := range parseEnvironmentEnvVarNames {
 		t.Setenv(name, "")
 	}
-	t.Setenv(strings.ToUpper(instanceName), "")
-	t.Setenv(strings.ToUpper(egressClean), "")
 }
