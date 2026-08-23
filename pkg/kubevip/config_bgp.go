@@ -2,7 +2,6 @@ package kubevip
 
 import (
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 
@@ -260,12 +259,12 @@ func (p *BGPPeer) FindMpbgpAddresses(ap *api.Peer, server *BGPConfig) (string, s
 		}
 
 		if ipv4 != "" {
-			if net.ParseIP(ipv4) == nil {
+			if !utils.IsIPv4(ipv4) {
 				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv4 address", ipv4)
 			}
 		}
 		if ipv6 != "" {
-			if net.ParseIP(ipv6) == nil {
+			if !utils.IsIPv6(ipv6) {
 				return "", "", fmt.Errorf("provided address '%s' is not a valid IPv6 address", ipv6)
 			}
 		}
