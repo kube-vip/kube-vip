@@ -43,7 +43,11 @@ func (t *Table) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 	if t.config.CleanRoutingTable {
 		wg.Go(func() {
 			// we assume that after 10s all services should be configured so we can delete redundant routes
-			time.Sleep(time.Second * 10)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 			if err := t.cleanRoutes(); err != nil {
 				log.Error("error checking for old routes", "err", err)
 			}
