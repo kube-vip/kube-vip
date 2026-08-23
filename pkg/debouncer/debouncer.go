@@ -52,9 +52,8 @@ func (n *ns) add(name string, output chan<- watch.Event) *object {
 	return i
 }
 
-func (n *ns) del(name string) {
-	if _, exists := n.Load(name); exists {
-		n.Delete(name)
+func (n *ns) del(name string, object *object) {
+	if n.CompareAndDelete(name, object) {
 		n.cnt.Add(-1)
 	}
 }
@@ -119,35 +118,57 @@ func (d *debouncer) Start(ctx context.Context) error {
 				return fmt.Errorf("objects of type %T are not supported", v)
 			}
 
-			eventNs, exists := d.getNs(namespace)
-			if !exists {
-				// if not, create new map for the namespace
-				eventNs = d.addNs(namespace)
-			}
+		processEvent:
+			for {
+				eventNs, exists := d.getNs(namespace)
+				if !exists {
+					// if not, create new map for the namespace
+					eventNs = d.addNs(namespace)
+				}
 
-			// check if the object was previously reconciled
-			eventObject, exists := eventNs.get(name)
+				// check if the object was previously reconciled
+				eventObject, exists := eventNs.get(name)
 
-			// if not and the event is not of type 'Deleted', create new object
-			if !exists && tmp.Type != watch.Deleted {
-				eventObject = eventNs.add(name, d.output)
+				// if not and the event is not of type 'Deleted', create new object
+				if !exists && tmp.Type != watch.Deleted {
+					eventObject = eventNs.add(name, d.output)
 
-				wg.Go(func() {
-					// start deboucing events for this object
-					eventObject.start(debouncerCtx, d.debounceTime)
-					// if debouncer for the object ended - e.g. object was deleted - clean the map of objects
-					eventObject = nil
-					eventNs.del(name)
-					// if namespace is empty, delete the namespace map
-					if eventNs.cnt.Load() == 0 {
-						d.delNs(namespace)
+					workerObject := eventObject
+					workerNs := eventNs
+					workerName := name
+					workerNamespace := namespace
+					workerObject.onStop = func() {
+						// Remove the object before its worker can become receiver-less.
+						workerNs.del(workerName, workerObject)
 					}
-				})
-			}
 
-			if eventObject != nil {
+					wg.Go(func() {
+						// start deboucing events for this object
+						workerObject.start(debouncerCtx, d.debounceTime)
+						// if debouncer for the object ended - e.g. object was deleted - clean the map of objects
+						workerNs.del(workerName, workerObject)
+						// if namespace is empty, delete the namespace map
+						if workerNs.cnt.Load() == 0 {
+							d.delNs(workerNamespace, workerNs)
+						}
+					})
+				}
+
+				if eventObject == nil {
+					break processEvent
+				}
+
 				// pass the watch event to the debouncer object
-				eventObject.input <- tmp
+				select {
+				case eventObject.input <- tmp:
+					break processEvent
+				case <-eventObject.stopChan:
+					// The object stopped after the map lookup. Retry the event
+					// against the newly-created object instead of dropping it.
+					continue processEvent
+				case <-debouncerCtx.Done():
+					return nil
+				}
 			}
 		}
 	}
@@ -181,8 +202,8 @@ func (d *debouncer) addNs(namespace string) *ns {
 	return &n
 }
 
-func (d *debouncer) delNs(namespace string) {
-	d.namespaces.Delete(namespace)
+func (d *debouncer) delNs(namespace string, ns *ns) {
+	d.namespaces.CompareAndDelete(namespace, ns)
 }
 
 type object struct {
@@ -190,6 +211,7 @@ type object struct {
 	output   chan<- watch.Event
 	stopChan chan any
 	stopOnce sync.Once
+	onStop   func()
 }
 
 func newObject(output chan<- watch.Event) *object {
@@ -247,6 +269,9 @@ func (o *object) start(ctx context.Context, debounceTime time.Duration) {
 
 func (o *object) stop() {
 	o.stopOnce.Do(func() {
+		if o.onStop != nil {
+			o.onStop()
+		}
 		close(o.stopChan)
 	})
 }
