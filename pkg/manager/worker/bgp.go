@@ -114,6 +114,8 @@ func (b *BGP) StartServices(ctx context.Context) error {
 			return err
 		}
 	} else if b.config.EnableLeaderElection {
+		log.Warn("leader election is enabled, only the elected leader will advertise service VIPs; unset enable_leader_election to keep advertising from every node (ECMP)",
+			"lease", b.config.ServicesLeaseName)
 		b.GlobalLeader(ctx, b.config.ServicesLeaseName)
 	} else {
 		if err := b.ServicesNoLeader(ctx); err != nil {
