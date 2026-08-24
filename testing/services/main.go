@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gookit/slog"
@@ -58,6 +59,13 @@ func run() int {
 	if err != nil {
 		slog.Fatal(err)
 	}
+	defer func() {
+		if os.Getenv("E2E_KEEP_LOGS") != "true" {
+			if err := os.RemoveAll(t.TempDirPath); err != nil {
+				slog.Errorf("failed to remove temporary directory %q: %v", t.TempDirPath, err)
+			}
+		}
+	}()
 
 	if t.ControlPlane {
 		err := t.CreateKind()
@@ -127,11 +135,35 @@ func run() int {
 			slog.Warnf("failed to delete namespace %q: %v", ns, err)
 		}
 	}
+	// Collect every test result so multiple parallel failures are all reported
+	// instead of collapsing to the errgroup's first error.
+	var resultsMu sync.Mutex
+	var errs []error
+	passed := 0
 	runTimed := func(name string, test func() error) error {
 		started := time.Now()
 		err := test()
 		slog.Infof("test %q completed in %s", name, time.Since(started).Round(time.Millisecond))
+		resultsMu.Lock()
+		defer resultsMu.Unlock()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("test %q: %w", name, err))
+		} else {
+			passed++
+		}
 		return err
+	}
+	finish := func() int {
+		const testComplete = "🏆 Testing Complete [%d] passed / [%d] failed"
+		if len(errs) > 0 {
+			for _, err := range errs {
+				slog.Error(err)
+			}
+			slog.Errorf(testComplete, passed, len(errs))
+		} else {
+			slog.Infof(testComplete, passed, len(errs))
+		}
+		return len(errs)
 	}
 
 	// --- Phase A: run independent tests in parallel, each in its own namespace ---
@@ -192,11 +224,9 @@ func run() int {
 		})
 	}
 
-	var errs []error
 	phaseStarted := time.Now()
-	if err := parallelGroup.Wait(); err != nil {
-		errs = append(errs, err)
-	}
+	// Individual results were already collected by runTimed.
+	_ = parallelGroup.Wait()
 	slog.Infof("phase A completed in %s", time.Since(phaseStarted).Round(time.Millisecond))
 
 	// Wait for Phase A pods to terminate before Phase B to avoid port-2112 conflicts.
@@ -206,7 +236,7 @@ func run() int {
 		}
 	}
 	if len(errs) > 0 {
-		return len(errs)
+		return finish()
 	}
 
 	// --- Phase B: egress tests ---
@@ -255,9 +285,8 @@ func run() int {
 			})
 		}
 
-		if err := egressGroup.Wait(); err != nil {
-			errs = append(errs, err)
-		}
+		// Individual results were already collected by runTimed.
+		_ = egressGroup.Wait()
 		slog.Infof("phase B completed in %s", time.Since(phaseStarted).Round(time.Millisecond))
 
 		// Wait for Phase B pods to terminate before Phase C.
@@ -268,7 +297,7 @@ func run() int {
 			}
 		}
 		if len(errs) > 0 {
-			return len(errs)
+			return finish()
 		}
 	}
 
@@ -282,11 +311,10 @@ func run() int {
 		defer cleanup(ns)
 		cfg := t.WithNamespace(ns)
 		phaseStarted = time.Now()
-		if err := runTimed("election-faults", func() error { return cfg.ElectionFaults(ctx, clientset) }); err != nil {
-			errs = append(errs, err)
-		}
+		// The result is collected by runTimed.
+		_ = runTimed("election-faults", func() error { return cfg.ElectionFaults(ctx, clientset) })
 		slog.Infof("phase C completed in %s", time.Since(phaseStarted).Round(time.Millisecond))
 	}
 
-	return len(errs)
+	return finish()
 }
