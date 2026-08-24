@@ -75,7 +75,7 @@ func TestEndpointslicesReplacingSliceUpdatesState(t *testing.T) {
 	assertEndpoints(t, provider, []string{"10.0.0.2"})
 }
 
-func TestEndpointslicesLocalEndpointConditions(t *testing.T) {
+func TestEndpointslicesEndpointConditions(t *testing.T) {
 	yes, no := true, false
 	nodeName := "node-1"
 
@@ -107,6 +107,8 @@ func TestEndpointslicesLocalEndpointConditions(t *testing.T) {
 			if err := provider.LoadObject(slice, func() {}); err != nil {
 				t.Fatalf("LoadObject returned error: %v", err)
 			}
+			// Cluster and Local policy have to agree on which endpoints are usable.
+			assertEndpoints(t, provider, test.want)
 			assertLocalEndpoints(t, provider, nodeName, test.want)
 		})
 	}

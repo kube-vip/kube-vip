@@ -75,10 +75,24 @@ func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
 	return nil
 }
 
+// isServing reports whether an endpoint should receive traffic. Per the
+// EndpointConditions godoc a nil Serving defers to Ready, and a nil Ready is an
+// unknown state that consumers should interpret as ready.
+func isServing(conditions discoveryv1.EndpointConditions) bool {
+	serving := conditions.Serving
+	if serving == nil {
+		serving = conditions.Ready
+	}
+	return serving == nil || *serving
+}
+
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for _, eps := range ep.slices {
 		for _, e := range eps.Endpoints {
+			if !isServing(e.Conditions) {
+				continue
+			}
 			result = append(result, e.Addresses...)
 		}
 	}
@@ -89,13 +103,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 	var localEndpoints []string
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
-			// Per the EndpointConditions godoc a nil Serving defers to Ready, and a nil
-			// Ready is an unknown state that consumers should interpret as ready.
-			serving := endpoint.Conditions.Serving
-			if serving == nil {
-				serving = endpoint.Conditions.Ready
-			}
-			if serving != nil && !*serving {
+			if !isServing(endpoint.Conditions) {
 				continue
 			}
 			for _, address := range endpoint.Addresses {
