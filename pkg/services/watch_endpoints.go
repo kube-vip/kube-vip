@@ -78,22 +78,19 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 
-		case watch.Added, watch.Modified:
-			restart, err := epProcessor.AddOrModify(svcCtx, event, &lastKnownGoodEndpoint, service, id,
+		case watch.Added, watch.Modified, watch.Deleted:
+			if event.Type == watch.Deleted {
+				log.Info("[endpoint watcher] endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
+			}
+
+			restart, err := epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
 				p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
 			if restart {
 				continue
 			} else if err != nil {
-				return fmt.Errorf("[%s] error while processing add/modify event: %w", provider.GetLabel(), err)
+				return fmt.Errorf("[%s] error while processing %s event: %w", provider.GetLabel(), event.Type, err)
 			}
 
-		case watch.Deleted:
-			if err := epProcessor.Delete(svcCtx, service, id, event.Object, &lastKnownGoodEndpoint,
-				p.clientSet, p.updateEgressConfiguration); err != nil {
-				return fmt.Errorf("[%s] error while processing delete event: %w", provider.GetLabel(), err)
-			}
-
-			log.Info("[endpoint watcher] endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 		case watch.Error:
 			if svcCtx.Ctx.Err() != nil {
 				return nil

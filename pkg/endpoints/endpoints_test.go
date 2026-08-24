@@ -62,10 +62,10 @@ func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service
 	return nil
 }
 
-// TestDelete_RecomputesRemainingEndpoints asserts that deleting one EndpointSlice
+// TestReconcile_RecomputesRemainingEndpoints asserts that deleting one EndpointSlice
 // reconciles against the endpoints that remain, instead of assuming the service
 // lost all of them.
-func TestDelete_RecomputesRemainingEndpoints(t *testing.T) {
+func TestReconcile_RecomputesRemainingEndpoints(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -115,17 +115,25 @@ func TestDelete_RecomputesRemainingEndpoints(t *testing.T) {
 			svcCtx.SignalReadiness()
 
 			lastKnown := test.lastKnown
-			err := p.Delete(
+			restart, err := p.Reconcile(
 				svcCtx,
+				watch.Event{
+					Type:   watch.Deleted,
+					Object: &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "slice-1"}},
+				},
+				&lastKnown,
 				&v1.Service{Spec: v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
 				"node-1",
-				&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "slice-1"}},
-				&lastKnown,
+				func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error { return nil },
+				&sync.WaitGroup{},
 				nil,
 				nil,
 			)
 			if err != nil {
-				t.Fatalf("Delete returned error: %v", err)
+				t.Fatalf("Reconcile returned error: %v", err)
+			}
+			if restart {
+				t.Fatal("Reconcile unexpectedly requested restart")
 			}
 
 			if ready := svcCtx.Signalled.Load(); ready != test.expectReady {
@@ -144,7 +152,7 @@ func TestDelete_RecomputesRemainingEndpoints(t *testing.T) {
 	}
 }
 
-func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
+func TestReconcile_ZeroEndpointsBehavior(t *testing.T) {
 	t.Parallel()
 
 	run := func(t *testing.T, service *v1.Service, presetSignalled bool, expectReady bool, expectClear bool, expectProcess bool) {
@@ -162,7 +170,7 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 			svcCtx.SignalReadiness()
 		}
 
-		restart, err := p.AddOrModify(
+		restart, err := p.Reconcile(
 			svcCtx,
 			watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string),
@@ -174,10 +182,10 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 			nil,
 		)
 		if err != nil {
-			t.Fatalf("AddOrModify returned error: %v", err)
+			t.Fatalf("Reconcile returned error: %v", err)
 		}
 		if restart {
-			t.Fatal("AddOrModify unexpectedly requested restart")
+			t.Fatal("Reconcile unexpectedly requested restart")
 		}
 
 		if ready := svcCtx.Signalled.Load(); ready != expectReady {
@@ -216,15 +224,15 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 	})
 }
 
-// TestAddOrModify_ServicesElectionStartsOnce asserts that repeated endpoint events
+// TestReconcile_ServicesElectionStartsOnce asserts that repeated endpoint events
 // for the same service start the leader-election restart loop exactly once.
 //
-// AddOrModify runs on every EndpointSlice add/modify/resync event, and the loop it
+// Reconcile runs on every EndpointSlice add/modify/resync event, and the loop it
 // starts only returns once the service context is cancelled. Starting it per event
 // therefore accumulates duplicate goroutines that all contend on the same lease.
 //
 // See https://github.com/kube-vip/kube-vip/issues/1665.
-func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
+func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 	config := &kubevip.Config{
 		EnableServicesElection: true,
 		LeaderElectionType:     "kubernetes",
@@ -268,13 +276,13 @@ func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
 
 	// Three endpoint events, as a flapping backend pod would produce.
 	for range 3 {
-		restart, err := p.AddOrModify(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+		restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string), service, "node-1", serviceFunc, wg, nil, nil)
 		if err != nil {
-			t.Fatalf("AddOrModify returned error: %v", err)
+			t.Fatalf("Reconcile returned error: %v", err)
 		}
 		if restart {
-			t.Fatal("AddOrModify unexpectedly requested restart")
+			t.Fatal("Reconcile unexpectedly requested restart")
 		}
 	}
 

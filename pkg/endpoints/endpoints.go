@@ -21,7 +21,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -47,20 +46,24 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 	}
 }
 
-func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Event,
+// Reconcile applies a watch event to the provider and reconciles the service
+// against the endpoints that remain afterwards. A deleted object is only one of
+// potentially several backing the service, so deletions are recomputed rather
+// than assumed to empty it. It reports whether the caller should skip this event
+// and wait for the next one.
+func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup,
 	clientSet *kubernetes.Clientset,
 	egressUpdateFunc func(context.Context, *v1.Service) error) (bool, error) {
 
-	var err error
-	if err = p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
-		return false, fmt.Errorf("[%s] error loading k8s object: %w", p.provider.GetLabel(), err)
+	if err := p.applyEvent(svcCtx, event); err != nil {
+		return false, err
 	}
 
 	endpoints, err := p.worker.getEndpoints(service, id)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
 	}
 
 	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
@@ -122,40 +125,18 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	return false, nil
 }
 
-// Delete removes the deleted object from the provider and reconciles against the
-// endpoints that remain, since other objects may still back the same service.
-func (p *Processor) Delete(svcCtx *servicecontext.Context, service *v1.Service, id string,
-	object runtime.Object, lastKnownGoodEndpoint *string, clientSet *kubernetes.Clientset,
-	egressUpdateFunc func(context.Context, *v1.Service) error) error {
-	if err := p.provider.DeleteObject(object); err != nil {
-		return fmt.Errorf("[%s] error deleting object: %w", p.provider.GetLabel(), err)
-	}
-
-	endpoints, err := p.worker.getEndpoints(service, id)
-	if err != nil {
-		return fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
-	}
-	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
-		log.Error("updating instance", "err", err)
-	}
-
-	if len(endpoints) != 0 {
-		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
-
-		if p.shouldProcessInstance() {
-			if err := p.worker.processInstance(svcCtx, service); err != nil {
-				return fmt.Errorf("failed to process remaining endpoints: %w", err)
-			}
+// applyEvent updates the provider's view of the objects backing this service.
+func (p *Processor) applyEvent(svcCtx *servicecontext.Context, event watch.Event) error {
+	if event.Type == watch.Deleted {
+		if err := p.provider.DeleteObject(event.Object); err != nil {
+			return fmt.Errorf("[%s] error deleting k8s object: %w", p.provider.GetLabel(), err)
 		}
-	} else if svcCtx.Signalled.Load() && !shouldAllowReconcileWithoutEndpoints(service) {
-		p.handleNoEndpoints(svcCtx, service, lastKnownGoodEndpoint)
+		return nil
 	}
 
-	p.updateAnnotations(service, lastKnownGoodEndpoint, clientSet, egressUpdateFunc)
-
-	log.Debug("watcher", "provider",
-		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint)
-
+	if err := p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
+		return fmt.Errorf("[%s] error loading k8s object: %w", p.provider.GetLabel(), err)
+	}
 	return nil
 }
 
