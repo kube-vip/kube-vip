@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added support in ipoib interfaces in ARP mode. Fixes #694
 
 ### Changed
+- BGP mode now honours `enable_leader_election` for services: a single global services leader advertises the service VIPs instead of every node advertising them. Deployments that enabled `enable_leader_election` for the control plane and relied on ECMP/multipath for services must unset it (or switch to `enable_service_election`) to keep the previous datapath. kube-vip logs a warning on startup when this path is taken.
 - Updated signal handlers in manager_arp.go, manager_bgp.go, manager_wireguard.go, and manager_table.go to use switch statement pattern for handling multiple signals (SIGUSR1, SIGINT, SIGTERM)
 - wireguard.go now manages a complete wireguard interface on the current network namespace
 - manager_wireguard.go uses the new wireguard.go implementation

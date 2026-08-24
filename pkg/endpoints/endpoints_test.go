@@ -58,14 +58,101 @@ func (f *fakeWorker) clear(_ *servicecontext.Context, _ *string, _ *v1.Service) 
 
 func (f *fakeWorker) getEndpoints(_ *v1.Service, _ string) ([]string, error) { return f.endpoints, nil }
 func (f *fakeWorker) removeEgress(_ *v1.Service, _ *string)                  {}
-func (f *fakeWorker) delete(_ context.Context, _ *v1.Service, _ string) error {
-	return nil
-}
 func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
 	return nil
 }
 
-func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
+// TestReconcile_RecomputesRemainingEndpoints asserts that deleting one EndpointSlice
+// reconciles against the endpoints that remain, instead of assuming the service
+// lost all of them.
+func TestReconcile_RecomputesRemainingEndpoints(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		remaining         []string
+		lastKnown         string
+		expectReady       bool
+		expectClear       bool
+		expectProcess     bool
+		expectedLastKnown string
+	}{
+		{
+			name:              "remaining endpoints keep the service up",
+			remaining:         []string{"10.0.0.2"},
+			lastKnown:         "10.0.0.2",
+			expectReady:       true,
+			expectProcess:     true,
+			expectedLastKnown: "10.0.0.2",
+		},
+		{
+			name:              "stale last known endpoint moves to a survivor",
+			remaining:         []string{"10.0.0.2"},
+			lastKnown:         "10.0.0.1",
+			expectReady:       true,
+			expectProcess:     true,
+			expectedLastKnown: "10.0.0.2",
+		},
+		{
+			name:        "last endpoint removed tears the service down",
+			remaining:   nil,
+			lastKnown:   "10.0.0.1",
+			expectReady: false,
+			expectClear: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			worker := &fakeWorker{endpoints: test.remaining}
+			p := &Processor{
+				config:   &kubevip.Config{},
+				provider: providers.NewEndpointslices(),
+				worker:   worker,
+			}
+
+			svcCtx := servicecontext.New(context.Background())
+			svcCtx.SignalReadiness()
+
+			lastKnown := test.lastKnown
+			restart, err := p.Reconcile(
+				svcCtx,
+				watch.Event{
+					Type:   watch.Deleted,
+					Object: &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "slice-1"}},
+				},
+				&lastKnown,
+				&v1.Service{Spec: v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
+				"node-1",
+				func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error { return nil },
+				&sync.WaitGroup{},
+				nil,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("Reconcile returned error: %v", err)
+			}
+			if restart {
+				t.Fatal("Reconcile unexpectedly requested restart")
+			}
+
+			if ready := svcCtx.Signalled.Load(); ready != test.expectReady {
+				t.Fatalf("readiness mismatch: expected %v, got %v", test.expectReady, ready)
+			}
+			if worker.clearCalled != test.expectClear {
+				t.Fatalf("clearCalled mismatch: expected %v, got %v", test.expectClear, worker.clearCalled)
+			}
+			if worker.processCalled != test.expectProcess {
+				t.Fatalf("processCalled mismatch: expected %v, got %v", test.expectProcess, worker.processCalled)
+			}
+			if test.expectedLastKnown != "" && lastKnown != test.expectedLastKnown {
+				t.Fatalf("lastKnownGoodEndpoint mismatch: expected %q, got %q", test.expectedLastKnown, lastKnown)
+			}
+		})
+	}
+}
+
+func TestReconcile_ZeroEndpointsBehavior(t *testing.T) {
 	t.Parallel()
 
 	run := func(t *testing.T, service *v1.Service, presetSignalled bool, expectReady bool, expectClear bool, expectProcess bool) {
@@ -83,7 +170,7 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 			svcCtx.SignalReadiness()
 		}
 
-		restart, err := p.AddOrModify(
+		restart, err := p.Reconcile(
 			svcCtx,
 			watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string),
@@ -95,10 +182,10 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 			nil,
 		)
 		if err != nil {
-			t.Fatalf("AddOrModify returned error: %v", err)
+			t.Fatalf("Reconcile returned error: %v", err)
 		}
 		if restart {
-			t.Fatal("AddOrModify unexpectedly requested restart")
+			t.Fatal("Reconcile unexpectedly requested restart")
 		}
 
 		if ready := svcCtx.Signalled.Load(); ready != expectReady {
@@ -137,15 +224,15 @@ func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 	})
 }
 
-// TestAddOrModify_ServicesElectionStartsOnce asserts that repeated endpoint events
+// TestReconcile_ServicesElectionStartsOnce asserts that repeated endpoint events
 // for the same service start the leader-election restart loop exactly once.
 //
-// AddOrModify runs on every EndpointSlice add/modify/resync event, and the loop it
+// Reconcile runs on every EndpointSlice add/modify/resync event, and the loop it
 // starts only returns once the service context is cancelled. Starting it per event
 // therefore accumulates duplicate goroutines that all contend on the same lease.
 //
 // See https://github.com/kube-vip/kube-vip/issues/1665.
-func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
+func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 	config := &kubevip.Config{
 		EnableServicesElection: true,
 		LeaderElectionType:     "kubernetes",
@@ -189,13 +276,13 @@ func TestAddOrModify_ServicesElectionStartsOnce(t *testing.T) {
 
 	// Three endpoint events, as a flapping backend pod would produce.
 	for range 3 {
-		restart, err := p.AddOrModify(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+		restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string), service, "node-1", serviceFunc, wg, nil, nil)
 		if err != nil {
-			t.Fatalf("AddOrModify returned error: %v", err)
+			t.Fatalf("Reconcile returned error: %v", err)
 		}
 		if restart {
-			t.Fatal("AddOrModify unexpectedly requested restart")
+			t.Fatal("Reconcile unexpectedly requested restart")
 		}
 	}
 

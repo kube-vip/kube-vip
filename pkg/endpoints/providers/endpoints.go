@@ -61,6 +61,18 @@ func (ep *Endpoints) LoadObject(endpoints runtime.Object, cancel context.CancelF
 	return nil
 }
 
+// DeleteObject drops the tracked object. A service is backed by exactly one
+// v1.Endpoints object, so there is nothing to match on and the cache is reset.
+func (ep *Endpoints) DeleteObject(endpoints runtime.Object) error {
+	//nolint:staticcheck // SA1019 endpoints have to be explicitly requested now
+	if _, ok := endpoints.(*v1.Endpoints); !ok {
+		return fmt.Errorf("[%s] unable to parse Kubernetes object", ep.GetLabel())
+	}
+	//nolint:staticcheck // SA1019 endpoints have to be explicitly requested now
+	ep.endpoints = &v1.Endpoints{}
+	return nil
+}
+
 func (ep *Endpoints) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for subset := range ep.endpoints.Subsets {
