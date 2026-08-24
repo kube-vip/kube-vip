@@ -6,7 +6,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func TestWireguardDeleteDoesNotDereferenceNilServiceContext(t *testing.T) {
+func TestWireguardClearDoesNotDereferenceNilServiceContext(t *testing.T) {
 	worker := &wireguardWorker{}
 	service := &v1.Service{}
 
