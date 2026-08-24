@@ -12,56 +12,67 @@ import (
 	gobgp "github.com/osrg/gobgp/v4/pkg/server"
 )
 
-func TestAddPeerUsesConfiguredRemotePort(t *testing.T) {
-	server := newStartedTestBGPServer(t, kubevip.BGPConfig{
-		AS:       65000,
-		RouterID: "192.0.2.1",
-		Peers:    []kubevip.BGPPeer{{Address: "192.0.2.10", AS: 65001}},
-	})
-
-	if err := server.AddPeer(context.Background(), kubevip.BGPPeer{
-		Address: "192.0.2.10",
-		AS:      65001,
-		Port:    180,
-	}); err != nil {
-		t.Fatalf("AddPeer() error = %v", err)
+func TestAddPeerConfiguresTransportOptions(t *testing.T) {
+	tests := []struct {
+		name          string
+		newServer     func(*testing.T) *Server
+		peer          kubevip.BGPPeer
+		wantPort      uint32
+		wantLocalAddr string
+		wantInterface string
+	}{
+		{
+			name: "configured remote port",
+			newServer: func(t *testing.T) *Server {
+				return newStartedTestBGPServer(t, kubevip.BGPConfig{
+					AS:       65000,
+					RouterID: "192.0.2.1",
+					Peers:    []kubevip.BGPPeer{{Address: "192.0.2.10", AS: 65001}},
+				})
+			},
+			peer:     kubevip.BGPPeer{Address: "192.0.2.10", AS: 65001, Port: 180},
+			wantPort: 180,
+		},
+		{
+			name: "configured source interface after MP-BGP fallback",
+			newServer: func(t *testing.T) *Server {
+				return newPeerTestServer(t, kubevip.BGPConfig{
+					AS:           65000,
+					RouterID:     "192.0.2.1",
+					SourceIF:     "lo",
+					MpbgpNexthop: "fixed",
+					Peers:        []kubevip.BGPPeer{{Address: "192.0.2.20", AS: 65001}},
+					MpbgpIPv4:    "",
+					MpbgpIPv6:    "",
+				})
+			},
+			peer:          kubevip.BGPPeer{Address: "192.0.2.20", AS: 65001},
+			wantInterface: "lo",
+		},
 	}
 
-	peer := listTestPeer(t, server, "192.0.2.10")
-	if got := peer.GetTransport().GetRemotePort(); got != 180 {
-		t.Fatalf("remote port = %d, want %d", got, 180)
-	}
-}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := tt.newServer(t)
+			if err := server.AddPeer(context.Background(), tt.peer); err != nil {
+				t.Fatalf("AddPeer() error = %v", err)
+			}
 
-func TestAddPeerFallsBackToConfiguredSourceInterfaceAfterMPBGPResolutionFailure(t *testing.T) {
-	server := newPeerTestServer(t, kubevip.BGPConfig{
-		AS:           65000,
-		RouterID:     "192.0.2.1",
-		SourceIF:     "lo",
-		MpbgpNexthop: "fixed",
-		Peers:        []kubevip.BGPPeer{{Address: "192.0.2.20", AS: 65001}},
-		MpbgpIPv4:    "",
-		MpbgpIPv6:    "",
-	})
-
-	if err := server.AddPeer(context.Background(), kubevip.BGPPeer{
-		Address: "192.0.2.20",
-		AS:      65001,
-	}); err != nil {
-		t.Fatalf("AddPeer: %v", err)
-	}
-
-	var got *api.Peer
-	if err := server.s.ListPeer(context.Background(), &api.ListPeerRequest{}, func(peer *api.Peer) {
-		got = peer
-	}); err != nil {
-		t.Fatalf("ListPeer: %v", err)
-	}
-	if got == nil || got.Transport == nil {
-		t.Fatal("configured peer was not returned")
-	}
-	if got.Transport.BindInterface != "lo" {
-		t.Fatalf("fallback peer interface = %q, want %q", got.Transport.BindInterface, "lo")
+			peer := listTestPeer(t, server, tt.peer.Address)
+			if peer.GetTransport() == nil {
+				t.Fatal("configured peer has no transport")
+			}
+			if tt.wantPort != 0 && peer.GetTransport().GetRemotePort() != tt.wantPort {
+				t.Fatalf("remote port = %d, want %d", peer.GetTransport().GetRemotePort(), tt.wantPort)
+			}
+			if tt.wantLocalAddr != "" && peer.GetTransport().GetLocalAddress() != tt.wantLocalAddr {
+				t.Fatalf("local address = %q, want %q", peer.GetTransport().GetLocalAddress(), tt.wantLocalAddr)
+			}
+			if tt.wantInterface != "" && peer.GetTransport().GetBindInterface() != tt.wantInterface {
+				t.Fatalf("bind interface = %q, want %q", peer.GetTransport().GetBindInterface(), tt.wantInterface)
+			}
+		})
 	}
 }
 
