@@ -23,7 +23,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
-	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -375,17 +374,6 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				if err := p.updateEgressNftablesTableAnnotation(ctx, svc); err != nil {
 					return err
 				}
-			}
-
-			var provider providers.Provider
-			if p.config.EnableEndpoints {
-				provider = providers.NewEndpoints()
-			} else {
-				provider = providers.NewEndpointslices()
-			}
-			err := provider.UpdateServiceAnnotation(ctx, svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
-			if err != nil {
-				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
 	}
