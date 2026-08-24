@@ -90,11 +90,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 
 		svcCtx.SignalReadiness()
 
-		// There are local endpoints available on the node
-		// Process immediately if:
-		// - No services/leader election is enabled, OR
-		// - WireGuard is enabled (it always needs immediate DNAT rule updates)
-		if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+		if p.shouldProcessInstance() {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -107,21 +103,13 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 			}
 			svcCtx.SignalReadiness()
 
-			if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+			if p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service); err != nil {
 					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
 				}
 			}
 		} else if svcCtx.Signalled.Load() {
-			// There are no local endpoints
-			svcCtx.ResetReadiness()
-			p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
-			if p.config.EnableARP && !p.config.EnableServicesElection {
-				i := instance.FindServiceInstance(service, *p.instances)
-				for _, c := range i.Clusters {
-					c.Stop()
-				}
-			}
+			p.handleNoEndpoints(svcCtx, service, lastKnownGoodEndpoint)
 		}
 	}
 
@@ -134,25 +122,62 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	return false, nil
 }
 
+// Delete removes the deleted object from the provider and reconciles against the
+// endpoints that remain, since other objects may still back the same service.
 func (p *Processor) Delete(svcCtx *servicecontext.Context, service *v1.Service, id string,
-	object runtime.Object, lastKnownGoodEndpoint *string) error {
+	object runtime.Object, lastKnownGoodEndpoint *string, clientSet *kubernetes.Clientset,
+	egressUpdateFunc func(context.Context, *v1.Service) error) error {
 	if err := p.provider.DeleteObject(object); err != nil {
 		return fmt.Errorf("[%s] error deleting object: %w", p.provider.GetLabel(), err)
 	}
 
 	endpoints, err := p.worker.getEndpoints(service, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
 	}
 	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
 		log.Error("updating instance", "err", err)
 	}
 
-	if len(endpoints) == 0 && svcCtx.Signalled.Load() && !shouldAllowReconcileWithoutEndpoints(service) {
-		svcCtx.ResetReadiness()
-		p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
+	if len(endpoints) != 0 {
+		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
+
+		if p.shouldProcessInstance() {
+			if err := p.worker.processInstance(svcCtx, service); err != nil {
+				return fmt.Errorf("failed to process remaining endpoints: %w", err)
+			}
+		}
+	} else if svcCtx.Signalled.Load() && !shouldAllowReconcileWithoutEndpoints(service) {
+		p.handleNoEndpoints(svcCtx, service, lastKnownGoodEndpoint)
 	}
+
+	p.updateAnnotations(service, lastKnownGoodEndpoint, clientSet, egressUpdateFunc)
+
+	log.Debug("watcher", "provider",
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint)
+
 	return nil
+}
+
+// shouldProcessInstance reports whether this node has to program the datapath
+// itself, rather than waiting to be told to by a leader election callback.
+// WireGuard always reprograms, because its DNAT rules are per-endpoint.
+func (p *Processor) shouldProcessInstance() bool {
+	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+}
+
+// handleNoEndpoints tears down everything backing a service that no longer has
+// any usable endpoints.
+func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, lastKnownGoodEndpoint *string) {
+	svcCtx.ResetReadiness()
+	p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
+	if p.config.EnableARP && !p.config.EnableServicesElection && p.instances != nil {
+		if i := instance.FindServiceInstance(service, *p.instances); i != nil {
+			for _, c := range i.Clusters {
+				c.Stop()
+			}
+		}
+	}
 }
 
 func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, endpoints []string, service *v1.Service) {

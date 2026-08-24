@@ -88,7 +88,8 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			}
 
 		case watch.Deleted:
-			if err := epProcessor.Delete(svcCtx, service, id, event.Object, &lastKnownGoodEndpoint); err != nil {
+			if err := epProcessor.Delete(svcCtx, service, id, event.Object, &lastKnownGoodEndpoint,
+				p.clientSet, p.updateEgressConfiguration); err != nil {
 				return fmt.Errorf("[%s] error while processing delete event: %w", provider.GetLabel(), err)
 			}
 

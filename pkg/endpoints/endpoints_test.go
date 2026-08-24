@@ -62,6 +62,88 @@ func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service
 	return nil
 }
 
+// TestDelete_RecomputesRemainingEndpoints asserts that deleting one EndpointSlice
+// reconciles against the endpoints that remain, instead of assuming the service
+// lost all of them.
+func TestDelete_RecomputesRemainingEndpoints(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		remaining         []string
+		lastKnown         string
+		expectReady       bool
+		expectClear       bool
+		expectProcess     bool
+		expectedLastKnown string
+	}{
+		{
+			name:              "remaining endpoints keep the service up",
+			remaining:         []string{"10.0.0.2"},
+			lastKnown:         "10.0.0.2",
+			expectReady:       true,
+			expectProcess:     true,
+			expectedLastKnown: "10.0.0.2",
+		},
+		{
+			name:              "stale last known endpoint moves to a survivor",
+			remaining:         []string{"10.0.0.2"},
+			lastKnown:         "10.0.0.1",
+			expectReady:       true,
+			expectProcess:     true,
+			expectedLastKnown: "10.0.0.2",
+		},
+		{
+			name:        "last endpoint removed tears the service down",
+			remaining:   nil,
+			lastKnown:   "10.0.0.1",
+			expectReady: false,
+			expectClear: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			worker := &fakeWorker{endpoints: test.remaining}
+			p := &Processor{
+				config:   &kubevip.Config{},
+				provider: providers.NewEndpointslices(),
+				worker:   worker,
+			}
+
+			svcCtx := servicecontext.New(context.Background())
+			svcCtx.SignalReadiness()
+
+			lastKnown := test.lastKnown
+			err := p.Delete(
+				svcCtx,
+				&v1.Service{Spec: v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
+				"node-1",
+				&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "slice-1"}},
+				&lastKnown,
+				nil,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("Delete returned error: %v", err)
+			}
+
+			if ready := svcCtx.Signalled.Load(); ready != test.expectReady {
+				t.Fatalf("readiness mismatch: expected %v, got %v", test.expectReady, ready)
+			}
+			if worker.clearCalled != test.expectClear {
+				t.Fatalf("clearCalled mismatch: expected %v, got %v", test.expectClear, worker.clearCalled)
+			}
+			if worker.processCalled != test.expectProcess {
+				t.Fatalf("processCalled mismatch: expected %v, got %v", test.expectProcess, worker.processCalled)
+			}
+			if test.expectedLastKnown != "" && lastKnown != test.expectedLastKnown {
+				t.Fatalf("lastKnownGoodEndpoint mismatch: expected %q, got %q", test.expectedLastKnown, lastKnown)
+			}
+		})
+	}
+}
+
 func TestAddOrModify_ZeroEndpointsBehavior(t *testing.T) {
 	t.Parallel()
 
