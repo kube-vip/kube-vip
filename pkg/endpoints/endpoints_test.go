@@ -17,6 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -47,6 +48,7 @@ type fakeWorker struct {
 	endpoints     []string
 	clearCalled   bool
 	processCalled bool
+	processHook   func()
 }
 
 type annotationUpdate struct {
@@ -111,15 +113,16 @@ func TestUpdateAnnotationsZeroEndpointsThenSameEndpoint(t *testing.T) {
 					instances: &instances,
 				}
 
-				updateSnapshot := func(_ context.Context, updated *v1.Service) error {
-					serviceInstance.ServiceSnapshot = updated
-					return nil
-				}
-
 				noEndpoint := ""
-				processor.updateAnnotations(service, &noEndpoint, nil, updateSnapshot)
+				updated, changed := processor.updateAnnotations(service, serviceInstance, &noEndpoint, nil)
+				if changed {
+					serviceInstance.ServiceSnapshot = updated
+				}
 				repopulatedEndpoint := family.endpoint
-				processor.updateAnnotations(service, &repopulatedEndpoint, nil, updateSnapshot)
+				updated, changed = processor.updateAnnotations(service, serviceInstance, &repopulatedEndpoint, nil)
+				if changed {
+					serviceInstance.ServiceSnapshot = updated
+				}
 
 				cleared := annotationUpdate{}
 				repopulated := annotationUpdate{endpoint: family.endpoint}
@@ -176,7 +179,7 @@ func TestUpdateAnnotationsEndpointSlicesClearsConfiguredFamily(t *testing.T) {
 			}
 
 			noEndpoint := ""
-			processor.updateAnnotations(service, &noEndpoint, nil, func(context.Context, *v1.Service) error { return nil })
+			processor.updateAnnotations(service, instances[0], &noEndpoint, nil)
 
 			if len(recorder.updates) != 1 || recorder.updates[0] != test.want {
 				t.Fatalf("annotation updates = %+v, want [%+v]", recorder.updates, test.want)
@@ -219,7 +222,7 @@ func TestUpdateAnnotationsValidatesEndpointFamily(t *testing.T) {
 				provider: recorder,
 			}
 
-			processor.updateAnnotations(service, &test.endpoint, nil, nil)
+			processor.updateAnnotations(service, nil, &test.endpoint, nil)
 
 			if !test.wantUpdate {
 				if len(recorder.updates) != 0 {
@@ -234,19 +237,26 @@ func TestUpdateAnnotationsValidatesEndpointFamily(t *testing.T) {
 	}
 }
 
-func (f *fakeWorker) processInstance(_ *servicecontext.Context, _ *v1.Service) error {
+func (f *fakeWorker) processInstance(_ *servicecontext.Context, _ *v1.Service, _ *instance.Instance) error {
+	if f.processHook != nil {
+		f.processHook()
+	}
 	f.processCalled = true
 	return nil
 }
 
-func (f *fakeWorker) clear(_ *servicecontext.Context, _ *string, _ *v1.Service) {
+func (f *fakeWorker) clear(_ *servicecontext.Context, _ *string, _ *v1.Service, _ *instance.Instance) {
 	f.clearCalled = true
 }
 
 func (f *fakeWorker) getEndpoints(_ *v1.Service, _ string) ([]string, error) { return f.endpoints, nil }
 func (f *fakeWorker) removeEgress(_ *v1.Service, _ *string)                  {}
-func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
+func (f *fakeWorker) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ *instance.Instance, _ []string) error {
 	return nil
+}
+
+func noOpServiceLock(types.UID) func() {
+	return func() {}
 }
 
 // TestReconcile_RecomputesRemainingEndpoints asserts that deleting one EndpointSlice
@@ -293,9 +303,10 @@ func TestReconcile_RecomputesRemainingEndpoints(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			worker := &fakeWorker{endpoints: test.remaining}
 			p := &Processor{
-				config:   &kubevip.Config{},
-				provider: providers.NewEndpointslices(),
-				worker:   worker,
+				config:      &kubevip.Config{},
+				provider:    providers.NewEndpointslices(),
+				worker:      worker,
+				lockService: noOpServiceLock,
 			}
 
 			svcCtx := servicecontext.New(context.Background())
@@ -347,9 +358,10 @@ func TestReconcile_ZeroEndpointsBehavior(t *testing.T) {
 
 		worker := &fakeWorker{endpoints: []string{}}
 		p := &Processor{
-			config:   &kubevip.Config{},
-			provider: providers.NewEndpointslices(),
-			worker:   worker,
+			config:      &kubevip.Config{},
+			provider:    providers.NewEndpointslices(),
+			worker:      worker,
+			lockService: noOpServiceLock,
 		}
 
 		svcCtx := servicecontext.New(context.Background())
@@ -446,10 +458,11 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 	defer svcCtx.Cancel()
 
 	p := &Processor{
-		config:   config,
-		provider: providers.NewEndpointslices(),
-		worker:   &fakeWorker{endpoints: []string{"10.0.0.1"}},
-		leaseMgr: leaseMgr,
+		config:      config,
+		provider:    providers.NewEndpointslices(),
+		worker:      &fakeWorker{endpoints: []string{"10.0.0.1"}},
+		leaseMgr:    leaseMgr,
+		lockService: noOpServiceLock,
 	}
 
 	// starts counts the restart loops. The real StartServicesLeaderElection blocks

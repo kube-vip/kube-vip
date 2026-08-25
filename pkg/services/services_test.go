@@ -15,9 +15,10 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/node/noop"
 )
 
-func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
+func TestAddServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 	const selectedEndpoint = "172.30.2.40"
 
 	staleService := &v1.Service{
@@ -43,12 +44,12 @@ func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 				t.Errorf("encode Service response: %v", err)
 			}
 		case http.MethodPut:
+			updateRequests++
 			updatedService := &v1.Service{}
 			if err := json.NewDecoder(request.Body).Decode(updatedService); err != nil {
 				http.Error(writer, err.Error(), http.StatusBadRequest)
 				return
 			}
-			updateRequests++
 			currentService = updatedService
 			if err := json.NewEncoder(writer).Encode(currentService); err != nil {
 				t.Errorf("encode updated Service response: %v", err)
@@ -59,7 +60,12 @@ func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	clientSet, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	clientSet, err := kubernetes.NewForConfig(&rest.Config{
+		Host: server.URL,
+		ContentConfig: rest.ContentConfig{
+			ContentType: "application/json",
+		},
+	})
 	if err != nil {
 		t.Fatalf("create Kubernetes client: %v", err)
 	}
@@ -68,20 +74,50 @@ func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 			DisableServiceUpdates:  true,
 			EnableServicesElection: true,
 		},
-		clientSet: clientSet,
+		clientSet:        clientSet,
+		nodeLabelManager: noop.NewManager(),
 	}
 	serviceInstance := &instance.Instance{ServiceSnapshot: staleService}
-	if err := processor.configureService(context.Background(), serviceInstance, staleService, &sync.WaitGroup{}); err != nil {
-		t.Fatalf("configureService returned error: %v", err)
+	if err := processor.addService(context.Background(), serviceInstance, staleService, &sync.WaitGroup{}); err != nil {
+		t.Fatalf("addService returned error: %v", err)
 	}
 
 	mutex.Lock()
 	defer mutex.Unlock()
 	if updateRequests != 0 {
-		t.Fatalf("configureService sent %d stale Service updates, want none", updateRequests)
+		t.Fatalf("addService sent %d stale Service updates, want none", updateRequests)
 	}
 	if got := currentService.Annotations[kubevip.ActiveEndpoint]; got != selectedEndpoint {
 		t.Fatalf("active endpoint = %q, want %q", got, selectedEndpoint)
+	}
+}
+
+func TestServiceSnapshotForEgressUsesCurrentInstanceState(t *testing.T) {
+	captured := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			kubevip.ActiveEndpoint: "10.0.0.1",
+			kubevip.EgressIPv6:     "true",
+		}},
+		Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10"},
+	}
+	current := captured.DeepCopy()
+	current.Annotations[kubevip.ActiveEndpoint] = "10.0.0.2"
+	current.Annotations[kubevip.ActiveEndpointIPv6] = "fd00::2"
+	serviceInstance := &instance.Instance{ServiceSnapshot: current}
+
+	got := serviceSnapshotForEgress(serviceInstance, captured)
+	if got == captured || got == current {
+		t.Fatal("egress configuration did not create an isolated merged Service")
+	}
+	if got.Annotations[kubevip.ActiveEndpoint] != "10.0.0.2" ||
+		got.Annotations[kubevip.ActiveEndpointIPv6] != "fd00::2" {
+		t.Fatalf("merged endpoints = %q, %q", got.Annotations[kubevip.ActiveEndpoint], got.Annotations[kubevip.ActiveEndpointIPv6])
+	}
+	if got.Annotations[kubevip.EgressIPv6] != "true" || got.Spec.LoadBalancerIP != "192.0.2.10" {
+		t.Fatal("merged Service did not preserve current configuration")
+	}
+	if got := serviceSnapshotForEgress(nil, captured); got != captured {
+		t.Fatal("egress configuration did not fall back to the captured Service")
 	}
 }
 
