@@ -9,13 +9,13 @@ import (
 type Context struct {
 	Ctx                context.Context
 	Cancel             context.CancelFunc
-	IsWatched          bool
 	ConfiguredNetworks sync.Map
-	EndpointsReady     chan any
-	epReady            sync.Once
 	leaderElection     sync.Once
 	Signalled          atomic.Bool
-	LeaderCancel       context.CancelFunc
+	stateMutex         sync.Mutex
+	isWatched          bool
+	endpointsReady     chan any
+	leaderCancel       context.CancelFunc
 }
 
 func New(ctx context.Context) *Context {
@@ -24,7 +24,7 @@ func New(ctx context.Context) *Context {
 	return &Context{
 		Ctx:            svcCtx,
 		Cancel:         svcCancel,
-		EndpointsReady: make(chan any),
+		endpointsReady: make(chan any),
 	}
 }
 
@@ -50,17 +50,57 @@ func (ctx *Context) StartLeaderElectionOnce(f func()) {
 	ctx.leaderElection.Do(f)
 }
 
+func (ctx *Context) Readiness() <-chan any {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	return ctx.endpointsReady
+}
+
 func (ctx *Context) SignalReadiness() {
-	ctx.epReady.Do(func() {
-		close(ctx.EndpointsReady)
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	if !ctx.Signalled.Load() {
+		close(ctx.endpointsReady)
 		ctx.Signalled.Store(true)
-	})
+	}
 }
 
 func (ctx *Context) ResetReadiness() {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
 	if ctx.Signalled.Load() {
-		ctx.EndpointsReady = make(chan any)
-		ctx.epReady = sync.Once{}
+		ctx.endpointsReady = make(chan any)
 		ctx.Signalled.Store(false)
+	}
+}
+
+func (ctx *Context) StartWatching() bool {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	if ctx.isWatched {
+		return false
+	}
+	ctx.isWatched = true
+	return true
+}
+
+func (ctx *Context) StopWatching() {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	ctx.isWatched = false
+}
+
+func (ctx *Context) SetLeaderCancel(cancel context.CancelFunc) {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	ctx.leaderCancel = cancel
+}
+
+func (ctx *Context) CancelLeader() {
+	ctx.stateMutex.Lock()
+	cancel := ctx.leaderCancel
+	ctx.stateMutex.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }

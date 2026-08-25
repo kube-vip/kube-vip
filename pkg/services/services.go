@@ -57,15 +57,11 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if instance != nil {
-			instance.AddCalled = true
-		}
-
 		if !usesLeaderElection {
 			select {
 			case <-ctx.Ctx.Done():
 				return nil
-			case <-ctx.EndpointsReady:
+			case <-ctx.Readiness():
 			}
 		}
 
@@ -90,58 +86,58 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 }
 
 func (p *Processor) getServiceInstanceAction(svc *v1.Service) (ServiceInstanceAction, *instance.Instance) {
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
+
 	// protect against multiple calls
 	// get the annotations or legacy values from manual configuration
 	addresses, hostnames := instance.FetchServiceAddresses(svc)
 	// get the status information of the LB Service
 	statusAddresses, _ := instance.FetchLoadBalancerIngress(svc)
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	for _, instance := range p.ServiceInstances {
-		if instance != nil && instance.ServiceSnapshot.UID == svc.UID {
-			if !instance.AddCalled {
-				return ActionAdd, instance
-			}
-			for _, address := range addresses {
-				// handle the case where the service instance needs to be deleted
-				if instance.IsDHCPv4 {
-					if address != "0.0.0.0" {
-						return ActionDelete, instance
-					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv4) {
-						return ActionDelete, instance
-					}
-				} else {
-					if address == "0.0.0.0" {
-						return ActionDelete, instance
-					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-						return ActionDelete, instance
-					}
+	inst := p.findServiceInstance(svc)
+	if inst != nil {
+		instance := inst
+		if !instance.AddCalled {
+			return ActionAdd, instance
+		}
+		for _, address := range addresses {
+			// handle the case where the service instance needs to be deleted
+			if instance.IsDHCPv4 {
+				if address != "0.0.0.0" {
+					return ActionDelete, instance
 				}
-				if instance.IsDHCPv6 {
-					if address != "::" {
-						return ActionDelete, instance
-					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv6) {
-						return ActionDelete, instance
-					}
-				} else {
-					if address == "::" {
-						return ActionDelete, instance
-					}
-					if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-						return ActionDelete, instance
-					}
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv4) {
+					return ActionDelete, instance
 				}
-				if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
+			} else {
+				if address == "0.0.0.0" {
+					return ActionDelete, instance
+				}
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
 					return ActionDelete, instance
 				}
 			}
-			// If we reach here, it means the service instance matches the service UID and is not a DHCP service, so we can return "no action"
-			return ActionNone, instance
+			if instance.IsDHCPv6 {
+				if address != "::" {
+					return ActionDelete, instance
+				}
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, instance.DHCPInterfaceIPv6) {
+					return ActionDelete, instance
+				}
+			} else {
+				if address == "::" {
+					return ActionDelete, instance
+				}
+				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
+					return ActionDelete, instance
+				}
+			}
+			if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
+				return ActionDelete, instance
+			}
 		}
+		// If we reach here, it means the service instance matches the service UID and is not a DHCP service, so we can return "no action"
+		return ActionNone, instance
 	}
 	if len(addresses) > 0 || len(hostnames) > 0 {
 		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID, "addresses", addresses, "hostnames", hostnames)
@@ -167,33 +163,47 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 }
 
 func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
-	// protect against addService while reading
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	unlockService := p.lockService(svc.UID)
+	serviceLocked := true
+	defer func() {
+		if serviceLocked {
+			unlockService()
+		}
+	}()
 
 	startTime := time.Now()
 
 	var err error
-	if inst == nil {
+	current := p.findServiceInstance(svc)
+	if current != nil {
+		inst = current
+	}
+	if inst != nil {
+		if current != nil {
+			alreadyAdded := inst.AddCalled
+			if alreadyAdded {
+				unlockService()
+				return nil
+			}
+		} else {
+			inst.AddCalled = true
+			p.appendServiceInstance(inst)
+		}
+	} else {
 		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
 			return err
 		}
 		inst.AddCalled = true
 
-		p.ServiceInstances = append(p.ServiceInstances, inst)
+		p.appendServiceInstance(inst)
 	}
+	unlockService()
+	serviceLocked = false
 
 	if err := p.configureService(ctx, inst, svc, wg); err != nil {
-		return fmt.Errorf("failed to configure service: %w", err)
+		return err
 	}
-
-	// add the label to the node after adding the service
-	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
-	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
-		return fmt.Errorf("error adding label to node: %w", err)
-	}
-	inst.LabelAdded = true
 
 	finishTime := time.Since(startTime)
 	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
@@ -202,6 +212,13 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 }
 
 func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
+	current := p.findServiceInstance(svc)
+	if current != inst {
+		return fmt.Errorf("service instance no longer active for %s/%s", svc.Namespace, svc.Name)
+	}
+
 	// is not a global leader election mode
 	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		for x := range inst.VIPConfigs {
@@ -228,6 +245,12 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				log.Error("unable to find proper VIPConfig for the DHCPv4")
 			} else {
 				for ip := range inst.DHCPv4Client.IPChannel() {
+					unlockService := p.lockService(svc.UID)
+					current := p.findServiceInstance(svc)
+					if current != inst {
+						unlockService()
+						return
+					}
 					log.Debug("IP changed", "ip", ip)
 					inst.VIPConfigs[index].VIP = ip
 					inst.DHCPInterfaceIPv4 = ip
@@ -236,6 +259,7 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 							log.Warn("updating svc", "err", err)
 						}
 					}
+					unlockService()
 				}
 				log.Debug("IPv4 update channel closed, stopping")
 			}
@@ -257,6 +281,12 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				log.Error("unable to find proper VIPConfig for the DHCPv6")
 			} else {
 				for ip := range inst.DHCPv4Client.IPChannel() {
+					unlockService := p.lockService(svc.UID)
+					current := p.findServiceInstance(svc)
+					if current != inst {
+						unlockService()
+						return
+					}
 					log.Debug("IP changed", "ip", ip)
 					inst.VIPConfigs[index].VIP = ip
 					inst.DHCPInterfaceIPv6 = ip
@@ -265,6 +295,7 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 							log.Warn("updating svc", "err", err)
 						}
 					}
+					unlockService()
 				}
 				log.Debug("IPv6 update channel closed, stopping")
 			}
@@ -278,26 +309,27 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 		}
 	}
 
-	serviceIPs, _ := instance.FetchServiceAddresses(svc)
+	egressService := serviceSnapshotForEgress(inst, svc)
+	serviceIPs, _ := instance.FetchServiceAddresses(egressService)
 	// Check if we need to flush any conntrack connections (due to some dangling conntrack connections)
-	if svc.Annotations[kubevip.FlushContrack] == "true" {
+	if egressService.Annotations[kubevip.FlushContrack] == "true" {
 
-		log.Debug("[service] Flushing conntrack rules", "service", svc.Name, "namespace", svc.Namespace)
+		log.Debug("[service] Flushing conntrack rules", "service", egressService.Name, "namespace", egressService.Namespace)
 		for _, serviceIP := range serviceIPs {
-			err := vip.DeleteExistingSessions(serviceIP, false, svc.Annotations[kubevip.EgressDestinationPorts], svc.Annotations[kubevip.EgressSourcePorts])
+			err := vip.DeleteExistingSessions(serviceIP, false, egressService.Annotations[kubevip.EgressDestinationPorts], egressService.Annotations[kubevip.EgressSourcePorts])
 			if err != nil {
-				log.Error("[service] flushing any remaining egress connections", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				log.Error("[service] flushing any remaining egress connections", "service", egressService.Name, "namespace", egressService.Namespace, "err", err)
 			}
-			err = vip.DeleteExistingSessions(serviceIP, true, svc.Annotations[kubevip.EgressDestinationPorts], svc.Annotations[kubevip.EgressSourcePorts])
+			err = vip.DeleteExistingSessions(serviceIP, true, egressService.Annotations[kubevip.EgressDestinationPorts], egressService.Annotations[kubevip.EgressSourcePorts])
 			if err != nil {
-				log.Error("[service] flushing any remaining ingress connections", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+				log.Error("[service] flushing any remaining ingress connections", "service", egressService.Name, "namespace", egressService.Namespace, "err", err)
 			}
 		}
 	}
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
-	if svc.Annotations[kubevip.Egress] == "true" && len(serviceIPs) > 0 {
-		log.Debug("[service] enabling egress", "service", svc.Name, "namespace", svc.Namespace)
+	if egressService.Annotations[kubevip.Egress] == "true" && len(serviceIPs) > 0 {
+		log.Debug("[service] enabling egress", "service", egressService.Name, "namespace", egressService.Namespace)
 		// If we'er not using NFtables, then ensure that the correct iptables modules are loaded
 		if p.config.EgressWithNftables {
 			// Ensure that kernel modules are loaded and report back missing modules.
@@ -315,19 +347,19 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 		var podIP string
 		errList := []error{}
 		configuredRules := 0
-		useInternalNftables := svc.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
+		useInternalNftables := egressService.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
 		preparedFamilies := map[bool]bool{}
 
 		// Should egress be IPv6
-		if svc.Annotations[kubevip.EgressIPv6] == "true" {
+		if egressService.Annotations[kubevip.EgressIPv6] == "true" {
 			// Does the service have an active IPv6 endpoint
-			if svc.Annotations[kubevip.ActiveEndpointIPv6] != "" {
+			if egressService.Annotations[kubevip.ActiveEndpointIPv6] != "" {
 				for _, serviceIP := range serviceIPs {
 					if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
 
-						podIP = svc.Annotations[kubevip.ActiveEndpointIPv6]
+						podIP = egressService.Annotations[kubevip.ActiveEndpointIPv6]
 						if useInternalNftables && !preparedFamilies[true] {
-							if err := p.prepareEgressNftablesTable(string(svc.UID), true); err != nil {
+							if err := p.prepareEgressNftablesTable(string(egressService.UID), true); err != nil {
 								errList = append(errList, err)
 								continue
 							}
@@ -335,35 +367,35 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 						}
 
 						applied := false
-						err := p.configureEgress(ctx, serviceIP, podIP, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
+						err := p.configureEgress(ctx, serviceIP, podIP, egressService.Namespace, string(egressService.UID), egressService.Annotations, &applied)
 						if err != nil {
 							errList = append(errList, err)
-							log.Warn("[service] configuring egress IPv6", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+							log.Warn("[service] configuring egress IPv6", "service", egressService.Name, "namespace", egressService.Namespace, "err", err)
 						} else if applied {
 							configuredRules++
 						}
 					}
 				}
 			}
-		} else if svc.Annotations[kubevip.ActiveEndpoint] != "" { // Not expected to be IPv6, so should be an IPv4 address
+		} else if egressService.Annotations[kubevip.ActiveEndpoint] != "" { // Not expected to be IPv6, so should be an IPv4 address
 			for _, serviceIP := range serviceIPs {
-				podIPs := svc.Annotations[kubevip.ActiveEndpoint]
+				podIPs := egressService.Annotations[kubevip.ActiveEndpoint]
 				if !p.config.EnableEndpoints && utils.IsIPv6(serviceIP) {
-					podIPs = svc.Annotations[kubevip.ActiveEndpointIPv6]
+					podIPs = egressService.Annotations[kubevip.ActiveEndpointIPv6]
 				}
 				ipv6 := utils.IsIPv6(serviceIP)
 				if useInternalNftables && !preparedFamilies[ipv6] {
-					if err := p.prepareEgressNftablesTable(string(svc.UID), ipv6); err != nil {
+					if err := p.prepareEgressNftablesTable(string(egressService.UID), ipv6); err != nil {
 						errList = append(errList, err)
 						continue
 					}
 					preparedFamilies[ipv6] = true
 				}
 				applied := false
-				err := p.configureEgress(ctx, serviceIP, podIPs, svc.Namespace, string(svc.UID), svc.Annotations, &applied)
+				err := p.configureEgress(ctx, serviceIP, podIPs, egressService.Namespace, string(egressService.UID), egressService.Annotations, &applied)
 				if err != nil {
 					errList = append(errList, err)
-					log.Warn("[service] configuring egress IPv4", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					log.Warn("[service] configuring egress IPv4", "service", egressService.Name, "namespace", egressService.Namespace, "err", err)
 				} else if applied {
 					configuredRules++
 				}
@@ -371,7 +403,7 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 		}
 		if len(errList) == 0 {
 			if configuredRules > 0 && useInternalNftables {
-				if err := p.updateEgressNftablesTableAnnotation(ctx, svc); err != nil {
+				if err := p.updateEgressNftablesTableAnnotation(ctx, egressService); err != nil {
 					return err
 				}
 			}
@@ -387,31 +419,62 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 		}
 	}
 
+	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
+	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
+		return fmt.Errorf("error adding label to node: %w", err)
+	}
+	inst.LabelAdded = true
+
 	return nil
 }
 
-func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
-	// protect multiple calls
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+func serviceSnapshotForEgress(inst *instance.Instance, service *v1.Service) *v1.Service {
+	if inst == nil || inst.ServiceSnapshot == nil || service == nil {
+		return service
+	}
 
-	var updatedInstances []*instance.Instance
-	var serviceInstance *instance.Instance
-	found := false
-	for x := range p.ServiceInstances {
-		log.Debug("[service] lookup", "target UID", uid, "found UID", p.ServiceInstances[x].ServiceSnapshot.UID, "name", p.ServiceInstances[x].ServiceSnapshot.Name, "namespace", p.ServiceInstances[x].ServiceSnapshot.Namespace)
-		// Add the running services to the new array
-		if p.ServiceInstances[x].ServiceSnapshot.UID != uid {
-			updatedInstances = append(updatedInstances, p.ServiceInstances[x])
-		} else {
-			// Flip the found when we match
-			found = true
-			serviceInstance = p.ServiceInstances[x]
+	merged := service.DeepCopy()
+	if merged.Annotations == nil {
+		merged.Annotations = make(map[string]string)
+	}
+	merged.Annotations[kubevip.ActiveEndpoint] = inst.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+	merged.Annotations[kubevip.ActiveEndpointIPv6] = inst.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+	return merged
+}
+
+func (p *Processor) serviceSnapshot(service *v1.Service) (*v1.Service, bool) {
+	serviceInstance := p.findServiceInstance(service)
+	if serviceInstance == nil || serviceInstance.ServiceSnapshot == nil {
+		return nil, false
+	}
+	return serviceInstance.ServiceSnapshot.DeepCopy(), true
+}
+
+func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCtx ...*servicecontext.Context) error {
+	unlockService := p.lockService(uid)
+	defer unlockService()
+	var expected *servicecontext.Context
+	if len(expectedCtx) > 0 {
+		expected = expectedCtx[0]
+	}
+	return p.deleteServiceLocked(ctx, uid, expected)
+}
+
+func (p *Processor) deleteServiceLocked(ctx context.Context, uid types.UID, expectedCtx *servicecontext.Context) error {
+	if expectedCtx != nil {
+		currentCtx, err := p.getServiceContext(uid)
+		if err != nil {
+			return err
+		}
+		if currentCtx != expectedCtx {
+			return nil
 		}
 	}
 
+	serviceInstance, updatedInstances := p.detachServiceInstance(uid)
+
 	// If we've been through all services and not found the correct one then error
-	if !found {
+	if serviceInstance == nil {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
 		log.Warn("unable to find/stop service", "uid", uid)
@@ -435,12 +498,12 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 	shared := false
 	vipSet := make(map[string]interface{})
 	for x := range updatedInstances {
-		vips, _ := instance.FetchServiceAddresses(updatedInstances[x].ServiceSnapshot)
+		vips := updatedInstances[x].Addresses()
 		for _, vip := range vips { //updatedInstances[x].ServiceSnapshot.Spec.LoadBalancerIP {
 			vipSet[vip] = nil
 		}
 	}
-	vips, _ := instance.FetchServiceAddresses(serviceInstance.ServiceSnapshot)
+	vips := serviceInstance.Addresses()
 	for _, vip := range vips {
 		if _, found := vipSet[vip]; found {
 			shared = true
@@ -451,10 +514,8 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
-	// ClearRoutesByInstance is reference-counted per route, so calling it here is safe
-	// even when the no-election path in Processor.Delete already cleared it.
 	if p.config.EnableRoutingTable {
-		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances, p.routeMgr); len(errs) > 0 {
+		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &updatedInstances, p.routeMgr); len(errs) > 0 {
 			for _, err := range errs {
 				log.Error("unable to clear routes", "err", err)
 			}
@@ -517,36 +578,38 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		}
 	}
 
-	// Update the service array
-	p.ServiceInstances = updatedInstances
-
 	// Clean up WireGuard DNAT rules if WireGuard is enabled
 	if p.config.EnableWireguard {
 		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name)
 		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
 	}
 
-	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
+	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
 
 	return nil
 }
 
-func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service) error {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service, expected ...*instance.Instance) error {
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
 
-	i := instance.FindServiceInstance(svc, p.ServiceInstances)
+	i := p.findServiceInstance(svc)
 	if i == nil {
 		return fmt.Errorf("service instance not found for %s/%s", svc.Namespace, svc.Name)
+	}
+	if len(expected) > 0 && expected[0] != nil && i != expected[0] {
+		return nil
 	}
 
 	oldIPv4 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
 	newIPv4 := svc.Annotations[kubevip.ActiveEndpoint]
 	oldIPv6 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 	newIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
+	oldEgressIPv6 := i.ServiceSnapshot.Annotations[kubevip.EgressIPv6] == "true"
+	newEgressIPv6 := svc.Annotations[kubevip.EgressIPv6] == "true"
 
-	// Skip update if endpoints haven't changed, without touching the API.
-	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 {
+	// Skip update if neither endpoints nor the selected egress family changed.
+	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 && oldEgressIPv6 == newEgressIPv6 {
 		return nil
 	}
 
@@ -573,12 +636,18 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 
 	// Remove old egress rules if they exist
 	if oldIPv4 != "" || oldIPv6 != "" {
-		oldEndpoint := oldIPv4
-		if oldEndpoint == "" {
-			oldEndpoint = oldIPv6
-		}
 		serviceIPs, _ := instance.FetchServiceAddresses(i.ServiceSnapshot)
 		for _, serviceIP := range serviceIPs {
+			if oldEgressIPv6 && !utils.IsIPv6(serviceIP) {
+				continue
+			}
+			oldEndpoint := oldIPv4
+			if utils.IsIPv6(serviceIP) {
+				oldEndpoint = oldIPv6
+			}
+			if oldEndpoint == "" {
+				continue
+			}
 			if err := egress.Teardown(
 				oldEndpoint,
 				serviceIP,
@@ -957,17 +1026,27 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			instances := p.serviceInstances()
 			// Skip logging if no service instances
-			if len(p.ServiceInstances) == 0 {
+			if len(instances) == 0 {
 				continue
 			}
 
-			log.Info("[UPNP] Refreshing Instances", "number of instances", len(p.ServiceInstances))
-			for i := range p.ServiceInstances {
-				p.upnpMap(ctx, p.ServiceInstances[i])
-				if err := p.updateStatus(ctx, p.ServiceInstances[i]); err != nil {
-					log.Warn("[UPNP] Error updating service", "ip", p.ServiceInstances[i].ServiceSnapshot.Name, "err", err)
+			log.Info("[UPNP] Refreshing Instances", "number of instances", len(instances))
+			for _, serviceInstance := range instances {
+				uid := serviceInstance.UID()
+				unlockService := p.lockService(uid)
+				service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
+				current := p.findServiceInstance(service)
+				if current != serviceInstance {
+					unlockService()
+					continue
 				}
+				p.upnpMap(ctx, serviceInstance)
+				if err := p.updateStatus(ctx, serviceInstance); err != nil {
+					log.Warn("[UPNP] Error updating service", "ip", serviceInstance.ServiceSnapshot.Name, "err", err)
+				}
+				unlockService()
 			}
 		}
 	}

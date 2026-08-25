@@ -11,7 +11,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
-	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -30,7 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/keymutex"
 )
+
+const concurrentServiceLocks = 128
 
 type Processor struct {
 	config        *kubevip.Config
@@ -39,8 +41,10 @@ type Processor struct {
 
 	// Keeps track of all running instances
 	ServiceInstances []*instance.Instance
+	instancesMutex   sync.RWMutex
+	serviceLocks     keymutex.KeyMutex
+	serviceLocksOnce sync.Once
 
-	mutex     sync.Mutex
 	bgpServer *bgp.Server
 
 	clientSet   *kubernetes.Clientset
@@ -77,6 +81,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
 		ServiceInstances: []*instance.Instance{},
+		serviceLocks:     keymutex.NewHashed(concurrentServiceLocks),
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
@@ -141,7 +146,14 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		svc = s
 	}
 
-	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
+	unlockService := p.lockService(svc.UID)
+	serviceLocked := true
+	defer func() {
+		if serviceLocked {
+			unlockService()
+		}
+	}()
+	svcInstance := p.findServiceInstance(svc)
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
@@ -163,6 +175,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		if svcInstance != nil {
 			shouldGarbageCollect = serviceChanged(svcInstance, svc)
 		}
+		unlockService()
+		serviceLocked = false
 		if shouldGarbageCollect {
 			for _, addr := range svcAddresses {
 				// log.Debugf("(svcs) Retrieving local addresses, to ensure that this modified address doesn't exist: %s", addr)
@@ -197,39 +211,61 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				p.updateActiveServicesMetric()
 			}
 		}
+	} else {
+		unlockService()
+		serviceLocked = false
 	}
-
 	ips, hostnames := instance.FetchServiceAddresses(svc)
 	log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
 	if svcCtx == nil {
-		ns, name := lease.ServiceName(svc)
-		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-		p.leaseMgr.Add(ctx, leaseID)
-		// The service context is parented to the watcher, not to the lease: losing a
-		// lease must not tear the service down, it has to let the election restart.
-		svcCtx = servicecontext.New(ctx)
-		p.svcMap.Store(svc.UID, svcCtx)
+		unlockService := p.lockService(svc.UID)
+		svcCtx, err = p.getServiceContext(svc.UID)
+		if err != nil {
+			unlockService()
+			return fmt.Errorf("failed to get service context: %w", err)
+		}
+		svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
+		if svcCtx == nil {
+			ns, name := lease.ServiceName(svc)
+			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+			p.leaseMgr.Add(ctx, leaseID)
+			// The service context is parented to the watcher, not to the lease: losing a
+			// lease must not tear the service down, it has to let the election restart.
+			svcCtx = servicecontext.New(ctx)
+			p.svcMap.Store(svc.UID, svcCtx)
+		}
+		unlockService()
 	}
 
 	if svcInstance == nil {
-		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
-		if err != nil {
-			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
-			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
+		unlockService := p.lockService(svc.UID)
+		instanceAdded := false
+		svcInstance = p.findServiceInstance(svc)
+		if svcInstance == nil {
+			svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+			if err != nil {
+				unlockService()
+				metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
+				return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
+			}
+			p.appendServiceInstance(svcInstance)
+			instanceAdded = true
 		}
-		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
-		p.updateActiveServicesMetric()
+		unlockService()
+		if instanceAdded {
+			p.updateActiveServicesMetric()
+		}
 	}
 
 	// this goroutine starts service handling function (with or without leaderelection)
-	if !svcCtx.IsWatched {
+	if svcCtx.StartWatching() {
 		wg.Go(func() {
 			watchWg := sync.WaitGroup{}
 			defer func() {
 				// wait for the sub-goroutines and tag service as not watched
 				watchWg.Wait()
-				svcCtx.IsWatched = false
+				svcCtx.StopWatching()
 			}()
 
 			watchWg.Go(func() {
@@ -266,9 +302,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			})
 
 		})
-
-		// tag service as watched
-		svcCtx.IsWatched = true
 	}
 
 	if !p.config.EnableServicesElection {
@@ -315,47 +348,51 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
+	unlockService := p.lockService(svc.UID)
+	serviceLocked := true
+	defer func() {
+		if serviceLocked {
+			unlockService()
+		}
+	}()
+
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
 	if svcCtx != nil {
-		// If no leader election is enabled, delete routes here
-		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
-			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
-			if errs := endpoints.ClearRoutes(svc, &p.ServiceInstances, p.routeMgr); len(errs) == 0 {
-				svcCtx.ConfiguredNetworks.Clear()
-			}
-		}
-
+		// Calls the cancel function of the context
+		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		svcCtx.Cancel()
+		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 		if !p.config.EnableServicesElection {
-			// If this is an active service then and additional leaderElection will handle stopping
-			err = p.deleteService(svcCtx.Ctx, svc.UID)
+			// The context is gone, so no replacement can reuse this lifecycle while deletion runs.
+			err = p.deleteServiceLocked(svcCtx.Ctx, svc.UID, nil)
 			if err != nil {
 				log.Error(err.Error())
 			}
 		}
-
-		// Calls the cancel function of the context
-		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		svcCtx.Cancel()
-		p.svcMap.Delete(svc.UID)
 		// Drop the per-service election series so a recreated service starts clean.
 		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-		p.updateActiveServicesMetric()
-
 		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+	}
+	unlockService()
+	serviceLocked = false
+	if svcCtx != nil {
+		p.updateActiveServicesMetric()
 	}
 
 	return nil
 }
 
 func (p *Processor) Stop() {
-	for _, instance := range p.ServiceInstances {
+	for _, instance := range p.serviceInstances() {
+		unlockService := p.lockService(instance.UID())
 		for _, cluster := range instance.Clusters {
 			cluster.Stop()
 		}
+		unlockService()
 	}
 }
 
@@ -389,7 +426,7 @@ func (p *Processor) dropCancelledServiceContext(uid types.UID, svcCtx *serviceco
 	if svcCtx == nil || svcCtx.Ctx.Err() == nil {
 		return svcCtx
 	}
-	p.svcMap.Delete(uid)
+	p.svcMap.CompareAndDelete(uid, svcCtx)
 	return nil
 }
 
@@ -414,13 +451,68 @@ func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
 
 func (p *Processor) updateActiveServicesMetric() {
 	counts := map[string]int{}
-	for _, inst := range p.ServiceInstances {
+	for _, inst := range p.serviceInstances() {
+		unlockService := p.lockService(inst.UID())
 		if inst.ServiceSnapshot != nil {
 			counts[inst.ServiceSnapshot.Namespace]++
 		}
+		unlockService()
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
 		metrics.ActiveServices.WithLabelValues(ns).Set(float64(count))
+	}
+}
+
+func (p *Processor) findServiceInstance(service *v1.Service) *instance.Instance {
+	p.instancesMutex.RLock()
+	defer p.instancesMutex.RUnlock()
+	return instance.FindServiceInstance(service, p.ServiceInstances)
+}
+
+func (p *Processor) serviceInstances() []*instance.Instance {
+	p.instancesMutex.RLock()
+	defer p.instancesMutex.RUnlock()
+	return append([]*instance.Instance(nil), p.ServiceInstances...)
+}
+
+func (p *Processor) appendServiceInstance(inst *instance.Instance) {
+	p.instancesMutex.Lock()
+	defer p.instancesMutex.Unlock()
+	p.ServiceInstances = append(p.ServiceInstances, inst)
+}
+
+func (p *Processor) detachServiceInstance(uid types.UID) (*instance.Instance, []*instance.Instance) {
+	p.instancesMutex.Lock()
+	defer p.instancesMutex.Unlock()
+
+	remaining := make([]*instance.Instance, 0, len(p.ServiceInstances))
+	var found *instance.Instance
+	for _, inst := range p.ServiceInstances {
+		if inst != nil && inst.UID() == uid {
+			found = inst
+			continue
+		}
+		remaining = append(remaining, inst)
+	}
+	if found != nil {
+		p.ServiceInstances = remaining
+		return found, append([]*instance.Instance(nil), remaining...)
+	}
+	return nil, append([]*instance.Instance(nil), remaining...)
+}
+
+func (p *Processor) lockService(uid types.UID) func() {
+	p.serviceLocksOnce.Do(func() {
+		if p.serviceLocks == nil {
+			p.serviceLocks = keymutex.NewHashed(concurrentServiceLocks)
+		}
+	})
+	key := string(uid)
+	p.serviceLocks.LockKey(key)
+	return func() {
+		if err := p.serviceLocks.UnlockKey(key); err != nil {
+			log.Error("failed to unlock service reconciliation", "uid", uid, "err", err)
+		}
 	}
 }

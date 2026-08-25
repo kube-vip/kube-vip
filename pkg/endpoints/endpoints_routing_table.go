@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync"
 
 	log "log/slog"
 
@@ -18,7 +17,6 @@ import (
 
 type RoutingTable struct {
 	generic
-	mtx      sync.Mutex
 	routeMgr *route.Manager
 }
 
@@ -29,8 +27,7 @@ func newRoutingTable(generic generic, routeMgr *route.Manager) endpointWorker {
 	}
 }
 
-func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
-	inst := instance.FindServiceInstance(service, *rt.instances)
+func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance) error {
 	if inst != nil {
 		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
@@ -51,11 +48,9 @@ func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service 
 	return nil
 }
 
-func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
-	rt.mtx.Lock()
-	defer rt.mtx.Unlock()
+func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
 	if !rt.config.EnableServicesElection {
-		if errs := ClearRoutes(service, rt.instances, rt.routeMgr); len(errs) == 0 {
+		if errs := ClearRoutesByInstance(service, inst, nil, rt.routeMgr); len(errs) == 0 {
 			svcCtx.ConfiguredNetworks.Clear()
 		} else {
 			for _, err := range errs {
@@ -66,9 +61,7 @@ func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpo
 
 	rt.clearEgress(lastKnownGoodEndpoint, service)
 
-	if svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
-	}
+	svcCtx.CancelLeader()
 }
 
 func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, error) {
@@ -82,8 +75,7 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 	}
 }
 
-func (rt *RoutingTable) setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error {
-	inst := instance.FindServiceInstance(service, *rt.instances)
+func (rt *RoutingTable) setInstanceEndpointsStatus(_ context.Context, service *v1.Service, inst *instance.Instance, endpoints []string) error {
 	if inst == nil {
 		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {

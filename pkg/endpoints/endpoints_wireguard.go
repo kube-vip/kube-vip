@@ -23,18 +23,16 @@ type wireguardWorker struct {
 	config    *kubevip.Config
 	provider  providers.Provider
 	bgpServer *bgp.Server
-	instances *[]*instance.Instance
 	leaseMgr  *lease.Manager
 	tunnelMgr *wireguard.TunnelManager
 }
 
 func newWireguardWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *wireguardWorker {
+	leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager) *wireguardWorker {
 	return &wireguardWorker{
 		config:    config,
 		provider:  provider,
 		bgpServer: bgpServer,
-		instances: instances,
 		leaseMgr:  leaseMgr,
 		tunnelMgr: tunnelMgr,
 	}
@@ -42,7 +40,7 @@ func newWireguardWorker(config *kubevip.Config, provider providers.Provider, bgp
 
 // processInstance updates nftables DNAT rules when endpoints change
 // This is called by the endpoint watcher when endpoints are added/modified
-func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
+func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance) error {
 	log.Debug("[wireguard] processing instance for endpoint change", "service", service.Name, "namespace", service.Namespace)
 
 	// Get the target endpoint for this service
@@ -61,7 +59,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 
 	if len(endpoints) == 0 {
 		log.Debug("[wireguard] no endpoints available", "service", service.Name)
-		w.clear(svcCtx, nil, service)
+		w.clear(svcCtx, nil, service, inst)
 		return nil
 	}
 
@@ -70,7 +68,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 	// So we'll recreate the DNAT rules directly
 
 	// First, clear existing rules
-	w.clear(svcCtx, nil, service)
+	w.clear(svcCtx, nil, service, inst)
 
 	// Get service VIPs
 	serviceIPs, err := utils.FetchServiceIPs(service)
@@ -167,7 +165,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 }
 
 // clear removes DNAT rules when no endpoints are available
-func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
+func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, _ *instance.Instance) {
 	log.Info("[wireguard] clearing DNAT rules (no endpoints)", "service", service.Name, "namespace", service.Namespace)
 
 	serviceID := utils.SanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
@@ -212,8 +210,8 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 		}
 	}
 
-	if svcCtx != nil && svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
+	if svcCtx != nil {
+		svcCtx.CancelLeader()
 	}
 }
 
@@ -243,7 +241,7 @@ func (w *wireguardWorker) removeEgress(service *v1.Service, lastKnownGoodEndpoin
 }
 
 // setInstanceEndpointsStatus updates the endpoint status on the service instance
-func (w *wireguardWorker) setInstanceEndpointsStatus(_ context.Context, service *v1.Service, endpoints []string) error {
+func (w *wireguardWorker) setInstanceEndpointsStatus(_ context.Context, service *v1.Service, inst *instance.Instance, endpoints []string) error {
 	hasEndpoints := len(endpoints) > 0
 
 	log.Debug("[wireguard] setting instance endpoint status",
@@ -251,23 +249,17 @@ func (w *wireguardWorker) setInstanceEndpointsStatus(_ context.Context, service 
 		"hasEndpoints", hasEndpoints,
 		"endpointCount", len(endpoints))
 
-	// Find the service instance
-	for _, inst := range *w.instances {
-		if inst.ServiceSnapshot == nil {
-			continue
-		}
-		if inst.ServiceSnapshot.UID == service.UID {
-			// Update the network status for all clusters
-			for _, cluster := range inst.Clusters {
-				for i := range cluster.Network {
-					cluster.Network[i].SetHasEndpoints(hasEndpoints)
-				}
+	if inst != nil {
+		// Update the network status for all clusters
+		for _, cluster := range inst.Clusters {
+			for i := range cluster.Network {
+				cluster.Network[i].SetHasEndpoints(hasEndpoints)
 			}
-			log.Debug("[wireguard] updated instance endpoint status",
-				"service", service.Name,
-				"hasEndpoints", hasEndpoints)
-			return nil
 		}
+		log.Debug("[wireguard] updated instance endpoint status",
+			"service", service.Name,
+			"hasEndpoints", hasEndpoints)
+		return nil
 	}
 
 	log.Debug("[wireguard] instance not found for endpoint status update", "service", service.Name)

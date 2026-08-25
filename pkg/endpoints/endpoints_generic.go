@@ -18,19 +18,19 @@ import (
 )
 
 type endpointWorker interface {
-	processInstance(svcCtx *servicecontext.Context, service *v1.Service) error
-	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service)
+	processInstance(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance) error
+	clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance)
 	getEndpoints(service *v1.Service, id string) ([]string, error)
 	removeEgress(service *v1.Service, lastKnownGoodEndpoint *string)
-	setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error
+	setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, inst *instance.Instance, endpoints []string) error
 }
 
-func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server, instances *[]*instance.Instance,
+func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
 	leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager) endpointWorker {
-	generic := newGeneric(config, provider, instances, leaseMgr)
+	generic := newGeneric(config, provider, leaseMgr)
 
 	if config.EnableWireguard {
-		return newWireguardWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr)
+		return newWireguardWorker(config, provider, bgpServer, leaseMgr, tunnelMgr)
 	}
 	if config.EnableRoutingTable {
 		return newRoutingTable(generic, routeMgr)
@@ -43,30 +43,26 @@ func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpS
 }
 
 type generic struct {
-	config    *kubevip.Config
-	provider  providers.Provider
-	instances *[]*instance.Instance
-	leaseMgr  *lease.Manager
+	config   *kubevip.Config
+	provider providers.Provider
+	leaseMgr *lease.Manager
 }
 
-func newGeneric(config *kubevip.Config, provider providers.Provider, instances *[]*instance.Instance, leaseMgr *lease.Manager) generic {
+func newGeneric(config *kubevip.Config, provider providers.Provider, leaseMgr *lease.Manager) generic {
 	return generic{
-		config:    config,
-		provider:  provider,
-		instances: instances,
-		leaseMgr:  leaseMgr,
+		config:   config,
+		provider: provider,
+		leaseMgr: leaseMgr,
 	}
 }
 
-func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service) error {
+func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service, _ *instance.Instance) error {
 	return nil
 }
 
-func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
+func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, _ *instance.Instance) {
 	g.clearEgress(lastKnownGoodEndpoint, service)
-	if svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
-	}
+	svcCtx.CancelLeader()
 }
 
 func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service) {
@@ -104,6 +100,6 @@ func (g *generic) getAllEndpoints(service *v1.Service, id string) ([]string, err
 func (g *generic) removeEgress(_ *v1.Service, _ *string) {
 }
 
-func (g *generic) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
+func (g *generic) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ *instance.Instance, _ []string) error {
 	return nil
 }

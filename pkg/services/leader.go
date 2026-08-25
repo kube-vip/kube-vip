@@ -99,7 +99,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return fmt.Errorf("service context cancelled before election start: %w", svcCtx.Ctx.Err())
 	case <-svcLease.Ctx.Done():
 		return fmt.Errorf("lease context cancelled before election start: %w", svcLease.Ctx.Err())
-	case <-svcCtx.EndpointsReady:
+	case <-svcCtx.Readiness():
 	}
 
 	// this service is sharing lease with another service
@@ -135,7 +135,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 
 	leaderCtx, leaderCancel := context.WithCancel(svcLease.Ctx)
-	svcCtx.LeaderCancel = leaderCancel
+	svcCtx.SetLeaderCancel(leaderCancel)
 
 	run := election.RunConfig{
 		Config:           p.config,
@@ -204,7 +204,7 @@ func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *l
 	}
 
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
-	err = p.deleteService(svcLease.Ctx, service.UID)
+	err = p.deleteService(svcLease.Ctx, service.UID, svcCtx)
 	if err != nil {
 		log.Error("service deletion", "err", err)
 		return err

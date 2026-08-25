@@ -13,6 +13,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
@@ -55,7 +56,9 @@ type Instance struct {
 	UPNPGatewayIPs []string
 
 	// Kubernetes service mapping
-	ServiceSnapshot *v1.Service
+	ServiceUID       types.UID
+	ServiceAddresses []string
+	ServiceSnapshot  *v1.Service
 
 	dnsAddresses []string
 
@@ -65,6 +68,24 @@ type Instance struct {
 	// LabelAdded determined that node was labeled with
 	// service-provided.kube-vip.io label
 	LabelAdded bool
+}
+
+func (i *Instance) UID() types.UID {
+	if i.ServiceUID != "" {
+		return i.ServiceUID
+	}
+	if i.ServiceSnapshot != nil {
+		return i.ServiceSnapshot.UID
+	}
+	return ""
+}
+
+func (i *Instance) Addresses() []string {
+	if i.ServiceAddresses != nil {
+		return append([]string(nil), i.ServiceAddresses...)
+	}
+	addresses, _ := FetchServiceAddresses(i.ServiceSnapshot)
+	return addresses
 }
 
 type Port struct {
@@ -85,8 +106,10 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 
 	// Create new service
 	instance := &Instance{
-		ServiceSnapshot: svc,
-		dnsAddresses:    dnsAddresses,
+		ServiceUID:       svc.UID,
+		ServiceAddresses: append([]string(nil), instanceAddresses...),
+		ServiceSnapshot:  svc,
+		dnsAddresses:     dnsAddresses,
 	}
 
 	for _, address := range instanceAddresses {
@@ -739,7 +762,7 @@ func FetchServiceAddresses(s *v1.Service) ([]string, []string) {
 func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	log.Debug("finding service", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
 	for i := range instances {
-		if instances[i].ServiceSnapshot.UID == svc.UID {
+		if instances[i].UID() == svc.UID {
 			return instances[i]
 		}
 	}
