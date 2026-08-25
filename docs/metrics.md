@@ -49,6 +49,39 @@ sum by (result) (rate(kube_vip_arp_advertisements_total[5m]))
 sum by (result) (rate(kube_vip_ndp_advertisements_total[5m]))
 ```
 
+## BGP routes and egress
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `kube_vip_bgp_routes_advertised` | Gauge | `family` | BGP host routes currently advertised by address family. `family` is `IPv4` or `IPv6`. |
+| `kube_vip_bgp_route_operations_total` | Counter | `op`, `result` | BGP route operations. Current operations are `add` and `delete`; results are `ok` or `error`. |
+| `kube_vip_egress_rules` | Gauge | `table` | Egress SNAT rules currently present in the labeled iptables or nftables table. The value is refreshed from the ruleset after successful changes. |
+| `kube_vip_egress_operations_total` | Counter | `op`, `result` | Egress SNAT operations. Current operations are `add` and `delete`; results are `ok` or `error`. |
+| `kube_vip_upnp_mappings` | Gauge | — | Number of distinct external gateway mappings currently tracked by the service processor. |
+
+The BGP route gauge tracks the routes kube-vip owns in its host tracker; it is
+not a dump of every route in the BGP server. The egress rule gauge is a
+snapshot, while the egress operation metric records the outcome of individual
+updates. Table names are backend-specific, so dashboards should group by the
+`table` label instead of hard-coding one table name.
+
+```promql
+sum by (instance, family) (kube_vip_bgp_routes_advertised)
+sum by (op, result) (rate(kube_vip_bgp_route_operations_total[5m]))
+sum by (instance, table) (kube_vip_egress_rules)
+sum by (kind, reason) (increase(kube_vip_watcher_restarts_total[15m]))
+```
+
+## Watcher recovery
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `kube_vip_watcher_restarts_total` | Counter | `kind`, `reason` | Watcher restarts caused by a watch failure or an unexpected channel/lifecycle event. Current kinds include `service`, `endpoint`, `annotations`, `lease`, and `node`; current reasons include `watch_error`, `channel_closed`, and `leader_election_error`. |
+
+Use `kube_vip_watcher_loops` together with this counter: the counter shows
+that recovery was needed, while the gauge verifies that the replacement loop
+settled at the expected live-loop count.
+
 ## Service events and leader election
 
 | Metric | Type | Labels | Meaning |
