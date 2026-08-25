@@ -7,15 +7,16 @@ import (
 )
 
 type Context struct {
-	Ctx                context.Context
-	Cancel             context.CancelFunc
-	ConfiguredNetworks sync.Map
-	leaderElection     sync.Once
-	Signalled          atomic.Bool
-	stateMutex         sync.Mutex
-	isWatched          bool
-	endpointsReady     chan any
-	leaderCancel       context.CancelFunc
+	Ctx                 context.Context
+	Cancel              context.CancelFunc
+	ConfiguredNetworks  sync.Map
+	leaderElection      sync.Once
+	Signalled           atomic.Bool
+	stateMutex          sync.Mutex
+	isWatched           bool
+	endpointsReady      chan any
+	leaderCancel        context.CancelFunc
+	leaderCancelPending bool
 }
 
 func New(ctx context.Context) *Context {
@@ -63,6 +64,7 @@ func (ctx *Context) SignalReadiness() {
 		close(ctx.endpointsReady)
 		ctx.Signalled.Store(true)
 	}
+	ctx.leaderCancelPending = false
 }
 
 func (ctx *Context) ResetReadiness() {
@@ -92,12 +94,17 @@ func (ctx *Context) StopWatching() {
 
 func (ctx *Context) SetLeaderCancel(cancel context.CancelFunc) {
 	ctx.stateMutex.Lock()
-	defer ctx.stateMutex.Unlock()
 	ctx.leaderCancel = cancel
+	pending := ctx.leaderCancelPending
+	ctx.stateMutex.Unlock()
+	if pending && cancel != nil {
+		cancel()
+	}
 }
 
 func (ctx *Context) CancelLeader() {
 	ctx.stateMutex.Lock()
+	ctx.leaderCancelPending = true
 	cancel := ctx.leaderCancel
 	ctx.stateMutex.Unlock()
 	if cancel != nil {

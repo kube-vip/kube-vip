@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestReadinessResetCreatesNewGeneration(t *testing.T) {
@@ -85,4 +86,36 @@ func TestConcurrentStateTransitions(t *testing.T) {
 	if cancelCalls.Load() == 0 {
 		t.Fatal("leader cancellation was never invoked")
 	}
+}
+
+func TestCancelLeaderCancelsCallbackInstalledDuringCancellation(t *testing.T) {
+	svcCtx := New(context.Background())
+	defer svcCtx.Cancel()
+
+	oldCancelStarted := make(chan struct{})
+	releaseOldCancel := make(chan struct{})
+	svcCtx.SetLeaderCancel(func() {
+		close(oldCancelStarted)
+		<-releaseOldCancel
+	})
+
+	cancelComplete := make(chan struct{})
+	go func() {
+		svcCtx.CancelLeader()
+		close(cancelComplete)
+	}()
+	<-oldCancelStarted
+
+	newCancelCalled := make(chan struct{})
+	svcCtx.SetLeaderCancel(func() {
+		close(newCancelCalled)
+	})
+	select {
+	case <-newCancelCalled:
+	case <-time.After(time.Second):
+		t.Fatal("leader cancel installed during cancellation was not called")
+	}
+
+	close(releaseOldCancel)
+	<-cancelComplete
 }

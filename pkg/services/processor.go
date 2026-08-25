@@ -470,6 +470,23 @@ func (p *Processor) serviceInstances() []*instance.Instance {
 	return append([]*instance.Instance(nil), p.ServiceInstances...)
 }
 
+// ServiceSnapshots returns stable copies for external observers such as diagnostics.
+func (p *Processor) ServiceSnapshots() []*v1.Service {
+	instances := p.serviceInstances()
+	snapshots := make([]*v1.Service, 0, len(instances))
+	for _, inst := range instances {
+		if inst == nil {
+			continue
+		}
+		unlockService := p.lockService(inst.UID())
+		if inst.ServiceSnapshot != nil {
+			snapshots = append(snapshots, inst.ServiceSnapshot.DeepCopy())
+		}
+		unlockService()
+	}
+	return snapshots
+}
+
 func (p *Processor) appendServiceInstance(inst *instance.Instance) {
 	p.instancesMutex.Lock()
 	defer p.instancesMutex.Unlock()

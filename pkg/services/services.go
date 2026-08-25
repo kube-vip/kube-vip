@@ -185,6 +185,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 				unlockService()
 				return nil
 			}
+			inst.AddCalled = true
 		} else {
 			inst.AddCalled = true
 			p.appendServiceInstance(inst)
@@ -459,7 +460,15 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 		}
 	}
 
-	serviceInstance, updatedInstances := p.detachServiceInstance(uid)
+	var serviceInstance *instance.Instance
+	updatedInstances := make([]*instance.Instance, 0)
+	for _, inst := range p.serviceInstances() {
+		if inst != nil && inst.UID() == uid {
+			serviceInstance = inst
+			continue
+		}
+		updatedInstances = append(updatedInstances, inst)
+	}
 
 	// If we've been through all services and not found the correct one then error
 	if serviceInstance == nil {
@@ -571,6 +580,8 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name)
 		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
 	}
+
+	p.detachServiceInstance(uid)
 
 	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
 

@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+type testLabeler struct {
+	addErr    error
+	removeErr error
+}
+
+func (l *testLabeler) AddLabel(map[string]string) error {
+	return l.addErr
+}
+
+func (l *testLabeler) RemoveLabel(map[string]string) error {
+	return l.removeErr
+}
 
 func TestServiceLocksAreScopedByUID(t *testing.T) {
 	processor := &Processor{}
@@ -72,4 +87,96 @@ func TestDeleteServiceCleansUpAfterContextRemoval(t *testing.T) {
 	if got := processor.findServiceInstance(service); got != nil {
 		t.Fatal("deleted Service instance remained tracked after leader cleanup")
 	}
+}
+
+func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	serviceInstance := &instance.Instance{ServiceSnapshot: service}
+	processor := &Processor{
+		config:           &kubevip.Config{DisableServiceUpdates: true, EnableServicesElection: true},
+		ServiceInstances: []*instance.Instance{serviceInstance},
+		nodeLabelManager: &testLabeler{},
+	}
+
+	if err := processor.addService(context.Background(), serviceInstance, service, &sync.WaitGroup{}); err != nil {
+		t.Fatalf("addService() error = %v", err)
+	}
+	if !serviceInstance.AddCalled {
+		t.Fatal("pre-tracked Service instance was not marked added")
+	}
+}
+
+func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	serviceInstance := &instance.Instance{ServiceSnapshot: service, LabelAdded: true}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{serviceInstance},
+		nodeLabelManager: &testLabeler{removeErr: errors.New("remove label")},
+	}
+
+	if err := processor.deleteService(context.Background(), uid); err == nil {
+		t.Fatal("deleteService() error = nil, want label removal error")
+	}
+	if got := processor.findServiceInstance(service); got != serviceInstance {
+		t.Fatal("failed deletion removed the Service instance, preventing cleanup retry")
+	}
+}
+
+func TestServiceSnapshotsCopiesMutableServiceState(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	processor := &Processor{ServiceInstances: []*instance.Instance{{
+		ServiceUID:      uid,
+		ServiceSnapshot: service,
+	}}}
+
+	snapshots := processor.ServiceSnapshots()
+	if len(snapshots) != 1 {
+		t.Fatalf("ServiceSnapshots() count = %d, want 1", len(snapshots))
+	}
+	service.Namespace = "changed"
+	if snapshots[0].Namespace != "default" {
+		t.Fatal("ServiceSnapshots() returned mutable Service state")
+	}
+}
+
+func TestServiceSnapshotsSerializesSnapshotReplacement(t *testing.T) {
+	uid := types.UID("service-a")
+	serviceInstance := &instance.Instance{
+		ServiceUID: uid,
+		ServiceSnapshot: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+			UID: uid, Name: "service-a", Namespace: "default",
+		}},
+	}
+	processor := &Processor{ServiceInstances: []*instance.Instance{serviceInstance}}
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 100 {
+			unlockService := processor.lockService(uid)
+			serviceInstance.ServiceSnapshot = &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				UID: uid, Name: "service-a", Namespace: "default",
+			}}
+			unlockService()
+		}
+	})
+	wg.Go(func() {
+		for range 100 {
+			snapshots := processor.ServiceSnapshots()
+			if len(snapshots) != 1 || snapshots[0].UID != uid {
+				t.Errorf("ServiceSnapshots() = %+v, want one snapshot for %q", snapshots, uid)
+				return
+			}
+		}
+	})
+	wg.Wait()
 }
