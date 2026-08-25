@@ -442,14 +442,6 @@ func serviceSnapshotForEgress(inst *instance.Instance, service *v1.Service) *v1.
 	return merged
 }
 
-func (p *Processor) serviceSnapshot(service *v1.Service) (*v1.Service, bool) {
-	serviceInstance := p.findServiceInstance(service)
-	if serviceInstance == nil || serviceInstance.ServiceSnapshot == nil {
-		return nil, false
-	}
-	return serviceInstance.ServiceSnapshot.DeepCopy(), true
-}
-
 func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCtx ...*servicecontext.Context) error {
 	unlockService := p.lockService(uid)
 	defer unlockService()
