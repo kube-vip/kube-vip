@@ -132,7 +132,7 @@ Additionally it is now relatively easy and quick to develop with [skaffold](http
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=kube-vip/kube-vip&type=Date)](https://star-history.com/#kube-vip/kube-vip&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=kube-vip/kube-vip&type=Date)](https://star-history.dera.page/#kube-vip/kube-vip&type=date)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkube-vip%2Fkube-vip.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkube-vip%2Fkube-vip?ref=badge_shield)
 
 
