@@ -204,7 +204,7 @@ func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *l
 	}
 
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
-	err = p.deleteService(svcLease.Ctx, service.UID, svcCtx)
+	err = p.deleteService(context.WithoutCancel(svcLease.Ctx), service.UID, svcCtx)
 	if err != nil {
 		log.Error("service deletion", "err", err)
 		return err

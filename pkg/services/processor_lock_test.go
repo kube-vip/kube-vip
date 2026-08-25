@@ -9,6 +9,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,10 +17,8 @@ import (
 )
 
 type testLabeler struct {
-	addErr       error
-	removeErr    error
-	removeErrors []error
-	removeCalls  int
+	addErr    error
+	removeErr error
 }
 
 func (l *testLabeler) AddLabel(map[string]string) error {
@@ -27,12 +26,6 @@ func (l *testLabeler) AddLabel(map[string]string) error {
 }
 
 func (l *testLabeler) RemoveLabel(map[string]string) error {
-	l.removeCalls++
-	if len(l.removeErrors) > 0 {
-		err := l.removeErrors[0]
-		l.removeErrors = l.removeErrors[1:]
-		return err
-	}
 	return l.removeErr
 }
 
@@ -115,6 +108,9 @@ func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
 	if !serviceInstance.AddCalled {
 		t.Fatal("pre-tracked Service instance was not marked added")
 	}
+	if err := processor.addService(context.Background(), serviceInstance, service, &sync.WaitGroup{}); err != nil {
+		t.Fatalf("second addService() error = %v", err)
+	}
 }
 
 func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
@@ -137,27 +133,33 @@ func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
 	}
 }
 
-func TestDeleteTrackedServiceRetriesTransientCleanupFailure(t *testing.T) {
+func TestDeleteTrackedServiceCleansUpElectedServiceImmediately(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		UID: uid, Name: "service-a", Namespace: "default",
 	}}
-	labeler := &testLabeler{removeErrors: []error{errors.New("temporary remove label"), nil}}
 	processor := &Processor{
-		config:           &kubevip.Config{},
-		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service, LabelAdded: true}},
-		nodeLabelManager: labeler,
+		config:           &kubevip.Config{EnableServicesElection: true},
+		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service}},
+		leaseMgr:         lease.NewManager(),
 	}
-	processor.svcMap.Store(uid, servicecontext.New(context.Background()))
+	svcCtx := servicecontext.New(context.Background())
+	processor.svcMap.Store(uid, svcCtx)
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	leaseID := lease.NewID(processor.config.LeaderElectionType, leaseNamespace, serviceLease)
+	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceNamespacedName(service))
 
 	if err := processor.deleteTrackedService(service); err != nil {
 		t.Fatalf("deleteTrackedService() error = %v", err)
 	}
-	if labeler.removeCalls != 2 {
-		t.Fatalf("RemoveLabel calls = %d, want 2", labeler.removeCalls)
-	}
 	if got := processor.findServiceInstance(service); got != nil {
-		t.Fatal("transient cleanup failure left Service instance tracked after retry")
+		t.Fatal("deleted elected Service instance remained tracked")
+	}
+	if _, ok := processor.svcMap.Load(uid); ok {
+		t.Fatal("deleted Service context remained tracked after cleanup")
+	}
+	if processor.leaseMgr.Get(leaseID) != nil {
+		t.Fatal("deleted Service lease remained available for a replacement")
 	}
 }
 
@@ -166,18 +168,31 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		UID: uid, Name: "service-a", Namespace: "default",
 	}}
+	labeler := &testLabeler{removeErr: errors.New("permanent remove label")}
 	processor := &Processor{
 		config:           &kubevip.Config{},
 		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service, LabelAdded: true}},
-		nodeLabelManager: &testLabeler{removeErr: errors.New("permanent remove label")},
+		nodeLabelManager: labeler,
 	}
-	processor.svcMap.Store(uid, servicecontext.New(context.Background()))
+	svcCtx := servicecontext.New(context.Background())
+	processor.svcMap.Store(uid, svcCtx)
 
 	if err := processor.deleteTrackedService(service); err == nil {
 		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")
 	}
 	if got := processor.findServiceInstance(service); got == nil {
 		t.Fatal("persistent cleanup failure removed the Service instance")
+	}
+	if got, err := processor.getServiceContext(uid); err != nil || got != svcCtx {
+		t.Fatalf("failed cleanup did not retain its context for retry: got %v, err %v", got, err)
+	}
+
+	labeler.removeErr = nil
+	if err := processor.deleteTrackedService(service); err != nil {
+		t.Fatalf("deleteTrackedService() retry error = %v", err)
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("retry did not remove the Service instance")
 	}
 }
 

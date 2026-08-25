@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
@@ -28,21 +27,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/keymutex"
 )
 
 const concurrentServiceLocks = 128
-
-var serviceDeletionRetryBackoff = wait.Backoff{
-	Steps:    3,
-	Duration: 10 * time.Millisecond,
-	Factor:   1.0,
-	Jitter:   0.1,
-}
 
 type Processor struct {
 	config        *kubevip.Config
@@ -365,32 +355,28 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
-	if svcCtx == nil {
-		unlockService()
-		return nil
+	cleanupCtx := context.Background()
+	if svcCtx != nil {
+		// Stop the old watchers and retire their lease before a replacement can attach.
+		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		svcCtx.Cancel()
+		if p.leaseMgr != nil {
+			namespace, name := lease.ServiceName(svc)
+			leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
+			p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+		}
+		cleanupCtx = context.WithoutCancel(svcCtx.Ctx)
 	}
-
-	// Calls the cancel function of the context.
-	log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-	svcCtx.Cancel()
-	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
-	// Drop the per-service election series so a recreated service starts clean.
-	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-	deleteWithoutElection := !p.config.EnableServicesElection
 	unlockService()
 
-	if deleteWithoutElection {
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), time.Second)
-		deletionErr := retry.OnError(serviceDeletionRetryBackoff, func(err error) bool {
-			return cleanupCtx.Err() == nil && !errors.Is(err, context.Canceled)
-		}, func() error {
-			return p.deleteService(cleanupCtx, svc.UID)
-		})
-		cancelCleanup()
-		if deletionErr != nil {
-			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deletionErr)
-		}
+	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
+		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
+	if svcCtx != nil {
+		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+	}
+	// Drop the per-service election series so a recreated service starts clean.
+	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 	p.updateActiveServicesMetric()
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 

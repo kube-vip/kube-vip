@@ -183,6 +183,7 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 			alreadyAdded := inst.AddCalled
 			if alreadyAdded {
 				unlockService()
+				serviceLocked = false
 				return nil
 			}
 			inst.AddCalled = true
