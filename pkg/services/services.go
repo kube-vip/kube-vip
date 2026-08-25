@@ -457,16 +457,12 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 	if len(expectedCtx) > 0 {
 		expected = expectedCtx[0]
 	}
-	return p.deleteServiceLocked(ctx, uid, expected)
-}
-
-func (p *Processor) deleteServiceLocked(ctx context.Context, uid types.UID, expectedCtx *servicecontext.Context) error {
-	if expectedCtx != nil {
+	if expected != nil {
 		currentCtx, err := p.getServiceContext(uid)
 		if err != nil {
 			return err
 		}
-		if currentCtx != expectedCtx {
+		if currentCtx != nil && currentCtx != expected {
 			return nil
 		}
 	}

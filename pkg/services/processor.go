@@ -349,39 +349,33 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	unlockService := p.lockService(svc.UID)
-	serviceLocked := true
-	defer func() {
-		if serviceLocked {
-			unlockService()
-		}
-	}()
-
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
+		unlockService()
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
-	if svcCtx != nil {
-		// Calls the cancel function of the context
-		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		svcCtx.Cancel()
-		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
-		if !p.config.EnableServicesElection {
-			// The context is gone, so no replacement can reuse this lifecycle while deletion runs.
-			err = p.deleteServiceLocked(svcCtx.Ctx, svc.UID, nil)
-			if err != nil {
-				log.Error(err.Error())
-			}
-		}
-		// Drop the per-service election series so a recreated service starts clean.
-		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+	if svcCtx == nil {
+		unlockService()
+		return nil
 	}
+
+	// Calls the cancel function of the context.
+	log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+	svcCtx.Cancel()
+	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+	// Drop the per-service election series so a recreated service starts clean.
+	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
+	deleteWithoutElection := !p.config.EnableServicesElection
 	unlockService()
-	serviceLocked = false
-	if svcCtx != nil {
-		p.updateActiveServicesMetric()
+
+	if deleteWithoutElection {
+		if err := p.deleteService(svcCtx.Ctx, svc.UID); err != nil {
+			log.Error(err.Error())
+		}
 	}
+	p.updateActiveServicesMetric()
+	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
 }
