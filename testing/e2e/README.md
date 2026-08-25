@@ -24,3 +24,24 @@ The E2E tests:
     * This causes leader election to occur
 * Attempts to connect to the control plane using the VIP
     * The new leader will need send ndp advertisements before this can succeed within a timeout
+
+## Prometheus metrics helpers
+
+The E2E build also provides helpers for checking the metrics endpoint from
+inside a kind node. `ScrapeMetrics` executes `curl` against
+`http://127.0.0.1:2112/metrics` and parses the result into a label-aware sample
+map. The helpers are compiled only with the `e2e` build tag and do not change
+the normal test suite.
+
+Use `MetricValue` when a label selector should match one series; its second
+return value is the number of matching series. Use `SumMetric` or `MaxMetric`
+when a selector intentionally matches multiple series. `CounterDelta` compares
+two scrapes of one counter, while `EventuallyMetric` and
+`ConsistentlyMetric` provide Gomega polling assertions. `MetricStable` checks
+that a value remains unchanged across samples separated by a caller-selected
+gap, which is useful for detecting leaked loops after a fault.
+
+The metrics-enabled tests require kube-vip to expose port `2112` in the kind
+node and require `curl` in the node image. Keep metric assertions focused on
+stable behavior and use label selectors instead of depending on the ordering
+of Prometheus samples.
