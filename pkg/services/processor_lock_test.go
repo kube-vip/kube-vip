@@ -16,8 +16,10 @@ import (
 )
 
 type testLabeler struct {
-	addErr    error
-	removeErr error
+	addErr       error
+	removeErr    error
+	removeErrors []error
+	removeCalls  int
 }
 
 func (l *testLabeler) AddLabel(map[string]string) error {
@@ -25,6 +27,12 @@ func (l *testLabeler) AddLabel(map[string]string) error {
 }
 
 func (l *testLabeler) RemoveLabel(map[string]string) error {
+	l.removeCalls++
+	if len(l.removeErrors) > 0 {
+		err := l.removeErrors[0]
+		l.removeErrors = l.removeErrors[1:]
+		return err
+	}
 	return l.removeErr
 }
 
@@ -126,6 +134,50 @@ func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
 	}
 	if got := processor.findServiceInstance(service); got != serviceInstance {
 		t.Fatal("failed deletion removed the Service instance, preventing cleanup retry")
+	}
+}
+
+func TestDeleteTrackedServiceRetriesTransientCleanupFailure(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	labeler := &testLabeler{removeErrors: []error{errors.New("temporary remove label"), nil}}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service, LabelAdded: true}},
+		nodeLabelManager: labeler,
+	}
+	processor.svcMap.Store(uid, servicecontext.New(context.Background()))
+
+	if err := processor.deleteTrackedService(service); err != nil {
+		t.Fatalf("deleteTrackedService() error = %v", err)
+	}
+	if labeler.removeCalls != 2 {
+		t.Fatalf("RemoveLabel calls = %d, want 2", labeler.removeCalls)
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("transient cleanup failure left Service instance tracked after retry")
+	}
+}
+
+func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service, LabelAdded: true}},
+		nodeLabelManager: &testLabeler{removeErr: errors.New("permanent remove label")},
+	}
+	processor.svcMap.Store(uid, servicecontext.New(context.Background()))
+
+	if err := processor.deleteTrackedService(service); err == nil {
+		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")
+	}
+	if got := processor.findServiceInstance(service); got == nil {
+		t.Fatal("persistent cleanup failure removed the Service instance")
 	}
 }
 

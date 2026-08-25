@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
@@ -27,12 +28,21 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/keymutex"
 )
 
 const concurrentServiceLocks = 128
+
+var serviceDeletionRetryBackoff = wait.Backoff{
+	Steps:    3,
+	Duration: 10 * time.Millisecond,
+	Factor:   1.0,
+	Jitter:   0.1,
+}
 
 type Processor struct {
 	config        *kubevip.Config
@@ -370,8 +380,15 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	unlockService()
 
 	if deleteWithoutElection {
-		if err := p.deleteService(svcCtx.Ctx, svc.UID); err != nil {
-			log.Error(err.Error())
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), time.Second)
+		deletionErr := retry.OnError(serviceDeletionRetryBackoff, func(err error) bool {
+			return cleanupCtx.Err() == nil && !errors.Is(err, context.Canceled)
+		}, func() error {
+			return p.deleteService(cleanupCtx, svc.UID)
+		})
+		cancelCleanup()
+		if deletionErr != nil {
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deletionErr)
 		}
 	}
 	p.updateActiveServicesMetric()
