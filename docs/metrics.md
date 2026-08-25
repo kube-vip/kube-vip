@@ -24,6 +24,31 @@ backends grow.
 | `kube_vip_service_reconcile_errors_total` | Counter | `namespace`, `name`, `reason` | Service reconciliation failures. Current reasons include `invalid_config`, `service_context`, `delete_service`, and `new_instance`. |
 | `kube_vip_service_reconcile_duration_seconds` | Histogram | `namespace` | End-to-end duration of service `AddOrModify` reconciliation. |
 
+## Dataplane operations
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `kube_vip_vip_addresses` | Gauge | `interface`, `family` | VIP addresses currently held by an interface. `family` is `IPv4` or `IPv6`. |
+| `kube_vip_vip_operations_total` | Counter | `op`, `result` | VIP address operations. Current operations are `add` and `delete`; results are `ok` or `error`. |
+| `kube_vip_arp_advertisements_total` | Counter | `result` | Gratuitous ARP advertisements, labeled `ok` or `error`. |
+| `kube_vip_ndp_advertisements_total` | Counter | `result` | Gratuitous NDP advertisements, labeled `ok` or `error`. |
+| `kube_vip_route_operations_total` | Counter | `op`, `result` | Routing-table operations. Current operations are `add`, `delete`, `replace`, and `update`; results are `ok` or `error`. |
+| `kube_vip_dns_resolutions_total` | Counter | `result` | DNS resolutions performed by the DNS-backed VIP updater, labeled `ok` or `error`. |
+| `kube_vip_dns_ip_changes_total` | Counter | — | Number of DNS-backed VIP changes where the resolved address changed. |
+
+The VIP address gauge is state-based: an address is counted once per
+interface/family and is removed when kube-vip releases it. Operation counters
+are attempt/outcome signals and should normally be queried with `rate()`.
+
+Useful examples:
+
+```promql
+sum by (instance, interface, family) (kube_vip_vip_addresses)
+sum by (op, result) (rate(kube_vip_vip_operations_total[5m]))
+sum by (result) (rate(kube_vip_arp_advertisements_total[5m]))
+sum by (result) (rate(kube_vip_ndp_advertisements_total[5m]))
+```
+
 ## Service events and leader election
 
 | Metric | Type | Labels | Meaning |
@@ -76,4 +101,3 @@ sum by (result) (rate(kube_vip_service_reconcile_errors_total[5m]))
 histogram_quantile(0.99,
   sum by (le) (rate(kube_vip_service_reconcile_duration_seconds_bucket[5m])))
 ```
-
