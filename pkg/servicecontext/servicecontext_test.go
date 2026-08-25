@@ -118,4 +118,36 @@ func TestCancelLeaderCancelsCallbackInstalledDuringCancellation(t *testing.T) {
 
 	close(releaseOldCancel)
 	<-cancelComplete
+
+	laterCancelCalled := make(chan struct{})
+	svcCtx.SetLeaderCancel(func() {
+		close(laterCancelCalled)
+	})
+	select {
+	case <-laterCancelCalled:
+		t.Fatal("pending cancellation was applied more than once")
+	case <-time.After(10 * time.Millisecond):
+	}
+}
+
+func TestCancelLeaderDoesNotCancelNextInstalledCallback(t *testing.T) {
+	svcCtx := New(context.Background())
+	defer svcCtx.Cancel()
+
+	firstCancelCalled := make(chan struct{})
+	svcCtx.SetLeaderCancel(func() {
+		close(firstCancelCalled)
+	})
+	svcCtx.CancelLeader()
+	<-firstCancelCalled
+
+	nextCancelCalled := make(chan struct{})
+	svcCtx.SetLeaderCancel(func() {
+		close(nextCancelCalled)
+	})
+	select {
+	case <-nextCancelCalled:
+		t.Fatal("canceling an installed leader callback canceled the next election round")
+	case <-time.After(10 * time.Millisecond):
+	}
 }

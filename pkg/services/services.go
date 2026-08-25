@@ -48,7 +48,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
-	action, instance := p.getServiceInstanceAction(svc)
+	action, _ := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
@@ -65,7 +65,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 			}
 		}
 
-		if err := p.addService(ctx.Ctx, instance, svc, wg); err != nil {
+		if err := p.addService(ctx.Ctx, svc, wg); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
@@ -162,7 +162,7 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
 	unlockService := p.lockService(svc.UID)
 	serviceLocked := true
 	defer func() {
@@ -173,25 +173,18 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 	startTime := time.Now()
 
-	var err error
 	current := p.findServiceInstance(svc)
+	var inst *instance.Instance
 	if current != nil {
 		inst = current
-	}
-	if inst != nil {
-		if current != nil {
-			alreadyAdded := inst.AddCalled
-			if alreadyAdded {
-				unlockService()
-				serviceLocked = false
-				return nil
-			}
-			inst.AddCalled = true
-		} else {
-			inst.AddCalled = true
-			p.appendServiceInstance(inst)
+		if inst.AddCalled {
+			unlockService()
+			serviceLocked = false
+			return nil
 		}
+		inst.AddCalled = true
 	} else {
+		var err error
 		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
 			return err
@@ -204,6 +197,10 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 	serviceLocked = false
 
 	if err := p.configureService(ctx, inst, svc, wg); err != nil {
+		cleanupErr := p.deleteServiceInstance(context.WithoutCancel(ctx), inst)
+		if cleanupErr != nil {
+			return fmt.Errorf("configure service %s/%s: %w; cleanup: %w", svc.Namespace, svc.Name, err, cleanupErr)
+		}
 		return err
 	}
 
@@ -461,22 +458,41 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 		}
 	}
 
-	var serviceInstance *instance.Instance
-	updatedInstances := make([]*instance.Instance, 0)
-	for _, inst := range p.serviceInstances() {
-		if inst != nil && inst.UID() == uid {
-			serviceInstance = inst
-			continue
-		}
-		updatedInstances = append(updatedInstances, inst)
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
+	return p.deleteCurrentService(ctx, p.findServiceInstance(service))
+}
+
+func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instance.Instance) error {
+	if expected == nil {
+		return nil
 	}
+
+	unlockService := p.lockService(expected.UID())
+	defer unlockService()
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: expected.UID()}}
+	if p.findServiceInstance(service) != expected {
+		return nil
+	}
+	return p.deleteCurrentService(ctx, expected)
+}
+
+// deleteCurrentService removes the supplied tracked instance while its Service key is held.
+func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
 
 	// If we've been through all services and not found the correct one then error
 	if serviceInstance == nil {
 		// TODO: - fix UX
 		// return fmt.Errorf("unable to find/stop service [%s]", uid)
-		log.Warn("unable to find/stop service", "uid", uid)
+		log.Warn("unable to find/stop service")
 		return nil
+	}
+
+	updatedInstances := make([]*instance.Instance, 0)
+	for _, inst := range p.serviceInstances() {
+		if inst == serviceInstance {
+			continue
+		}
+		updatedInstances = append(updatedInstances, inst)
 	}
 
 	if serviceInstance.LabelAdded {
@@ -578,13 +594,13 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 
 	// Clean up WireGuard DNAT rules if WireGuard is enabled
 	if p.config.EnableWireguard {
-		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name)
+		log.Debug("[service] cleaning up WireGuard DNAT rules", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name)
 		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
 	}
 
-	p.detachServiceInstance(uid)
+	p.detachServiceInstance(serviceInstance.UID())
 
-	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
+	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
 
 	return nil
 }

@@ -18,10 +18,18 @@ import (
 
 type testLabeler struct {
 	addErr    error
+	addErrors []error
+	addCalls  int
 	removeErr error
 }
 
 func (l *testLabeler) AddLabel(map[string]string) error {
+	l.addCalls++
+	if len(l.addErrors) > 0 {
+		err := l.addErrors[0]
+		l.addErrors = l.addErrors[1:]
+		return err
+	}
 	return l.addErr
 }
 
@@ -102,14 +110,75 @@ func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
 		nodeLabelManager: &testLabeler{},
 	}
 
-	if err := processor.addService(context.Background(), serviceInstance, service, &sync.WaitGroup{}); err != nil {
+	if err := processor.addService(context.Background(), service, &sync.WaitGroup{}); err != nil {
 		t.Fatalf("addService() error = %v", err)
 	}
 	if !serviceInstance.AddCalled {
 		t.Fatal("pre-tracked Service instance was not marked added")
 	}
-	if err := processor.addService(context.Background(), serviceInstance, service, &sync.WaitGroup{}); err != nil {
+	if err := processor.addService(context.Background(), service, &sync.WaitGroup{}); err != nil {
 		t.Fatalf("second addService() error = %v", err)
+	}
+}
+
+func TestAddServiceDoesNotReattachDetachedInstance(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	staleInstance := &instance.Instance{ServiceSnapshot: service}
+	processor := &Processor{
+		config:           &kubevip.Config{DisableServiceUpdates: true, EnableServicesElection: true},
+		ServiceInstances: []*instance.Instance{staleInstance},
+		nodeLabelManager: &testLabeler{},
+	}
+
+	action, selected := processor.getServiceInstanceAction(service)
+	if action != ActionAdd || selected != staleInstance {
+		t.Fatalf("getServiceInstanceAction() = %q, %v; want ActionAdd and stale instance", action, selected)
+	}
+	if err := processor.deleteService(context.Background(), uid); err != nil {
+		t.Fatalf("deleteService() error = %v", err)
+	}
+	if err := processor.addService(context.Background(), service, &sync.WaitGroup{}); err != nil {
+		t.Fatalf("addService() error = %v", err)
+	}
+	current := processor.findServiceInstance(service)
+	if current == nil {
+		t.Fatal("addService() did not track a replacement instance")
+	}
+	if current == staleInstance {
+		t.Fatal("addService() reattached an instance detached by concurrent deletion")
+	}
+	if got := len(processor.ServiceInstances); got != 1 {
+		t.Fatalf("tracked instance count = %d, want 1", got)
+	}
+	if !current.AddCalled {
+		t.Fatal("replacement instance was not marked added")
+	}
+}
+
+func TestAddServiceCleansUpAfterConfigurationFailure(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	serviceInstance := &instance.Instance{ServiceSnapshot: service}
+	labeler := &testLabeler{addErr: errors.New("add label")}
+	processor := &Processor{
+		config:           &kubevip.Config{DisableServiceUpdates: true, EnableServicesElection: true},
+		ServiceInstances: []*instance.Instance{serviceInstance},
+		nodeLabelManager: labeler,
+	}
+
+	if err := processor.addService(context.Background(), service, &sync.WaitGroup{}); err == nil {
+		t.Fatal("addService() error = nil, want configuration failure")
+	}
+	if labeler.addCalls != 1 {
+		t.Fatalf("AddLabel calls = %d, want 1", labeler.addCalls)
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("configuration failure left a partial instance tracked")
 	}
 }
 
@@ -130,6 +199,27 @@ func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
 	}
 	if got := processor.findServiceInstance(service); got != serviceInstance {
 		t.Fatal("failed deletion removed the Service instance, preventing cleanup retry")
+	}
+}
+
+func TestDeleteServiceInstanceDoesNotDeleteReplacement(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	failedInstance := &instance.Instance{ServiceSnapshot: service}
+	replacement := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{replacement},
+		nodeLabelManager: &testLabeler{},
+	}
+
+	if err := processor.deleteServiceInstance(context.Background(), failedInstance); err != nil {
+		t.Fatalf("deleteServiceInstance() error = %v", err)
+	}
+	if got := processor.findServiceInstance(service); got != replacement {
+		t.Fatal("failed-add cleanup removed a replacement instance")
 	}
 }
 
@@ -173,9 +263,13 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 		config:           &kubevip.Config{},
 		ServiceInstances: []*instance.Instance{{ServiceSnapshot: service, LabelAdded: true}},
 		nodeLabelManager: labeler,
+		leaseMgr:         lease.NewManager(),
 	}
 	svcCtx := servicecontext.New(context.Background())
 	processor.svcMap.Store(uid, svcCtx)
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	leaseID := lease.NewID(processor.config.LeaderElectionType, leaseNamespace, serviceLease)
+	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceNamespacedName(service))
 
 	if err := processor.deleteTrackedService(service); err == nil {
 		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")
@@ -185,6 +279,9 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	}
 	if got, err := processor.getServiceContext(uid); err != nil || got != svcCtx {
 		t.Fatalf("failed cleanup did not retain its context for retry: got %v, err %v", got, err)
+	}
+	if processor.leaseMgr.Get(leaseID) != nil {
+		t.Fatal("failed cleanup left the retired lease available to a replacement")
 	}
 
 	labeler.removeErr = nil

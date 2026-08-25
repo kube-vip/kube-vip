@@ -78,7 +78,8 @@ func TestAddServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 		nodeLabelManager: noop.NewManager(),
 	}
 	serviceInstance := &instance.Instance{ServiceSnapshot: staleService}
-	if err := processor.addService(context.Background(), serviceInstance, staleService, &sync.WaitGroup{}); err != nil {
+	processor.ServiceInstances = []*instance.Instance{serviceInstance}
+	if err := processor.addService(context.Background(), staleService, &sync.WaitGroup{}); err != nil {
 		t.Fatalf("addService returned error: %v", err)
 	}
 
