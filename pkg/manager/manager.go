@@ -433,18 +433,22 @@ func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFun
 		switch sig {
 		case syscall.SIGUSR1:
 			log.Info("Received SIGUSR1, dumping configuration")
-			sm.dumpConfiguration(ctx)
+			go sm.dumpConfiguration(ctx)
 		case syscall.SIGINT, syscall.SIGTERM:
-			sm.closing.Store(true)
-			log.Info("Received kube-vip termination, signaling shutdown")
-			if cpCluster != nil {
-				cpCluster.Stop()
-			}
-			// Cancel the context, which will in turn cancel the leadership and all goroutines
-			cancel()
+			sm.shutdown(cancel, cpCluster)
 			return
 		}
 	}
+}
+
+func (sm *Manager) shutdown(cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+	sm.closing.Store(true)
+	log.Info("Received kube-vip termination, signaling shutdown")
+	if cpCluster != nil {
+		cpCluster.Stop()
+	}
+	// Cancel the context, which will in turn cancel the leadership and all goroutines.
+	cancel()
 }
 
 func (sm *Manager) Kill() {

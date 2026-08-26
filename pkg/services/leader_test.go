@@ -69,3 +69,53 @@ func TestStartServicesLeaderElection_ReturnsOnLeaseLossWithoutServiceDeletion(t 
 	// deleted; confirm it is not left dangling forever by cancelling the service context now.
 	svcCtx.Cancel()
 }
+
+func TestSharedLeaseFollowerCancellationDoesNotStopLeader(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{EnableServicesElection: true},
+		leaseMgr: lease.NewManager(),
+	}
+	annotations := map[string]string{kubevip.ServiceLease: "shared"}
+	leaderService := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "leader", Namespace: "default", UID: types.UID("leader"), Annotations: annotations,
+	}}
+	followerService := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "follower", Namespace: "default", UID: types.UID("follower"), Annotations: annotations,
+	}}
+
+	leaseNamespace, serviceLease := lease.ServiceName(leaderService)
+	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+	sharedLease := p.leaseMgr.Add(context.Background(), id)
+	sharedLease.Add(lease.ServiceNamespacedName(leaderService))
+	if !sharedLease.BeginElection() {
+		t.Fatal("leader service did not become candidate")
+	}
+	sharedLease.ElectionStarted()
+	sharedLease.Add(lease.ServiceNamespacedName(followerService))
+
+	followerCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(followerService.UID, followerCtx)
+	followerCtx.SignalReadiness()
+	done := make(chan error, 1)
+	go func() {
+		done <- p.StartServicesLeaderElection(followerCtx, followerService, nil, true)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	followerCtx.Cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("follower election returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower election did not return after follower context cancellation")
+	}
+
+	if !sharedLease.Elected.Load() {
+		t.Fatal("follower cancellation cleared the shared leader election state")
+	}
+	if sharedLease.BeginElection() {
+		t.Fatal("follower cancellation admitted a second candidate while leader remains elected")
+	}
+}

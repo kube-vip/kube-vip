@@ -341,24 +341,18 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 		default:
 			leaseNamespace, serviceLease := lease.ServiceName(service)
 			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
-			// The lease is retired once its last service is gone, so an absent one means
-			// this loop has nothing left to elect for.
-			l := p.leaseMgr.Get(id)
-			if l == nil {
-				return
-			}
-			l.Lock()
-
-			if !l.Elected.Load() {
-				l.Unlock()
-				attempts.Inc()
-				err := serviceFunc(svcCtx, service, wg, true)
-				if err != nil {
-					log.Error(err.Error())
+			// StartServicesLeaderElection owns registration and chooses whether this
+			// service becomes a candidate or joins an elected shared lease.
+			attempts.Inc()
+			err := serviceFunc(svcCtx, service, wg, true)
+			if err != nil {
+				log.Error(err.Error())
+				p.leaseMgr.Add(svcCtx.Ctx, id)
+				select {
+				case <-svcCtx.Ctx.Done():
+					return
+				case <-time.After(time.Millisecond * 200):
 				}
-			} else {
-				l.Unlock()
-				time.Sleep(time.Millisecond * 200)
 			}
 		}
 	}

@@ -163,50 +163,25 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)
 	objectName := lease.ObjectName(leaseID, "svcs0")
 
-	// objLease, isNew, isSharedLease := c.leaseMgr.Add(leaseID, objectName)
-
-	objLease := c.leaseMgr.Add(ctx, leaseID)
-	isNew := objLease.Add(objectName)
+	objLease, isNew := c.leaseMgr.Acquire(ctx, leaseID, objectName)
 
 	// this service was already processed so we do not need to do anything
-	if !isNew {
+	if !isNew && objLease.Elected.Load() {
 		log.Debug("this election was already done, waiting for it to finish", "lease", c.config.ServicesLeaseName)
-		// Wait for either the service context or lease context to be done
-		select {
-		case <-ctx.Done():
-			// Service was deleted
-			c.leaseMgr.Delete(leaseID, objectName, objLease)
-		case <-objLease.Ctx.Done():
-			// Leader election ended (leadership lost or context cancelled)
-		}
+		objLease.WaitForElectionEnd(ctx)
 		return
 	}
 
-	objLease.Lock()
-
-	defer func() {
-		objLease.Unlock()
-	}()
-
-	if objLease.Elected.Load() {
-		objLease.Unlock()
+	if !objLease.BeginElection() {
 		log.Debug("this election was already done, shared lease", "lease", leaseID.Name())
-
-		// wait for leader election to start or context to be done
-		select {
-		case <-objLease.Started:
-		case <-objLease.Ctx.Done():
-			// Lease was cancelled (e.g., leader election ended), return immediately
-			// This allows the restart loop to create a fresh lease
-			log.Debug("lease context cancelled before leader election started", "lease", leaseID.Name())
+		if !objLease.WaitForLeader(ctx) {
 			return
 		}
 
 		a.OnStartedLeading(objLease.Ctx)
 
 		log.Debug("waiting for lease to finish", "lease", leaseID.Name())
-		// wait for leaderelection to be finished
-		<-objLease.Ctx.Done()
+		objLease.WaitForElectionEnd(ctx)
 
 		// we can do cleanup here
 		a.OnStoppedLeading()
@@ -216,7 +191,6 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 
 		return
 	}
-
 	// For new leases (not shared), ensure cleanup when the leader election ends
 	// This is critical for the restartable service watcher to be able to restart
 	// the leader election after leadership loss
@@ -230,6 +204,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	}()
 
 	wg := sync.WaitGroup{}
+	defer objLease.ElectionStopped()
 	defer wg.Wait()
 
 	run := &election.RunConfig{
@@ -238,17 +213,14 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		LeaseAnnotations: map[string]string{},
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
+			objLease.ElectionStarted()
 			wg.Go(func() {
-				objLease.Elected.Store(true)
-				objLease.Unlock()
-				close(objLease.Started)
 				a.OnStartedLeading(ctx)
 				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
 				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
 			})
 		},
 		OnStoppedLeading: func() {
-			objLease.Elected.Store(false)
 			a.OnStoppedLeading()
 			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
 		},

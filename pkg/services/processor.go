@@ -146,37 +146,38 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		svc = s
 	}
 
-	unlockService := p.lockService(svc.UID)
-	serviceLocked := true
-	defer func() {
-		if serviceLocked {
-			unlockService()
+	var svcInstance *instance.Instance
+	var svcCtx *servicecontext.Context
+	shouldGarbageCollect := false
+	var err error
+	if err := func() error {
+		unlockService := p.lockService(svc.UID)
+		defer unlockService()
+
+		svcInstance = p.findServiceInstance(svc)
+		_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
+		if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "invalid_config").Inc()
+			return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
+				kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
 		}
-	}()
-	svcInstance := p.findServiceInstance(svc)
 
-	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
-	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
-		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "invalid_config").Inc()
-		return fmt.Errorf("annotation %q cannot be used with service traffic policy other than %q, service %s/%s",
-			kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
+		svcCtx, err = p.getServiceContext(svc.UID)
+		if err != nil {
+			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
+			return fmt.Errorf("failed to get service context: %w", err)
+		}
+		svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
+		if event.Type == watch.Modified && svcInstance != nil {
+			shouldGarbageCollect = serviceChanged(svcInstance, svc)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-
-	svcCtx, err := p.getServiceContext(svc.UID)
-	if err != nil {
-		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
-		return fmt.Errorf("failed to get service context: %w", err)
-	}
-	svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
-		shouldGarbageCollect := false
-		if svcInstance != nil {
-			shouldGarbageCollect = serviceChanged(svcInstance, svc)
-		}
-		unlockService()
-		serviceLocked = false
 		if shouldGarbageCollect {
 			for _, addr := range svcAddresses {
 				// log.Debugf("(svcs) Retrieving local addresses, to ensure that this modified address doesn't exist: %s", addr)
@@ -211,9 +212,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				p.updateActiveServicesMetric()
 			}
 		}
-	} else {
-		unlockService()
-		serviceLocked = false
 	}
 	ips, hostnames := instance.FetchServiceAddresses(svc)
 	log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)

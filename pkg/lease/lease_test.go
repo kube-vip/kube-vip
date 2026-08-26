@@ -34,6 +34,119 @@ func getSvcData(svc *v1.Service) (context.Context, ID) {
 
 const serviceLeaseAnnotation = kubevip.ServiceLease
 
+func electLease(t *testing.T, lease *Lease) {
+	t.Helper()
+	if !lease.BeginElection() {
+		t.Fatal("expected lease to admit an election candidate")
+	}
+	lease.ElectionStarted()
+}
+
+func TestManagerAcquireRegistersMembership(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	lease, first := manager.Acquire(context.Background(), id, objectName)
+	if !first {
+		t.Fatal("first acquire did not register the service")
+	}
+	if _, second := manager.Acquire(context.Background(), id, objectName); second {
+		t.Fatal("second acquire registered the same service twice")
+	}
+
+	manager.Delete(id, objectName, lease)
+	if manager.Get(id) != nil {
+		t.Fatal("lease remained after its only acquired member was deleted")
+	}
+}
+
+func TestManagerClaimDoesNotCreateRetiredLease(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	if lease, joined := manager.Claim(getSvcID(service), ServiceNamespacedName(service)); lease != nil || joined {
+		t.Fatal("claim created or joined a lease that does not exist")
+	}
+}
+
+func TestLeaseElectionStateCoordinatesCandidates(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+
+	if !lease.BeginElection() {
+		t.Fatal("first election candidate was not admitted")
+	}
+	if lease.BeginElection() {
+		t.Fatal("second election candidate was admitted while election was running")
+	}
+
+	joined := make(chan bool, 1)
+	go func() {
+		joined <- lease.WaitForLeader(context.Background())
+	}()
+	lease.ElectionStarted()
+	select {
+	case elected := <-joined:
+		if !elected {
+			t.Fatal("follower did not observe elected lease")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after election succeeded")
+	}
+
+	lease.ElectionStopped()
+	if !lease.BeginElection() {
+		t.Fatal("lease did not admit a new candidate after election stopped")
+	}
+}
+
+func TestLeaseWaitForLeaderReturnsWhenCandidateStops(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+	if !lease.BeginElection() {
+		t.Fatal("candidate was not admitted")
+	}
+
+	joined := make(chan bool, 1)
+	go func() {
+		joined <- lease.WaitForLeader(context.Background())
+	}()
+	lease.ElectionStopped()
+	select {
+	case elected := <-joined:
+		if elected {
+			t.Fatal("follower observed a leader after candidate stopped")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after candidate stopped")
+	}
+}
+
+func TestLeaseWaitForElectionEndReleasesFollowers(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+	if !lease.BeginElection() {
+		t.Fatal("candidate was not admitted")
+	}
+	lease.ElectionStarted()
+
+	finished := make(chan struct{})
+	go func() {
+		lease.WaitForElectionEnd(context.Background())
+		close(finished)
+	}()
+	lease.ElectionStopped()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after leadership stopped")
+	}
+}
+
 // TestManager_Add_NewLease tests adding a new service with a new lease
 func TestManager_Add_NewLease(t *testing.T) {
 	mgr := NewManager()
@@ -54,10 +167,6 @@ func TestManager_Add_NewLease(t *testing.T) {
 	if leaseID.Cancel == nil {
 		t.Error("expected lease cancel func to be non-nil")
 	}
-	if leaseID.Started == nil {
-		t.Error("expected lease Started channel to be non-nil")
-	}
-
 }
 
 // TestManager_Add_ExistingLease tests adding a service with an existing lease
@@ -254,33 +363,6 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestLease_StartedChannel tests the Started channel behavior
-func TestLease_StartedChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	lease := newLease(ctx, cancel)
-
-	// Started channel should be open initially
-	select {
-	case <-lease.Started:
-		t.Fatal("expected Started channel to be open initially")
-	default:
-		// Expected
-	}
-
-	// Close the channel
-	close(lease.Started)
-
-	// Now it should be closed
-	select {
-	case <-lease.Started:
-		// Expected
-	default:
-		t.Error("expected Started channel to be closed after close()")
-	}
-}
-
 // TestGetName_WithoutAnnotation tests with no annotation
 func TestGetName_WithoutAnnotation(t *testing.T) {
 	svc := createTestService("my-service", "my-namespace", nil)
@@ -423,8 +505,8 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired - close Started channel
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Simulate leadership lost - the leader election function should delete the lease
 	// This is the fix: delete the lease when RunOrDie returns
@@ -443,17 +525,12 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 		t.Fatal("expected second add after delete to return isNew=true")
 	}
 
-	// Verify we got a new lease with a fresh Started channel
+	// Verify we got a new lease with no elected leader.
 	if lease1 == lease2 {
 		t.Error("expected new lease to be different from old lease")
 	}
-
-	// Verify the new Started channel is not closed
-	select {
-	case <-lease2.Started:
-		t.Error("expected new lease's Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected new lease to have no elected leader")
 	}
 }
 
@@ -479,8 +556,11 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 		t.Error("expected first add to return isNew=true")
 	}
 
-	// Simulate first service starting leadership
-	close(lease1.Started)
+	// Simulate first service starting leadership.
+	if !lease1.BeginElection() {
+		t.Fatal("expected first service to become election candidate")
+	}
+	lease1.ElectionStarted()
 
 	objectName2 := ServiceNamespacedName(svc2)
 
@@ -494,6 +574,9 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 	}
 	if lease1 != lease2 {
 		t.Error("expected same lease for services with same lease annotation")
+	}
+	if !lease2.WaitForLeader(context.Background()) {
+		t.Fatal("shared-lease follower did not observe the elected lease")
 	}
 
 	// Delete first service - lease should still exist
@@ -526,8 +609,8 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired - close Started channel
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Simulate a second goroutine calling Add BEFORE the first goroutine's defer deletes the lease
 	// This is the race condition scenario
@@ -542,12 +625,8 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 		t.Error("expected same lease to be returned")
 	}
 
-	// The Started channel should be closed (from the first run)
-	select {
-	case <-lease2.Started:
-		// Expected - channel is closed
-	default:
-		t.Error("expected Started channel to be closed")
+	if !lease2.Elected.Load() {
+		t.Error("expected lease to remain elected")
 	}
 
 	// Now the first goroutine's defer deletes the lease
@@ -581,8 +660,8 @@ func TestManager_NonCommonLease_MultipleAdds(t *testing.T) {
 		t.Error("expected first add to return isNew=true")
 	}
 
-	// Close Started to simulate leadership acquired
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Second Add (simulating another goroutine or restart attempt)
 	ctx2, leaseID2 := getSvcData(svc)
@@ -649,12 +728,8 @@ func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
 		t.Error("expected second add to return isNew=false")
 	}
 
-	// Verify Started is not closed yet
-	select {
-	case <-lease2.Started:
-		t.Error("expected Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected lease to have no elected leader")
 	}
 
 	// Cancel the lease context (simulating timeout or leadership loss before acquiring)
@@ -710,7 +785,7 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 		t.Error("expected new lease after delete")
 	}
 
-	// Verify new lease has fresh context and Started channel
+	// Verify new lease has a fresh active context and no elected leader.
 	select {
 	case <-lease2.Ctx.Done():
 		t.Error("expected new lease context to be active")
@@ -718,11 +793,8 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 		// Expected
 	}
 
-	select {
-	case <-lease2.Started:
-		t.Error("expected new lease Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected new lease to have no elected leader")
 	}
 }
 
@@ -745,8 +817,8 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Second Add - simulates another goroutine trying to start leader election
 	// This should return isNew=false
@@ -762,12 +834,8 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 		t.Error("expected same lease to be returned")
 	}
 
-	// Verify Started channel is closed (leadership was acquired by first)
-	select {
-	case <-lease2.Started:
-		// Expected - channel is closed
-	default:
-		t.Error("expected Started channel to be closed")
+	if !lease2.Elected.Load() {
+		t.Error("expected lease to remain elected")
 	}
 
 	// In the actual code (leader.go), when isNew=false for non-common lease,
@@ -834,7 +902,7 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	close(lease1.Started)
+	electLease(t, lease1)
 
 	// Track how many times Add is called in a tight loop
 	// In the buggy code, this would spin forever
@@ -898,7 +966,7 @@ func TestManager_NonCommonLease_ServiceContextCancellation(t *testing.T) {
 	ctx1, leaseID1 := getSvcData(svc)
 	lease1 := mgr.Add(ctx1, leaseID1)
 	_ = lease1.Add(objectName1)
-	close(lease1.Started)
+	electLease(t, lease1)
 
 	// Second Add - returns isNew=false
 	ctx2, leaseID2 := getSvcData(svc)

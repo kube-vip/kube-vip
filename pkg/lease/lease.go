@@ -37,6 +37,33 @@ func NewManager() *Manager {
 func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	return m.addLocked(ctx, id)
+}
+
+// Acquire creates or retrieves a lease and atomically registers objectName as a
+// member. The returned bool reports whether this object was newly registered.
+func (m *Manager) Acquire(ctx context.Context, id ID, objectName string) (*Lease, bool) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	lease := m.addLocked(ctx, id)
+	return lease, lease.Add(objectName)
+}
+
+// Claim atomically registers objectName against an existing lease. It returns
+// nil when the lease was retired before the caller could join it.
+func (m *Manager) Claim(id ID, objectName string) (*Lease, bool) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	lease, exists := m.leases[id.NamespacedName()]
+	if !exists {
+		return nil, false
+	}
+	return lease, lease.Add(objectName)
+}
+
+func (m *Manager) addLocked(ctx context.Context, id ID) *Lease {
 
 	// A lease whose context is already cancelled cannot be handed out again:
 	// anything derived from it would be cancelled straight away. Replace it.
@@ -110,19 +137,19 @@ func (m *Manager) Get(id ID) *Lease {
 type Lease struct {
 	Ctx      context.Context
 	Cancel   context.CancelFunc
-	Started  chan any
 	services sync.Map
 	cnt      atomic.Int64
 	Elected  atomic.Bool
-	Mtx      sync.Mutex
-	locked   bool
+	stateMu  sync.Mutex
+	running  bool
+	changed  chan struct{}
 }
 
 func newLease(ctx context.Context, cancel context.CancelFunc) *Lease {
 	return &Lease{
 		Ctx:     ctx,
 		Cancel:  cancel,
-		Started: make(chan any),
+		changed: make(chan struct{}),
 	}
 }
 
@@ -144,16 +171,90 @@ func (l *Lease) delete(service string) {
 	}
 }
 
-func (l *Lease) Lock() {
-	l.Mtx.Lock()
-	l.locked = true
+func (l *Lease) BeginElection() bool {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if l.Elected.Load() || l.running {
+		return false
+	}
+	l.running = true
+	l.signalStateLocked()
+	return true
 }
 
-func (l *Lease) Unlock() {
-	if l.locked {
-		l.locked = false
-		l.Mtx.Unlock()
+func (l *Lease) ElectionStarted() {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if l.Elected.Load() {
+		return
 	}
+	l.Elected.Store(true)
+	l.running = false
+	l.signalStateLocked()
+}
+
+func (l *Lease) ElectionStopped() {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if !l.Elected.Load() && !l.running {
+		return
+	}
+	l.Elected.Store(false)
+	l.running = false
+	l.signalStateLocked()
+}
+
+// WaitForLeader waits for an in-flight lease election to either elect a leader
+// or finish without one. It never holds the lease state mutex while waiting.
+func (l *Lease) WaitForLeader(ctx context.Context) bool {
+	for {
+		l.stateMu.Lock()
+		if l.Elected.Load() {
+			l.stateMu.Unlock()
+			return true
+		}
+		if !l.running {
+			l.stateMu.Unlock()
+			return false
+		}
+		changed := l.changed
+		l.stateMu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-l.Ctx.Done():
+			return false
+		case <-changed:
+		}
+	}
+}
+
+// WaitForElectionEnd waits until an elected lease loses its leader. It never
+// holds the lease state mutex while waiting.
+func (l *Lease) WaitForElectionEnd(ctx context.Context) {
+	for {
+		l.stateMu.Lock()
+		if !l.Elected.Load() {
+			l.stateMu.Unlock()
+			return
+		}
+		changed := l.changed
+		l.stateMu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-l.Ctx.Done():
+			return
+		case <-changed:
+		}
+	}
+}
+
+func (l *Lease) signalStateLocked() {
+	close(l.changed)
+	l.changed = make(chan struct{})
 }
 
 // ServiceName gets lease name and id for the service.
