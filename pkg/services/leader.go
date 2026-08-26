@@ -92,7 +92,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		}
 
 		if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
-			log.Error("error on started leading", "error", err)
+			return fmt.Errorf("start shared-lease service: %w", err)
 		}
 
 		svcLease.WaitForElectionEnd(svcCtx.Ctx)
@@ -110,6 +110,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 	leaderCtx, leaderCancel := context.WithCancel(svcLease.Ctx)
 	svcCtx.SetLeaderCancel(leaderCancel)
+	activationErr := make(chan error, 1)
 
 	run := election.RunConfig{
 		Config:           p.config,
@@ -122,6 +123,10 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// Mark this service as active (as we've started leading)
 			// we run this in background as it's blocking
 			if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
+				select {
+				case activationErr <- err:
+				default:
+				}
 				leaderCancel()
 			}
 			metrics.LeaderTransitionsTotal.WithLabelValues(id.Name()).Inc()
@@ -148,6 +153,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	if err := election.RunOrDie(leaderCtx, &run, p.config); err != nil {
 		return fmt.Errorf("services election failed: %w", err)
+	}
+	select {
+	case err := <-activationErr:
+		metrics.ServiceElectionErrorsTotal.WithLabelValues(service.Namespace, service.Name, "service_sync").Inc()
+		return fmt.Errorf("start service after election: %w", err)
+	default:
 	}
 
 	log.Info("stopping leader election", "service", service.Name, "uid", service.UID)

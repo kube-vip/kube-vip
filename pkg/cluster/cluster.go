@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -21,7 +22,8 @@ import (
 
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
-	stop                  chan bool
+	stop                  chan struct{}
+	stopMu                sync.Mutex
 	Network               []vip.Network
 	arpMgr                *arp.Manager
 	routeMgr              *route.Manager
@@ -56,7 +58,7 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 	newCluster := &Cluster{
 		Network:               networks,
 		arpMgr:                arpMgr,
-		stop:                  make(chan bool),
+		stop:                  make(chan struct{}),
 		routeMgr:              routeMgr,
 		nodeLabelMgr:          nodeLabelMgr,
 		healthCheckHTTPClient: healthCheckHTTPClient,
@@ -93,11 +95,17 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 
 // Stop - Will stop the Cluster and release VIP if needed
 func (cluster *Cluster) Stop() {
-	// Close the stop channel, which will shut down the VIP (if needed)
-	if cluster.stop != nil {
-		close(cluster.stop)
-		cluster.stop = make(chan bool) // recreate channel for future use
-	}
+	cluster.stopMu.Lock()
+	stop := cluster.stop
+	cluster.stop = make(chan struct{})
+	cluster.stopMu.Unlock()
+	close(stop)
+}
+
+func (cluster *Cluster) StopChannel() <-chan struct{} {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	return cluster.stop
 }
 
 func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {

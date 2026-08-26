@@ -52,7 +52,7 @@ func TestKillDoesNotBlockWhenSignalChannelIsFull(t *testing.T) {
 	defer cancel()
 	shutdownDone := make(chan struct{})
 	go func() {
-		manager.waitForShutdown(ctx, cancel, nil)
+		manager.waitForShutdown(ctx, cancel)
 		close(shutdownDone)
 	}()
 
@@ -83,7 +83,7 @@ func TestWaitForShutdownHandlesKillSignal(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		manager.waitForShutdown(ctx, cancel, nil)
+		manager.waitForShutdown(ctx, cancel)
 		close(done)
 	}()
 	manager.Kill()

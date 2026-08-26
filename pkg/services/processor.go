@@ -192,6 +192,10 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			// This service has been modified, but it was also active.
 			if svcCtx != nil {
 				log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
+				oldService := svc
+				if svcInstance != nil && svcInstance.ServiceSnapshot != nil {
+					oldService = svcInstance.ServiceSnapshot
+				}
 				//Set it to inactive
 				svcCtx.Cancel()
 
@@ -202,9 +206,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// Retire the lease before the replacement context is built, so Add below
 				// cannot hand back an instance the pending cleanup is about to cancel.
 				// A lease shared with other services keeps their references and survives.
-				ns, name := lease.ServiceName(svc)
+				ns, name := lease.ServiceName(oldService)
 				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(oldService), nil)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
@@ -387,6 +391,7 @@ func (p *Processor) Stop() {
 		for _, cluster := range instance.Clusters {
 			cluster.Stop()
 		}
+		instance.AddCalled = false
 		unlockService()
 	}
 }

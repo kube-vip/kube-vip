@@ -17,7 +17,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
@@ -341,7 +340,6 @@ func (sm *Manager) Start(ctx context.Context) error {
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startMode(ctx context.Context) error {
-	var cpCluster *cluster.Cluster
 	var err error
 
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
@@ -376,7 +374,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 
 	// Shutdown function that will wait on this signal, unless we call it ourselves
 	wg.Go(func() {
-		sm.waitForShutdown(modeCtx, cancel, cpCluster)
+		sm.waitForShutdown(modeCtx, cancel)
 	})
 
 	if sm.config.EnableControlPlane {
@@ -416,9 +414,13 @@ func (sm *Manager) startMode(ctx context.Context) error {
 					if utils.IsPanicError(err) {
 						sm.Kill()
 						return fmt.Errorf("failed to reconcile services, non-recoverable error: %w", err)
-					} else {
-						log.Error("failed to reconcile services, restarting", "error", err)
 					}
+					log.Error("failed to reconcile services, restarting", "error", err)
+				}
+				select {
+				case <-modeCtx.Done():
+					return nil
+				case <-time.After(200 * time.Millisecond):
 				}
 			}
 		}
@@ -427,26 +429,28 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	return nil
 }
 
-func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc) {
 	for {
-		sig := <-sm.signalChan
+		var sig os.Signal
+		select {
+		case <-ctx.Done():
+			return
+		case sig = <-sm.signalChan:
+		}
 		switch sig {
 		case syscall.SIGUSR1:
 			log.Info("Received SIGUSR1, dumping configuration")
 			go sm.dumpConfiguration(ctx)
 		case syscall.SIGINT, syscall.SIGTERM:
-			sm.shutdown(cancel, cpCluster)
+			sm.shutdown(cancel)
 			return
 		}
 	}
 }
 
-func (sm *Manager) shutdown(cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+func (sm *Manager) shutdown(cancel context.CancelFunc) {
 	sm.closing.Store(true)
 	log.Info("Received kube-vip termination, signaling shutdown")
-	if cpCluster != nil {
-		cpCluster.Stop()
-	}
 	// Cancel the context, which will in turn cancel the leadership and all goroutines.
 	cancel()
 }

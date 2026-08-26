@@ -404,6 +404,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	// want to step down
 	//nolint
 	lbCtx, lbCancel := context.WithCancel(ctx)
+	stop := cluster.StopChannel()
 
 	var lbWg sync.WaitGroup
 
@@ -488,7 +489,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		}
 
 		select {
-		case <-cluster.stop:
+		case <-stop:
 		case <-ctx.Done():
 		}
 

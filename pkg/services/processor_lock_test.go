@@ -121,6 +121,23 @@ func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
 	}
 }
 
+func TestStopMarksServiceInstanceForReconfiguration(t *testing.T) {
+	uid := types.UID("service-a")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID: uid, Name: "service-a", Namespace: "default",
+	}}
+	processor := &Processor{ServiceInstances: []*instance.Instance{{
+		ServiceSnapshot: service,
+		AddCalled:       true,
+	}}}
+
+	processor.Stop()
+	action, _ := processor.getServiceInstanceAction(service)
+	if action != ActionAdd {
+		t.Fatalf("action after Stop() = %q, want %q", action, ActionAdd)
+	}
+}
+
 func TestAddServiceDoesNotReattachDetachedInstance(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
