@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -282,6 +283,10 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start(ctx context.Context) error {
+	if err := runtimeFailure(ctx); err != nil {
+		return err
+	}
+
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
@@ -335,7 +340,18 @@ func (sm *Manager) Start(ctx context.Context) error {
 		}
 	}
 
-	return sm.startMode(ctx)
+	if err := sm.startMode(ctx); err != nil {
+		return err
+	}
+	return runtimeFailure(ctx)
+}
+
+func runtimeFailure(ctx context.Context) error {
+	err := context.Cause(ctx)
+	if err == nil || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 // Start will begin the Manager, which will start services and watch the configmap

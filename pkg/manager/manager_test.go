@@ -2,12 +2,14 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"os"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -39,6 +41,21 @@ func TestNormalizeNodeName(t *testing.T) {
 			result := normalizeNodeName(tt.hostname)
 			assert.Equal(t, tt.expected, result, "The normalized node name did not match the expected RFC1123 compliant name")
 		})
+	}
+}
+
+func TestStartReturnsCancellationCause(t *testing.T) {
+	cause := errors.New("default interface is down")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+
+	manager := &Manager{
+		config:           &kubevip.Config{},
+		nodeLabelManager: noop.NewManager(),
+	}
+	err := manager.Start(ctx)
+	if !errors.Is(err, cause) {
+		t.Fatalf("Start() error = %v, want cancellation cause %v", err, cause)
 	}
 }
 
