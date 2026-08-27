@@ -147,6 +147,152 @@ func TestLeaseWaitForElectionEndReleasesFollowers(t *testing.T) {
 	}
 }
 
+func TestLeaseWaitForLeaderReturnsWhenContextCancelled(t *testing.T) {
+	for _, cancelWait := range []struct {
+		name   string
+		cancel func(context.CancelFunc, context.CancelFunc)
+	}{
+		{"caller context", func(cancelCaller, _ context.CancelFunc) { cancelCaller() }},
+		{"lease context", func(_, cancelLease context.CancelFunc) { cancelLease() }},
+	} {
+		t.Run(cancelWait.name, func(t *testing.T) {
+			leaseCtx, cancelLease := context.WithCancel(context.Background())
+			defer cancelLease()
+			lease := newLease(leaseCtx, cancelLease)
+			if !lease.BeginElection() {
+				t.Fatal("candidate was not admitted")
+			}
+
+			callerCtx, cancelCaller := context.WithCancel(context.Background())
+			defer cancelCaller()
+			result := make(chan bool, 1)
+			go func() {
+				result <- lease.WaitForLeader(callerCtx)
+			}()
+
+			cancelWait.cancel(cancelCaller, cancelLease)
+			select {
+			case elected := <-result:
+				if elected {
+					t.Fatal("waiter observed a leader after cancellation")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("waiter remained blocked after cancellation")
+			}
+		})
+	}
+}
+
+func TestLeaseWaitForElectionEndReturnsWhenContextCancelled(t *testing.T) {
+	for _, cancelWait := range []struct {
+		name   string
+		cancel func(context.CancelFunc, context.CancelFunc)
+	}{
+		{"caller context", func(cancelCaller, _ context.CancelFunc) { cancelCaller() }},
+		{"lease context", func(_, cancelLease context.CancelFunc) { cancelLease() }},
+	} {
+		t.Run(cancelWait.name, func(t *testing.T) {
+			leaseCtx, cancelLease := context.WithCancel(context.Background())
+			defer cancelLease()
+			lease := newLease(leaseCtx, cancelLease)
+			electLease(t, lease)
+
+			callerCtx, cancelCaller := context.WithCancel(context.Background())
+			defer cancelCaller()
+			finished := make(chan struct{})
+			go func() {
+				lease.WaitForElectionEnd(callerCtx)
+				close(finished)
+			}()
+
+			cancelWait.cancel(cancelCaller, cancelLease)
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("waiter remained blocked after cancellation")
+			}
+		})
+	}
+}
+
+func TestManagerAcquireRegistersConcurrentMemberOnce(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	type result struct {
+		lease *Lease
+		isNew bool
+	}
+	results := make(chan result, 64)
+	var wg sync.WaitGroup
+	for range cap(results) {
+		wg.Go(func() {
+			lease, isNew := manager.Acquire(context.Background(), id, objectName)
+			results <- result{lease, isNew}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	var lease *Lease
+	newMembers := 0
+	for result := range results {
+		if lease == nil {
+			lease = result.lease
+		} else if result.lease != lease {
+			t.Fatal("concurrent acquires returned different leases")
+		}
+		if result.isNew {
+			newMembers++
+		}
+	}
+	if newMembers != 1 {
+		t.Fatalf("new member registrations = %d, want 1", newMembers)
+	}
+
+	manager.Delete(id, objectName, lease)
+}
+
+func TestManagerClaimRegistersConcurrentMemberOnce(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+	lease := manager.Add(context.Background(), id)
+
+	type result struct {
+		lease *Lease
+		isNew bool
+	}
+	results := make(chan result, 64)
+	var wg sync.WaitGroup
+	for range cap(results) {
+		wg.Go(func() {
+			claimed, isNew := manager.Claim(id, objectName)
+			results <- result{claimed, isNew}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	newMembers := 0
+	for result := range results {
+		if result.lease != lease {
+			t.Fatal("concurrent claims returned a different lease")
+		}
+		if result.isNew {
+			newMembers++
+		}
+	}
+	if newMembers != 1 {
+		t.Fatalf("new member registrations = %d, want 1", newMembers)
+	}
+
+	manager.Delete(id, objectName, lease)
+}
+
 // TestManager_Add_NewLease tests adding a new service with a new lease
 func TestManager_Add_NewLease(t *testing.T) {
 	mgr := NewManager()
@@ -1044,6 +1190,37 @@ func TestManager_Delete_DoesNotCancelRecreatedLease(t *testing.T) {
 	if got := mgr.Get(id); got == nil {
 		t.Error("cleanup for the torn down lease removed the recreated lease")
 	}
+}
+
+func TestManagerDeleteDoesNotCancelReplacementAfterDirectLeaseCancellation(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	old, isNew := manager.Acquire(context.Background(), id, objectName)
+	if !isNew {
+		t.Fatal("initial acquire did not register the service")
+	}
+	old.Cancel()
+
+	fresh, isNew := manager.Acquire(context.Background(), id, objectName)
+	if !isNew {
+		t.Fatal("replacement acquire did not register the service")
+	}
+	if fresh == old {
+		t.Fatal("acquire reused a directly cancelled lease")
+	}
+
+	manager.Delete(id, objectName, old)
+	if fresh.Ctx.Err() != nil {
+		t.Fatal("late cleanup for a directly cancelled lease cancelled its replacement")
+	}
+	if manager.Get(id) != fresh {
+		t.Fatal("late cleanup for a directly cancelled lease removed its replacement")
+	}
+
+	manager.Delete(id, objectName, fresh)
 }
 
 // TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease reproduces the

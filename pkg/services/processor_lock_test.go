@@ -132,7 +132,7 @@ func TestStopMarksServiceInstanceForReconfiguration(t *testing.T) {
 	}}}
 
 	processor.Stop()
-	action, _ := processor.getServiceInstanceAction(service)
+	action := processor.getServiceInstanceAction(service)
 	if action != ActionAdd {
 		t.Fatalf("action after Stop() = %q, want %q", action, ActionAdd)
 	}
@@ -150,9 +150,9 @@ func TestAddServiceDoesNotReattachDetachedInstance(t *testing.T) {
 		nodeLabelManager: &testLabeler{},
 	}
 
-	action, selected := processor.getServiceInstanceAction(service)
-	if action != ActionAdd || selected != staleInstance {
-		t.Fatalf("getServiceInstanceAction() = %q, %v; want ActionAdd and stale instance", action, selected)
+	action := processor.getServiceInstanceAction(service)
+	if action != ActionAdd {
+		t.Fatalf("getServiceInstanceAction() = %q, want ActionAdd", action)
 	}
 	if err := processor.deleteService(context.Background(), uid); err != nil {
 		t.Fatalf("deleteService() error = %v", err)
