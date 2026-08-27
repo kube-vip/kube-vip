@@ -26,14 +26,7 @@ func NewManager() *Manager {
 	}
 }
 
-// Add adds lease to the manager.
-// It returns three values:
-// - lease for the object
-// - isNewObject, which reports if it is a new object that is being handled
-// - isSharedLease, which is true if object shares the lease with another object
-// If object is new but not shared, we should start leaderelection and sync it
-// If object is new and shared, we should only sync it as the leaderelection should be already handled
-// If object is not new we should do nothing
+// Add creates or retrieves the lease identified by id.
 func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
