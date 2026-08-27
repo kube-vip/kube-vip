@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +122,23 @@ func TestSharedLeaseFollowerCancellationDoesNotStopLeader(t *testing.T) {
 	}
 }
 
+func TestStartServicesLeaderElectionReturnsErrorWithoutLease(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service", Namespace: "default", UID: types.UID("service"),
+	}}
+	svcCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, svcCtx)
+
+	err := p.StartServicesLeaderElection(svcCtx, service, nil, true)
+	if err == nil || !strings.Contains(err.Error(), "no existing lease found") {
+		t.Fatalf("StartServicesLeaderElection() error = %v, want missing lease error", err)
+	}
+}
+
 func TestStartServicesLeaderElectionDoesNotClaimForCancelledContext(t *testing.T) {
 	p := &Processor{
 		config:   &kubevip.Config{},
@@ -146,6 +164,26 @@ func TestStartServicesLeaderElectionDoesNotClaimForCancelledContext(t *testing.T
 		t.Fatal("cancelled callback claimed the replacement lease membership")
 	}
 	p.leaseMgr.Delete(id, lease.ServiceNamespacedName(service), claimed)
+}
+
+func TestServiceLeaderContextCancelsWhenServiceEndsBeforeSharedLease(t *testing.T) {
+	svcCtx := servicecontext.New(context.Background())
+	leaseCtx, cancelLease := context.WithCancel(context.Background())
+	defer cancelLease()
+
+	leaderCtx, leaderCancel, stopServiceCancel := newServiceLeaderContext(svcCtx, leaseCtx)
+	defer leaderCancel()
+	defer stopServiceCancel()
+	svcCtx.Cancel()
+
+	select {
+	case <-leaderCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("leader election context remained active after its Service context ended")
+	}
+	if leaseCtx.Err() != nil {
+		t.Fatal("service cancellation ended the shared lease context")
+	}
 }
 
 func TestReleaseServiceLeaseDoesNotRemoveSharedLeaseReplacement(t *testing.T) {
