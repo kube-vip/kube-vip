@@ -65,70 +65,72 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	if p.lockService == nil {
 		return false, fmt.Errorf("service operation lock is not configured")
 	}
-	unlockService := p.lockService(service.UID)
-	locked := true
-	defer func() {
-		if locked {
-			unlockService()
-		}
-	}()
+	endpointCount := 0
+	updatedService, inst, changed, skip, err := func() (*v1.Service, *instance.Instance, bool, bool, error) {
+		unlockService := p.lockService(service.UID)
+		defer unlockService()
 
-	if err := p.applyEvent(svcCtx, event); err != nil {
-		return false, err
-	}
-
-	endpoints, err := p.worker.getEndpoints(service, id)
-	if err != nil {
-		return false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
-	}
-
-	inst := p.findServiceInstance(service)
-
-	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, inst, endpoints); err != nil {
-		log.Error("updating instance", "err", err)
-	}
-
-	allowReconcileWithoutEndpoints := shouldAllowReconcileWithoutEndpoints(service)
-
-	if len(endpoints) != 0 {
-		if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
-			return true, nil
+		if err := p.applyEvent(svcCtx, event); err != nil {
+			return nil, nil, false, false, err
 		}
 
-		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
+		endpoints, err := p.worker.getEndpoints(service, id)
+		if err != nil {
+			return nil, nil, false, false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
+		}
+		endpointCount = len(endpoints)
 
-		if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, serviceFunc, wg); err != nil {
-			return true, err
+		inst := p.findServiceInstance(service)
+
+		if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, inst, endpoints); err != nil {
+			log.Error("updating instance", "err", err)
 		}
 
-		svcCtx.SignalReadiness()
+		allowReconcileWithoutEndpoints := shouldAllowReconcileWithoutEndpoints(service)
 
-		if p.shouldProcessInstance() {
-			if err := p.worker.processInstance(svcCtx, service, inst); err != nil {
-				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
+		if len(endpoints) != 0 {
+			if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
+				return nil, nil, false, true, nil
 			}
-		}
-	} else {
-		if allowReconcileWithoutEndpoints {
-			// Explicit opt-in for controllers that create LoadBalancer services without endpoints
+
+			p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
+
 			if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, serviceFunc, wg); err != nil {
-				return true, err
+				return nil, nil, false, true, err
 			}
+
 			svcCtx.SignalReadiness()
 
 			if p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service, inst); err != nil {
-					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
+					return nil, nil, false, false, fmt.Errorf("failed to process non-empty instance: %w", err)
 				}
 			}
-		} else if svcCtx.Signalled.Load() {
-			p.handleNoEndpoints(svcCtx, service, inst, lastKnownGoodEndpoint)
+		} else {
+			if allowReconcileWithoutEndpoints {
+				// Explicit opt-in for controllers that create LoadBalancer services without endpoints
+				if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, serviceFunc, wg); err != nil {
+					return nil, nil, false, true, err
+				}
+				svcCtx.SignalReadiness()
+
+				if p.shouldProcessInstance() {
+					if err := p.worker.processInstance(svcCtx, service, inst); err != nil {
+						return nil, nil, false, false, fmt.Errorf("failed to process endpointless instance: %w", err)
+					}
+				}
+			} else if svcCtx.Signalled.Load() {
+				p.handleNoEndpoints(svcCtx, service, inst, lastKnownGoodEndpoint)
+			}
 		}
+
+		updatedService, changed := p.updateAnnotations(service, inst, lastKnownGoodEndpoint, clientSet)
+		return updatedService, inst, changed, false, nil
+	}()
+	if err != nil || skip {
+		return skip, err
 	}
 
-	updatedService, changed := p.updateAnnotations(service, inst, lastKnownGoodEndpoint, clientSet)
-	unlockService()
-	locked = false
 	if changed && egressUpdateFunc != nil {
 		if err := egressUpdateFunc(context.Background(), updatedService, inst); err != nil {
 			log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
@@ -136,7 +138,7 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	}
 
 	log.Debug("watcher", "provider",
-		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint)
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", endpointCount, "last endpoint", *lastKnownGoodEndpoint)
 
 	return false, nil
 }
