@@ -99,9 +99,9 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 		// We need to inspect the event and get ResourceVersion out of it
 		switch event.Type {
 		case watch.Added, watch.Modified:
-			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
+			if err := p.Reconcile(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
 				if utils.IsPanicError(err) {
-					return fmt.Errorf("add/modify service error: %w", err)
+					return fmt.Errorf("reconcile service error: %w", err)
 				}
 				log.Error("service watcher event failed", "type", event.Type, "error", err)
 			}

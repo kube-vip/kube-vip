@@ -95,7 +95,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
 	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
@@ -167,7 +167,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
-		svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
+		svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
 		if event.Type == watch.Modified && svcInstance != nil {
 			shouldGarbageCollect = serviceChanged(svcInstance, svc)
 		}
@@ -227,7 +227,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			unlockService()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
-		svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
+		svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
 		if svcCtx == nil {
 			ns, name := lease.ServiceName(svc)
 			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
@@ -411,22 +411,26 @@ func (p *Processor) getServiceContext(uid types.UID) (*servicecontext.Context, e
 // dropCancelledServiceContext discards a service context whose context has already been
 // cancelled, removing it from svcMap and returning nil so that callers create a fresh one.
 //
-// This matters because the in-memory lease and the service context are removed independently.
-// The cleanup goroutine started by StartServicesLeaderElection calls leaseMgr.Delete once
-// svcCtx.Ctx is done, and Manager.Delete drops the lease entirely when its last object goes
-// away. Several paths cancel the service context without also removing it from svcMap - for
-// example the deferred close(stopChan) in watchEndpoint, and the utils.PanicError branch in
-// AddOrModify.
+// This retires the cancelled context's lease membership before removing it from
+// svcMap. That prevents a replacement context from reusing a lease which the old
+// context's deferred cleanup is about to retire. Several paths cancel the service
+// context without also removing it from svcMap - for example the deferred
+// close(stopChan) in watchEndpoint and the utils.PanicError branch in AddOrModify.
 //
 // If such a cancelled context were reused, AddOrModify would skip its `if svcCtx == nil`
 // branch and therefore never call leaseMgr.Add again, so StartServicesLeaderElection would
 // fail with "no existing lease found" on every subsequent event and the VIP would never be
 // advertised again.
-func (p *Processor) dropCancelledServiceContext(uid types.UID, svcCtx *servicecontext.Context) *servicecontext.Context {
+func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *servicecontext.Context) *servicecontext.Context {
 	if svcCtx == nil || svcCtx.Ctx.Err() == nil {
 		return svcCtx
 	}
-	p.svcMap.CompareAndDelete(uid, svcCtx)
+	if p.leaseMgr != nil {
+		namespace, name := lease.ServiceName(svc)
+		leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
+		p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+	}
+	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil
 }
 

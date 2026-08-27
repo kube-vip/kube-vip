@@ -39,41 +39,16 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	leaseNamespace, serviceLease := lease.ServiceName(service)
 	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
 	objectName := lease.ServiceNamespacedName(service)
-
-	svcLease, isNew := p.leaseMgr.Claim(id, objectName)
+	svcLease, err := p.claimServiceLease(svcCtx, service, id, objectName)
+	if err != nil {
+		return err
+	}
 	if svcLease == nil {
 		metrics.ServiceElectionErrorsTotal.WithLabelValues(service.Namespace, service.Name, "no_lease").Inc()
 		return fmt.Errorf("no existing lease found for service %q with UID %q", service.Name, service.UID)
 	}
 	if err := svcLease.Ctx.Err(); err != nil {
 		return fmt.Errorf("lease context cancelled before election start: %w", err)
-	}
-
-	// A cancelled service context means this call belongs to a torn-down incarnation of
-	// the service. Its replacement is built as Cancel -> Delete -> Add, so the lease
-	// fetched above may already be the replacement's. Registering on it here would let
-	// the cleanup goroutine below retire a lease that is still in use.
-	if err := svcCtx.Ctx.Err(); err != nil {
-		return fmt.Errorf("service context cancelled before election start: %w", err)
-	}
-
-	// Start a goroutine that will delete the lease when the service context is cancelled.
-	// This is important for proper cleanup when a service is deleted - it ensures that
-	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
-	// Without this, RunOrDie would continue running until leadership is naturally lost.
-	//
-	// This must NOT be tracked by wg: it only completes once the service is deleted
-	// (svcCtx.Ctx.Done()), which is normally long after this function itself returns
-	// e.g. on an ordinary leadership loss such as a lease renewal failure. If it were
-	// added to wg, the deferred wg.Wait() above would block this function and with it
-	// the leader-election restart loop in startLeaderElection that calls it forever,
-	// until the Service was deleted (and recreated), even though the endpoint was still
-	// healthy and a new election should have started immediately.
-	if isNew {
-		go func() {
-			<-svcCtx.Ctx.Done()
-			p.leaseMgr.Delete(id, objectName, svcLease)
-		}()
 	}
 
 	select {
@@ -163,6 +138,48 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	log.Info("stopping leader election", "service", service.Name, "uid", service.UID)
 	return nil
+}
+
+// claimServiceLease admits only the context currently registered for this
+// Service. Holding the Service key prevents an old callback from claiming a
+// replacement's lease while AddOrModify installs the replacement context.
+func (p *Processor) claimServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, objectName string) (*lease.Lease, error) {
+	unlockService := p.lockService(service.UID)
+	defer unlockService()
+
+	currentCtx, err := p.getServiceContext(service.UID)
+	if err != nil {
+		return nil, err
+	}
+	if currentCtx != svcCtx {
+		return nil, fmt.Errorf("service context superseded before election start")
+	}
+	if err := svcCtx.Ctx.Err(); err != nil {
+		return nil, fmt.Errorf("service context cancelled before election start: %w", err)
+	}
+
+	svcLease, isNew := p.leaseMgr.Claim(id, objectName)
+	if isNew {
+		go func() {
+			<-svcCtx.Ctx.Done()
+			p.releaseServiceLease(svcCtx, service, id, objectName, svcLease)
+		}()
+	}
+	return svcLease, nil
+}
+
+// releaseServiceLease releases a lease membership only while svcCtx remains
+// the current context for the Service. A replacement can share the same lease,
+// so an old cleanup goroutine must not remove the replacement's membership.
+func (p *Processor) releaseServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, objectName string, svcLease *lease.Lease) {
+	unlockService := p.lockService(service.UID)
+	defer unlockService()
+
+	currentCtx, err := p.getServiceContext(service.UID)
+	if err != nil || currentCtx != svcCtx {
+		return
+	}
+	p.leaseMgr.Delete(id, objectName, svcLease)
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {

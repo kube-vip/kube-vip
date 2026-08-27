@@ -45,6 +45,7 @@ func TestStartServicesLeaderElection_ReturnsOnLeaseLossWithoutServiceDeletion(t 
 	svcLease.Cancel()
 
 	svcCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(svc.UID, svcCtx)
 
 	done := make(chan error, 1)
 	go func() {
@@ -118,4 +119,66 @@ func TestSharedLeaseFollowerCancellationDoesNotStopLeader(t *testing.T) {
 	if sharedLease.BeginElection() {
 		t.Fatal("follower cancellation admitted a second candidate while leader remains elected")
 	}
+}
+
+func TestStartServicesLeaderElectionDoesNotClaimForCancelledContext(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service", Namespace: "default", UID: types.UID("service"),
+	}}
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+	p.leaseMgr.Add(context.Background(), id)
+
+	staleCtx := servicecontext.New(context.Background())
+	staleCtx.Cancel()
+	freshCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, freshCtx)
+	if err := p.StartServicesLeaderElection(staleCtx, service, nil, true); err == nil {
+		t.Fatal("cancelled service context started leader election")
+	}
+
+	claimed, isNew := p.leaseMgr.Claim(id, lease.ServiceNamespacedName(service))
+	if claimed == nil || !isNew {
+		t.Fatal("cancelled callback claimed the replacement lease membership")
+	}
+	p.leaseMgr.Delete(id, lease.ServiceNamespacedName(service), claimed)
+}
+
+func TestReleaseServiceLeaseDoesNotRemoveSharedLeaseReplacement(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+	annotations := map[string]string{kubevip.ServiceLease: "shared"}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service", Namespace: "default", UID: types.UID("service"), Annotations: annotations,
+	}}
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+	sharedLease := p.leaseMgr.Add(context.Background(), id)
+	sharedLease.Add("default/sibling")
+
+	oldCtx := servicecontext.New(context.Background())
+	sharedLease.Add(lease.ServiceNamespacedName(service))
+	oldCtx.Cancel()
+
+	// AddOrModify drops the cancelled context's membership before installing its replacement.
+	p.leaseMgr.Delete(id, lease.ServiceNamespacedName(service), sharedLease)
+	freshCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, freshCtx)
+	if _, isNew := p.leaseMgr.Claim(id, lease.ServiceNamespacedName(service)); !isNew {
+		t.Fatal("replacement context did not claim shared lease membership")
+	}
+
+	p.releaseServiceLease(oldCtx, service, id, lease.ServiceNamespacedName(service), sharedLease)
+	p.leaseMgr.Delete(id, "default/sibling", sharedLease)
+	if p.leaseMgr.Get(id) != sharedLease {
+		t.Fatal("stale cleanup removed the replacement membership from the shared lease")
+	}
+
+	p.leaseMgr.Delete(id, lease.ServiceNamespacedName(service), sharedLease)
 }

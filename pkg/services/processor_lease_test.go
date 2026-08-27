@@ -51,8 +51,8 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 			svcCtx := servicecontext.New(context.Background())
 			p.svcMap.Store(uid, svcCtx)
 
-			if err := p.AddOrModify(context.Background(), watch.Event{Type: watch.Modified, Object: modified}, nil, false, nil, nil); err != nil {
-				t.Fatalf("AddOrModify returned error: %v", err)
+			if err := p.Reconcile(context.Background(), watch.Event{Type: watch.Modified, Object: modified}, nil, false, nil, nil); err != nil {
+				t.Fatalf("Reconcile returned error: %v", err)
 			}
 
 			if svcCtx.Ctx.Err() == nil {
@@ -90,6 +90,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 	}
 
 	uid := types.UID("service-uid")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
 
 	t.Run("cancelled context is dropped and removed from svcMap", func(t *testing.T) {
 		p := newProcessor()
@@ -99,7 +100,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 		p.svcMap.Store(uid, svcCtx)
 		cancel()
 
-		if got := p.dropCancelledServiceContext(uid, svcCtx); got != nil {
+		if got := p.dropCancelledServiceContext(service, svcCtx); got != nil {
 			t.Fatalf("expected a cancelled service context to be dropped, got %v", got)
 		}
 		if _, ok := p.svcMap.Load(uid); ok {
@@ -115,7 +116,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 		svcCtx := servicecontext.New(ctx)
 		p.svcMap.Store(uid, svcCtx)
 
-		if got := p.dropCancelledServiceContext(uid, svcCtx); got != svcCtx {
+		if got := p.dropCancelledServiceContext(service, svcCtx); got != svcCtx {
 			t.Fatalf("expected a live service context to be kept, got %v", got)
 		}
 		if _, ok := p.svcMap.Load(uid); !ok {
@@ -125,7 +126,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 
 	t.Run("nil context is a no-op", func(t *testing.T) {
 		p := newProcessor()
-		if got := p.dropCancelledServiceContext(uid, nil); got != nil {
+		if got := p.dropCancelledServiceContext(service, nil); got != nil {
 			t.Fatalf("expected nil to be returned for a nil service context, got %v", got)
 		}
 	})
@@ -162,7 +163,7 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 		t.Fatal("precondition failed: the lease manager should not hold a lease yet")
 	}
 
-	if got := p.dropCancelledServiceContext(svc.UID, svcCtx); got != nil {
+	if got := p.dropCancelledServiceContext(svc, svcCtx); got != nil {
 		t.Fatalf("expected the stale service context to be dropped, got %v", got)
 	}
 

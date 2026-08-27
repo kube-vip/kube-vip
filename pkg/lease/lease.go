@@ -156,10 +156,9 @@ func (l *Lease) Add(name string) bool {
 	return false
 }
 
-// delete removes the service from the lease and decrements the counter
+// delete removes the service from the lease and decrements the counter.
 func (l *Lease) delete(service string) {
-	if _, exists := l.services.Load(service); exists {
-		l.services.Delete(service)
+	if _, exists := l.services.LoadAndDelete(service); exists {
 		l.cnt.Add(-1)
 	}
 }
