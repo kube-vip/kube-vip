@@ -38,8 +38,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	leaseNamespace, serviceLease := lease.ServiceName(service)
 	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
-	objectName := lease.ServiceNamespacedName(service)
-	svcLease, err := p.claimServiceLease(svcCtx, service, id, objectName)
+	claimID := lease.ServiceClaimID(service)
+	svcLease, err := p.claimServiceLease(svcCtx, service, id, claimID)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func newServiceLeaderContext(svcCtx *servicecontext.Context, leaseCtx context.Co
 // claimServiceLease admits only the context currently registered for this
 // Service. Holding the Service key prevents an old callback from claiming a
 // replacement's lease while AddOrModify installs the replacement context.
-func (p *Processor) claimServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, objectName string) (*lease.Lease, error) {
+func (p *Processor) claimServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, claimID string) (*lease.Lease, error) {
 	unlockService := p.lockService(service.UID)
 	defer unlockService()
 
@@ -168,11 +168,11 @@ func (p *Processor) claimServiceLease(svcCtx *servicecontext.Context, service *v
 		return nil, fmt.Errorf("service context cancelled before election start: %w", err)
 	}
 
-	svcLease, isNew := p.leaseMgr.Claim(id, objectName)
+	svcLease, isNew := p.leaseMgr.Claim(id, claimID)
 	if isNew {
 		go func() {
 			<-svcCtx.Ctx.Done()
-			p.releaseServiceLease(svcCtx, service, id, objectName, svcLease)
+			p.releaseServiceLease(svcCtx, service, id, claimID, svcLease)
 		}()
 	}
 	return svcLease, nil
@@ -181,7 +181,7 @@ func (p *Processor) claimServiceLease(svcCtx *servicecontext.Context, service *v
 // releaseServiceLease releases a lease membership only while svcCtx remains
 // the current context for the Service. A replacement can share the same lease,
 // so an old cleanup goroutine must not remove the replacement's membership.
-func (p *Processor) releaseServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, objectName string, svcLease *lease.Lease) {
+func (p *Processor) releaseServiceLease(svcCtx *servicecontext.Context, service *v1.Service, id lease.ID, claimID string, svcLease *lease.Lease) {
 	unlockService := p.lockService(service.UID)
 	defer unlockService()
 
@@ -189,7 +189,7 @@ func (p *Processor) releaseServiceLease(svcCtx *servicecontext.Context, service 
 	if err != nil || currentCtx != svcCtx {
 		return
 	}
-	p.leaseMgr.Delete(id, objectName, svcLease)
+	p.leaseMgr.Delete(id, claimID, svcLease)
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {

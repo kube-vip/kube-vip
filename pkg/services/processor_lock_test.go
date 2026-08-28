@@ -254,7 +254,7 @@ func TestDeleteTrackedServiceCleansUpElectedServiceImmediately(t *testing.T) {
 	processor.svcMap.Store(uid, svcCtx)
 	leaseNamespace, serviceLease := lease.ServiceName(service)
 	leaseID := lease.NewID(processor.config.LeaderElectionType, leaseNamespace, serviceLease)
-	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceNamespacedName(service))
+	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceClaimID(service))
 
 	if err := processor.deleteTrackedService(service); err != nil {
 		t.Fatalf("deleteTrackedService() error = %v", err)
@@ -286,7 +286,7 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	processor.svcMap.Store(uid, svcCtx)
 	leaseNamespace, serviceLease := lease.ServiceName(service)
 	leaseID := lease.NewID(processor.config.LeaderElectionType, leaseNamespace, serviceLease)
-	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceNamespacedName(service))
+	processor.leaseMgr.Add(context.Background(), leaseID).Add(lease.ServiceClaimID(service))
 
 	if err := processor.deleteTrackedService(service); err == nil {
 		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")

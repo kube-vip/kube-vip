@@ -271,6 +271,13 @@ func ServiceNamespacedName(service *v1.Service) string {
 	return fmt.Sprintf("%s/%s", service.Namespace, service.Name)
 }
 
+// ServiceClaimID identifies one Kubernetes Service incarnation in a lease.
+// A recreated Service has a new UID, so its claim cannot be released by
+// deferred cleanup from the deleted incarnation.
+func ServiceClaimID(service *v1.Service) string {
+	return fmt.Sprintf("%s/%s", ServiceNamespacedName(service), service.UID)
+}
+
 func ObjectName(id ID, suffix string) string {
 	return fmt.Sprintf("%s-%s", id.NamespacedName(), suffix)
 }

@@ -208,7 +208,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				// A lease shared with other services keeps their references and survives.
 				ns, name := lease.ServiceName(oldService)
 				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(oldService), nil)
+				p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(oldService), nil)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
@@ -365,7 +365,7 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		if p.leaseMgr != nil {
 			namespace, name := lease.ServiceName(svc)
 			leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
-			p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+			p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(svc), nil)
 		}
 		cleanupCtx = context.WithoutCancel(svcCtx.Ctx)
 	}
@@ -428,7 +428,7 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	if p.leaseMgr != nil {
 		namespace, name := lease.ServiceName(svc)
 		leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
-		p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+		p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(svc), nil)
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil
