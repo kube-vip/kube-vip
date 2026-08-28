@@ -167,26 +167,6 @@ func TestStartServicesLeaderElectionDoesNotClaimForCancelledContext(t *testing.T
 	p.leaseMgr.Delete(id, claimID, claimed)
 }
 
-func TestServiceLeaderContextCancelsWhenServiceEndsBeforeSharedLease(t *testing.T) {
-	svcCtx := servicecontext.New(context.Background())
-	leaseCtx, cancelLease := context.WithCancel(context.Background())
-	defer cancelLease()
-
-	leaderCtx, leaderCancel, stopServiceCancel := newServiceLeaderContext(svcCtx, leaseCtx)
-	defer leaderCancel()
-	defer stopServiceCancel()
-	svcCtx.Cancel()
-
-	select {
-	case <-leaderCtx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("leader election context remained active after its Service context ended")
-	}
-	if leaseCtx.Err() != nil {
-		t.Fatal("service cancellation ended the shared lease context")
-	}
-}
-
 func TestReleaseServiceLeaseDoesNotRemoveSharedLeaseReplacement(t *testing.T) {
 	p := &Processor{
 		config:   &kubevip.Config{},

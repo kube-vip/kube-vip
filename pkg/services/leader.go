@@ -83,8 +83,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	defer wg.Wait()
 
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
-	leaderCtx, leaderCancel, stopServiceCancel := newServiceLeaderContext(svcCtx, svcLease.Ctx)
-	defer stopServiceCancel()
+	leaderCtx, leaderCancel := context.WithCancel(svcLease.Ctx)
 	svcCtx.SetLeaderCancel(leaderCancel)
 	activationErr := make(chan error, 1)
 
@@ -139,15 +138,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	log.Info("stopping leader election", "service", service.Name, "uid", service.UID)
 	return nil
-}
-
-// newServiceLeaderContext stops the leader election when either its lease or
-// its Service context ends. The latter is needed for a shared lease, which can
-// remain active after one Service is deleted or its watcher exits.
-func newServiceLeaderContext(svcCtx *servicecontext.Context, leaseCtx context.Context) (context.Context, context.CancelFunc, func() bool) {
-	leaderCtx, leaderCancel := context.WithCancel(leaseCtx)
-	stopServiceCancel := context.AfterFunc(svcCtx.Ctx, leaderCancel)
-	return leaderCtx, leaderCancel, stopServiceCancel
 }
 
 // claimServiceLease admits only the context currently registered for this
