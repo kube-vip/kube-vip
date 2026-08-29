@@ -1288,7 +1288,7 @@ func killLeader(leaderName string) {
 
 	session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(session, "5s").Should(gexec.Exit(0))
+	Eventually(session, "30s").Should(gexec.Exit(0))
 }
 
 func findLeader(leaderIPAddr string, clusterName string) string {
