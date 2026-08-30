@@ -173,7 +173,8 @@ func (p *Processor) shouldProcessInstance() bool {
 func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance, lastKnownGoodEndpoint *string) {
 	svcCtx.ResetReadiness()
 	p.worker.clear(svcCtx, lastKnownGoodEndpoint, service, inst)
-	if p.config.EnableARP && !p.config.EnableServicesElection {
+	stopWorkers := p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection)
+	if stopWorkers && !p.config.EnableServicesElection {
 		if inst != nil {
 			for _, c := range inst.Clusters {
 				c.StopWorkersAndWaitPreserving(nil)

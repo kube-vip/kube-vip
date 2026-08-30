@@ -21,6 +21,19 @@ type Context struct {
 	leaderCancel        context.CancelFunc
 	leaderCancelPending bool
 	leaderCancelRunning bool
+	leaderErr           error
+}
+
+func (ctx *Context) SetLeaderError(err error) {
+	ctx.stateMutex.Lock()
+	ctx.leaderErr = err
+	ctx.stateMutex.Unlock()
+}
+
+func (ctx *Context) LeaderError() error {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	return ctx.leaderErr
 }
 
 func New(ctx context.Context) *Context {

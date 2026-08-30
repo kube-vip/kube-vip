@@ -425,6 +425,20 @@ func TestReconcile_ZeroEndpointsBehavior(t *testing.T) {
 }
 
 func TestReconcileRapidZeroToNonzeroRestartsARPWorkers(t *testing.T) {
+	testReconcileRapidZeroToNonzeroRestartsWorkers(t, &kubevip.Config{EnableARP: true})
+}
+
+func TestReconcileRapidZeroToNonzeroRestartsGlobalRoutingTableWorkers(t *testing.T) {
+	testReconcileRapidZeroToNonzeroRestartsWorkers(t, &kubevip.Config{
+		EnableRoutingTable: true,
+		KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
+			EnableLeaderElection: true,
+		},
+	})
+}
+
+func testReconcileRapidZeroToNonzeroRestartsWorkers(t *testing.T, processorConfig *kubevip.Config) {
+	t.Helper()
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", UID: "service"},
 		Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal},
@@ -445,7 +459,7 @@ func TestReconcileRapidZeroToNonzeroRestartsARPWorkers(t *testing.T) {
 	instances := []*instance.Instance{inst}
 	worker := &fakeWorker{}
 	p := &Processor{
-		config:         &kubevip.Config{EnableARP: true},
+		config:         processorConfig,
 		provider:       providers.NewEndpointslices(),
 		worker:         worker,
 		instances:      &instances,

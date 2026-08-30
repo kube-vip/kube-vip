@@ -138,7 +138,7 @@ func (p *Processor) startLeaderElection(parent context.Context, svcCtx *servicec
 			return err
 		}
 	}
-	return nil
+	return svcCtx.LeaderError()
 }
 
 func (p *Processor) runServiceElectionMember(svcCtx *servicecontext.Context, service *v1.Service) error {
@@ -600,7 +600,8 @@ func (c *serviceElection) retryMemberCleanup(ctx context.Context, member *servic
 }
 
 func (c *serviceElection) failMemberCleanup(member *serviceElectionMember, cleanupErr error) error {
-	err := fmt.Errorf("%w for service %s/%s: %v", errServiceCleanupShutdown, member.service.Namespace, member.service.Name, cleanupErr)
+	err := fmt.Errorf("%w for service %s/%s: %w", errServiceCleanupShutdown, member.service.Namespace, member.service.Name, cleanupErr)
+	member.key.svcCtx.SetLeaderError(err)
 	var finalizers []func()
 	failed := false
 	c.mu.Lock()
@@ -627,6 +628,7 @@ func (c *serviceElection) failMemberCleanup(member *serviceElectionMember, clean
 }
 
 func (c *serviceElection) retireMember(member *serviceElectionMember) {
+	member.key.svcCtx.SetLeaderError(nil)
 	c.mu.Lock()
 	if c.members[member.key] != member {
 		c.mu.Unlock()
