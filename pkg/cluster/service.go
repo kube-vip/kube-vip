@@ -404,12 +404,64 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	// want to step down
 	//nolint
 	lbCtx, lbCancel := context.WithCancel(ctx)
-	stop := cluster.StopChannel()
+	cluster.stopMu.Lock()
+	if cluster.workers != nil {
+		cluster.stopMu.Unlock()
+		lbCancel()
+		return fmt.Errorf("load balancer workers already running")
+	}
+	stop := cluster.stop
+	done := make(chan struct{})
+	generation := &workerGeneration{stop: stop, done: done}
+	cluster.workers = generation
+	cluster.stopMu.Unlock()
 
 	var lbWg sync.WaitGroup
+	started := false
+	type configuredNetwork struct {
+		network vip.Network
+		addedIP bool
+	}
+	configuredNetworks := make([]configuredNetwork, 0, len(cluster.Network))
+	defer func() {
+		if !started {
+			lbCancel()
+			lbWg.Wait()
+			cleanupCtx := context.WithoutCancel(ctx)
+			if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) && bgp != nil {
+				for _, configured := range configuredNetworks {
+					if err := bgp.DelHost(cleanupCtx, configured.network.CIDR(), name); err != nil {
+						log.Warn("failed to withdraw BGP host after load balancer startup failure", "address", configured.network.CIDR(), "err", err)
+					}
+				}
+			}
+			if c.EnableRoutingTable {
+				if cluster.routeMgr != nil {
+					for _, configured := range configuredNetworks {
+						if err := cluster.routeMgr.Delete(name, configured.network); err != nil {
+							log.Warn("failed to delete route after load balancer startup failure", "address", configured.network.CIDR(), "err", err)
+						}
+					}
+				}
+			} else {
+				for _, configured := range configuredNetworks {
+					if configured.addedIP {
+						if c.EnableARP && cluster.arpMgr != nil && cluster.arpMgr.Count(configured.network.ARPName()) > 0 {
+							continue
+						}
+						cluster.cleanupVIP(c, configured.network)
+					}
+				}
+			}
+			cluster.finishWorkers(generation)
+		}
+	}()
 
 	for i := range cluster.Network {
 		network := cluster.Network[i]
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 
 		if network.IsDDNS() {
 			ddnsReady := make(chan struct{})
@@ -432,6 +484,11 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			lbCancel()
 			return utils.WrapPanicError(err, "failed to set mask for subnet %q", c.VIPSubnet)
 		}
+		existing, existingErr := network.IsSet()
+		if existingErr != nil {
+			return fmt.Errorf("failed to inspect VIP %s before startup: %w", network.IP(), existingErr)
+		}
+		configuredNetworks = append(configuredNetworks, configuredNetwork{network: network})
 		_, err := network.DeleteIP()
 		if err != nil {
 			log.Warn("attempted to clean existing VIP", "err", err)
@@ -451,9 +508,12 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			// Note: When WireGuard is enabled, the VIP is added to the tunnel interface
 			// instead of lo, so we skip adding it here.
-			if _, err = network.AddIP(false, false); err != nil {
+			added, addErr := network.AddIP(false, false)
+			if addErr != nil {
+				err = addErr
 				log.Warn(err.Error())
 			} else {
+				configuredNetworks[len(configuredNetworks)-1].addedIP = existing == nil && added
 				log.Info("successful add IP", "address", network.IP())
 			}
 		}
@@ -475,6 +535,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 	}
 
 	wg.Go(func() {
+		defer cluster.finishWorkers(generation)
 		for i := range cluster.Network {
 			network := cluster.Network[i]
 
@@ -482,7 +543,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			if network.IsDNS() {
 				log.Info("(svcs) starting the DNS updater", "address", network.DNSName(), "ip", network.IP())
 				ipUpdater := vip.NewIPUpdater(network)
-				wg.Go(func() {
+				lbWg.Go(func() {
 					ipUpdater.Run(lbCtx)
 				})
 			}
@@ -502,18 +563,63 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 
 		if c.EnableRoutingTable {
 			for i := range cluster.Network {
-				if err := cluster.routeMgr.Delete(name, cluster.Network[i]); err != nil {
-					log.Warn(err.Error())
+				if cluster.routeMgr != nil {
+					if err := cluster.routeMgr.Delete(name, cluster.Network[i]); err != nil {
+						log.Warn(err.Error())
+					}
 				}
 			}
 
 			return
 		}
 
-		cluster.cleanupVIPs(c)
+		cluster.cleanupServiceVIPs(c, generation.preservedAddresses())
 	})
+	started = true
 
 	return nil
+}
+
+func (cluster *Cluster) cleanupServiceVIPs(c *kubevip.Config, preserve map[string]struct{}) {
+	cluster.cleanupServiceNetworks(c, cluster.Network, preserve)
+}
+
+func (cluster *Cluster) cleanupServiceNetworks(c *kubevip.Config, networks []vip.Network, preserve map[string]struct{}) {
+	for _, network := range networks {
+		if _, ok := preserve["*"]; ok {
+			continue
+		}
+		if _, ok := preserve[network.IP()]; ok {
+			continue
+		}
+		cluster.cleanupVIP(c, network)
+	}
+}
+
+// CleanupStoppedServiceNetworks removes exact Service VIPs after their worker
+// generations have drained and ownership has been rechecked by the caller.
+func (cluster *Cluster) CleanupStoppedServiceNetworks(c *kubevip.Config, addresses map[string]struct{}) error {
+	if !shouldAddServiceIP(c) {
+		return nil
+	}
+	if cluster.WorkersRunning() {
+		return fmt.Errorf("cannot clean service VIPs while workers are running")
+	}
+	var errs []error
+	for _, network := range cluster.Network {
+		if _, ok := addresses[network.IP()]; !ok {
+			continue
+		}
+		deleted, err := network.DeleteIP()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("delete service VIP %s: %w", network.IP(), err))
+			continue
+		}
+		if deleted {
+			log.Info("deleted final service address", "IP", network.IP(), "interface", network.Interface())
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func shouldAddServiceIP(c *kubevip.Config) bool {

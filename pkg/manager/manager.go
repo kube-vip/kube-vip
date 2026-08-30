@@ -53,7 +53,10 @@ type Manager struct {
 	// This channel is used to catch an OS signal and trigger a shutdown
 	signalChan chan os.Signal
 
-	sigint sync.Once
+	sigint  sync.Once
+	dumpWG  sync.WaitGroup
+	dumping atomic.Bool
+	dump    func(context.Context)
 
 	svcProcessor *services.Processor
 
@@ -446,6 +449,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 }
 
 func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc) {
+	defer sm.dumpWG.Wait()
 	for {
 		var sig os.Signal
 		select {
@@ -455,8 +459,19 @@ func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFun
 		}
 		switch sig {
 		case syscall.SIGUSR1:
-			log.Info("Received SIGUSR1, dumping configuration")
-			go sm.dumpConfiguration(ctx)
+			if sm.dumping.CompareAndSwap(false, true) {
+				log.Info("Received SIGUSR1, dumping configuration")
+				dump := sm.dump
+				if dump == nil {
+					dump = sm.dumpConfiguration
+				}
+				sm.dumpWG.Add(1)
+				go func() {
+					defer sm.dumpWG.Done()
+					defer sm.dumping.Store(false)
+					dump(ctx)
+				}()
+			}
 		case syscall.SIGINT, syscall.SIGTERM:
 			sm.shutdown(cancel)
 			return

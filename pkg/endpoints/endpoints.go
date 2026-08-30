@@ -15,7 +15,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
-	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -90,7 +89,11 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 
 		if len(endpoints) != 0 {
 			if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
-				return nil, nil, false, true, nil
+				svcCtx.ResetReadiness()
+				p.worker.clear(svcCtx, lastKnownGoodEndpoint, service, inst)
+				*lastKnownGoodEndpoint = ""
+				updatedService, changed := p.updateAnnotations(service, inst, lastKnownGoodEndpoint, clientSet)
+				return updatedService, inst, changed, false, nil
 			}
 
 			p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
@@ -173,7 +176,7 @@ func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v
 	if p.config.EnableARP && !p.config.EnableServicesElection {
 		if inst != nil {
 			for _, c := range inst.Clusters {
-				c.Stop()
+				c.StopWorkersAndWaitPreserving(nil)
 			}
 		}
 	}
@@ -287,13 +290,11 @@ func (p *Processor) updateAnnotations(service *v1.Service, inst *instance.Instan
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
 	inst *instance.Instance, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) error {
 	if p.config.EnableServicesElection {
-		// startLeaderElection restarts itself until the service context is cancelled,
-		// so start it only once instead of on every endpoint event.
-		svcCtx.StartLeaderElectionOnce(func() {
-			wg.Go(func() {
-				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
+		if serviceFunc != nil {
+			svcCtx.StartLeaderElectionOnce(func() {
+				wg.Go(func() { p.runServiceLeaderElectionLoop(svcCtx, service, serviceFunc, wg) })
 			})
-		})
+		}
 		return nil
 	}
 
@@ -314,6 +315,27 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 	return nil
 }
 
+func (p *Processor) runServiceLeaderElectionLoop(svcCtx *servicecontext.Context, service *v1.Service,
+	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
+	for svcCtx.Ctx.Err() == nil {
+		if err := serviceFunc(svcCtx, service, wg, true); err == nil {
+			continue
+		} else {
+			log.Error("service leader election callback failed", "service", service.Name, "namespace", service.Namespace, "err", err)
+		}
+		if p.leaseMgr != nil {
+			namespace, name := lease.ServiceName(service)
+			p.leaseMgr.Add(svcCtx.Ctx, lease.NewID(p.config.LeaderElectionType, namespace, name))
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-svcCtx.Ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
+
 func (p *Processor) findServiceInstance(service *v1.Service) *instance.Instance {
 	if p.instances == nil {
 		return nil
@@ -324,40 +346,6 @@ func (p *Processor) findServiceInstance(service *v1.Service) *instance.Instance 
 	}
 	inst := instance.FindServiceInstance(service, *p.instances)
 	return inst
-}
-
-func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
-	// Track this loop for the lifetime of the goroutine. There has to be at most
-	// one per service, so a value above 1 means loops leaked.
-	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
-	loops.Inc()
-	defer loops.Dec()
-
-	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
-
-	// This is a blocking function, that will restart (in the event of failure)
-	for {
-		select {
-		case <-svcCtx.Ctx.Done():
-			return
-		default:
-			leaseNamespace, serviceLease := lease.ServiceName(service)
-			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
-			// StartServicesLeaderElection owns registration and chooses whether this
-			// service becomes a candidate or joins an elected shared lease.
-			attempts.Inc()
-			err := serviceFunc(svcCtx, service, wg, true)
-			if err != nil {
-				log.Error(err.Error())
-				p.leaseMgr.Add(svcCtx.Ctx, id)
-				select {
-				case <-svcCtx.Ctx.Done():
-					return
-				case <-time.After(time.Millisecond * 200):
-				}
-			}
-		}
-	}
 }
 
 func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {

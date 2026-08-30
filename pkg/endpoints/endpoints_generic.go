@@ -62,7 +62,6 @@ func (g *generic) processInstance(_ *servicecontext.Context, _ *v1.Service, _ *i
 
 func (g *generic) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service, _ *instance.Instance) {
 	g.clearEgress(lastKnownGoodEndpoint, service)
-	svcCtx.CancelLeader()
 }
 
 func (g *generic) clearEgress(lastKnownGoodEndpoint *string, service *v1.Service) {

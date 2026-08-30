@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"syscall"
+	"time"
 
 	log "log/slog"
 
@@ -77,22 +78,30 @@ func getDefaultRoute(family int) (*net.Interface, error) {
 
 // MonitorDefaultInterface monitors the default interface for route removal or link loss.
 func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) error {
-	routeCh, linkCh, err := subscribeDefaultInterface(ctx)
+	monitorCtx, cancel := context.WithCancel(ctx)
+	routeCh, linkCh, err := subscribeDefaultInterface(monitorCtx)
 	if err != nil {
+		cancel()
+		drainDefaultInterfaceSubscriptions(routeCh, linkCh)
 		return err
 	}
+	defer func() {
+		cancel()
+		drainDefaultInterfaceSubscriptions(routeCh, linkCh)
+	}()
 
-	return monitorDefaultInterface(ctx, defaultIF, routeCh, linkCh)
+	return monitorDefaultInterface(monitorCtx, defaultIF, routeCh, linkCh)
 }
 
 func subscribeDefaultInterface(ctx context.Context) (chan netlink.RouteUpdate, chan netlink.LinkUpdate, error) {
-	routeCh := make(chan netlink.RouteUpdate)
+	const subscriptionBuffer = 64
+	routeCh := make(chan netlink.RouteUpdate, subscriptionBuffer)
 	if err := netlink.RouteSubscribe(routeCh, ctx.Done()); err != nil {
 		return nil, nil, fmt.Errorf("subscribe route failed, error: %w", err)
 	}
-	linkCh := make(chan netlink.LinkUpdate)
+	linkCh := make(chan netlink.LinkUpdate, subscriptionBuffer)
 	if err := netlink.LinkSubscribe(linkCh, ctx.Done()); err != nil {
-		return nil, nil, fmt.Errorf("subscribe link failed, error: %w", err)
+		return routeCh, nil, fmt.Errorf("subscribe link failed, error: %w", err)
 	}
 
 	return routeCh, linkCh, nil
@@ -101,18 +110,53 @@ func subscribeDefaultInterface(ctx context.Context) (chan netlink.RouteUpdate, c
 func monitorDefaultInterface(ctx context.Context, defaultIF *net.Interface, routeCh <-chan netlink.RouteUpdate, linkCh <-chan netlink.LinkUpdate) error {
 	for {
 		select {
-		case r := <-routeCh:
+		case r, ok := <-routeCh:
+			if !ok {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return errors.New("route subscription closed")
+			}
 			log.Debug(fmt.Sprintf("type: %d, route: %+v", r.Type, r.Route))
 			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
 				return fmt.Errorf("default route deleted and the default interface may be invalid")
 			}
-		case update := <-linkCh:
+		case update, ok := <-linkCh:
+			if !ok {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return errors.New("link subscription closed")
+			}
+			if update.Link == nil {
+				continue
+			}
 			attrs := update.Attrs()
 			if attrs != nil && attrs.Index == defaultIF.Index && attrs.Flags&net.FlagUp == 0 {
 				return fmt.Errorf("default interface %q is down", defaultIF.Name)
 			}
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+func drainDefaultInterfaceSubscriptions(routeCh <-chan netlink.RouteUpdate, linkCh <-chan netlink.LinkUpdate) {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+
+	for routeCh != nil || linkCh != nil {
+		select {
+		case _, ok := <-routeCh:
+			if !ok {
+				routeCh = nil
+			}
+		case _, ok := <-linkCh:
+			if !ok {
+				linkCh = nil
+			}
+		case <-timer.C:
+			return
 		}
 	}
 }

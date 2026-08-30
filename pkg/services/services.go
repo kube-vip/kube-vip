@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/instance"
@@ -35,6 +36,15 @@ import (
 
 type ServiceInstanceAction string
 
+type serviceExpectation struct {
+	svcCtx    *servicecontext.Context
+	lost      <-chan any
+	version   uint64
+	lifecycle serviceLifecycle
+	valid     func() bool
+	track     func(*instance.Instance)
+}
+
 const (
 	ActionDelete ServiceInstanceAction = "delete"
 	ActionAdd    ServiceInstanceAction = "add"
@@ -44,28 +54,47 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
+var errServiceActivationStale = errors.New("service activation is no longer current")
+
 func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
+	if !p.serviceIsLatestDesired(svc) {
+		return nil
+	}
+	return p.syncServices(ctx.Ctx, ctx, svc, wg, usesLeaderElection, nil)
+}
+
+func (p *Processor) syncServices(activationCtx context.Context, svcCtx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool, expected *serviceExpectation) error {
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+	if !p.serviceExpectationCurrent(svc, expected) {
+		return nil
+	}
+	if expected != nil && expected.track != nil {
+		unlock := p.lockService(svc.UID)
+		if p.serviceExpectationCurrentLocked(svc, expected) {
+			expected.track(p.findServiceInstance(svc))
+		}
+		unlock()
+	}
 
 	// Iterate through the synchronising services
 	action := p.getServiceInstanceAction(svc)
 	switch action {
 	case ActionDelete:
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.deleteService(ctx.Ctx, svc.UID); err != nil {
+		if err := p.deleteExpectedService(activationCtx, svc, expected); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if !usesLeaderElection {
 			select {
-			case <-ctx.Ctx.Done():
+			case <-activationCtx.Done():
 				return nil
-			case <-ctx.Readiness():
+			case <-svcCtx.Readiness():
 			}
 		}
 
-		if err := p.addService(ctx.Ctx, svc, wg); err != nil {
+		if err := p.addService(activationCtx, svc, wg, expected); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
@@ -76,7 +105,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		// LB IP, the initial addService call may have missed the SNAT configuration because
 		// ActiveEndpoint was not yet present. Re-run it here.
 		if svc.Annotations[kubevip.Egress] == "true" && svc.Annotations[kubevip.ActiveEndpoint] != "" {
-			if err := p.updateEgressConfiguration(ctx.Ctx, svc); err != nil {
+			if err := p.updateEgressConfiguration(activationCtx, svc); err != nil {
 				log.Warn("[service] egress reconfigure on ActionNone", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
@@ -161,57 +190,89 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup, expectation ...*serviceExpectation) error {
+	var expected *serviceExpectation
+	if len(expectation) > 0 {
+		expected = expectation[0]
+	}
 	unlockService := p.lockService(svc.UID)
-	serviceLocked := true
+	unlockVIPs := func() {}
+	updateMetric := false
 	defer func() {
-		if serviceLocked {
-			unlockService()
+		unlockVIPs()
+		unlockService()
+		if updateMetric {
+			p.updateActiveServicesMetric()
 		}
 	}()
 
 	startTime := time.Now()
+	if !p.serviceExpectationCurrentLocked(svc, expected) {
+		return nil
+	}
 
 	current := p.findServiceInstance(svc)
 	var inst *instance.Instance
 	if current != nil {
 		inst = current
+		if expected != nil && expected.track != nil {
+			expected.track(inst)
+		}
 		if inst.AddCalled {
-			unlockService()
-			serviceLocked = false
 			return nil
 		}
+		unlockVIPs = p.lockInstanceResources(svc, inst)
 		inst.AddCalled = true
 	} else {
+		unlockVIPs = p.lockServiceResources(svc)
 		var err error
-		inst, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+		inst, err = p.makeServiceInstance(ctx, svc, wg)
 		if err != nil {
 			return err
+		}
+		if ctx.Err() != nil || !p.serviceExpectationCurrentLocked(svc, expected) {
+			if cleanupErr := p.deleteCurrentServiceLocked(context.WithoutCancel(ctx), inst); cleanupErr != nil {
+				return fmt.Errorf("discard stale service instance: %w", cleanupErr)
+			}
+			return errServiceActivationStale
 		}
 		inst.AddCalled = true
 
 		p.appendServiceInstance(inst)
 	}
-	unlockService()
-	serviceLocked = false
-
-	if err := p.configureService(ctx, inst, svc, wg); err != nil {
-		cleanupErr := p.deleteServiceInstance(context.WithoutCancel(ctx), inst)
+	if current == nil && expected != nil && expected.track != nil {
+		expected.track(inst)
+	}
+	if err := p.configureService(ctx, inst, svc, wg, expected); err != nil {
+		cleanupErr := p.deleteCurrentServiceLocked(context.WithoutCancel(ctx), inst)
 		if cleanupErr != nil {
 			return fmt.Errorf("configure service %s/%s: %w; cleanup: %w", svc.Namespace, svc.Name, err, cleanupErr)
 		}
+		updateMetric = true
 		return err
 	}
 
 	finishTime := time.Since(startTime)
+	updateMetric = true
 	log.Info("[service]", "service", svc.Name, "namespace", svc.Namespace, "synchronised in", fmt.Sprintf("%dms", finishTime.Milliseconds()))
 
 	return nil
 }
 
-func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup, expectation ...*serviceExpectation) error {
+	var expected *serviceExpectation
+	if len(expectation) > 0 {
+		expected = expectation[0]
+	}
+	if !p.serviceExpectationCurrentLocked(svc, expected) {
+		return errServiceActivationStale
+	}
+	checkCurrent := func() error {
+		if ctx.Err() != nil || !p.serviceExpectationCurrentLocked(svc, expected) {
+			return errServiceActivationStale
+		}
+		return nil
+	}
 	current := p.findServiceInstance(svc)
 	if current != inst {
 		return fmt.Errorf("service instance no longer active for %s/%s", svc.Namespace, svc.Name)
@@ -220,9 +281,15 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 	// is not a global leader election mode
 	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		for x := range inst.VIPConfigs {
+			if err := checkCurrent(); err != nil {
+				return err
+			}
 			log.Debug("[service] starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
 			if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {
 				return fmt.Errorf("failed to start lb: %w", err)
+			}
+			if err := checkCurrent(); err != nil {
+				return err
 			}
 		}
 	}
@@ -301,9 +368,15 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 	}
 
 	if !p.config.DisableServiceUpdates {
+		if err := checkCurrent(); err != nil {
+			return err
+		}
 		log.Debug("[service] update", "namespace", inst.ServiceSnapshot.Namespace, "name", inst.ServiceSnapshot.Name)
 		if err := p.updateStatus(ctx, inst); err != nil {
 			log.Error("[service] updating status", "namespace", inst.ServiceSnapshot.Namespace, "name", inst.ServiceSnapshot.Name, "err", err)
+		}
+		if err := checkCurrent(); err != nil {
+			return err
 		}
 	}
 
@@ -327,6 +400,9 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 
 	// Check if egress is enabled on the service, if so we'll need to configure some rules
 	if egressService.Annotations[kubevip.Egress] == "true" && len(serviceIPs) > 0 {
+		if err := checkCurrent(); err != nil {
+			return err
+		}
 		log.Debug("[service] enabling egress", "service", egressService.Name, "namespace", egressService.Namespace)
 		// If we'er not using NFtables, then ensure that the correct iptables modules are loaded
 		if p.config.EgressWithNftables {
@@ -406,22 +482,37 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				}
 			}
 		}
+		if err := checkCurrent(); err != nil {
+			return err
+		}
 	}
 
 	// Configure WireGuard DNAT rules if WireGuard is enabled
 	if p.config.EnableWireguard {
+		if err := checkCurrent(); err != nil {
+			return err
+		}
 		log.Debug("[service] configuring WireGuard DNAT rules", "service", svc.Name, "namespace", svc.Namespace)
 		if err := p.addServiceWireguard(ctx, svc); err != nil {
 			log.Warn("[service] failed to configure WireGuard DNAT", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			// Don't fail the entire service if WireGuard config fails
 		}
+		if err := checkCurrent(); err != nil {
+			return err
+		}
 	}
 
+	if err := checkCurrent(); err != nil {
+		return err
+	}
 	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
 	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
 		return fmt.Errorf("error adding label to node: %w", err)
 	}
 	inst.LabelAdded = true
+	if err := checkCurrent(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -442,7 +533,6 @@ func serviceSnapshotForEgress(inst *instance.Instance, service *v1.Service) *v1.
 
 func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCtx ...*servicecontext.Context) error {
 	unlockService := p.lockService(uid)
-	defer unlockService()
 	var expected *servicecontext.Context
 	if len(expectedCtx) > 0 {
 		expected = expectedCtx[0]
@@ -450,33 +540,61 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCt
 	if expected != nil {
 		currentCtx, err := p.getServiceContext(uid)
 		if err != nil {
+			unlockService()
 			return err
 		}
 		if currentCtx != nil && currentCtx != expected {
+			unlockService()
 			return nil
 		}
 	}
 
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
-	return p.deleteCurrentService(ctx, p.findServiceInstance(service))
+	err := p.deleteCurrentService(ctx, p.findServiceInstance(service))
+	unlockService()
+	if err == nil {
+		p.updateActiveServicesMetric()
+	}
+	return err
 }
 
 func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instance.Instance) error {
+	return p.deleteServiceInstanceExcluding(ctx, expected, nil)
+}
+
+func (p *Processor) deleteServiceInstanceExcluding(ctx context.Context, expected *instance.Instance, stopping map[*instance.Instance]struct{}, forceDelete ...map[string]struct{}) error {
+	return p.deleteServiceInstanceWithMode(ctx, expected, stopping, false, forceDelete...)
+}
+
+func (p *Processor) deleteServiceInstanceWithMode(ctx context.Context, expected *instance.Instance, stopping map[*instance.Instance]struct{}, leadershipLost bool, forceDelete ...map[string]struct{}) error {
 	if expected == nil {
 		return nil
 	}
 
 	unlockService := p.lockService(expected.UID())
-	defer unlockService()
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: expected.UID()}}
 	if p.findServiceInstance(service) != expected {
+		unlockService()
 		return nil
 	}
-	return p.deleteCurrentService(ctx, expected)
+	err := p.deleteCurrentServiceExcludingMode(ctx, expected, stopping, leadershipLost, forceDelete...)
+	unlockService()
+	if err == nil {
+		p.updateActiveServicesMetric()
+	}
+	return err
 }
 
 // deleteCurrentService removes the supplied tracked instance while its Service key is held.
 func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
+	return p.deleteCurrentServiceExcluding(ctx, serviceInstance, nil)
+}
+
+func (p *Processor) deleteCurrentServiceExcluding(ctx context.Context, serviceInstance *instance.Instance, stopping map[*instance.Instance]struct{}, forceDelete ...map[string]struct{}) error {
+	return p.deleteCurrentServiceExcludingMode(ctx, serviceInstance, stopping, false, forceDelete...)
+}
+
+func (p *Processor) deleteCurrentServiceExcludingMode(ctx context.Context, serviceInstance *instance.Instance, stopping map[*instance.Instance]struct{}, leadershipLost bool, forceDelete ...map[string]struct{}) error {
 
 	// If we've been through all services and not found the correct one then error
 	if serviceInstance == nil {
@@ -485,6 +603,27 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 		log.Warn("unable to find/stop service")
 		return nil
 	}
+	unlockVIPs := p.lockInstanceResources(serviceInstance.ServiceSnapshot, serviceInstance)
+	defer unlockVIPs()
+	return p.deleteCurrentServiceLockedWithOwnership(ctx, serviceInstance, stopping, firstAddressSet(forceDelete), leadershipLost)
+}
+
+func firstAddressSet(sets []map[string]struct{}) map[string]struct{} {
+	if len(sets) == 0 {
+		return nil
+	}
+	return sets[0]
+}
+
+func (p *Processor) deleteCurrentServiceLocked(ctx context.Context, serviceInstance *instance.Instance, stopping ...map[*instance.Instance]struct{}) error {
+	var stopSet map[*instance.Instance]struct{}
+	if len(stopping) != 0 {
+		stopSet = stopping[0]
+	}
+	return p.deleteCurrentServiceLockedWithOwnership(ctx, serviceInstance, stopSet, nil, false)
+}
+
+func (p *Processor) deleteCurrentServiceLockedWithOwnership(ctx context.Context, serviceInstance *instance.Instance, stopSet map[*instance.Instance]struct{}, forceDelete map[string]struct{}, leadershipLost bool) error {
 
 	updatedInstances := make([]*instance.Instance, 0)
 	for _, inst := range p.serviceInstances() {
@@ -499,6 +638,7 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
+		serviceInstance.LabelAdded = false
 	}
 
 	for _, c := range serviceInstance.Clusters {
@@ -507,19 +647,15 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 		}
 	}
 
-	// Determine if this VIP is shared with other loadbalancers
-	shared := false
-	vipSet := make(map[string]interface{})
+	// Only active siblings own VIPs. Pre-created election instances have no
+	// workers yet and must not prevent cleanup.
+	vipSet := make(map[string]struct{})
 	for x := range updatedInstances {
-		vips := updatedInstances[x].Addresses()
-		for _, vip := range vips { //updatedInstances[x].ServiceSnapshot.Spec.LoadBalancerIP {
-			vipSet[vip] = nil
+		if _, departing := stopSet[updatedInstances[x]]; departing {
+			continue
 		}
-	}
-	vips := serviceInstance.Addresses()
-	for _, vip := range vips {
-		if _, found := vipSet[vip]; found {
-			shared = true
+		for _, address := range p.activeInstanceAddresses(updatedInstances[x]) {
+			vipSet[address] = struct{}{}
 		}
 	}
 
@@ -542,51 +678,117 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 		}
 	}
 
-	if !shared {
-		for x := range serviceInstance.Clusters {
-			serviceInstance.Clusters[x].Stop()
-		}
-
-		if serviceInstance.IsVLAN {
-			vlan, err := netlink.LinkByName(serviceInstance.VLANInterface)
-			if err != nil {
-				return fmt.Errorf("[service] error finding VLAN Interface: %v", err)
-			}
-
-			err = netlink.LinkDel(vlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting VLAN interface : %v", err)
+	for _, c := range serviceInstance.Clusters {
+		preserve := make(map[string]struct{})
+		for _, network := range c.Network {
+			_, shared := vipSet[network.IP()]
+			preserveLeadershipVIP := leadershipLost && p.config.PreserveVIPOnLeadershipLoss && !utils.IsIPv6(network.IP())
+			if shared || preserveLeadershipVIP {
+				preserve[network.IP()] = struct{}{}
 			}
 		}
+		c.StopWorkersAndWaitPreserving(preserve)
+	}
 
-		if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
-			if serviceInstance.IsDHCPv4 {
-				serviceInstance.DHCPv4Client.Stop()
+	finalDelete := make(map[string]struct{})
+	if forceDelete == nil {
+		for _, address := range ownedInstanceAddresses(serviceInstance) {
+			finalDelete[address] = struct{}{}
+		}
+	} else {
+		for address := range forceDelete {
+			finalDelete[address] = struct{}{}
+		}
+	}
+	if leadershipLost && p.config.PreserveVIPOnLeadershipLoss {
+		for address := range finalDelete {
+			if !utils.IsIPv6(address) {
+				delete(finalDelete, address)
 			}
-
-			if serviceInstance.IsDHCPv6 {
-				serviceInstance.DHCPv6Client.Stop()
+		}
+	}
+	if len(finalDelete) != 0 {
+		// Every designated address may have been preserved by an earlier stop
+		// snapshot. Drain all departing generations that reference it before the
+		// final ownership check and exact deletion.
+		for sibling := range stopSet {
+			if sibling == nil || sibling == serviceInstance {
+				continue
 			}
+			for _, c := range sibling.Clusters {
+				if clusterOwnsAnyAddress(c, finalDelete) {
+					c.StopWorkersAndWaitPreserving(finalDelete)
+				}
+			}
+		}
+		active := make(map[string]struct{})
+		for _, sibling := range p.serviceInstances() {
+			if sibling == serviceInstance {
+				continue
+			}
+			if _, departing := stopSet[sibling]; departing {
+				continue
+			}
+			for _, address := range p.activeInstanceAddresses(sibling) {
+				active[address] = struct{}{}
+			}
+		}
+		for address := range active {
+			delete(finalDelete, address)
+		}
+		for i, c := range serviceInstance.Clusters {
+			if i >= len(serviceInstance.VIPConfigs) || serviceInstance.VIPConfigs[i] == nil {
+				continue
+			}
+			if err := c.CleanupStoppedServiceNetworks(serviceInstance.VIPConfigs[i], finalDelete); err != nil {
+				return err
+			}
+		}
+	}
 
+	if serviceInstance.IsVLAN && !instanceUsesVLAN(updatedInstances, serviceInstance.VLANInterface) {
+		vlan, err := netlink.LinkByName(serviceInstance.VLANInterface)
+		if err != nil && !isMissingLink(err) {
+			return fmt.Errorf("[service] error finding VLAN Interface: %v", err)
+		}
+		if err == nil {
+			if err := netlink.LinkDel(vlan); err != nil && !isMissingLink(err) {
+				return fmt.Errorf("[service] error deleting VLAN interface: %v", err)
+			}
+		}
+	}
+
+	if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
+		if serviceInstance.IsDHCPv4 && serviceInstance.DHCPv4Client != nil {
+			serviceInstance.DHCPv4Client.Stop()
+		}
+
+		if serviceInstance.IsDHCPv6 && serviceInstance.DHCPv6Client != nil {
+			serviceInstance.DHCPv6Client.Stop()
+		}
+
+		if !instanceUsesDHCPInterface(updatedInstances, serviceInstance.DHCPInterface) {
 			macvlan, err := netlink.LinkByName(serviceInstance.DHCPInterface)
-			if err != nil {
+			if err != nil && !isMissingLink(err) {
 				return fmt.Errorf("[service] error finding VIP Interface: %v", err)
 			}
-
-			err = netlink.LinkDel(macvlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting DHCP Link : %v", err)
+			if err == nil {
+				if err := netlink.LinkDel(macvlan); err != nil && !isMissingLink(err) {
+					return fmt.Errorf("[service] error deleting DHCP Link: %v", err)
+				}
 			}
 		}
+	}
 
-		// We will need to tear down the egress
-		if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" && !internalNftablesEgress {
-			if serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint] != "" {
-				log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
-				err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables)
-				if err != nil {
-					log.Error("[service] egress teardown", "err", err)
-				}
+	// Legacy teardown removes common marking state, so retain the original
+	// single-call behavior and address selection.
+	if serviceInstance.ServiceSnapshot.Annotations[kubevip.Egress] == "true" && !internalNftablesEgress {
+		address := serviceInstance.ServiceSnapshot.Spec.LoadBalancerIP
+		_, shared := vipSet[address]
+		if address != "" && !shared && serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint] != "" {
+			log.Info("[service] egress re-write enabled", "service", serviceInstance.ServiceSnapshot.Name)
+			if err := egress.Teardown(serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint], address, serviceInstance.ServiceSnapshot.Namespace, string(serviceInstance.ServiceSnapshot.UID), serviceInstance.ServiceSnapshot.Annotations, p.config.EgressWithNftables); err != nil {
+				log.Error("[service] egress teardown", "err", err)
 			}
 		}
 	}
@@ -602,6 +804,207 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
 
 	return nil
+}
+
+// prepareServiceInstanceStop records shared addresses before anything can close
+// the instance worker contexts. Cleanup repeats this calculation before stop,
+// and Cluster merges both snapshots monotonically for the exact generation.
+func (p *Processor) prepareServiceInstanceStop(serviceInstance *instance.Instance) {
+	p.prepareServiceInstanceStopPreserving(serviceInstance, nil, nil)
+}
+
+func (p *Processor) prepareServiceInstanceStopPreserving(serviceInstance *instance.Instance, stopping map[*instance.Instance]struct{}, preserveAddresses map[string]struct{}) {
+	if serviceInstance == nil {
+		return
+	}
+	unlockService := p.lockService(serviceInstance.UID())
+	defer unlockService()
+	unlockResources := p.lockInstanceResources(serviceInstance.ServiceSnapshot, serviceInstance)
+	defer unlockResources()
+
+	vipSet := make(map[string]struct{})
+	for _, sibling := range p.serviceInstances() {
+		if sibling == serviceInstance {
+			continue
+		}
+		if _, departing := stopping[sibling]; departing {
+			continue
+		}
+		for _, address := range p.activeInstanceAddresses(sibling) {
+			vipSet[address] = struct{}{}
+		}
+	}
+	for address := range preserveAddresses {
+		vipSet[address] = struct{}{}
+	}
+	for _, c := range serviceInstance.Clusters {
+		preserve := make(map[string]struct{})
+		for _, network := range c.Network {
+			if _, found := vipSet[network.IP()]; found {
+				preserve[network.IP()] = struct{}{}
+			}
+		}
+		c.PrepareStopPreserving(preserve)
+	}
+}
+
+func (p *Processor) prepareServiceInstancesStop(instances []*instance.Instance, leadershipLost ...bool) map[*instance.Instance]map[string]struct{} {
+	lost := make(map[*instance.Instance]bool, len(instances))
+	if len(leadershipLost) != 0 && leadershipLost[0] {
+		for _, inst := range instances {
+			lost[inst] = true
+		}
+	}
+	return p.prepareServiceInstancesCampaignStop(instances, lost)
+}
+
+func (p *Processor) prepareServiceInstancesCampaignStop(instances []*instance.Instance, leadershipLost map[*instance.Instance]bool) map[*instance.Instance]map[string]struct{} {
+	stopping := make(map[*instance.Instance]struct{}, len(instances))
+	addressOwners := make(map[string][]*instance.Instance)
+	preserveAddresses := make(map[string]struct{})
+	for _, inst := range instances {
+		if inst == nil {
+			continue
+		}
+		stopping[inst] = struct{}{}
+		for _, address := range ownedInstanceAddresses(inst) {
+			addressOwners[address] = append(addressOwners[address], inst)
+			preserveAddresses[address] = struct{}{}
+		}
+	}
+	for _, inst := range instances {
+		p.prepareServiceInstanceStopPreserving(inst, stopping, preserveAddresses)
+	}
+	forceDeletes := make(map[*instance.Instance]map[string]struct{})
+	for inst := range stopping {
+		forceDeletes[inst] = make(map[string]struct{})
+	}
+	for address, owners := range addressOwners {
+		owner := campaignAddressDeleteOwner(address, owners, leadershipLost, p.config.PreserveVIPOnLeadershipLoss)
+		if owner != nil {
+			forceDeletes[owner][address] = struct{}{}
+		}
+	}
+	return forceDeletes
+}
+
+func campaignAddressDeleteOwner(address string, owners []*instance.Instance, leadershipLost map[*instance.Instance]bool, preserveVIPOnLeadershipLoss bool) *instance.Instance {
+	if preserveVIPOnLeadershipLoss && !utils.IsIPv6(address) {
+		for _, owner := range owners {
+			if leadershipLost[owner] {
+				return nil
+			}
+		}
+	}
+	if len(owners) == 0 {
+		return nil
+	}
+	return owners[0]
+}
+
+func clusterOwnsAnyAddress(c *cluster.Cluster, addresses map[string]struct{}) bool {
+	for _, network := range c.Network {
+		if _, ok := addresses[network.IP()]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func ownedInstanceAddresses(inst *instance.Instance) []string {
+	set := make(map[string]struct{})
+	for _, address := range inst.Addresses() {
+		if address != "" && address != "0.0.0.0" && address != "::" {
+			set[address] = struct{}{}
+		}
+	}
+	for _, c := range inst.Clusters {
+		for _, network := range c.Network {
+			address := network.IP()
+			if address != "" && address != "0.0.0.0" && address != "::" {
+				set[address] = struct{}{}
+			}
+		}
+	}
+	addresses := make([]string, 0, len(set))
+	for address := range set {
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+func instanceUsesVLAN(instances []*instance.Instance, name string) bool {
+	for _, inst := range instances {
+		if inst.IsVLAN && inst.VLANInterface == name {
+			return true
+		}
+	}
+	return false
+}
+
+func instanceUsesDHCPInterface(instances []*instance.Instance, name string) bool {
+	for _, inst := range instances {
+		if (inst.IsDHCPv4 || inst.IsDHCPv6) && inst.DHCPInterface == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isMissingLink(err error) bool {
+	var notFound netlink.LinkNotFoundError
+	return errors.As(err, &notFound)
+}
+
+func (p *Processor) deleteExpectedService(ctx context.Context, svc *v1.Service, expected *serviceExpectation) error {
+	if expected == nil {
+		return p.deleteService(ctx, svc.UID)
+	}
+	unlock := p.lockService(svc.UID)
+	if !p.serviceExpectationCurrentLocked(svc, expected) {
+		unlock()
+		return nil
+	}
+	err := p.deleteCurrentService(ctx, p.findServiceInstance(svc))
+	unlock()
+	if err == nil {
+		p.updateActiveServicesMetric()
+	}
+	return err
+}
+
+func (p *Processor) serviceExpectationCurrent(svc *v1.Service, expected *serviceExpectation) bool {
+	if expected == nil {
+		return true
+	}
+	unlock := p.lockService(svc.UID)
+	defer unlock()
+	return p.serviceExpectationCurrentLocked(svc, expected)
+}
+
+func (p *Processor) serviceExpectationCurrentLocked(svc *v1.Service, expected *serviceExpectation) bool {
+	if expected == nil {
+		return true
+	}
+	if expected.valid != nil && !expected.valid() {
+		return false
+	}
+	if expected.lifecycle.uid != "" && svc.UID != expected.lifecycle.uid {
+		return false
+	}
+	if expected.version != 0 && !p.desiredLifecycleCurrent(svc.UID, expected.version, expected.lifecycle) {
+		return false
+	}
+	current, err := p.getServiceContext(svc.UID)
+	if err != nil || current != expected.svcCtx || expected.svcCtx.Ctx.Err() != nil {
+		return false
+	}
+	select {
+	case <-expected.lost:
+		return false
+	default:
+		return true
+	}
 }
 
 func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service, expected ...*instance.Instance) error {

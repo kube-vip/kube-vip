@@ -12,7 +12,7 @@ func TestReadinessResetCreatesNewGeneration(t *testing.T) {
 	svcCtx := New(context.Background())
 	defer svcCtx.Cancel()
 
-	first := svcCtx.Readiness()
+	first, firstLost := svcCtx.ReadinessGeneration()
 	svcCtx.SignalReadiness()
 	select {
 	case <-first:
@@ -21,7 +21,7 @@ func TestReadinessResetCreatesNewGeneration(t *testing.T) {
 	}
 
 	svcCtx.ResetReadiness()
-	second := svcCtx.Readiness()
+	second, secondLost := svcCtx.ReadinessGeneration()
 	if first == second {
 		t.Fatal("readiness reset reused the previous generation")
 	}
@@ -30,12 +30,33 @@ func TestReadinessResetCreatesNewGeneration(t *testing.T) {
 		t.Fatal("new readiness generation was already signalled")
 	default:
 	}
+	select {
+	case <-firstLost:
+	default:
+		t.Fatal("reset did not close the previous generation")
+	}
+	select {
+	case <-secondLost:
+		t.Fatal("new readiness generation was already lost")
+	default:
+	}
 
 	svcCtx.SignalReadiness()
 	select {
 	case <-second:
 	default:
 		t.Fatal("second readiness generation was not signalled")
+	}
+}
+
+func TestParentSurvivesServiceCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svcCtx := New(parent)
+	svcCtx.Cancel()
+
+	if svcCtx.Parent().Err() != nil {
+		t.Fatal("canceling a service canceled its stable parent")
 	}
 }
 
@@ -60,6 +81,25 @@ func TestStartWatchingClaimsOnce(t *testing.T) {
 	svcCtx.StopWatching()
 	if !svcCtx.StartWatching() {
 		t.Fatal("watcher ownership was not released")
+	}
+}
+
+func TestLeaderLoopOwnershipIsSeparateFromPublicOnce(t *testing.T) {
+	svcCtx := New(context.Background())
+	defer svcCtx.Cancel()
+	var onceCalls atomic.Int64
+	for range 2 {
+		svcCtx.StartLeaderElectionOnce(func() { onceCalls.Add(1) })
+	}
+	if onceCalls.Load() != 1 {
+		t.Fatalf("leader election once calls = %d, want 1", onceCalls.Load())
+	}
+	if !svcCtx.StartLeaderLoop() || svcCtx.StartLeaderLoop() {
+		t.Fatal("leader loop ownership was not exclusive")
+	}
+	svcCtx.FinishLeaderLoop()
+	if !svcCtx.StartLeaderLoop() {
+		t.Fatal("leader loop ownership was not released")
 	}
 }
 

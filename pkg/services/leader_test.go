@@ -2,10 +2,11 @@ package services
 
 import (
 	"context"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -14,19 +15,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// TestStartServicesLeaderElection_ReturnsOnLeaseLossWithoutServiceDeletion is a regression test for
-// the issue: StartServicesLeaderElection deadlocked forever whenever it returned for
-// any reason other than the Service itself being deleted.
-//
-// The function starts a lease-cleanup goroutine that only exits once svcCtx.Ctx is cancelled (Service
-// deleted), then defers wg.Wait() on the same WaitGroup that goroutine belonged to. Since the Service
-// stays alive across an ordinary lease loss, that goroutine and therefore the deferred wg.Wait()
-// never returned, permanently wedging the leader-election restart loop in startLeaderElection for that
-// service. The only workaround was to delete and recreate the Service.
-func TestStartServicesLeaderElection_ReturnsOnLeaseLossWithoutServiceDeletion(t *testing.T) {
+func TestServicesLeaderElectionLoopRecoversFromLeaseLoss(t *testing.T) {
+	runner := newElectionTestRunner()
 	p := &Processor{
-		config:   &kubevip.Config{},
-		leaseMgr: lease.NewManager(),
+		config:      &kubevip.Config{},
+		leaseMgr:    lease.NewManager(),
+		elections:   make(map[string]*serviceElection),
+		electionRun: runner.run,
 	}
 
 	svc := &v1.Service{
@@ -41,41 +36,42 @@ func TestStartServicesLeaderElection_ReturnsOnLeaseLossWithoutServiceDeletion(t 
 	id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
 	svcLease := p.leaseMgr.Add(context.Background(), id)
 
-	// Simulate ordinary leadership/lease loss (e.g. a renewal failure): the lease context ends
-	// but the Service itself is untouched, so svcCtx.Ctx must stay alive.
 	svcLease.Cancel()
 
 	svcCtx := servicecontext.New(context.Background())
 	p.svcMap.Store(svc.UID, svcCtx)
+	svcCtx.SignalReadiness()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- p.StartServicesLeaderElection(svcCtx, svc, nil, true)
+		done <- p.runServicesLeaderElectionLoop(svcCtx, svc, nil, true)
 	}()
 
+	awaitCondition(t, func() bool {
+		current := p.leaseMgr.Get(id)
+		return current != nil && current != svcLease && current.Ctx.Err() == nil
+	}, "replacement lease")
 	select {
-	case <-done:
-		// Expected: the function must return promptly when only the lease - not the service -
-		// has gone away, so the restart loop can retry the election.
-	case <-time.After(5 * time.Second):
-		t.Fatal("StartServicesLeaderElection did not return after the lease context was " +
-			"cancelled while the service context remained alive; this reproduces the deadlock " +
-			"where leader election could never be retried for a live service")
+	case err := <-done:
+		t.Fatalf("public election loop returned while service remained alive: %v", err)
+	case <-time.After(50 * time.Millisecond):
 	}
-
-	if svcCtx.Ctx.Err() != nil {
-		t.Fatal("service context should not have been cancelled by an ordinary lease loss")
-	}
-
-	// The lease-cleanup goroutine should still be running, waiting for the service to be
-	// deleted; confirm it is not left dangling forever by cancelling the service context now.
 	svcCtx.Cancel()
+	if err := awaitError(t, done, "public election loop cancellation"); err != nil {
+		t.Fatalf("runServicesLeaderElectionLoop() error = %v", err)
+	}
 }
 
 func TestSharedLeaseFollowerCancellationDoesNotStopLeader(t *testing.T) {
 	p := &Processor{
 		config:   &kubevip.Config{EnableServicesElection: true},
 		leaseMgr: lease.NewManager(),
+		electionRun: func(ctx context.Context, run *election.RunConfig, _ *kubevip.Config) error {
+			run.OnStartedLeading(ctx)
+			<-ctx.Done()
+			run.OnStoppedLeading()
+			return nil
+		},
 	}
 	annotations := map[string]string{kubevip.ServiceLease: "shared"}
 	leaderService := &v1.Service{ObjectMeta: metav1.ObjectMeta{
@@ -122,10 +118,13 @@ func TestSharedLeaseFollowerCancellationDoesNotStopLeader(t *testing.T) {
 	}
 }
 
-func TestStartServicesLeaderElectionReturnsErrorWithoutLease(t *testing.T) {
+func TestServicesLeaderElectionLoopRecreatesMissingLease(t *testing.T) {
+	runner := newElectionTestRunner()
 	p := &Processor{
-		config:   &kubevip.Config{},
-		leaseMgr: lease.NewManager(),
+		config:      &kubevip.Config{},
+		leaseMgr:    lease.NewManager(),
+		elections:   make(map[string]*serviceElection),
+		electionRun: runner.run,
 	}
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		Name: "service", Namespace: "default", UID: types.UID("service"),
@@ -133,9 +132,19 @@ func TestStartServicesLeaderElectionReturnsErrorWithoutLease(t *testing.T) {
 	svcCtx := servicecontext.New(context.Background())
 	p.svcMap.Store(service.UID, svcCtx)
 
-	err := p.StartServicesLeaderElection(svcCtx, service, nil, true)
-	if err == nil || !strings.Contains(err.Error(), "no existing lease found") {
-		t.Fatalf("StartServicesLeaderElection() error = %v, want missing lease error", err)
+	done := make(chan error, 1)
+	go func() { done <- p.runServicesLeaderElectionLoop(svcCtx, service, nil, true) }()
+	awaitCondition(t, func() bool {
+		return p.leaseMgr.Get(lease.NewID(p.config.LeaderElectionType, "default", "kubevip-service")) != nil
+	}, "missing lease recreation")
+	select {
+	case err := <-done:
+		t.Fatalf("public election loop returned after recreating lease: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	svcCtx.Cancel()
+	if err := awaitError(t, done, "public election loop cancellation"); err != nil {
+		t.Fatalf("runServicesLeaderElectionLoop() error = %v", err)
 	}
 }
 
@@ -165,6 +174,116 @@ func TestStartServicesLeaderElectionDoesNotClaimForCancelledContext(t *testing.T
 		t.Fatal("cancelled callback claimed the replacement lease membership")
 	}
 	p.leaseMgr.Delete(id, claimID, claimed)
+}
+
+func TestConcurrentStartServicesLeaderElectionRegistersOneMember(t *testing.T) {
+	runner := newElectionTestRunner()
+	p := newElectionTestProcessor(runner.run)
+	service := electionTestService("concurrent-start", "192.0.2.10")
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	namespace, name := lease.ServiceName(service)
+	id := lease.NewID(p.config.LeaderElectionType, namespace, name)
+	p.leaseMgr.Add(parent, id)
+	svcCtx := servicecontext.New(parent)
+	p.svcMap.Store(service.UID, svcCtx)
+	svcCtx.SignalReadiness()
+
+	const callers = 100
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var entered atomic.Int64
+	unlockStart := p.lockService(service.UID)
+	for range callers {
+		go func() {
+			<-start
+			entered.Add(1)
+			errs <- p.StartServicesLeaderElection(svcCtx, service, nil, true)
+		}()
+	}
+	close(start)
+	awaitCondition(t, func() bool { return entered.Load() == callers }, "all concurrent callers started")
+	unlockStart()
+	await(t, runner.started, "concurrent campaign")
+	awaitCondition(t, func() bool {
+		c, member := p.serviceElectionMember(service, svcCtx)
+		if member == nil {
+			return false
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.members) == 1
+	}, "single concurrent member")
+	time.Sleep(25 * time.Millisecond)
+	svcCtx.Cancel()
+	for range callers {
+		if err := awaitError(t, errs, "concurrent StartServices return"); err != nil {
+			t.Fatalf("StartServicesLeaderElection() error = %v", err)
+		}
+	}
+	awaitCondition(t, func() bool { return p.leaseMgr.Get(id) == nil }, "single member lease retirement")
+}
+
+func TestStartServicesLeaderElectionStaleContextReturnsPromptly(t *testing.T) {
+	p := &Processor{config: &kubevip.Config{}, leaseMgr: lease.NewManager()}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: "default", UID: types.UID("stale")}}
+	stale := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, servicecontext.New(context.Background()))
+
+	done := make(chan error, 1)
+	go func() { done <- p.StartServicesLeaderElection(stale, service, nil, true) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stale context returned nil error")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("stale direct StartServices call did not return promptly")
+	}
+}
+
+func TestStartServicesLeaderElectionUsesStableSharedParent(t *testing.T) {
+	runner := newElectionTestRunner()
+	p := newElectionTestProcessor(runner.run)
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := electionTestService("first", "10.0.0.1")
+	second := electionTestService("second", "10.0.0.2")
+	namespace, name := lease.ServiceName(first)
+	p.leaseMgr.Add(parent, lease.NewID(p.config.LeaderElectionType, namespace, name))
+	firstCtx := servicecontext.New(parent)
+	secondCtx := servicecontext.New(parent)
+	p.svcMap.Store(first.UID, firstCtx)
+	p.svcMap.Store(second.UID, secondCtx)
+	firstCtx.SignalReadiness()
+	secondCtx.SignalReadiness()
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() { firstDone <- p.StartServicesLeaderElection(firstCtx, first, nil, true) }()
+	go func() { secondDone <- p.StartServicesLeaderElection(secondCtx, second, nil, true) }()
+	awaitCondition(t, func() bool {
+		return p.serviceElectionMemberExists(first, firstCtx) && p.serviceElectionMemberExists(second, secondCtx)
+	}, "shared members")
+
+	firstCtx.Cancel()
+	if err := awaitError(t, firstDone, "first service cancellation"); err != nil {
+		t.Fatalf("first StartServicesLeaderElection() error = %v", err)
+	}
+	if secondCtx.Parent().Err() != nil || secondCtx.Ctx.Err() != nil {
+		t.Fatal("canceling first service canceled its sibling or stable parent")
+	}
+	secondCtx.Cancel()
+	if err := awaitError(t, secondDone, "second service cancellation"); err != nil {
+		t.Fatalf("second StartServicesLeaderElection() error = %v", err)
+	}
+}
+
+func TestStartServicesLeaderElectionRejectsTypedNilService(t *testing.T) {
+	p := &Processor{}
+	var service *v1.Service
+	if err := p.StartServicesLeaderElection(servicecontext.New(context.Background()), service, nil, true); err == nil {
+		t.Fatal("typed nil service was accepted")
+	}
 }
 
 func TestReleaseServiceLeaseDoesNotRemoveSharedLeaseReplacement(t *testing.T) {

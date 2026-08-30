@@ -323,8 +323,9 @@ type mockNetwork struct {
 	ip   string
 	cidr string
 
-	mu      sync.Mutex
-	present bool
+	mu         sync.Mutex
+	present    bool
+	setMaskErr error
 }
 
 func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
@@ -362,7 +363,7 @@ func (m *mockNetwork) IsDNS() bool                     { return false }
 func (m *mockNetwork) IsDDNS() bool                    { return false }
 func (m *mockNetwork) DDNSHostName() string            { return "" }
 func (m *mockNetwork) DNSName() string                 { return "" }
-func (m *mockNetwork) SetMask(string) error            { return nil }
+func (m *mockNetwork) SetMask(string) error            { return m.setMaskErr }
 func (m *mockNetwork) SetHasEndpoints(bool)            {}
 func (m *mockNetwork) HasEndpoints() bool              { return false }
 func (m *mockNetwork) ARPName() string                 { return "" }

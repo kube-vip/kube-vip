@@ -1,13 +1,13 @@
 package networkinterface
 
 import (
-	log "log/slog"
 	"sync"
 
 	"github.com/vishvananda/netlink"
 )
 
 type Manager struct {
+	mutex      sync.Mutex
 	interfaces map[string]*Link
 }
 
@@ -23,19 +23,19 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) Get(intf netlink.Link) *Link {
-	if l, ok := m.interfaces[intf.Attrs().Name]; ok {
-		updated, err := netlink.LinkByName(l.Intf.Attrs().Name)
-		if err != nil {
-			log.Error("failed to get interface %q: %w", l.Intf.Attrs().Name, err)
-			return nil
-		}
-		l.Intf = updated
+	attrs := intf.Attrs()
+
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if l, ok := m.interfaces[attrs.Name]; ok && l.Intf.Attrs().Index == attrs.Index {
 		return l
 	}
+
 	result := &Link{
 		Intf: intf,
 	}
 
-	m.interfaces[intf.Attrs().Name] = result
+	m.interfaces[attrs.Name] = result
 	return result
 }

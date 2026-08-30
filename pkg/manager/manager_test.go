@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ func TestKillDoesNotBlockWhenSignalChannelIsFull(t *testing.T) {
 	manager := &Manager{
 		config:     &kubevip.Config{},
 		signalChan: make(chan os.Signal, 1),
+		dump:       func(context.Context) {},
 	}
 	manager.signalChan <- syscall.SIGUSR1
 	ctx, cancel := context.WithCancel(context.Background())
@@ -88,6 +90,50 @@ func TestKillDoesNotBlockWhenSignalChannelIsFull(t *testing.T) {
 	case <-shutdownDone:
 	case <-time.After(time.Second):
 		t.Fatal("Kill did not signal shutdown")
+	}
+}
+
+func TestWaitForShutdownTracksAndCoalescesConfigurationDump(t *testing.T) {
+	dumpStarted := make(chan struct{})
+	releaseDump := make(chan struct{})
+	var dumpCalls atomic.Int64
+	manager := &Manager{
+		signalChan: make(chan os.Signal, 3),
+		dump: func(context.Context) {
+			dumpCalls.Add(1)
+			close(dumpStarted)
+			<-releaseDump
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		manager.waitForShutdown(ctx, cancel)
+		close(done)
+	}()
+
+	manager.signalChan <- syscall.SIGUSR1
+	select {
+	case <-dumpStarted:
+	case <-time.After(time.Second):
+		t.Fatal("configuration dump did not start")
+	}
+	manager.signalChan <- syscall.SIGUSR1
+	manager.Kill()
+	select {
+	case <-done:
+		t.Fatal("waitForShutdown returned before the configuration dump completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseDump)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("waitForShutdown did not return after the configuration dump completed")
+	}
+	if got := dumpCalls.Load(); got != 1 {
+		t.Fatalf("configuration dump calls = %d, want 1", got)
 	}
 }
 

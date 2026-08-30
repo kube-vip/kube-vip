@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -21,7 +22,7 @@ import (
 )
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) error {
+func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) (returnErr error) {
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -59,17 +60,19 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 		return fmt.Errorf("failed to create debouncer for endpoints event: %w", err)
 	}
 
+	watcherCtx, cancelWatcher := context.WithCancelCause(ctx)
 	var wg sync.WaitGroup
+	cleanup := p.registerCleanupGroup(watcherCtx, &wg)
 	defer func() {
+		cancelWatcher(nil)
+		cleanup.stopReplays()
 		if d != nil {
 			d.Stop()
 		}
 		rw.Stop()
 		wg.Wait()
+		returnErr = errors.Join(returnErr, p.finishCleanupGroup(cleanup))
 	}()
-
-	watcherCtx, cancelWatcher := context.WithCancelCause(ctx)
-	defer cancelWatcher(nil)
 
 	wg.Go(func() {
 		if d != nil {

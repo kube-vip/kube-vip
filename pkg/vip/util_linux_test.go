@@ -31,6 +31,106 @@ func TestMonitorDefaultInterfaceReturnsErrorWhenLinkGoesDown(t *testing.T) {
 	}
 }
 
+func TestMonitorDefaultInterfaceReturnsErrorWhenSubscriptionCloses(t *testing.T) {
+	tests := []struct {
+		name    string
+		close   func(chan netlink.RouteUpdate, chan netlink.LinkUpdate)
+		wantErr string
+	}{
+		{
+			name:    "route",
+			close:   func(routeCh chan netlink.RouteUpdate, _ chan netlink.LinkUpdate) { close(routeCh) },
+			wantErr: "route subscription closed",
+		},
+		{
+			name:    "link",
+			close:   func(_ chan netlink.RouteUpdate, linkCh chan netlink.LinkUpdate) { close(linkCh) },
+			wantErr: "link subscription closed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			routeCh := make(chan netlink.RouteUpdate)
+			linkCh := make(chan netlink.LinkUpdate)
+			tt.close(routeCh, linkCh)
+
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- monitorDefaultInterface(context.Background(), &net.Interface{}, routeCh, linkCh)
+			}()
+
+			select {
+			case err := <-errCh:
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("monitor error = %v, want %q", err, tt.wantErr)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("monitor did not report the closed subscription")
+			}
+		})
+	}
+}
+
+func TestMonitorDefaultInterfaceHandlesClosedSubscriptionsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	routeCh := make(chan netlink.RouteUpdate)
+	linkCh := make(chan netlink.LinkUpdate)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- monitorDefaultInterface(ctx, &net.Interface{}, routeCh, linkCh)
+	}()
+
+	cancel()
+	close(routeCh)
+	close(linkCh)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("monitor error = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("monitor did not stop after cancellation")
+	}
+}
+
+func TestMonitorDefaultInterfaceIgnoresNilLink(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	routeCh := make(chan netlink.RouteUpdate)
+	linkCh := make(chan netlink.LinkUpdate)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- monitorDefaultInterface(ctx, &net.Interface{}, routeCh, linkCh)
+	}()
+
+	linkCh <- netlink.LinkUpdate{}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("monitor error = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("monitor did not stop after cancellation")
+	}
+}
+
+func TestDrainDefaultInterfaceSubscriptionsIsBounded(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		drainDefaultInterfaceSubscriptions(make(chan netlink.RouteUpdate), make(chan netlink.LinkUpdate))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("subscription drain did not stop")
+	}
+}
+
 func TestMonitorDefaultInterfaceReturnsErrorWhenTestLinkIsSetDown(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

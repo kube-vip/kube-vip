@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
-	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
-	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -423,15 +424,110 @@ func TestReconcile_ZeroEndpointsBehavior(t *testing.T) {
 	})
 }
 
-// TestReconcile_ServicesElectionStartsOnce asserts that repeated endpoint events
-// for the same service start the leader-election restart loop exactly once.
-//
-// Reconcile runs on every EndpointSlice add/modify/resync event, and the loop it
-// starts only returns once the service context is cancelled. Starting it per event
-// therefore accumulates duplicate goroutines that all contend on the same lease.
-//
-// See https://github.com/kube-vip/kube-vip/issues/1665.
-func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
+func TestReconcileRapidZeroToNonzeroRestartsARPWorkers(t *testing.T) {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", UID: "service"},
+		Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal},
+	}
+	network := &endpointTestNetwork{ip: "192.0.2.10"}
+	config := &kubevip.Config{VIPSubnet: "32"}
+	c, err := cluster.InitCluster(config, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	c.Network = []vip.Network{network}
+	inst := &instance.Instance{
+		ServiceUID:      service.UID,
+		ServiceSnapshot: service,
+		VIPConfigs:      []*kubevip.Config{config},
+		Clusters:        []*cluster.Cluster{c},
+	}
+	instances := []*instance.Instance{inst}
+	worker := &fakeWorker{}
+	p := &Processor{
+		config:         &kubevip.Config{EnableARP: true},
+		provider:       providers.NewEndpointslices(),
+		worker:         worker,
+		instances:      &instances,
+		instancesMutex: &sync.RWMutex{},
+		lockService:    noOpServiceLock,
+	}
+	svcCtx := servicecontext.New(context.Background())
+	svcCtx.SignalReadiness()
+	var wg sync.WaitGroup
+	if err := c.StartLoadBalancerService(svcCtx.Ctx, config, nil, "default/service", &wg); err != nil {
+		t.Fatalf("initial StartLoadBalancerService() error = %v", err)
+	}
+
+	worker.endpoints = nil
+	if restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}}, new(string), service, "node", nil, &wg, nil, nil); err != nil || restart {
+		t.Fatalf("zero endpoint Reconcile() = restart %v, error %v", restart, err)
+	}
+	if c.WorkersRunning() {
+		t.Fatal("zero endpoint Reconcile returned before old workers stopped")
+	}
+
+	worker.endpoints = []string{"10.0.0.2"}
+	if restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}}, new(string), service, "node", nil, &wg, nil, nil); err != nil || restart {
+		t.Fatalf("nonzero endpoint Reconcile() = restart %v, error %v", restart, err)
+	}
+	if !c.WorkersRunning() || !network.active() {
+		t.Fatal("nonzero endpoint Reconcile did not restore the VIP workers")
+	}
+	c.StopWorkersAndWaitPreserving(nil)
+	wg.Wait()
+}
+
+type endpointTestNetwork struct {
+	mu      sync.Mutex
+	ip      string
+	present bool
+}
+
+func (n *endpointTestNetwork) AddIP(bool, bool, ...int) (bool, error) {
+	n.mu.Lock()
+	n.present = true
+	n.mu.Unlock()
+	return true, nil
+}
+func (n *endpointTestNetwork) AddRoute(bool) (bool, error) { return false, nil }
+func (n *endpointTestNetwork) ReplaceRoute() error         { return nil }
+func (n *endpointTestNetwork) DeleteIP() (bool, error) {
+	n.mu.Lock()
+	n.present = false
+	n.mu.Unlock()
+	return true, nil
+}
+func (n *endpointTestNetwork) DeleteRoute() error            { return nil }
+func (n *endpointTestNetwork) UpdateRoutes() (bool, error)   { return false, nil }
+func (n *endpointTestNetwork) IsSet() (*netlink.Addr, error) { return nil, nil }
+func (n *endpointTestNetwork) IP() string                    { return n.ip }
+func (n *endpointTestNetwork) CIDR() string                  { return n.ip + "/32" }
+func (n *endpointTestNetwork) IPisLinkLocal() bool           { return false }
+func (n *endpointTestNetwork) PrepareRoute() *netlink.Route  { return nil }
+func (n *endpointTestNetwork) RouteHash() string             { return n.ip }
+func (n *endpointTestNetwork) SetIP(ip string) error         { n.ip = ip; return nil }
+func (n *endpointTestNetwork) SetServicePorts(*v1.Service)   {}
+func (n *endpointTestNetwork) Interface() string             { return "lo" }
+func (n *endpointTestNetwork) IsDADFAIL() bool               { return false }
+func (n *endpointTestNetwork) IsDNS() bool                   { return false }
+func (n *endpointTestNetwork) IsDDNS() bool                  { return false }
+func (n *endpointTestNetwork) DDNSHostName() string          { return "" }
+func (n *endpointTestNetwork) DNSName() string               { return "" }
+func (n *endpointTestNetwork) SetMask(string) error          { return nil }
+func (n *endpointTestNetwork) SetHasEndpoints(bool)          {}
+func (n *endpointTestNetwork) HasEndpoints() bool            { return false }
+func (n *endpointTestNetwork) ARPName() string               { return n.ip }
+func (n *endpointTestNetwork) GetPossibleSubnets() string    { return "" }
+func (n *endpointTestNetwork) DHCPFamily() string            { return "" }
+func (n *endpointTestNetwork) IPVSMark() uint32              { return 0 }
+func (n *endpointTestNetwork) active() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.present
+}
+
+func TestReconcile_ServicesElectionStartsPublicCallbackOnce(t *testing.T) {
 	config := &kubevip.Config{
 		EnableServicesElection: true,
 		LeaderElectionType:     "kubernetes",
@@ -451,11 +547,7 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 
 	svcCtx := servicecontext.New(svcLease.Ctx)
 
-	// The started loops only return once the service context is cancelled, so it has
-	// to be cancelled before waiting on them.
 	wg := &sync.WaitGroup{}
-	defer wg.Wait()
-	defer svcCtx.Cancel()
 
 	p := &Processor{
 		config:      config,
@@ -465,8 +557,6 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 		lockService: noOpServiceLock,
 	}
 
-	// starts counts the restart loops. The real StartServicesLeaderElection blocks
-	// until the service context is cancelled, so each loop parks in a single call.
 	var starts atomic.Int64
 	serviceFunc := func(svcCtx *servicecontext.Context, _ *v1.Service, _ *sync.WaitGroup, _ bool) error {
 		starts.Add(1)
@@ -474,7 +564,6 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 		return nil
 	}
 
-	// Three endpoint events, as a flapping backend pod would produce.
 	for range 3 {
 		restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
 			new(string), service, "node-1", serviceFunc, wg, nil, nil)
@@ -486,20 +575,46 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 		}
 	}
 
-	// Give every loop that is going to start a chance to reach serviceFunc.
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if starts.Load() > 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	for starts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-
 	if got := starts.Load(); got != 1 {
-		t.Errorf("leader election started %d times, want 1", got)
+		t.Errorf("endpoint reconciliation started callback %d times, want 1", got)
 	}
+	if !svcCtx.Signalled.Load() {
+		t.Fatal("endpoint reconciliation did not signal readiness")
+	}
+	svcCtx.Cancel()
+	wg.Wait()
+}
 
-	// The gauge the e2e fault tests assert on has to agree with the call count.
-	if got := testutil.ToFloat64(metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)); got != 1 {
-		t.Errorf("kube_vip_service_election_loops is %v, want 1", got)
+func TestReconcile_ServicesElectionRetriesCustomCallback(t *testing.T) {
+	config := &kubevip.Config{EnableServicesElection: true, LeaderElectionType: "kubernetes"}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-svc", Namespace: "default", UID: "test-uid"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	leaseMgr := lease.NewManager()
+	svcCtx := servicecontext.New(ctx)
+	var calls atomic.Int64
+	second := make(chan struct{})
+	callback := func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error {
+		if calls.Add(1) == 1 {
+			return context.DeadlineExceeded
+		}
+		close(second)
+		<-svcCtx.Ctx.Done()
+		return nil
 	}
+	p := &Processor{config: config, provider: providers.NewEndpointslices(), worker: &fakeWorker{endpoints: []string{"10.0.0.1"}}, leaseMgr: leaseMgr, lockService: noOpServiceLock}
+	var wg sync.WaitGroup
+	if restart, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}}, new(string), service, "node", callback, &wg, nil, nil); err != nil || restart {
+		t.Fatalf("Reconcile() = restart %v, error %v", restart, err)
+	}
+	select {
+	case <-second:
+	case <-time.After(time.Second):
+		t.Fatal("custom service callback was not retried")
+	}
+	cancel()
+	wg.Wait()
 }

@@ -18,7 +18,8 @@ import (
 )
 
 func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, service *v1.Service,
-	provider providers.Provider, cancelWatcher context.CancelCauseFunc) error {
+	provider providers.Provider, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error,
+	cancelWatcher context.CancelCauseFunc) error {
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
@@ -85,7 +86,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			}
 
 			restart, err := epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
-				p.StartServicesLeaderElection, &wg, p.clientSet, func(ctx context.Context, service *v1.Service, inst *instance.Instance) error {
+				serviceFunc, &wg, p.clientSet, func(ctx context.Context, service *v1.Service, inst *instance.Instance) error {
 					return p.updateEgressConfiguration(ctx, service, inst)
 				})
 			if restart {

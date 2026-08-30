@@ -2,10 +2,16 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
@@ -44,6 +50,23 @@ type Processor struct {
 	instancesMutex   sync.RWMutex
 	serviceLocks     keymutex.KeyMutex
 	serviceLocksOnce sync.Once
+	resourceLocks    keyedMutexes
+	networkLifecycle sync.RWMutex
+	metricsMu        sync.Mutex
+
+	electionsMu    sync.Mutex
+	elections      map[string]*serviceElection
+	claimSeq       atomic.Uint64
+	electionRun    func(context.Context, *election.RunConfig, *kubevip.Config) error
+	newInstance    func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
+	garbageCollect func(string, string, *networkinterface.Manager) (bool, error)
+	desiredMu      sync.Mutex
+	desiredEvents  map[types.UID]desiredEvent
+	desiredDeletes []desiredDelete
+	pendingMu      sync.Mutex
+	pending        map[types.UID]*pendingReconcile
+	cleanupMu      sync.Mutex
+	cleanup        map[<-chan struct{}]*cleanupGroup
 
 	bgpServer *bgp.Server
 
@@ -82,6 +105,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		lbClassFilter:    lbClassFilterFunc,
 		ServiceInstances: []*instance.Instance{},
 		serviceLocks:     keymutex.NewHashed(concurrentServiceLocks),
+		elections:        make(map[string]*serviceElection),
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
@@ -98,21 +122,40 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
 	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	svc, ok := event.Object.(*v1.Service)
-	if !ok {
+	if !ok || svc == nil {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
+	}
+	if !watcherOwnsService(svc, forcedOnly) {
+		return nil
+	}
+	version := p.recordDesiredEvent(event.Type, svc)
+	if version == 0 {
+		return nil
+	}
+	return p.reconcileDesired(ctx, event, serviceFunc, forcedOnly, wg, cancelWatcher, version)
+}
+
+func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc, version uint64) error {
+	svc := event.Object.(*v1.Service)
+	if latest := p.desiredServiceForVersion(svc.UID, version); latest != nil {
+		svc = latest
+		event.Object = latest
+	} else if !p.desiredTerminalEventCurrent(svc.UID, version) {
+		return nil
 	}
 
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
-	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" ||
-		!forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] == "true" {
+	if !watcherOwnsService(svc, forcedOnly) {
 		return nil
 	}
 
 	// A tracked LoadBalancer must be torn down when its type changes.
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-		return p.deleteTrackedService(svc)
+		p.discardPendingReconcile(svc.UID)
+		return p.deleteTrackedService(svc, version)
 	}
 
 	// Check if we ignore this service
@@ -144,17 +187,50 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			return fmt.Errorf("failed to get updated LB addresses for service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 		svc = s
+		p.refreshDesiredService(svc.UID, version, svc)
 	}
 
 	var svcInstance *instance.Instance
 	var svcCtx *servicecontext.Context
+	var previousService *v1.Service
+	serviceModified := false
 	shouldGarbageCollect := false
 	var err error
+	svcCtx, err = p.getServiceContext(svc.UID)
+	if err != nil {
+		return fmt.Errorf("failed to get service context: %w", err)
+	}
+	if svcCtx != nil && svcCtx.Ctx.Err() != nil {
+		if c, member := p.serviceElectionMemberForContext(svcCtx); member != nil {
+			p.queuePendingReconcile(c, member, ctx, event, serviceFunc, forcedOnly, wg, cancelWatcher, version)
+			if cleanupErr := p.waitAndRetryServiceElectionMember(svcCtx); cleanupErr != nil {
+				return fmt.Errorf("service %s/%s cleanup is still pending: %w", svc.Namespace, svc.Name, cleanupErr)
+			}
+			return nil
+		}
+		svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
+	}
+	if svcCtx == nil {
+		svcInstance = nil
+	} else if svcCtx.Ctx.Err() != nil {
+		return fmt.Errorf("service %s/%s cleanup is still pending", svc.Namespace, svc.Name)
+	}
 	if err := func() error {
 		unlockService := p.lockService(svc.UID)
 		defer unlockService()
+		if !p.desiredEventCurrent(svc.UID, version) {
+			return errServiceReconcileStale
+		}
 
 		svcInstance = p.findServiceInstance(svc)
+		if svcCtx != nil {
+			if c, member := p.serviceElectionMemberForContext(svcCtx); member != nil {
+				previousService = c.memberServiceSnapshot(member)
+			}
+		}
+		if previousService == nil && svcInstance != nil {
+			previousService = svcInstance.ServiceSnapshot
+		}
 		_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 		if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "invalid_config").Inc()
@@ -162,53 +238,92 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				kubevip.ServiceLease, v1.ServiceExternalTrafficPolicyTypeCluster, svc.Namespace, svc.Name)
 		}
 
-		svcCtx, err = p.getServiceContext(svc.UID)
-		if err != nil {
-			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
-			return fmt.Errorf("failed to get service context: %w", err)
-		}
-		svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
-		if event.Type == watch.Modified && svcInstance != nil {
-			shouldGarbageCollect = serviceChanged(svcInstance, svc)
+		if event.Type == watch.Modified {
+			serviceModified = p.desiredLifecycleChanged(svc.UID, version) || serviceSnapshotChanged(previousService, svc) || serviceChanged(svcInstance, svc)
+			shouldGarbageCollect = svcInstance != nil && serviceChanged(svcInstance, svc)
 		}
 		return nil
 	}(); err != nil {
+		if errors.Is(err, errServiceReconcileStale) {
+			return nil
+		}
 		return err
 	}
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
 		if shouldGarbageCollect {
-			for _, addr := range svcAddresses {
-				// log.Debugf("(svcs) Retrieving local addresses, to ensure that this modified address doesn't exist: %s", addr)
-				f, err := vip.GarbageCollect(p.config.Interface, addr, p.intfMgr)
-				if err != nil {
-					log.Error("(svcs) cleaning existing address error", "err", err)
+			unlockService := p.lockService(svc.UID)
+			if p.findServiceInstance(svc) != svcInstance {
+				unlockService()
+				shouldGarbageCollect = false
+			} else {
+				oldService := svcInstance.ServiceSnapshot
+				if oldService == nil {
+					oldService = svc
 				}
-				if f {
-					log.Warn("(svcs) already found existing config", "address", addr, "adapter", p.config.Interface)
+				unlockResources := p.lockInstanceResources(oldService, svcInstance)
+				activeSiblingAddresses := make(map[string]struct{})
+				for _, sibling := range p.serviceInstances() {
+					if sibling == svcInstance {
+						continue
+					}
+					for _, address := range p.activeInstanceAddresses(sibling) {
+						activeSiblingAddresses[address] = struct{}{}
+					}
 				}
+				garbageCollect := p.garbageCollect
+				if garbageCollect == nil {
+					garbageCollect = vip.GarbageCollect
+				}
+				for _, addr := range ownedInstanceAddresses(svcInstance) {
+					if _, shared := activeSiblingAddresses[addr]; shared {
+						continue
+					}
+					// log.Debugf("(svcs) Retrieving local addresses, to ensure that this modified address doesn't exist: %s", addr)
+					f, err := garbageCollect(p.config.Interface, addr, p.intfMgr)
+					if err != nil {
+						log.Error("(svcs) cleaning existing address error", "err", err)
+					}
+					if f {
+						log.Warn("(svcs) already found existing config", "address", addr, "adapter", p.config.Interface)
+					}
+				}
+				unlockResources()
+				unlockService()
 			}
+		}
+		if serviceModified {
 			// This service has been modified, but it was also active.
 			if svcCtx != nil {
 				log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
-				oldService := svc
-				if svcInstance != nil && svcInstance.ServiceSnapshot != nil {
-					oldService = svcInstance.ServiceSnapshot
+				oldSvcCtx := svcCtx
+				oldService := previousService
+				if oldService == nil {
+					oldService = p.previousLifecycleService(svc.UID, version, svc)
 				}
-				//Set it to inactive
-				svcCtx.Cancel()
-
-				if err := p.deleteService(ctx, svc.UID); err != nil {
+				if c, member := p.serviceElectionMemberForContext(oldSvcCtx); member != nil {
+					p.queuePendingReconcile(c, member, ctx, event, serviceFunc, forcedOnly, wg, cancelWatcher, version)
+					oldSvcCtx.ResetReadiness()
+					oldSvcCtx.Cancel()
+					if err := p.waitAndRetryServiceElectionMember(oldSvcCtx); err != nil {
+						return fmt.Errorf("cleanup replaced service %s/%s: %w", svc.Namespace, svc.Name, err)
+					}
+					return nil
+				} else if err := p.deleteService(ctx, svc.UID, oldSvcCtx); err != nil {
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
-					log.Error("(svc) unable to remove", "service", svc.UID)
+					return fmt.Errorf("cleanup replaced service %s/%s: %w", svc.Namespace, svc.Name, err)
 				}
+				oldSvcCtx.Cancel()
 				// Retire the lease before the replacement context is built, so Add below
 				// cannot hand back an instance the pending cleanup is about to cancel.
 				// A lease shared with other services keeps their references and survives.
 				ns, name := lease.ServiceName(oldService)
 				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-				p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(oldService), nil)
+				if !p.serviceElectionMemberExists(oldService, oldSvcCtx) {
+					p.releaseServiceLease(oldSvcCtx, oldService, leaseID, lease.ServiceClaimID(oldService), p.leaseMgr.Get(leaseID))
+				}
+				p.svcMap.CompareAndDelete(svc.UID, oldSvcCtx)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
@@ -221,37 +336,66 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
 
 	if svcCtx == nil {
-		unlockService := p.lockService(svc.UID)
-		svcCtx, err = p.getServiceContext(svc.UID)
-		if err != nil {
+		for svcCtx == nil {
+			unlockService := p.lockService(svc.UID)
+			if !p.desiredEventCurrent(svc.UID, version) {
+				unlockService()
+				return nil
+			}
+			svcCtx, err = p.getServiceContext(svc.UID)
+			if err != nil {
+				unlockService()
+				return fmt.Errorf("failed to get service context: %w", err)
+			}
+			if svcCtx != nil && svcCtx.Ctx.Err() != nil {
+				unlockService()
+				svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
+				if svcCtx != nil {
+					return fmt.Errorf("service %s/%s cleanup is still pending", svc.Namespace, svc.Name)
+				}
+				continue
+			}
+			if svcCtx == nil {
+				ns, name := lease.ServiceName(svc)
+				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+				p.leaseMgr.Add(ctx, leaseID)
+				// The service context is parented to the watcher, not to the lease: losing a
+				// lease must not tear the service down, it has to let the election restart.
+				svcCtx = servicecontext.New(ctx)
+				p.svcMap.Store(svc.UID, svcCtx)
+			}
 			unlockService()
-			return fmt.Errorf("failed to get service context: %w", err)
 		}
-		svcCtx = p.dropCancelledServiceContext(svc, svcCtx)
-		if svcCtx == nil {
-			ns, name := lease.ServiceName(svc)
-			leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-			p.leaseMgr.Add(ctx, leaseID)
-			// The service context is parented to the watcher, not to the lease: losing a
-			// lease must not tear the service down, it has to let the election restart.
-			svcCtx = servicecontext.New(ctx)
-			p.svcMap.Store(svc.UID, svcCtx)
-		}
-		unlockService()
 	}
 
-	if svcInstance == nil {
+	if svcInstance == nil && !p.config.EnableServicesElection {
 		unlockService := p.lockService(svc.UID)
+		if !p.desiredEventCurrent(svc.UID, version) {
+			unlockService()
+			return nil
+		}
 		instanceAdded := false
 		svcInstance = p.findServiceInstance(svc)
 		if svcInstance == nil {
-			svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+			unlockResources := p.lockServiceResources(svc)
+			svcInstance, err = p.makeServiceInstance(ctx, svc, wg)
 			if err != nil {
+				unlockResources()
 				unlockService()
 				metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
 				return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
 			}
+			if !p.desiredEventCurrent(svc.UID, version) {
+				cleanupErr := p.deleteCurrentServiceLocked(context.WithoutCancel(ctx), svcInstance)
+				unlockResources()
+				unlockService()
+				if cleanupErr != nil {
+					return fmt.Errorf("discard stale service instance: %w", cleanupErr)
+				}
+				return nil
+			}
 			p.appendServiceInstance(svcInstance)
+			unlockResources()
 			instanceAdded = true
 		}
 		unlockService()
@@ -262,6 +406,10 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
+		var endpointServiceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error
+		if serviceFunc != nil && serviceFunc.Function != nil && !isPrivateServiceElectionCallback(serviceFunc.Function) {
+			endpointServiceFunc = serviceFunc.Function
+		}
 		wg.Go(func() {
 			watchWg := sync.WaitGroup{}
 			defer func() {
@@ -271,13 +419,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			}()
 
 			watchWg.Go(func() {
-				// start if service is not already watched/handled
 				// signal endpoints goroutine we are ready to start and run service handling function
 				log.Info("(svcs) service function starting", "uid", svc.UID)
-				err = serviceFunc.Run(svcCtx, svc, wg)
-				if err != nil {
-					log.Error(err.Error())
-					if utils.IsPanicError(err) {
+				runErr := serviceFunc.Run(svcCtx, svc, wg)
+				if runErr != nil {
+					log.Error(runErr.Error())
+					if utils.IsPanicError(runErr) {
 						// cancel service context on panic error
 						// TODO:  should we quit kube-vip altogether here?
 						svcCtx.Cancel()
@@ -295,7 +442,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				} else {
 					provider = providers.NewEndpointslices()
 				}
-				if err := p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider, cancelWatcher); err != nil {
+				if err := p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider, endpointServiceFunc, cancelWatcher); err != nil {
 					log.Error("endpoint watcher failed", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 					if utils.IsPanicError(err) {
 						cancelWatcher(err)
@@ -309,8 +456,14 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	if !p.config.EnableServicesElection {
 		log.Debug("Service now active", "name", svc.Name, "uid", svc.UID)
 	}
+	p.markDesiredLifecycleApplied(svc.UID, version)
 
 	return nil
+}
+
+func isPrivateServiceElectionCallback(callback func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error) bool {
+	fn := runtime.FuncForPC(reflect.ValueOf(callback).Pointer())
+	return fn != nil && strings.Contains(fn.Name(), "runServicesLeaderElectionLoop")
 }
 
 func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Service, error) {
@@ -337,20 +490,302 @@ func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Se
 
 func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 	svc, ok := event.Object.(*v1.Service)
-	if !ok {
+	if !ok || svc == nil {
 		return fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
 	}
 
-	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" ||
-		!forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] == "true" {
+	if !watcherOwnsService(svc, forcedOnly) {
 		return nil
 	}
-
-	return p.deleteTrackedService(svc)
+	version := p.recordDesiredEvent(event.Type, svc)
+	if version == 0 {
+		return nil
+	}
+	p.discardPendingReconcile(svc.UID)
+	return p.deleteTrackedService(svc, version)
 }
 
-func (p *Processor) deleteTrackedService(svc *v1.Service) error {
+var errServiceReconcileStale = errors.New("service reconcile is no longer desired")
+
+type desiredEvent struct {
+	version              uint64
+	type_                watch.EventType
+	resourceVersion      string
+	service              *v1.Service
+	lifecycle            serviceLifecycle
+	previousLifecycle    serviceLifecycle
+	hasPreviousLifecycle bool
+}
+
+type desiredDelete struct {
+	uid     types.UID
+	version uint64
+}
+
+type serviceLifecycle struct {
+	uid                           types.UID
+	type_                         v1.ServiceType
+	externalTrafficPolicy         v1.ServiceExternalTrafficPolicy
+	internalTrafficPolicy         *v1.ServiceInternalTrafficPolicy
+	ipFamilies                    []v1.IPFamily
+	ipFamilyPolicy                *v1.IPFamilyPolicy
+	ports                         []v1.ServicePort
+	loadBalancerClass             *string
+	allocateLoadBalancerNodePorts *bool
+	loadBalancerSourceRanges      []string
+	trafficDistribution           *string
+	addresses                     []string
+	hostnames                     []string
+	annotations                   map[string]string
+}
+
+const maxDesiredDeleteTombstones = 1024
+
+var lifecycleAnnotationKeys = []string{
+	kubevip.RequestedIP,
+	kubevip.Egress,
+	kubevip.EgressInternal,
+	kubevip.EgressIPv6,
+	kubevip.EgressDestinationPorts,
+	kubevip.EgressSourcePorts,
+	kubevip.EgressAllowedNetworks,
+	kubevip.EgressDeniedNetworks,
+	kubevip.EgressNoInternalTraffic,
+	kubevip.EgressDetectAPIServer,
+	kubevip.FlushContrack,
+	kubevip.LoadbalancerIPAnnotation,
+	kubevip.LoadbalancerIgnore,
+	kubevip.LoadbalancerHostname,
+	kubevip.ServiceInterface,
+	kubevip.ServiceVlan,
+	kubevip.ServiceSecurityIgnore,
+	kubevip.UpnpEnabled,
+	kubevip.UpnpLeaseDuration,
+	kubevip.RPFilter,
+	kubevip.ServiceLease,
+	kubevip.ForcePerServiceElection,
+	kubevip.AllowReconcileWithoutEndpoints,
+	kubevip.ServiceDDNS,
+	kubevip.MacvlanName,
+	kubevip.DHCPBroadcast,
+}
+
+func watcherOwnsService(service *v1.Service, forcedOnly bool) bool {
+	forced := service.Annotations[kubevip.ForcePerServiceElection] == "true"
+	return forcedOnly == forced
+}
+
+func serviceLifecycleFor(service *v1.Service) serviceLifecycle {
+	addresses, hostnames := instance.FetchServiceAddresses(service)
+	spec := service.Spec.DeepCopy()
+	annotations := make(map[string]string)
+	for _, key := range lifecycleAnnotationKeys {
+		if value, ok := service.Annotations[key]; ok {
+			annotations[key] = value
+		}
+	}
+	return serviceLifecycle{
+		uid: service.UID, type_: spec.Type, externalTrafficPolicy: spec.ExternalTrafficPolicy,
+		internalTrafficPolicy: spec.InternalTrafficPolicy, ipFamilies: spec.IPFamilies,
+		ipFamilyPolicy: spec.IPFamilyPolicy, ports: spec.Ports,
+		loadBalancerClass:             spec.LoadBalancerClass,
+		allocateLoadBalancerNodePorts: spec.AllocateLoadBalancerNodePorts,
+		loadBalancerSourceRanges:      spec.LoadBalancerSourceRanges,
+		trafficDistribution:           spec.TrafficDistribution,
+		addresses:                     slices.Clone(addresses), hostnames: slices.Clone(hostnames), annotations: annotations,
+	}
+}
+
+func serviceLifecycleEqual(first, second serviceLifecycle) bool {
+	return reflect.DeepEqual(first, second)
+}
+
+func (p *Processor) recordDesiredEvent(eventType watch.EventType, service *v1.Service) uint64 {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	if p.desiredEvents == nil {
+		p.desiredEvents = make(map[types.UID]desiredEvent)
+	}
+	current, exists := p.desiredEvents[service.UID]
+	// Forced and non-forced watchers can observe the same Kubernetes event.
+	// They share one desired state, so retain its version for an exact duplicate.
+	if exists && current.type_ == eventType && current.resourceVersion == service.ResourceVersion &&
+		(current.service == nil || reflect.DeepEqual(current.service, service)) {
+		return current.version
+	}
+	if exists && resourceVersionOlder(service.ResourceVersion, current.resourceVersion) {
+		return 0
+	}
+
+	terminal := eventType == watch.Deleted || service.Spec.Type != v1.ServiceTypeLoadBalancer
+	next := desiredEvent{version: current.version, type_: eventType, resourceVersion: service.ResourceVersion}
+	if terminal {
+		next.version++
+		p.desiredEvents[service.UID] = next
+		p.desiredDeletes = append(p.desiredDeletes, desiredDelete{uid: service.UID, version: next.version})
+		p.pruneDesiredDeletesLocked()
+		p.updateDesiredStateMetricsLocked()
+		return next.version
+	}
+
+	next.service = service.DeepCopy()
+	next.lifecycle = serviceLifecycleFor(service)
+	if !exists || current.service == nil || !serviceLifecycleEqual(current.lifecycle, next.lifecycle) {
+		next.version++
+		if current.service != nil {
+			next.previousLifecycle = current.lifecycle
+			next.hasPreviousLifecycle = true
+		}
+	} else {
+		next.previousLifecycle = current.previousLifecycle
+		next.hasPreviousLifecycle = current.hasPreviousLifecycle
+	}
+	p.desiredEvents[service.UID] = next
+	p.updateDesiredStateMetricsLocked()
+	return next.version
+}
+
+func resourceVersionOlder(incoming, current string) bool {
+	if incoming == "" || current == "" {
+		return false
+	}
+	incomingNumber, incomingErr := strconv.ParseUint(incoming, 10, 64)
+	currentNumber, currentErr := strconv.ParseUint(current, 10, 64)
+	return incomingErr == nil && currentErr == nil && incomingNumber < currentNumber
+}
+
+func (p *Processor) pruneDesiredDeletesLocked() {
+	for len(p.desiredDeletes) > maxDesiredDeleteTombstones {
+		oldest := p.desiredDeletes[0]
+		p.desiredDeletes = p.desiredDeletes[1:]
+		if current, ok := p.desiredEvents[oldest.uid]; ok && current.service == nil && current.version == oldest.version {
+			delete(p.desiredEvents, oldest.uid)
+		}
+	}
+}
+
+func (p *Processor) updateDesiredStateMetricsLocked() {
+	active, terminal := 0, 0
+	for _, desired := range p.desiredEvents {
+		if desired.service == nil {
+			terminal++
+		} else {
+			active++
+		}
+	}
+	metrics.ServiceDesiredStateEntries.WithLabelValues("active").Set(float64(active))
+	metrics.ServiceDesiredStateEntries.WithLabelValues("terminal").Set(float64(terminal))
+}
+
+func (p *Processor) desiredEventCurrent(uid types.UID, version uint64) bool {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	if !ok || desired.version != version || desired.type_ == watch.Deleted || desired.service == nil {
+		return false
+	}
+	return desired.service.Spec.Type == v1.ServiceTypeLoadBalancer
+}
+
+func (p *Processor) desiredLifecycleCurrent(uid types.UID, version uint64, lifecycle serviceLifecycle) bool {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	return ok && desired.version == version && desired.type_ != watch.Deleted && desired.service != nil &&
+		desired.service.Spec.Type == v1.ServiceTypeLoadBalancer && serviceLifecycleEqual(desired.lifecycle, lifecycle)
+}
+
+func (p *Processor) desiredService(uid types.UID) (*v1.Service, uint64) {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	if !ok || desired.type_ == watch.Deleted || desired.service == nil || desired.service.Spec.Type != v1.ServiceTypeLoadBalancer {
+		return nil, desired.version
+	}
+	return desired.service.DeepCopy(), desired.version
+}
+
+func (p *Processor) desiredServiceForVersion(uid types.UID, version uint64) *v1.Service {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	if !ok || desired.version != version || desired.type_ == watch.Deleted || desired.service == nil {
+		return nil
+	}
+	return desired.service.DeepCopy()
+}
+
+func (p *Processor) desiredLifecycleChanged(uid types.UID, version uint64) bool {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	return ok && desired.version == version && desired.hasPreviousLifecycle &&
+		!serviceLifecycleEqual(desired.previousLifecycle, desired.lifecycle)
+}
+
+func (p *Processor) markDesiredLifecycleApplied(uid types.UID, version uint64) {
+	p.desiredMu.Lock()
+	desired, ok := p.desiredEvents[uid]
+	if ok && desired.version == version {
+		desired.previousLifecycle = serviceLifecycle{}
+		desired.hasPreviousLifecycle = false
+		p.desiredEvents[uid] = desired
+	}
+	p.desiredMu.Unlock()
+}
+
+func (p *Processor) previousLifecycleService(uid types.UID, version uint64, current *v1.Service) *v1.Service {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	if !ok || desired.version != version || !desired.hasPreviousLifecycle {
+		return current
+	}
+	previous := current.DeepCopy()
+	if previous.Annotations == nil {
+		previous.Annotations = make(map[string]string)
+	}
+	if leaseName, ok := desired.previousLifecycle.annotations[kubevip.ServiceLease]; ok {
+		previous.Annotations[kubevip.ServiceLease] = leaseName
+	} else {
+		delete(previous.Annotations, kubevip.ServiceLease)
+	}
+	return previous
+}
+
+func (p *Processor) refreshDesiredService(uid types.UID, version uint64, service *v1.Service) {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	if !ok || desired.version != version || desired.type_ == watch.Deleted {
+		return
+	}
+	desired.service = service.DeepCopy()
+	desired.resourceVersion = service.ResourceVersion
+	desired.lifecycle = serviceLifecycleFor(service)
+	p.desiredEvents[uid] = desired
+}
+
+func (p *Processor) serviceIsLatestDesired(service *v1.Service) bool {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[service.UID]
+	if !ok {
+		return true
+	}
+	return desired.type_ != watch.Deleted && desired.service != nil && desired.service.Spec.Type == v1.ServiceTypeLoadBalancer &&
+		serviceLifecycleEqual(desired.lifecycle, serviceLifecycleFor(service))
+}
+
+func (p *Processor) deleteTrackedService(svc *v1.Service, expectedVersion ...uint64) error {
+	if svc == nil {
+		return fmt.Errorf("(svcs) unable to delete nil service")
+	}
 	unlockService := p.lockService(svc.UID)
+	if len(expectedVersion) != 0 && !p.desiredTerminalEventCurrent(svc.UID, expectedVersion[0]) {
+		unlockService()
+		return nil
+	}
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		unlockService()
@@ -358,21 +793,51 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	}
 
 	cleanupCtx := context.Background()
+	var member *serviceElectionMember
+	var releaseID lease.ID
+	releaseClaim := false
 	if svcCtx != nil {
 		// Stop the old watchers and retire their lease before a replacement can attach.
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		svcCtx.Cancel()
 		if p.leaseMgr != nil {
 			namespace, name := lease.ServiceName(svc)
 			leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
-			p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(svc), nil)
+			_, member = p.serviceElectionMemberForContext(svcCtx)
+			if member == nil {
+				releaseID, releaseClaim = leaseID, true
+			}
 		}
 		cleanupCtx = context.WithoutCancel(svcCtx.Ctx)
 	}
 	unlockService()
+	if releaseClaim {
+		p.releaseServiceLease(svcCtx, svc, releaseID, lease.ServiceClaimID(svc), p.leaseMgr.Get(releaseID))
+	}
 
-	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
+	if member != nil {
+		finalize := func() {
+			svcCtx.Cancel()
+			p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+			metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
+			p.updateActiveServicesMetric()
+		}
+		if c, current := p.serviceElectionMemberForContext(svcCtx); current == member {
+			p.finalizeServiceElectionMember(c, member, finalize)
+		} else {
+			finalize()
+		}
+		svcCtx.ResetReadiness()
+		svcCtx.Cancel()
+		if err := p.waitAndRetryServiceElectionMember(svcCtx); err != nil {
+			log.Error("service cleanup continues asynchronously", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
+		}
+	} else if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
+		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
 		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
+	}
+	if svcCtx != nil {
+		svcCtx.Cancel()
 	}
 	if svcCtx != nil {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
@@ -383,6 +848,13 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
+}
+
+func (p *Processor) desiredTerminalEventCurrent(uid types.UID, version uint64) bool {
+	p.desiredMu.Lock()
+	defer p.desiredMu.Unlock()
+	desired, ok := p.desiredEvents[uid]
+	return ok && desired.version == version && (desired.type_ == watch.Deleted || desired.service == nil || desired.service.Spec.Type != v1.ServiceTypeLoadBalancer)
 }
 
 func (p *Processor) Stop() {
@@ -425,35 +897,43 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	if svcCtx == nil || svcCtx.Ctx.Err() == nil {
 		return svcCtx
 	}
+	if c, member := p.serviceElectionMemberForContext(svcCtx); member != nil {
+		p.finalizeServiceElectionMember(c, member, func() {
+			p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+		})
+	}
+	if err := p.waitAndRetryServiceElectionMember(svcCtx); err != nil {
+		return svcCtx
+	}
+	if err := p.deleteService(context.Background(), svc.UID, svcCtx); err != nil {
+		return svcCtx
+	}
 	if p.leaseMgr != nil {
 		namespace, name := lease.ServiceName(svc)
 		leaseID := lease.NewID(p.config.LeaderElectionType, namespace, name)
-		p.leaseMgr.Delete(leaseID, lease.ServiceClaimID(svc), nil)
+		p.releaseServiceLease(svcCtx, svc, leaseID, lease.ServiceClaimID(svc), p.leaseMgr.Get(leaseID))
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil
 }
 
 func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
-	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
-	originalServiceAddresses, originalServiceHostnames := instance.FetchServiceAddresses(i.ServiceSnapshot)
+	if i == nil {
+		return false
+	}
+	return serviceSnapshotChanged(i.ServiceSnapshot, svc)
+}
 
-	// Service addresses changed
-	return !reflect.DeepEqual(originalServiceAddresses, svcAddresses) ||
-		// Service hostnames changed
-		!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
-		// ExternalTrafficPolicy changed
-		svc.Spec.ExternalTrafficPolicy != i.ServiceSnapshot.Spec.ExternalTrafficPolicy ||
-		// IP stack configuration changed
-		!reflect.DeepEqual(svc.Spec.IPFamilies, i.ServiceSnapshot.Spec.IPFamilies) ||
-		*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
-		// DDNS was disabled/enabled
-		svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS] ||
-		// lease name was changed
-		svc.Annotations[kubevip.ServiceLease] != i.ServiceSnapshot.Annotations[kubevip.ServiceLease]
+func serviceSnapshotChanged(old, svc *v1.Service) bool {
+	if old == nil || svc == nil {
+		return false
+	}
+	return !serviceLifecycleEqual(serviceLifecycleFor(old), serviceLifecycleFor(svc))
 }
 
 func (p *Processor) updateActiveServicesMetric() {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
 	counts := map[string]int{}
 	for _, inst := range p.serviceInstances() {
 		unlockService := p.lockService(inst.UID())
@@ -536,4 +1016,202 @@ func (p *Processor) lockService(uid types.UID) func() {
 			log.Error("failed to unlock service reconciliation", "uid", uid, "err", err)
 		}
 	}
+}
+
+type keyedMutex struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type keyedMutexes struct {
+	mu      sync.Mutex
+	entries map[string]*keyedMutex
+}
+
+func (m *keyedMutexes) lock(keys []string) func() {
+	keys = slices.DeleteFunc(keys, func(key string) bool { return key == "" })
+	slices.Sort(keys)
+	keys = slices.Compact(keys)
+
+	m.mu.Lock()
+	if m.entries == nil {
+		m.entries = make(map[string]*keyedMutex)
+	}
+	locks := make([]*keyedMutex, 0, len(keys))
+	for _, key := range keys {
+		entry := m.entries[key]
+		if entry == nil {
+			entry = &keyedMutex{}
+			m.entries[key] = entry
+		}
+		entry.refs++
+		locks = append(locks, entry)
+	}
+	m.mu.Unlock()
+
+	for _, entry := range locks {
+		entry.mu.Lock()
+	}
+
+	return func() {
+		for i := len(locks) - 1; i >= 0; i-- {
+			locks[i].mu.Unlock()
+		}
+		m.mu.Lock()
+		for i, key := range keys {
+			locks[i].refs--
+			if locks[i].refs == 0 {
+				delete(m.entries, key)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+func (m *keyedMutexes) len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.entries)
+}
+
+func (p *Processor) lockServiceResources(svc *v1.Service) func() {
+	return p.lockNetworkResources(serviceHasHostname(svc), serviceResourceKeys(svc))
+}
+
+func (p *Processor) lockInstanceResources(svc *v1.Service, inst *instance.Instance) func() {
+	return p.lockNetworkResources(serviceHasHostname(svc) || instanceHasHostname(inst), instanceResourceKeys(svc, inst))
+}
+
+func (p *Processor) lockNetworkResources(exclusive bool, keys []string) func() {
+	if exclusive {
+		p.networkLifecycle.Lock()
+	} else {
+		p.networkLifecycle.RLock()
+	}
+	unlockResources := p.lockResources(keys)
+	return func() {
+		unlockResources()
+		if exclusive {
+			p.networkLifecycle.Unlock()
+		} else {
+			p.networkLifecycle.RUnlock()
+		}
+	}
+}
+
+func serviceHasHostname(svc *v1.Service) bool {
+	if svc == nil {
+		return false
+	}
+	_, hostnames := instance.FetchServiceAddresses(svc)
+	return len(hostnames) != 0
+}
+
+func instanceHasHostname(inst *instance.Instance) bool {
+	if inst == nil {
+		return false
+	}
+	if serviceHasHostname(inst.ServiceSnapshot) {
+		return true
+	}
+	for _, config := range inst.VIPConfigs {
+		if config != nil && config.VIP != "" && !utils.IsIP(config.VIP) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Processor) lockResources(keys []string) func() {
+	return p.resourceLocks.lock(keys)
+}
+
+func serviceResourceKeys(svc *v1.Service) []string {
+	if svc == nil {
+		return nil
+	}
+	addresses, hostnames := instance.FetchServiceAddresses(svc)
+	keys := []string{"service:" + svc.Namespace + "/" + svc.Name}
+	dhcp := false
+	for _, address := range addresses {
+		if address == "0.0.0.0" || address == "::" {
+			dhcp = true
+			continue
+		}
+		if address != "" {
+			keys = append(keys, "vip:"+address)
+		}
+	}
+	for _, hostname := range hostnames {
+		if hostname != "" {
+			keys = append(keys, "hostname:"+hostname)
+		}
+	}
+	if vlan := strings.TrimSpace(svc.Annotations[kubevip.ServiceVlan]); vlan != "" {
+		keys = append(keys, "vlan:"+vlan)
+	}
+	if requested := svc.Annotations[kubevip.RequestedIP]; requested != "" {
+		for _, address := range strings.Split(requested, ",") {
+			address = strings.TrimSpace(address)
+			if address != "" {
+				keys = append(keys, "vip:"+address)
+			}
+		}
+	}
+	if dhcp {
+		name := svc.Annotations[kubevip.MacvlanName]
+		if name == "" {
+			uid := string(svc.UID)
+			if len(uid) >= 8 {
+				name = "vip-" + uid[:8]
+			}
+		}
+		if name != "" {
+			keys = append(keys, "dhcp:"+name)
+		}
+	}
+	return keys
+}
+
+func instanceResourceKeys(svc *v1.Service, inst *instance.Instance) []string {
+	keys := serviceResourceKeys(svc)
+	if inst == nil {
+		return keys
+	}
+	for _, address := range ownedInstanceAddresses(inst) {
+		keys = append(keys, "vip:"+address)
+	}
+	if inst.IsVLAN && inst.VLANInterface != "" {
+		keys = append(keys, "vlan:"+inst.VLANInterface)
+	}
+	if (inst.IsDHCPv4 || inst.IsDHCPv6) && inst.DHCPInterface != "" {
+		keys = append(keys, "dhcp:"+inst.DHCPInterface)
+	}
+	return keys
+}
+
+func (p *Processor) activeInstanceAddresses(inst *instance.Instance) []string {
+	set := make(map[string]struct{})
+	for _, c := range inst.Clusters {
+		if c.WorkersRunning() {
+			for _, network := range c.Network {
+				address := network.IP()
+				if address != "" && address != "0.0.0.0" && address != "::" {
+					set[address] = struct{}{}
+				}
+			}
+		}
+	}
+	addresses := make([]string, 0, len(set))
+	for address := range set {
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+func (p *Processor) makeServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, error) {
+	if p.newInstance != nil {
+		return p.newInstance(ctx, svc, wg)
+	}
+	return instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 }

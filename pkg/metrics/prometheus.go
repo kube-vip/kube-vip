@@ -16,6 +16,10 @@ var (
 		prometheus.HistogramOpts{Name: "kube_vip_service_reconcile_duration_seconds", Help: "How long AddOrModify takes end-to-end"},
 		[]string{"namespace"},
 	)
+	ServiceDesiredStateEntries = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_service_desired_state_entries", Help: "Desired Service state entries retained by state"},
+		[]string{"state"},
+	)
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -42,7 +46,7 @@ var (
 	)
 	ServiceElectionAttemptsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{Name: "kube_vip_service_election_attempts_total",
-			Help: "Election attempts made by the per-service leader election restart loop"},
+			Help: "Coordinator election campaign starts attributed to the initiating service"},
 		[]string{"namespace", "name"},
 	)
 	ServiceElectionErrorsTotal = prometheus.NewCounterVec(
@@ -74,6 +78,7 @@ func RegisterPrometheusMetrics() {
 		ActiveServices,
 		ServiceReconcileErrorsTotal,
 		ServiceReconcileDuration,
+		ServiceDesiredStateEntries,
 		LeaderTransitionsTotal,
 		IsLeader,
 		ServiceElectionLoops,
