@@ -53,21 +53,19 @@ type Processor struct {
 	networkLifecycle sync.RWMutex
 	metricsMu        sync.Mutex
 
-	electionsMu        sync.Mutex
-	elections          map[string]*serviceElection
-	claimSeq           atomic.Uint64
-	electionRun        func(context.Context, *election.RunConfig, *kubevip.Config) error
-	newInstance        func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
-	garbageCollect     func(string, string, *networkinterface.Manager) (bool, error)
-	desiredMu          sync.Mutex
-	desiredEvents      map[types.UID]desiredEvent
-	desiredDeletes     []desiredDelete
-	pendingMu          sync.Mutex
-	pending            map[types.UID]*pendingReconcile
-	cleanupMu          sync.Mutex
-	cleanup            map[<-chan struct{}]*cleanupGroup
-	privateCallbacksMu sync.Mutex
-	privateCallbacks   map[*Callback]int
+	electionsMu    sync.Mutex
+	elections      map[string]*serviceElection
+	claimSeq       atomic.Uint64
+	electionRun    func(context.Context, *election.RunConfig, *kubevip.Config) error
+	newInstance    func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
+	garbageCollect func(string, string, *networkinterface.Manager) (bool, error)
+	desiredMu      sync.Mutex
+	desiredEvents  map[types.UID]desiredEvent
+	desiredDeletes []desiredDelete
+	pendingMu      sync.Mutex
+	pending        map[types.UID]*pendingReconcile
+	cleanupMu      sync.Mutex
+	cleanup        map[<-chan struct{}]*cleanupGroup
 
 	bgpServer *bgp.Server
 
@@ -408,7 +406,7 @@ func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, ser
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
 		var endpointServiceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error
-		if serviceFunc != nil && serviceFunc.Function != nil && !p.isPrivateServiceElectionCallback(serviceFunc) {
+		if serviceFunc != nil && serviceFunc.Function != nil && !serviceFunc.skipEndpointReconcile {
 			endpointServiceFunc = serviceFunc.Function
 		}
 		wg.Go(func() {
@@ -419,20 +417,22 @@ func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, ser
 				svcCtx.StopWatching()
 			}()
 
-			watchWg.Go(func() {
-				// signal endpoints goroutine we are ready to start and run service handling function
-				log.Info("(svcs) service function starting", "uid", svc.UID)
-				runErr := serviceFunc.Run(svcCtx, svc, wg)
-				if runErr != nil {
-					log.Error(runErr.Error())
-					if utils.IsPanicError(runErr) {
-						// cancel service context on panic error
-						// TODO:  should we quit kube-vip altogether here?
-						svcCtx.Cancel()
+			if serviceFunc != nil && serviceFunc.Function != nil {
+				watchWg.Go(func() {
+					// signal endpoints goroutine we are ready to start and run service handling function
+					log.Info("(svcs) service function starting", "uid", svc.UID)
+					runErr := serviceFunc.Run(svcCtx, svc, wg)
+					if runErr != nil {
+						log.Error(runErr.Error())
+						if utils.IsPanicError(runErr) {
+							// cancel service context on panic error
+							// TODO:  should we quit kube-vip altogether here?
+							svcCtx.Cancel()
+						}
 					}
-				}
-				log.Info("(svcs) service function done", "uid", svc.UID)
-			})
+					log.Info("(svcs) service function done", "uid", svc.UID)
+				})
+			}
 
 			// this goroutine will watch endpoints for the service
 			watchWg.Go(func() {
@@ -462,37 +462,16 @@ func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, ser
 	return nil
 }
 
-func (p *Processor) registerPrivateCallback(callback *Callback) func() {
-	p.privateCallbacksMu.Lock()
-	if p.privateCallbacks == nil {
-		p.privateCallbacks = make(map[*Callback]int)
-	}
-	p.privateCallbacks[callback]++
-	p.privateCallbacksMu.Unlock()
-	return func() {
-		p.privateCallbacksMu.Lock()
-		if p.privateCallbacks[callback]--; p.privateCallbacks[callback] == 0 {
-			delete(p.privateCallbacks, callback)
-		}
-		p.privateCallbacksMu.Unlock()
-	}
-}
-
-func (p *Processor) isPrivateServiceElectionCallback(callback *Callback) bool {
-	p.privateCallbacksMu.Lock()
-	defer p.privateCallbacksMu.Unlock()
-	return p.privateCallbacks[callback] != 0
-}
-
 func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Service, error) {
 	addressCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-addressCtx.Done():
-			return nil, fmt.Errorf("failed to wait for the service LB address: %w", ctx.Err())
+			return nil, fmt.Errorf("failed to wait for the service LB address: %w", addressCtx.Err())
 		case <-ticker.C:
 			s, err := p.clientSet.CoreV1().Services(svc.Namespace).Get(addressCtx, svc.Name, metav1.GetOptions{})
 			if err != nil {

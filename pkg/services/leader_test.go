@@ -15,24 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func TestPrivateServiceElectionCallbackUsesExplicitIdentity(t *testing.T) {
-	p := &Processor{}
-	private := NewCallback(p.runServicesLeaderElectionLoop, true)
-	public := NewCallback(p.runServicesLeaderElectionLoop, true)
-	unregister := p.registerPrivateCallback(private)
-
-	if !p.isPrivateServiceElectionCallback(private) {
-		t.Fatal("registered callback was not private")
-	}
-	if p.isPrivateServiceElectionCallback(public) {
-		t.Fatal("callback with the same function was treated as private")
-	}
-	unregister()
-	if p.isPrivateServiceElectionCallback(private) {
-		t.Fatal("unregistered callback remained private")
-	}
-}
-
 func TestServicesLeaderElectionLoopRecoversFromLeaseLoss(t *testing.T) {
 	runner := newElectionTestRunner()
 	p := &Processor{

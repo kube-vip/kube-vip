@@ -49,8 +49,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 	itm, exists := m.tracker[key]
 
 	if !exists {
-		m.tracker[key] = newItem(r)
-		itm = m.tracker[key]
+		itm = newItem(r)
 
 		added, err := r.AddRoute(precheck)
 		if err != nil {
@@ -73,6 +72,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 		if added {
 			log.Debug("[RT] added route", "path", key, "object", object)
 		}
+		m.tracker[key] = itm
 	}
 
 	itm.objects[object] = true

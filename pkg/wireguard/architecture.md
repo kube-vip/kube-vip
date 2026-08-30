@@ -2,6 +2,10 @@
 
 This brief document is largely for my own notes about how this functionality is added to `kube-vip`.
 
+The Service lifecycle, per-VIP tunnel ownership, endpoint-driven DNAT, protocol
+identifiers, and cleanup model are documented in
+[`pkg/services/architecture.md`](../services/architecture.md).
+
 ## Overview
 
 - New Flags

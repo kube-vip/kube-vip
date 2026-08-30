@@ -40,6 +40,7 @@ type workerTestNetwork struct {
 	ip            string
 	setMaskErr    error
 	isSetErr      error
+	addIPErr      error
 	existing      bool
 	addIPCalls    int
 	deleteIPCalls int
@@ -49,9 +50,11 @@ type workerTestNetwork struct {
 
 func (n *workerTestNetwork) AddIP(bool, bool, ...int) (bool, error) {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.addIPCalls++
-	n.mu.Unlock()
-	return true, nil
+	added := !n.existing
+	n.existing = true
+	return added, n.addIPErr
 }
 func (n *workerTestNetwork) AddRoute(bool) (bool, error) {
 	n.mu.Lock()
@@ -62,9 +65,11 @@ func (n *workerTestNetwork) AddRoute(bool) (bool, error) {
 func (n *workerTestNetwork) ReplaceRoute() error { return nil }
 func (n *workerTestNetwork) DeleteIP() (bool, error) {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.deleteIPCalls++
-	n.mu.Unlock()
-	return true, nil
+	deleted := n.existing
+	n.existing = false
+	return deleted, nil
 }
 func (n *workerTestNetwork) DeleteRoute() error {
 	n.mu.Lock()
@@ -74,6 +79,8 @@ func (n *workerTestNetwork) DeleteRoute() error {
 }
 func (n *workerTestNetwork) UpdateRoutes() (bool, error) { return false, nil }
 func (n *workerTestNetwork) IsSet() (*netlink.Addr, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.isSetErr != nil {
 		return nil, n.isSetErr
 	}
@@ -114,11 +121,27 @@ func TestStartLoadBalancerServiceRollsBackEarlierNetwork(t *testing.T) {
 	first.mu.Lock()
 	addCalls, deleteCalls := first.addIPCalls, first.deleteIPCalls
 	first.mu.Unlock()
-	if addCalls != 1 || deleteCalls != 2 {
-		t.Fatalf("first network AddIP/DeleteIP calls = %d/%d, want 1/2", addCalls, deleteCalls)
+	if addCalls != 1 || deleteCalls != 1 {
+		t.Fatalf("first network AddIP/DeleteIP calls = %d/%d, want 1/1", addCalls, deleteCalls)
 	}
 	if c.WorkersRunning() {
 		t.Fatal("partial startup left a worker generation running")
+	}
+}
+
+func TestStartLoadBalancerServiceRollsBackPartialAddIP(t *testing.T) {
+	first := &workerTestNetwork{ip: "192.0.2.10", addIPErr: errors.New("configure firewall")}
+	second := &workerTestNetwork{ip: "192.0.2.11", setMaskErr: errors.New("set mask")}
+	c := &Cluster{stop: make(chan struct{}), Network: []vip.Network{first, second}}
+
+	if err := c.StartLoadBalancerService(context.Background(), &kubevip.Config{VIPSubnet: "32"}, nil, "service", &sync.WaitGroup{}); err == nil {
+		t.Fatal("StartLoadBalancerService error = nil, want second network failure")
+	}
+	first.mu.Lock()
+	addCalls, deleteCalls, exists := first.addIPCalls, first.deleteIPCalls, first.existing
+	first.mu.Unlock()
+	if addCalls != 1 || deleteCalls != 1 || exists {
+		t.Fatalf("partial AddIP rollback = add %d, delete %d, exists %t; want 1, 1, false", addCalls, deleteCalls, exists)
 	}
 }
 
@@ -156,10 +179,10 @@ func TestStartLoadBalancerServiceRollbackPreservesExistingSharedVIP(t *testing.T
 		t.Fatal("StartLoadBalancerService error = nil, want second network failure")
 	}
 	first.mu.Lock()
-	addCalls, deleteCalls := first.addIPCalls, first.deleteIPCalls
+	addCalls, deleteCalls, exists := first.addIPCalls, first.deleteIPCalls, first.existing
 	first.mu.Unlock()
-	if addCalls != 1 || deleteCalls != 1 {
-		t.Fatalf("existing shared VIP AddIP/DeleteIP calls = %d/%d, want 1/1", addCalls, deleteCalls)
+	if addCalls != 1 || deleteCalls != 0 || !exists {
+		t.Fatalf("existing shared VIP state after rollback = add %d, delete %d, exists %t; want 1, 0, true", addCalls, deleteCalls, exists)
 	}
 }
 
@@ -177,8 +200,8 @@ func TestStartLoadBalancerServiceRollbackPreservesARPSiblingVIP(t *testing.T) {
 	first.mu.Lock()
 	deleteCalls := first.deleteIPCalls
 	first.mu.Unlock()
-	if deleteCalls != 1 {
-		t.Fatalf("shared ARP VIP DeleteIP calls = %d, want initial cleanup only", deleteCalls)
+	if deleteCalls != 0 {
+		t.Fatalf("shared ARP VIP DeleteIP calls = %d, want 0", deleteCalls)
 	}
 }
 

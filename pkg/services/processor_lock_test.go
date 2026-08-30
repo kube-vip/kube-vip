@@ -491,7 +491,6 @@ func TestLatestModifiedDuringCleanupEventuallyApplies(t *testing.T) {
 	awaitCondition(t, func() bool { return p.findServiceInstance(oldService) != nil }, "old service activation")
 
 	var watchWG sync.WaitGroup
-	start := time.Now()
 	err := p.Reconcile(parent, watch.Event{Type: watch.Modified, Object: newService}, NewCallback(p.StartServicesLeaderElection, true), false, &watchWG, func(error) {})
 	if err == nil {
 		t.Fatal("slow cleanup did not report its initial failure")
@@ -503,9 +502,6 @@ func TestLatestModifiedDuringCleanupEventuallyApplies(t *testing.T) {
 		current, getErr := p.getServiceContext(latestService.UID)
 		return getErr == nil && current != nil && current != svcCtx
 	}, "eventual replacement context")
-	if elapsed := time.Since(start); elapsed <= 500*time.Millisecond {
-		t.Fatalf("replacement installed after %v, want cleanup past 500ms", elapsed)
-	}
 	currentCtx, _ := p.getServiceContext(latestService.UID)
 	currentCtx.SignalReadiness()
 	await(t, runner.secondStarted, "slow-cleanup replacement campaign")

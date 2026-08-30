@@ -1,6 +1,7 @@
 package route
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -182,6 +183,26 @@ func Test_MultipleRoutesAddDel(t *testing.T) {
 			}
 		}
 	})
+}
+
+func Test_AddFailureDoesNotTrackRoute(t *testing.T) {
+	m := NewManager()
+	r := &mockRoute{hash: "failed-route", addErr: errors.New("add failed")}
+
+	if err := m.Add("service", r, false, false); err == nil {
+		t.Fatal("Add error = nil, want route failure")
+	}
+	if m.Check(r.RouteHash()) {
+		t.Fatal("failed route was tracked")
+	}
+
+	r.addErr = nil
+	if err := m.Add("service", r, false, false); err != nil {
+		t.Fatalf("retry Add error = %v", err)
+	}
+	if !m.Check(r.RouteHash()) {
+		t.Fatal("successful retry was not tracked")
+	}
 }
 
 type mockRoute struct {

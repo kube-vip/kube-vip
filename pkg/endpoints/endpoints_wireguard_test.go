@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,8 +70,11 @@ func TestWireguardProcessInstanceClearsAllApplyFailuresWithoutCancelingLeader(t 
 	if calls != 2 {
 		t.Fatalf("ApplyDNAT calls = %d, want 2", calls)
 	}
-	wantDeleted := []string{"default_service_p80", "default_service_p443"}
-	if len(deleted) != len(wantDeleted) || deleted[0] != wantDeleted[0] || deleted[1] != wantDeleted[1] {
+	wantDeleted := []string{
+		"default_service_p80", "default_service_p80_tcp",
+		"default_service_p443", "default_service_p443_tcp",
+	}
+	if strings.Join(deleted, ",") != strings.Join(wantDeleted, ",") {
 		t.Fatalf("deleted DNAT chains = %v, want %v", deleted, wantDeleted)
 	}
 	select {
@@ -163,8 +167,13 @@ tunnel1:
 	if strings.Join(applied, ",") != "tunnel0,tunnel1" {
 		t.Fatalf("applied tunnels = %v, want [tunnel0 tunnel1]", applied)
 	}
-	if len(deleted) != 1 || deleted[0] != "tunnel1/default_service_p80" {
-		t.Fatalf("deleted rules = %v, want [tunnel1/default_service_p80]", deleted)
+	wantDeleted := []string{
+		"tunnel0/default_service_p80",
+		"tunnel1/default_service_p80",
+		"tunnel1/default_service_p80_tcp",
+	}
+	if strings.Join(deleted, ",") != strings.Join(wantDeleted, ",") {
+		t.Fatalf("deleted rules = %v, want %v", deleted, wantDeleted)
 	}
 }
 
@@ -242,6 +251,7 @@ func TestWireguardProcessInstanceWithEndpointsDoesNotCancelLeader(t *testing.T) 
 			applied = append(applied, targets...)
 			return nil
 		},
+		deleteDNATRule: func(string, bool, string) error { return nil },
 	}
 	if err := worker.processInstance(svcCtx, service, nil); err != nil {
 		t.Fatalf("processInstance returned error: %v", err)
@@ -292,8 +302,9 @@ func TestWireguardMissingTunnelDeletesStaleDNATWithoutCancelingLeader(t *testing
 	if err := worker.processInstance(svcCtx, service, nil); err != nil {
 		t.Fatalf("processInstance error = %v, want nil", err)
 	}
-	if len(deleted) != 1 || deleted[0] != "default_service_p80" {
-		t.Fatalf("deleted DNAT chains = %v, want [default_service_p80]", deleted)
+	wantDeleted := []string{"default_service_p80_tcp", "default_service_p80"}
+	if strings.Join(deleted, ",") != strings.Join(wantDeleted, ",") {
+		t.Fatalf("deleted DNAT chains = %v, want %v", deleted, wantDeleted)
 	}
 	select {
 	case <-leaderCtx.Done():
@@ -308,14 +319,11 @@ func TestWireguardMissingServiceIPClearsBothFamilies(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"},
 		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 80, Protocol: v1.ProtocolTCP}}},
 	}
-	var families []bool
+	var deleted []string
 	worker := &wireguardWorker{
 		config: &kubevip.Config{}, provider: provider,
 		deleteDNAT: func(ipv6 bool, serviceID string) error {
-			if serviceID != "default_service_p80" {
-				t.Fatalf("service ID = %q, want default_service_p80", serviceID)
-			}
-			families = append(families, ipv6)
+			deleted = append(deleted, fmt.Sprintf("%t/%s", ipv6, serviceID))
 			return nil
 		},
 	}
@@ -323,8 +331,130 @@ func TestWireguardMissingServiceIPClearsBothFamilies(t *testing.T) {
 	if err := worker.processInstance(servicecontext.New(context.Background()), service, nil); err != nil {
 		t.Fatalf("processInstance error = %v, want nil", err)
 	}
-	if len(families) != 2 || families[0] || !families[1] {
-		t.Fatalf("deleted IPv6 families = %v, want [false true]", families)
+	wantDeleted := []string{
+		"false/default_service_p80_tcp", "true/default_service_p80_tcp",
+		"false/default_service_p80", "true/default_service_p80",
+	}
+	if strings.Join(deleted, ",") != strings.Join(wantDeleted, ",") {
+		t.Fatalf("deleted rules = %v, want %v", deleted, wantDeleted)
+	}
+}
+
+func TestWireguardProcessInstanceKeepsEndpointFamiliesSeparate(t *testing.T) {
+	provider := newWireguardTestProvider(t)
+	if err := provider.LoadObject(&discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "service-2", Namespace: "default",
+			Labels: map[string]string{discoveryv1.LabelServiceName: "service"},
+		},
+		AddressType: discoveryv1.AddressTypeIPv6,
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"2001:db8::2"}}},
+	}, func() {}); err != nil {
+		t.Fatalf("LoadObject returned error: %v", err)
+	}
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", Annotations: map[string]string{
+			kubevip.LoadbalancerIPAnnotation: "192.0.2.1,2001:db8::1",
+		}},
+		Spec: v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 80, Protocol: v1.ProtocolTCP}}},
+	}
+	tunnelMgr := wireguard.NewTunnelManager()
+	loadWireguardTunnelConfigs(t, tunnelMgr, `tunnel0:
+  vip: 192.0.2.1/32
+  privateKey: private
+  peerPublicKey: public
+  peerEndpoint: 198.51.100.1:51820
+  allowedIPs: [192.0.2.1/32]
+  listenPort: 51820
+tunnel1:
+  vip: 2001:db8::1/128
+  privateKey: private
+  peerPublicKey: public
+  peerEndpoint: '[2001:db8::10]:51820'
+  allowedIPs: ['2001:db8::1/128']
+  listenPort: 51821
+`)
+	applied := make(map[string][]nftables.DNATTarget)
+	worker := &wireguardWorker{
+		config: &kubevip.Config{}, provider: provider, tunnelMgr: tunnelMgr,
+		applyDNAT: func(_ string, vip string, _ uint16, targets []nftables.DNATTarget, _ string, _ v1.Protocol, _ bool, _ int) error {
+			applied[vip] = targets
+			return nil
+		},
+		deleteDNATRule: func(string, bool, string) error { return nil },
+	}
+
+	if err := worker.processInstance(servicecontext.New(context.Background()), service, nil); err != nil {
+		t.Fatalf("processInstance error = %v", err)
+	}
+	if targets := applied["192.0.2.1"]; len(targets) != 1 || targets[0].IP != "10.0.0.2" {
+		t.Fatalf("IPv4 targets = %v, want 10.0.0.2", targets)
+	}
+	if targets := applied["2001:db8::1"]; len(targets) != 1 || targets[0].IP != "2001:db8::2" {
+		t.Fatalf("IPv6 targets = %v, want 2001:db8::2", targets)
+	}
+}
+
+func TestWireguardClearIncludesSCTP(t *testing.T) {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"},
+		Spec: v1.ServiceSpec{
+			LoadBalancerIP: "192.0.2.1",
+			Ports:          []v1.ServicePort{{Port: 80, Protocol: v1.ProtocolSCTP}},
+		},
+	}
+	var deleted []string
+	worker := &wireguardWorker{deleteDNAT: func(ipv6 bool, serviceID string) error {
+		if ipv6 {
+			t.Fatal("cleared IPv6 rule for IPv4 service")
+		}
+		deleted = append(deleted, serviceID)
+		return nil
+	}}
+
+	worker.clear(nil, nil, service, nil)
+	wantDeleted := []string{"default_service_p80_sctp", "default_service_p80"}
+	if strings.Join(deleted, ",") != strings.Join(wantDeleted, ",") {
+		t.Fatalf("deleted service IDs = %v, want %v", deleted, wantDeleted)
+	}
+}
+
+func TestWireguardProcessInstanceSeparatesSamePortProtocols(t *testing.T) {
+	provider := newWireguardTestProvider(t)
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"},
+		Spec: v1.ServiceSpec{
+			LoadBalancerIP: "192.0.2.1",
+			Ports: []v1.ServicePort{
+				{Port: 53, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt32(8053)},
+				{Port: 53, Protocol: v1.ProtocolUDP, TargetPort: intstr.FromInt32(8053)},
+			},
+		},
+	}
+	tunnelMgr := wireguard.NewTunnelManager()
+	loadWireguardTestConfig(t, tunnelMgr)
+	var applied, migrated []string
+	worker := &wireguardWorker{
+		config: &kubevip.Config{}, provider: provider, tunnelMgr: tunnelMgr,
+		applyDNAT: func(_ string, _ string, _ uint16, _ []nftables.DNATTarget, serviceID string, _ v1.Protocol, _ bool, _ int) error {
+			applied = append(applied, serviceID)
+			return nil
+		},
+		deleteDNATRule: func(_ string, _ bool, serviceID string) error {
+			migrated = append(migrated, serviceID)
+			return nil
+		},
+	}
+
+	if err := worker.processInstance(servicecontext.New(context.Background()), service, nil); err != nil {
+		t.Fatalf("processInstance error = %v", err)
+	}
+	wantApplied := []string{"default_service_p53_tcp", "default_service_p53_udp"}
+	if strings.Join(applied, ",") != strings.Join(wantApplied, ",") {
+		t.Fatalf("applied service IDs = %v, want %v", applied, wantApplied)
+	}
+	if strings.Join(migrated, ",") != "default_service_p53,default_service_p53" {
+		t.Fatalf("migrated service IDs = %v, want legacy ID for each protocol", migrated)
 	}
 }
 
@@ -332,7 +462,10 @@ func newWireguardTestProvider(t *testing.T) providers.Provider {
 	t.Helper()
 	provider := providers.NewEndpointslices()
 	if err := provider.LoadObject(&discoveryv1.EndpointSlice{
-		ObjectMeta:  metav1.ObjectMeta{Name: "service-1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "service-1", Namespace: "default",
+			Labels: map[string]string{discoveryv1.LabelServiceName: "service"},
+		},
 		AddressType: discoveryv1.AddressTypeIPv4,
 		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.2"}}},
 	}, func() {}); err != nil {

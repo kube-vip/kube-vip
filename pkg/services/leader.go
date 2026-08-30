@@ -16,8 +16,7 @@ import (
 // The StartServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context, forcedOnly bool) error {
 	callback := NewCallback(p.runServicesLeaderElectionLoop, true)
-	unregister := p.registerPrivateCallback(callback)
-	defer unregister()
+	callback.skipEndpointReconcile = true
 	err := p.ServicesWatcher(ctx, callback, forcedOnly)
 	if err != nil {
 		return err

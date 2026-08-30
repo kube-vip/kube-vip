@@ -489,15 +489,10 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			return fmt.Errorf("failed to inspect VIP %s before startup: %w", network.IP(), existingErr)
 		}
 		configuredNetworks = append(configuredNetworks, configuredNetwork{network: network})
-		_, err := network.DeleteIP()
-		if err != nil {
-			log.Warn("attempted to clean existing VIP", "err", err)
-		}
 		log.Debug("config flags", "enable_routing_table", c.EnableRoutingTable, "enable_leader_election", c.EnableLeaderElection, "enable_services_election", c.EnableServicesElection)
 
 		if c.EnableRoutingTable && (c.EnableLeaderElection || c.EnableServicesElection) {
-			err = cluster.routeMgr.Add(name, network, false, false)
-			if err != nil {
+			if err := cluster.routeMgr.Add(name, network, false, false); err != nil {
 				log.Warn(err.Error())
 			} else {
 				log.Info("successful add Route")
@@ -509,11 +504,10 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			// Note: When WireGuard is enabled, the VIP is added to the tunnel interface
 			// instead of lo, so we skip adding it here.
 			added, addErr := network.AddIP(false, false)
+			configuredNetworks[len(configuredNetworks)-1].addedIP = existing == nil && added
 			if addErr != nil {
-				err = addErr
-				log.Warn(err.Error())
+				log.Warn(addErr.Error())
 			} else {
-				configuredNetworks[len(configuredNetworks)-1].addedIP = existing == nil && added
 				log.Info("successful add IP", "address", network.IP())
 			}
 		}
@@ -527,8 +521,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		if c.EnableBGP && (c.EnableLeaderElection || c.EnableServicesElection) {
 			// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation
 			log.Debug("(svcs) attempting to advertise over BGP", "address", network.CIDR())
-			err = bgp.AddHost(lbCtx, network.CIDR(), name)
-			if err != nil {
+			if err := bgp.AddHost(lbCtx, network.CIDR(), name); err != nil {
 				log.Error(err.Error())
 			}
 		}
