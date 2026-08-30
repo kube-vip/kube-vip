@@ -463,13 +463,20 @@ func (c *serviceElection) cleanupMember(member *serviceElectionMember) error {
 	}
 	c.mu.Lock()
 	member.err = cleanupErr
+	queued := true
 	if !member.retrying {
 		member.retrying = true
-		c.p.queueMemberCleanup(c, member)
+		if !c.p.queueMemberCleanup(c, member) {
+			member.retrying = false
+			queued = false
+		}
 	}
 	c.signalLocked()
 	c.mu.Unlock()
 	member.cleanupOnce.Do(func() { close(member.cleanupAttempted) })
+	if !queued {
+		return c.retryMemberCleanup(member.key.svcCtx.Parent(), member)
+	}
 	return cleanupErr
 }
 
@@ -496,12 +503,19 @@ func (c *serviceElection) deactivateMember(member *serviceElectionMember) error 
 	}
 	c.mu.Lock()
 	member.err = cleanupErr
+	queued := true
 	if !member.retrying {
 		member.retrying = true
-		c.p.queueMemberCleanup(c, member)
+		if !c.p.queueMemberCleanup(c, member) {
+			member.retrying = false
+			queued = false
+		}
 	}
 	c.signalLocked()
 	c.mu.Unlock()
+	if !queued {
+		return c.retryMemberCleanup(member.key.svcCtx.Parent(), member)
+	}
 	return cleanupErr
 }
 

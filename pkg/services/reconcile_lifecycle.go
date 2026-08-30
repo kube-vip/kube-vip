@@ -30,6 +30,7 @@ type cleanupGroup struct {
 	err     error
 	watchWG *sync.WaitGroup
 	active  bool
+	closing bool
 }
 
 func (p *Processor) queuePendingReconcile(c *serviceElection, member *serviceElectionMember, ctx context.Context,
@@ -167,9 +168,15 @@ func (group *cleanupGroup) stopReplays() {
 	group.mu.Unlock()
 }
 
-func (p *Processor) queueMemberCleanup(c *serviceElection, member *serviceElectionMember) {
+func (p *Processor) queueMemberCleanup(c *serviceElection, member *serviceElectionMember) bool {
 	group := p.cleanupGroup(member.key.svcCtx.Parent())
+	group.mu.Lock()
+	if group.closing {
+		group.mu.Unlock()
+		return false
+	}
 	group.wg.Add(1)
+	group.mu.Unlock()
 	go func() {
 		defer group.wg.Done()
 		if err := c.retryMemberCleanup(group.ctx, member); err != nil {
@@ -178,9 +185,13 @@ func (p *Processor) queueMemberCleanup(c *serviceElection, member *serviceElecti
 			group.mu.Unlock()
 		}
 	}()
+	return true
 }
 
 func (p *Processor) finishCleanupGroup(group *cleanupGroup) error {
+	group.mu.Lock()
+	group.closing = true
+	group.mu.Unlock()
 	group.wg.Wait()
 	p.cleanupMu.Lock()
 	if p.cleanup[group.ctx.Done()] == group {

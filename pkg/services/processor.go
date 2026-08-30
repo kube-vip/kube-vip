@@ -6,7 +6,6 @@ import (
 	"fmt"
 	log "log/slog"
 	"reflect"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,19 +53,21 @@ type Processor struct {
 	networkLifecycle sync.RWMutex
 	metricsMu        sync.Mutex
 
-	electionsMu    sync.Mutex
-	elections      map[string]*serviceElection
-	claimSeq       atomic.Uint64
-	electionRun    func(context.Context, *election.RunConfig, *kubevip.Config) error
-	newInstance    func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
-	garbageCollect func(string, string, *networkinterface.Manager) (bool, error)
-	desiredMu      sync.Mutex
-	desiredEvents  map[types.UID]desiredEvent
-	desiredDeletes []desiredDelete
-	pendingMu      sync.Mutex
-	pending        map[types.UID]*pendingReconcile
-	cleanupMu      sync.Mutex
-	cleanup        map[<-chan struct{}]*cleanupGroup
+	electionsMu        sync.Mutex
+	elections          map[string]*serviceElection
+	claimSeq           atomic.Uint64
+	electionRun        func(context.Context, *election.RunConfig, *kubevip.Config) error
+	newInstance        func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
+	garbageCollect     func(string, string, *networkinterface.Manager) (bool, error)
+	desiredMu          sync.Mutex
+	desiredEvents      map[types.UID]desiredEvent
+	desiredDeletes     []desiredDelete
+	pendingMu          sync.Mutex
+	pending            map[types.UID]*pendingReconcile
+	cleanupMu          sync.Mutex
+	cleanup            map[<-chan struct{}]*cleanupGroup
+	privateCallbacksMu sync.Mutex
+	privateCallbacks   map[*Callback]int
 
 	bgpServer *bgp.Server
 
@@ -407,7 +408,7 @@ func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, ser
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
 		var endpointServiceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error
-		if serviceFunc != nil && serviceFunc.Function != nil && !isPrivateServiceElectionCallback(serviceFunc.Function) {
+		if serviceFunc != nil && serviceFunc.Function != nil && !p.isPrivateServiceElectionCallback(serviceFunc) {
 			endpointServiceFunc = serviceFunc.Function
 		}
 		wg.Go(func() {
@@ -461,9 +462,26 @@ func (p *Processor) reconcileDesired(ctx context.Context, event watch.Event, ser
 	return nil
 }
 
-func isPrivateServiceElectionCallback(callback func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error) bool {
-	fn := runtime.FuncForPC(reflect.ValueOf(callback).Pointer())
-	return fn != nil && strings.Contains(fn.Name(), "runServicesLeaderElectionLoop")
+func (p *Processor) registerPrivateCallback(callback *Callback) func() {
+	p.privateCallbacksMu.Lock()
+	if p.privateCallbacks == nil {
+		p.privateCallbacks = make(map[*Callback]int)
+	}
+	p.privateCallbacks[callback]++
+	p.privateCallbacksMu.Unlock()
+	return func() {
+		p.privateCallbacksMu.Lock()
+		if p.privateCallbacks[callback]--; p.privateCallbacks[callback] == 0 {
+			delete(p.privateCallbacks, callback)
+		}
+		p.privateCallbacksMu.Unlock()
+	}
+}
+
+func (p *Processor) isPrivateServiceElectionCallback(callback *Callback) bool {
+	p.privateCallbacksMu.Lock()
+	defer p.privateCallbacksMu.Unlock()
+	return p.privateCallbacks[callback] != 0
 }
 
 func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Service, error) {
