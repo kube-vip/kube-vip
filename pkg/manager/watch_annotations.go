@@ -41,6 +41,9 @@ func annotationsWatcher(ctx context.Context, clientSet,
 	if err != nil {
 		return err
 	}
+	if len(nodeList.Items) == 0 {
+		return fmt.Errorf("no node found with hostname %q", config.NodeName)
+	}
 
 	// We'll assume there's only one node with the hostname annotation. If that's not true,
 	// there's probably bigger problems
