@@ -25,6 +25,11 @@ const defaultBGPPort uint32 = 179
 
 // AddPeer will add peers to the BGP configuration
 func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) {
+	remotePort := defaultBGPPort
+	if peer.Port != 0 {
+		remotePort = uint32(peer.Port)
+	}
+
 	p := &api.Peer{
 		Conf: &api.PeerConf{
 			NeighborAddress:   peer.Address,
@@ -50,7 +55,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 		Transport: &api.Transport{
 			MtuDiscovery:  true,
 			RemoteAddress: peer.Address,
-			RemotePort:    defaultBGPPort,
+			RemotePort:    remotePort,
 		},
 	}
 
@@ -85,6 +90,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 		ipv4Address, ipv6Address, err := peer.FindMpbgpAddresses(p, b.c)
 		if err != nil {
 			log.Error("failed to get MP-BGP addresses, will not us MP-BGP for this host", "error", err)
+			b.setPeerSource(p)
 		} else {
 			p.AfiSafis = []*api.AfiSafi{
 				{
@@ -136,13 +142,7 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 			}
 		}
 	} else {
-		if b.c.SourceIP != "" {
-			p.Transport.LocalAddress = b.c.SourceIP
-		}
-
-		if b.c.SourceIF != "" {
-			p.Transport.BindInterface = b.c.SourceIF
-		}
+		b.setPeerSource(p)
 	}
 
 	if err := b.s.AddPeer(ctx, &api.AddPeerRequest{Peer: p}); err != nil {
@@ -150,6 +150,16 @@ func (b *Server) AddPeer(ctx context.Context, peer kubevip.BGPPeer) (err error) 
 	}
 	log.Info("[BGP]", "peer", p.Conf.NeighborAddress, "AS", p.Conf.PeerAsn, "BFD", p.Bfd)
 	return nil
+}
+
+func (b *Server) setPeerSource(p *api.Peer) {
+	if b.c.SourceIP != "" {
+		p.Transport.LocalAddress = b.c.SourceIP
+	}
+
+	if b.c.SourceIF != "" {
+		p.Transport.BindInterface = b.c.SourceIF
+	}
 }
 
 func (b *Server) getPath(ip net.IP) *apiutil.Path {
