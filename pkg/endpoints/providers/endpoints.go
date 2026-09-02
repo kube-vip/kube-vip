@@ -99,7 +99,7 @@ func (ep *Endpoints) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, 
 				continue
 			}
 			// 2. Compare the Hostname (only useful if address.NodeName is not available)
-			if id == address.Hostname {
+			if address.NodeName == nil && id == address.Hostname {
 				log.Debug("found local endpoint", "label", ep.label, "ip", address.IP, "hostname", address.Hostname)
 				localEndpoints = append(localEndpoints, address.IP)
 				continue
