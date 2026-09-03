@@ -85,7 +85,6 @@ type Manager struct {
 
 // New will create a new managing object
 func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manager, error) {
-
 	// Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
 	// so if node name is not provided in the config,
@@ -353,6 +352,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
+		sm.Kill()
 		wg.Wait()
 		sm.svcProcessor.WaitForElectionCampaigns()
 		w.Cleanup()
