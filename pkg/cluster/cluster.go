@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	log "log/slog"
@@ -22,6 +23,7 @@ import (
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
 	stop                  chan bool
+	stopMutex             sync.Mutex
 	Network               []vip.Network
 	arpMgr                *arp.Manager
 	routeMgr              *route.Manager
@@ -93,6 +95,9 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 
 // Stop - Will stop the Cluster and release VIP if needed
 func (cluster *Cluster) Stop() {
+	cluster.stopMutex.Lock()
+	defer cluster.stopMutex.Unlock()
+
 	// Close the stop channel, which will shut down the VIP (if needed)
 	if cluster.stop != nil {
 		close(cluster.stop)
