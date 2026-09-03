@@ -49,9 +49,6 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 	itm, exists := m.tracker[key]
 
 	if !exists {
-		m.tracker[key] = newItem(r)
-		itm = m.tracker[key]
-
 		added, err := r.AddRoute(precheck)
 		if err != nil {
 			if update && errors.Is(err, syscall.EEXIST) && update {
@@ -69,6 +66,9 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 				return fmt.Errorf("error adding route %q: %w", key, err)
 			}
 		}
+
+		itm = newItem(r)
+		m.tracker[key] = itm
 
 		if added {
 			log.Debug("[RT] added route", "path", key, "object", object)
