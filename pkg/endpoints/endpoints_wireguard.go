@@ -212,8 +212,8 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 		}
 	}
 
-	if svcCtx != nil && svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
+	if svcCtx != nil {
+		svcCtx.CallLeaderCancel()
 	}
 }
 

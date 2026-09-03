@@ -12,6 +12,7 @@ type Context struct {
 	IsWatched          bool
 	ConfiguredNetworks sync.Map
 	EndpointsReady     chan any
+	mu                 sync.Mutex
 	epReady            sync.Once
 	leaderElection     sync.Once
 	Signalled          atomic.Bool
@@ -51,6 +52,9 @@ func (ctx *Context) StartLeaderElectionOnce(f func()) {
 }
 
 func (ctx *Context) SignalReadiness() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	ctx.epReady.Do(func() {
 		close(ctx.EndpointsReady)
 		ctx.Signalled.Store(true)
@@ -58,9 +62,50 @@ func (ctx *Context) SignalReadiness() {
 }
 
 func (ctx *Context) ResetReadiness() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	if ctx.Signalled.Load() {
 		ctx.EndpointsReady = make(chan any)
 		ctx.epReady = sync.Once{}
 		ctx.Signalled.Store(false)
 	}
+}
+
+func (ctx *Context) GetEndpointsReady() chan any {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	return ctx.EndpointsReady
+}
+
+func (ctx *Context) SetLeaderCancel(cancel context.CancelFunc) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	ctx.LeaderCancel = cancel
+}
+
+func (ctx *Context) CallLeaderCancel() {
+	ctx.mu.Lock()
+	cancel := ctx.LeaderCancel
+	ctx.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (ctx *Context) SetWatched(watched bool) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	ctx.IsWatched = watched
+}
+
+func (ctx *Context) IsWatchedLocked() bool {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	return ctx.IsWatched
 }
