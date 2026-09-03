@@ -132,7 +132,10 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 	dhcpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	lease := c.requestWithBackoff(dhcpCtx)
+	lease, err := c.requestWithBackoff(dhcpCtx)
+	if err != nil {
+		return fmt.Errorf("DHCPv4 client failed: %w", err)
+	}
 
 	c.initRebootFlag = false
 	c.lease = lease
@@ -173,7 +176,12 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 				}
 				log.Warn("[DHCPv4] ip may have changed", "ip", c.lease.ACK.YourIPAddr, "err", err)
 				c.initRebootFlag = false
-				c.lease = c.requestWithBackoff(dhcpCtx)
+				lease, backoffErr := c.requestWithBackoff(dhcpCtx)
+				if backoffErr != nil {
+					log.Error("[DHCPv4] failed to reacquire lease", "err", backoffErr)
+					continue
+				}
+				c.lease = lease
 			}
 			t1.Reset(t1Timeout)
 			t2.Reset(t2Timeout)
@@ -204,7 +212,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 // |ciaddr        |zero         | IP address   |IP address|
 // --------------------------------------------------------
 
-func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) *nclient4.Lease {
+func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease, error) {
 	backoff := backoff.Backoff{
 		Factor: 2,
 		Jitter: true,
@@ -226,8 +234,7 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) *nclient4.Lease {
 				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 				log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
 				c.errorChan <- errMsg
-				c.Stop()
-				return nil
+				return nil, errMsg
 			}
 			log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
 			time.Sleep(dur)
@@ -242,7 +249,7 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) *nclient4.Lease {
 		c.ipChan <- lease.ACK.YourIPAddr.String()
 	}
 
-	return lease
+	return lease, nil
 }
 
 func (c *DHCPv4Client) request(ctx context.Context, rebind bool) (*nclient4.Lease, error) {

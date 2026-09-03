@@ -90,6 +90,7 @@ func NewDHCPv6InternalClient(iface string) (*DHCPv6InternalClient, error) {
 
 type DHCPv6Client struct {
 	iface           *net.Interface
+	managerKey      string
 	ddnsHostName    string
 	initRebootFlag  bool
 	requestedIP     net.IP
@@ -117,6 +118,7 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 
 	return &DHCPv6Client{
 		iface:           iface,
+		managerKey:      name,
 		stopChan:        make(chan struct{}),
 		releasedChan:    make(chan struct{}),
 		errorChan:       make(chan error),
@@ -140,7 +142,7 @@ func (c *DHCPv6Client) Stop() {
 		close(c.stopChan)
 	})
 	<-c.releasedChan
-	dhcpv6ClientManager.Delete(c.iface.Name)
+	dhcpv6ClientManager.Delete(c.managerKey)
 }
 
 // Gets the IPChannel for consumption
@@ -247,7 +249,6 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 				log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
 				c.errorChan <- errMsg
-				c.Stop()
 				return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 			}
 			log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
@@ -385,9 +386,10 @@ func getAddress(iana []*dhcpv6.OptIANA) (*dhcpv6.OptIAAddress, error) {
 		return nil, fmt.Errorf("failed to get IANA")
 	}
 
-	if len(iana) < 1 {
-		return nil, fmt.Errorf("failed to get addresses data")
+	addrs := iana[0].Options.Addresses()
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("IANA contained no addresses")
 	}
 
-	return iana[0].Options.Addresses()[0], nil
+	return addrs[0], nil
 }
