@@ -23,6 +23,9 @@ func init() {
 }
 
 type DHCPv6ClientManager struct {
+	// mu guards clients and the reference counts of its entries together, so a
+	// concurrent Add cannot join a client that Delete is already retiring.
+	mu      sync.Mutex
 	clients map[string]*DHCPv6InternalClient
 }
 
@@ -33,17 +36,17 @@ func NewDHCPv6ClientManager() *DHCPv6ClientManager {
 }
 
 func (m *DHCPv6ClientManager) Get(iface string) *DHCPv6InternalClient {
-	c, exists := m.clients[iface]
-	if !exists {
-		return nil
-	}
-	return c
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.clients[iface]
 }
 
 func (m *DHCPv6ClientManager) Add(iface string) (*DHCPv6InternalClient, error) {
-	c := m.Get(iface)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if c != nil {
+	if c := m.clients[iface]; c != nil {
 		c.references.Add(1)
 		return c, nil
 	}
@@ -57,15 +60,16 @@ func (m *DHCPv6ClientManager) Add(iface string) (*DHCPv6InternalClient, error) {
 }
 
 func (m *DHCPv6ClientManager) Delete(iface string) {
-	c := m.Get(iface)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if c != nil {
-		c.references.Add(-1)
-		ref := c.references.Load()
-		if ref < 1 {
-			c.client.Close()
-			delete(m.clients, iface)
-		}
+	c := m.clients[iface]
+	if c == nil {
+		return
+	}
+	if c.references.Add(-1) < 1 {
+		c.client.Close()
+		delete(m.clients, iface)
 	}
 }
 
@@ -138,7 +142,6 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
 	c.stop.Do(func() {
-		close(c.ipChan)
 		close(c.stopChan)
 	})
 	<-c.releasedChan
@@ -158,6 +161,7 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 func (c *DHCPv6Client) Start(ctx context.Context) error {
 	dhcpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer close(c.releasedChan)
 
 	addr, err := c.requestWithBackoff(dhcpCtx)
 
@@ -221,7 +225,6 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			t1.Stop()
 			t2.Stop()
 
-			close(c.releasedChan)
 			return err
 		}
 	}
@@ -244,15 +247,32 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 		addr, err = c.request(ctx, false)
 
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			dur := backoff.Duration()
 			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 				log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
-				c.errorChan <- errMsg
+				select {
+				case c.errorChan <- errMsg:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-c.stopChan:
+				}
 				return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 			}
 			log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
-			time.Sleep(dur)
+			timer := time.NewTimer(dur)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-c.stopChan:
+				timer.Stop()
+				return nil, context.Canceled
+			}
 			continue
 		}
 		backoff.Reset()
@@ -261,7 +281,13 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 
 	if c.ipChan != nil {
 		log.Debug("[DHCPv6] using channel")
-		c.ipChan <- addr.IPv6Addr.String()
+		select {
+		case c.ipChan <- addr.IPv6Addr.String():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-c.stopChan:
+			return nil, context.Canceled
+		}
 	}
 
 	return addr, nil
