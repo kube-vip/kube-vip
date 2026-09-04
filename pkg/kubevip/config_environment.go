@@ -908,6 +908,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.NodeName == "" && fileConfig.NodeName != "" {
 		baseConfig.NodeName = fileConfig.NodeName
 	}
+	if baseConfig.KubernetesAddr == "" && fileConfig.KubernetesAddr != "" {
+		baseConfig.KubernetesAddr = fileConfig.KubernetesAddr
+	}
 
 	// Boolean flags - only merge if not explicitly set
 	if !baseConfig.EnableARP && fileConfig.EnableARP {
@@ -955,6 +958,33 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if !baseConfig.PreserveVIPOnLeadershipLoss && fileConfig.PreserveVIPOnLeadershipLoss {
 		baseConfig.PreserveVIPOnLeadershipLoss = fileConfig.PreserveVIPOnLeadershipLoss
 	}
+	if !baseConfig.LoseLeadership && fileConfig.LoseLeadership {
+		baseConfig.LoseLeadership = fileConfig.LoseLeadership
+	}
+	if !baseConfig.AddPeersAsBackends && fileConfig.AddPeersAsBackends {
+		baseConfig.AddPeersAsBackends = fileConfig.AddPeersAsBackends
+	}
+	if !baseConfig.AllowInterfaceNotUp && fileConfig.AllowInterfaceNotUp {
+		baseConfig.AllowInterfaceNotUp = fileConfig.AllowInterfaceNotUp
+	}
+	if !baseConfig.LoadBalancerClassOnly && fileConfig.LoadBalancerClassOnly {
+		baseConfig.LoadBalancerClassOnly = fileConfig.LoadBalancerClassOnly
+	}
+	if !baseConfig.LoadBalancerClassLegacyHandling && fileConfig.LoadBalancerClassLegacyHandling {
+		baseConfig.LoadBalancerClassLegacyHandling = fileConfig.LoadBalancerClassLegacyHandling
+	}
+	if !baseConfig.EnableServiceSecurity && fileConfig.EnableServiceSecurity {
+		baseConfig.EnableServiceSecurity = fileConfig.EnableServiceSecurity
+	}
+	if !baseConfig.EnableUPNP && fileConfig.EnableUPNP {
+		baseConfig.EnableUPNP = fileConfig.EnableUPNP
+	}
+	if !baseConfig.CleanRoutingTable && fileConfig.CleanRoutingTable {
+		baseConfig.CleanRoutingTable = fileConfig.CleanRoutingTable
+	}
+	if !baseConfig.SkipDAD && fileConfig.SkipDAD {
+		baseConfig.SkipDAD = fileConfig.SkipDAD
+	}
 
 	// Service configuration
 	if baseConfig.Namespace == "" && fileConfig.Namespace != "" {
@@ -988,16 +1018,25 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 		baseConfig.RoutingProtocol = fileConfig.RoutingProtocol
 	}
 
+	if len(baseConfig.BGPPeers) == 0 && len(fileConfig.BGPPeers) > 0 {
+		baseConfig.BGPPeers = fileConfig.BGPPeers
+	}
+
 	// BGP configuration
 	mergeBGPConfig(&baseConfig.BGPConfig, &fileConfig.BGPConfig)
+	mergeBGPPeerConfig(&baseConfig.BGPPeerConfig, &fileConfig.BGPPeerConfig)
 
 	// Kubernetes configuration
+	if baseConfig.LeaderElectionType == "" && fileConfig.LeaderElectionType != "" {
+		baseConfig.LeaderElectionType = fileConfig.LeaderElectionType
+	}
 	if baseConfig.K8sConfigFile == "" && fileConfig.K8sConfigFile != "" {
 		baseConfig.K8sConfigFile = fileConfig.K8sConfigFile
 	}
 
 	// Leader Election configuration
 	mergeLeaderElectionConfig(&baseConfig.KubernetesLeaderElection, &fileConfig.KubernetesLeaderElection)
+	mergeEtcdConfig(&baseConfig.Etcd, &fileConfig.Etcd)
 
 	// BGP health check configuration
 	mergeHealthCheck(&baseConfig.ControlPlaneHealthCheck, &fileConfig.ControlPlaneHealthCheck)
@@ -1011,6 +1050,12 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.DNSMode == "" && fileConfig.DNSMode != "" {
 		baseConfig.DNSMode = fileConfig.DNSMode
 	}
+	if !baseConfig.IsDualStack && fileConfig.IsDualStack {
+		baseConfig.IsDualStack = fileConfig.IsDualStack
+	}
+	if !baseConfig.RequireDualStack && fileConfig.RequireDualStack {
+		baseConfig.RequireDualStack = fileConfig.RequireDualStack
+	}
 
 	// DHCP configuration - mode
 	if baseConfig.DHCPMode == "" && fileConfig.DHCPMode != "" {
@@ -1020,6 +1065,12 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	// DHCP configuration - backoff attempts
 	if baseConfig.DHCPBackoffAttempts == DefaultDHCPBackoffAttempts && fileConfig.DHCPBackoffAttempts != DefaultDHCPBackoffAttempts {
 		baseConfig.DHCPBackoffAttempts = fileConfig.DHCPBackoffAttempts
+	}
+	if !baseConfig.DisableServiceUpdates && fileConfig.DisableServiceUpdates {
+		baseConfig.DisableServiceUpdates = fileConfig.DisableServiceUpdates
+	}
+	if !baseConfig.EnableEndpoints && fileConfig.EnableEndpoints {
+		baseConfig.EnableEndpoints = fileConfig.EnableEndpoints
 	}
 
 	// Health check configuration (HTTP listener for kube-vip readiness)
@@ -1039,9 +1090,21 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.EgressServiceCidr == "" && fileConfig.EgressServiceCidr != "" {
 		baseConfig.EgressServiceCidr = fileConfig.EgressServiceCidr
 	}
+	if !baseConfig.EnableInternalSNAT && fileConfig.EnableInternalSNAT {
+		baseConfig.EnableInternalSNAT = fileConfig.EnableInternalSNAT
+	}
+	if !baseConfig.EgressWithNftables && fileConfig.EgressWithNftables {
+		baseConfig.EgressWithNftables = fileConfig.EgressWithNftables
+	}
+	if !baseConfig.EgressClean && fileConfig.EgressClean {
+		baseConfig.EgressClean = fileConfig.EgressClean
+	}
 	// Mirror configuration
 	if baseConfig.MirrorDestInterface == "" && fileConfig.MirrorDestInterface != "" {
 		baseConfig.MirrorDestInterface = fileConfig.MirrorDestInterface
+	}
+	if !baseConfig.LoInterfaceGlobalScope && fileConfig.LoInterfaceGlobalScope {
+		baseConfig.LoInterfaceGlobalScope = fileConfig.LoInterfaceGlobalScope
 	}
 
 	// Iptables configuration
@@ -1073,6 +1136,12 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	if baseConfig.DebounceTime == debouncer.DefaultTime && fileConfig.DebounceTime != debouncer.DefaultTime {
 		baseConfig.DebounceTime = fileConfig.DebounceTime
 	}
+	if !baseConfig.PerServiceElectionOnDemand && fileConfig.PerServiceElectionOnDemand {
+		baseConfig.PerServiceElectionOnDemand = fileConfig.PerServiceElectionOnDemand
+	}
+	if baseConfig.ConfigFile == "" && fileConfig.ConfigFile != "" {
+		baseConfig.ConfigFile = fileConfig.ConfigFile
+	}
 
 	if baseConfig.LoseLeadershipTimeoutSeconds == 0 && fileConfig.LoseLeadershipTimeoutSeconds != 0 {
 		baseConfig.LoseLeadershipTimeoutSeconds = fileConfig.LoseLeadershipTimeoutSeconds
@@ -1099,13 +1168,101 @@ func mergeBGPConfig(base, file *BGPConfig) {
 	if base.KeepaliveInterval == 0 && file.KeepaliveInterval != 0 {
 		base.KeepaliveInterval = file.KeepaliveInterval
 	}
+	if base.MpbgpNexthop == "" && file.MpbgpNexthop != "" {
+		base.MpbgpNexthop = file.MpbgpNexthop
+	}
+	if base.MpbgpIPv4 == "" && file.MpbgpIPv4 != "" {
+		base.MpbgpIPv4 = file.MpbgpIPv4
+	}
+	if base.MpbgpIPv6 == "" && file.MpbgpIPv6 != "" {
+		base.MpbgpIPv6 = file.MpbgpIPv6
+	}
 	if len(base.Peers) == 0 && len(file.Peers) > 0 {
 		base.Peers = file.Peers
+	}
+	mergeZebraConfig(&base.Zebra, &file.Zebra)
+}
+
+// mergeBGPPeerConfig merges standalone BGP peer configuration.
+func mergeBGPPeerConfig(base, file *BGPPeer) {
+	if base.Address == "" && file.Address != "" {
+		base.Address = file.Address
+	}
+	if base.Port == 0 && file.Port != 0 {
+		base.Port = file.Port
+	}
+	if base.Interface == "" && file.Interface != "" {
+		base.Interface = file.Interface
+	}
+	if base.AS == 0 && file.AS != 0 {
+		base.AS = file.AS
+	}
+	if base.Password == "" && file.Password != "" {
+		base.Password = file.Password
+	}
+	if !base.MultiHop && file.MultiHop {
+		base.MultiHop = file.MultiHop
+	}
+	if base.MpbgpNexthop == "" && file.MpbgpNexthop != "" {
+		base.MpbgpNexthop = file.MpbgpNexthop
+	}
+	if base.MpbgpIPv4 == "" && file.MpbgpIPv4 != "" {
+		base.MpbgpIPv4 = file.MpbgpIPv4
+	}
+	if base.MpbgpIPv6 == "" && file.MpbgpIPv6 != "" {
+		base.MpbgpIPv6 = file.MpbgpIPv6
+	}
+	if !base.BFDEnabled && file.BFDEnabled {
+		base.BFDEnabled = file.BFDEnabled
+	}
+	if base.BFDReceiveInterval == 0 && file.BFDReceiveInterval != 0 {
+		base.BFDReceiveInterval = file.BFDReceiveInterval
+	}
+	if base.BFDTransmitInterval == 0 && file.BFDTransmitInterval != 0 {
+		base.BFDTransmitInterval = file.BFDTransmitInterval
+	}
+	if base.BFDDetectMultiplier == 0 && file.BFDDetectMultiplier != 0 {
+		base.BFDDetectMultiplier = file.BFDDetectMultiplier
+	}
+}
+
+// mergeZebraConfig merges Zebra configuration.
+func mergeZebraConfig(base, file *ZebraConfig) {
+	if !base.Enabled && file.Enabled {
+		base.Enabled = file.Enabled
+	}
+	if base.URL == "" && file.URL != "" {
+		base.URL = file.URL
+	}
+	if base.Version == 0 && file.Version != 0 {
+		base.Version = file.Version
+	}
+	if base.SoftwareName == "" && file.SoftwareName != "" {
+		base.SoftwareName = file.SoftwareName
+	}
+}
+
+// mergeEtcdConfig merges Etcd client configuration.
+func mergeEtcdConfig(base, file *Etcd) {
+	if base.CAFile == "" && file.CAFile != "" {
+		base.CAFile = file.CAFile
+	}
+	if base.ClientCertFile == "" && file.ClientCertFile != "" {
+		base.ClientCertFile = file.ClientCertFile
+	}
+	if base.ClientKeyFile == "" && file.ClientKeyFile != "" {
+		base.ClientKeyFile = file.ClientKeyFile
+	}
+	if len(base.Endpoints) == 0 && len(file.Endpoints) > 0 {
+		base.Endpoints = file.Endpoints
 	}
 }
 
 // mergeLeaderElectionConfig merges leader election configuration
 func mergeLeaderElectionConfig(base, file *KubernetesLeaderElection) {
+	if !base.EnableLeaderElection && file.EnableLeaderElection {
+		base.EnableLeaderElection = file.EnableLeaderElection
+	}
 	if base.LeaseName == "" && file.LeaseName != "" {
 		base.LeaseName = file.LeaseName
 	}
