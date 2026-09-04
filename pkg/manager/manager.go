@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/k8s"
@@ -52,8 +52,13 @@ type Manager struct {
 
 	// This channel is used to catch an OS signal and trigger a shutdown
 	signalChan chan os.Signal
+	killChan   chan struct{}
 
-	sigint sync.Once
+	sigint       sync.Once
+	killChanOnce sync.Once
+	dumpWG       sync.WaitGroup
+	dumping      atomic.Bool
+	dump         func(context.Context)
 
 	svcProcessor *services.Processor
 
@@ -86,6 +91,8 @@ type Manager struct {
 
 	// Will handle routes
 	routeMgr *route.Manager
+
+	modeWorker func() worker.Worker
 }
 
 // New will create a new managing object
@@ -283,6 +290,10 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) Start(ctx context.Context) error {
+	if err := runtimeFailure(ctx); err != nil {
+		return err
+	}
+
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
@@ -336,52 +347,67 @@ func (sm *Manager) Start(ctx context.Context) error {
 		}
 	}
 
-	return sm.startMode(ctx)
+	if err := sm.startMode(ctx); err != nil {
+		return err
+	}
+	return runtimeFailure(ctx)
+}
+
+func runtimeFailure(ctx context.Context) error {
+	err := context.Cause(ctx)
+	if err == nil || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startMode(ctx context.Context) error {
-	var cpCluster *cluster.Cluster
 	var err error
 
-	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
-		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.electionMgr,
-		sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
+	w := sm.newModeWorker()
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-
+		cancel()
 		wg.Wait()
 		w.Cleanup()
-		cancel()
 		log.Info("Shutting down Kube-Vip")
 	}()
 
 	log.Info("starting Kube-vip Manager", "mode", w.Name())
 	if err := w.Configure(modeCtx, &wg); err != nil {
-		defer cancel()
 		return fmt.Errorf("failed to configure %s mode: %w", w.Name(), err)
 	}
 
 	if sm.config.EnableControlPlane {
 		err = w.InitControlPlane()
 		if err != nil {
-			defer cancel()
 			return err
 		}
 	}
-
-	// Shutdown function that will wait on this signal, unless we call it ourselves
+	// Start the shutdown watcher before any slow startup API calls, so a
+	// signal received during RecoverAddresses cancels modeCtx immediately
+	// instead of waiting for it to return on its own.
 	wg.Go(func() {
-		sm.waitForShutdown(modeCtx, cancel, cpCluster)
+		sm.waitForShutdown(modeCtx, cancel)
 	})
+
+	if sm.config.EnableControlPlane || sm.config.EnableServices {
+		if err := sm.svcProcessor.RecoverAddresses(modeCtx); err != nil {
+			log.Warn("skipping kube-vip address recovery", "err", err)
+		}
+	}
 
 	if sm.config.EnableControlPlane {
 		wg.Go(func() {
 			w.StartControlPlane(modeCtx, sm.electionMgr)
+			if modeCtx.Err() == nil {
+				sm.Kill()
+			}
 		})
 	}
 
@@ -398,11 +424,11 @@ func (sm *Manager) startMode(ctx context.Context) error {
 			// TODO: Deprecate the iptables code v1.2.x
 			err = vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv4)
 			if err != nil {
-				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", "IPv4", "error", err)
+				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", utils.IPv4Family, "error", err)
 			}
 			err = vip.ClearIPTables(sm.config.EgressWithNftables, sm.config.ServiceNamespace, iptables.ProtocolIPv6)
 			if err != nil {
-				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", "IPv6", "error", err)
+				log.Info("[egress]", "legacy-iptables", sm.config.EgressWithNftables, "mode", utils.IPv6Family, "error", err)
 			}
 		}
 		w.ConfigureServices()
@@ -416,41 +442,85 @@ func (sm *Manager) startMode(ctx context.Context) error {
 					if utils.IsPanicError(err) {
 						sm.Kill()
 						return fmt.Errorf("failed to reconcile services, non-recoverable error: %w", err)
-					} else {
-						log.Error("failed to reconcile services, restarting", "error", err)
 					}
+					log.Error("failed to reconcile services, restarting", "error", err)
+				}
+				select {
+				case <-modeCtx.Done():
+					return nil
+				case <-time.After(200 * time.Millisecond):
 				}
 			}
 		}
+	}
+	if sm.config.EnableControlPlane {
+		<-modeCtx.Done()
 	}
 
 	return nil
 }
 
-func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+func (sm *Manager) newModeWorker() worker.Worker {
+	if sm.modeWorker != nil {
+		return sm.modeWorker()
+	}
+	return worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
+		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.electionMgr,
+		sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
+}
+
+func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc) {
+	defer sm.dumpWG.Wait()
 	for {
-		sig := <-sm.signalChan
+		var sig os.Signal
+		select {
+		case <-ctx.Done():
+			return
+		case <-sm.killChannel():
+			sm.shutdown(cancel)
+			return
+		case sig = <-sm.signalChan:
+		}
 		switch sig {
 		case syscall.SIGUSR1:
-			log.Info("Received SIGUSR1, dumping configuration")
-			sm.dumpConfiguration(ctx)
-		case syscall.SIGINT, syscall.SIGTERM:
-			sm.closing.Store(true)
-			log.Info("Received kube-vip termination, signaling shutdown")
-			if cpCluster != nil {
-				cpCluster.Stop()
+			if sm.dumping.CompareAndSwap(false, true) {
+				log.Info("Received SIGUSR1, dumping configuration")
+				dump := sm.dump
+				if dump == nil {
+					dump = sm.dumpConfiguration
+				}
+				sm.dumpWG.Add(1)
+				go func() {
+					defer sm.dumpWG.Done()
+					defer sm.dumping.Store(false)
+					dump(ctx)
+				}()
 			}
-			// Cancel the context, which will in turn cancel the leadership and all goroutines
-			cancel()
+		case syscall.SIGINT, syscall.SIGTERM:
+			sm.shutdown(cancel)
 			return
 		}
 	}
 }
 
+func (sm *Manager) shutdown(cancel context.CancelFunc) {
+	sm.closing.Store(true)
+	log.Info("Received kube-vip termination, signaling shutdown")
+	// Cancel the context, which will in turn cancel the leadership and all goroutines.
+	cancel()
+}
+
 func (sm *Manager) Kill() {
 	sm.sigint.Do(func() {
-		sm.signalChan <- syscall.SIGINT
+		close(sm.killChannel())
 	})
+}
+
+func (sm *Manager) killChannel() chan struct{} {
+	sm.killChanOnce.Do(func() {
+		sm.killChan = make(chan struct{})
+	})
+	return sm.killChan
 }
 
 // normalizeNodeName ensures the local machine hostname conforms to

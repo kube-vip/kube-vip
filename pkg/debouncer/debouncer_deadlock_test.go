@@ -23,7 +23,7 @@ func TestStartReturnsWhenCancellationInterruptsObjectForwarding(t *testing.T) {
 	// Leave the object without a receiver. This is the state reached when its
 	// worker exits on context cancellation just before Start forwards an event.
 	ns := d.addNs("default")
-	object := ns.add("example", d.output)
+	ns.add("example", d.output)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -49,20 +49,13 @@ func TestStartReturnsWhenCancellationInterruptsObjectForwarding(t *testing.T) {
 	}
 	cancel()
 
+	// Nothing ever receives from the object, so Start can only return by
+	// abandoning the blocked forward when the context is cancelled. Receiving
+	// here instead would make the forward succeed and the assertion racy.
 	select {
 	case <-done:
-		return
-	case <-object.input:
-		// Receiving here unblocks the production send. If cancellation had
-		// interrupted that send, Start would already have returned above.
-		select {
-		case <-done:
-		case <-time.After(250 * time.Millisecond):
-			t.Fatal("debouncer remained blocked forwarding an event after context cancellation")
-		}
-		t.Fatal("debouncer forwarded an event after context cancellation")
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("debouncer did not return after context cancellation")
+	case <-time.After(time.Second):
+		t.Fatal("debouncer remained blocked forwarding an event after context cancellation")
 	}
 }
 

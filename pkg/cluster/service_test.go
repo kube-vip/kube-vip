@@ -3,6 +3,7 @@ package cluster_test
 import (
 	"context"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,6 +33,110 @@ func TestBGPHealthCheckLoop_AnnouncesOnHealthy(t *testing.T) {
 
 	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
 		"route should be announced")
+}
+
+func TestServicesWorkerStopAndWaitDrainsBeforeRestart(t *testing.T) {
+	config := &kubevip.Config{}
+	serviceCluster, err := cluster.InitCluster(config, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	var workers sync.WaitGroup
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err != nil {
+		t.Fatalf("first StartLoadBalancerService() error = %v", err)
+	}
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err == nil {
+		t.Fatal("second StartLoadBalancerService() started while the first workers were active")
+	}
+
+	serviceCluster.StopAndWait()
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err != nil {
+		t.Fatalf("StartLoadBalancerService() after StopAndWait error = %v", err)
+	}
+	serviceCluster.StopAndWait()
+	workers.Wait()
+}
+
+func TestServicesWorkerStopAndWaitPreservingDrainsBeforeRestart(t *testing.T) {
+	config := &kubevip.Config{}
+	serviceCluster, err := cluster.InitCluster(config, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	var workers sync.WaitGroup
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err != nil {
+		t.Fatalf("StartLoadBalancerService() error = %v", err)
+	}
+	serviceCluster.StopAndWait()
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err != nil {
+		t.Fatalf("StartLoadBalancerService() after preserving stop error = %v", err)
+	}
+	serviceCluster.StopAndWait()
+	workers.Wait()
+}
+
+func TestStartLoadBalancerServiceRollsBackEarlierNetwork(t *testing.T) {
+	first := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32"}
+	second := &mockNetwork{ip: "192.0.2.11", cidr: "192.0.2.11/32", setMaskErr: errors.New("set mask")}
+	serviceCluster, err := cluster.InitCluster(&kubevip.Config{}, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	serviceCluster.Network = []vip.Network{first, second}
+
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), &kubevip.Config{VIPSubnet: "32"}, nil, "service", &sync.WaitGroup{}); err == nil {
+		t.Fatal("StartLoadBalancerService() error = nil, want second-network failure")
+	}
+	first.mu.Lock()
+	addCalls, deleteCalls, present := first.addIPCalls, first.deleteIPCalls, first.present
+	first.mu.Unlock()
+	if addCalls != 1 || deleteCalls != 1 || present {
+		t.Fatalf("first network rollback = add %d, delete %d, present %t; want 1, 1, false", addCalls, deleteCalls, present)
+	}
+	serviceCluster.StopAndWait()
+}
+
+func TestStartLoadBalancerServiceRollbackPreservesExistingVIP(t *testing.T) {
+	first := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32", present: true}
+	second := &mockNetwork{ip: "192.0.2.11", cidr: "192.0.2.11/32", setMaskErr: errors.New("set mask")}
+	serviceCluster, err := cluster.InitCluster(&kubevip.Config{}, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	serviceCluster.Network = []vip.Network{first, second}
+
+	if err := serviceCluster.StartLoadBalancerService(context.Background(), &kubevip.Config{VIPSubnet: "32"}, nil, "service", &sync.WaitGroup{}); err == nil {
+		t.Fatal("StartLoadBalancerService() error = nil, want second-network failure")
+	}
+	first.mu.Lock()
+	addCalls, deleteCalls, present := first.addIPCalls, first.deleteIPCalls, first.present
+	first.mu.Unlock()
+	if addCalls != 1 || deleteCalls != 0 || !present {
+		t.Fatalf("existing VIP rollback = add %d, delete %d, present %t; want 1, 0, true", addCalls, deleteCalls, present)
+	}
+	serviceCluster.StopAndWait()
+}
+
+func TestStartLoadBalancerServiceCancelledContextDoesNotConfigureVIP(t *testing.T) {
+	network := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32"}
+	serviceCluster, err := cluster.InitCluster(&kubevip.Config{}, true, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("InitCluster() error = %v", err)
+	}
+	serviceCluster.Network = []vip.Network{network}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = serviceCluster.StartLoadBalancerService(ctx, &kubevip.Config{VIPSubnet: "32"}, nil, "service", &sync.WaitGroup{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("StartLoadBalancerService() error = %v, want context.Canceled", err)
+	}
+	network.mu.Lock()
+	addCalls := network.addIPCalls
+	network.mu.Unlock()
+	if addCalls != 0 {
+		t.Fatalf("AddIP calls = %d, want 0 after context cancellation", addCalls)
+	}
 }
 
 func TestBGPHealthCheckLoop_NoAnnouncementUntilHealthy(t *testing.T) {
@@ -323,32 +428,45 @@ type mockNetwork struct {
 	ip   string
 	cidr string
 
-	mu      sync.Mutex
-	present bool
+	mu            sync.Mutex
+	present       bool
+	setMaskErr    error
+	addIPCalls    int
+	deleteIPCalls int
 }
 
 func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.addIPCalls++
 	m.present = true
 	return true, nil
 }
 func (m *mockNetwork) DeleteIP() (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.deleteIPCalls++
+	deleted := m.present
 	m.present = false
-	return false, nil
+	return deleted, nil
 }
 func (m *mockNetwork) isPresent() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.present
 }
-func (m *mockNetwork) AddRoute(bool) (bool, error)     { return false, nil }
-func (m *mockNetwork) ReplaceRoute() error             { return nil }
-func (m *mockNetwork) DeleteRoute() error              { return nil }
-func (m *mockNetwork) UpdateRoutes() (bool, error)     { return false, nil }
-func (m *mockNetwork) IsSet() (*netlink.Addr, error)   { return nil, nil }
+func (m *mockNetwork) AddRoute(bool) (bool, error) { return false, nil }
+func (m *mockNetwork) ReplaceRoute() error         { return nil }
+func (m *mockNetwork) DeleteRoute() error          { return nil }
+func (m *mockNetwork) UpdateRoutes() (bool, error) { return false, nil }
+func (m *mockNetwork) IsSet() (*netlink.Addr, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.present {
+		return &netlink.Addr{}, nil
+	}
+	return nil, nil
+}
 func (m *mockNetwork) IP() string                      { return m.ip }
 func (m *mockNetwork) CIDR() string                    { return m.cidr }
 func (m *mockNetwork) IPisLinkLocal() bool             { return false }
@@ -362,7 +480,7 @@ func (m *mockNetwork) IsDNS() bool                     { return false }
 func (m *mockNetwork) IsDDNS() bool                    { return false }
 func (m *mockNetwork) DDNSHostName() string            { return "" }
 func (m *mockNetwork) DNSName() string                 { return "" }
-func (m *mockNetwork) SetMask(string) error            { return nil }
+func (m *mockNetwork) SetMask(string) error            { return m.setMaskErr }
 func (m *mockNetwork) SetHasEndpoints(bool)            {}
 func (m *mockNetwork) HasEndpoints() bool              { return false }
 func (m *mockNetwork) ARPName() string                 { return "" }

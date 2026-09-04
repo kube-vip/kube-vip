@@ -62,6 +62,30 @@ func TestValidate_InstanceName(t *testing.T) {
 	}
 }
 
+func TestValidate_RoutingProtocol(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol int
+		wantErr  bool
+	}{
+		{name: "unset", protocol: 0, wantErr: false},
+		{name: "kube-vip default", protocol: 248, wantErr: false},
+		{name: "maximum byte value", protocol: 255, wantErr: false},
+		{name: "truncated on the wire", protocol: 256, wantErr: true},
+		{name: "negative", protocol: -1, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{RoutingProtocol: tt.protocol}
+			err := config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestInstanceNameLimitReservesNftablesPrefixAndFamilySuffix(t *testing.T) {
 	name := strings.Repeat("a", instanceNameMaxLength)
 	if got := len(egressNftablesTablePrefix + name + egressNftablesTableSuffix); got != nftablesNameMaxLength {
