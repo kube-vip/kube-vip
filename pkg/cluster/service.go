@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -98,7 +96,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 		if c.EnableLoadBalancer {
 			lb, err := loadbalancer.NewIPVSLB(ctx, network, c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
-				c.BackendHealthCheckInterval, c.EgressWithNftables, killFunc, &wg)
+				c.BackendHealthCheckInterval, c.EgressWithNftables, killFunc, &wg, c.K8sConfigFile)
 			if err != nil {
 				killFunc()
 				return fmt.Errorf("creating IPVS LoadBalancer: %w", err)
@@ -144,8 +142,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	}
 
 	if c.EnableRoutingTable {
-		backendMapV4 := backend.Map{}
-		backendMapV6 := backend.Map{}
+		backendMap := backend.Map{}
 		// only check localhost
 
 		// An explicitly configured Kubernetes API address (static-pod
@@ -154,85 +151,94 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		// takes precedence over the Node object's addresses: the check
 		// answers "is the local API server healthy" for every VIP family,
 		// regardless of the transport family of the override itself.
-		if entry := kubernetesAddrBackendEntry(c.KubernetesAddr, c.Port); entry != nil {
+		entry, err := backend.New(&backend.Config{
+			Type:           backend.HTTP,
+			Address:        c.KubernetesAddr,
+			Port:           c.Port,
+			KubeConfigPath: c.K8sConfigFile,
+			Client:         cluster.healthCheckHTTPClient,
+			KeepAddress:    false,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to create backend: %w", err)
+		}
+		if entry != nil {
 			log.Info("using configured Kubernetes address for backend health checks", "address", c.KubernetesAddr)
-			backendMapV4[*entry] = false
-			backendMapV6[*entry] = false
+			backendMap[entry] = false
 		} else {
-			ips := []string{}
-			if c.NodeName != "" {
-				if ips, err = getNodeIPs(ctx, c.NodeName, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
-					log.Error("failed to get IP of control-plane node", "err", err)
+			if c.ControlPlaneHealthCheck.Address != "" {
+				entry, err = backend.New(&backend.Config{
+					Type:           backend.HTTP,
+					Address:        c.ControlPlaneHealthCheck.Address,
+					Port:           c.Port,
+					KubeConfigPath: c.K8sConfigFile,
+					Client:         cluster.healthCheckHTTPClient,
+					KeepAddress:    true,
+				})
+				if err != nil {
+					return fmt.Errorf("unable to create backend: %w", err)
 				}
-			}
-
-			if len(ips) == 0 {
-				if !utils.IsIPv6(cluster.Network[0].IP()) {
-					ips = append(ips, "127.0.0.1")
-				} else {
-					ips = append(ips, "::1")
+				backendMap[entry] = false
+			} else {
+				ips := []string{}
+				if c.NodeName != "" {
+					if ips, err = getNodeIPs(ctx, c.NodeName, em.KubernetesClient); err != nil && !apierrors.IsNotFound(err) {
+						log.Error("failed to get IP of control-plane node", "err", err)
+					}
 				}
 
-				log.Info("no IP address found for node - will fallback to use localhost address", "addresses", ips)
-			}
+				if len(ips) == 0 {
+					if !utils.IsIPv6(cluster.Network[0].IP()) {
+						ips = append(ips, "127.0.0.1")
+					} else {
+						ips = append(ips, "::1")
+					}
 
-			for _, ip := range ips {
-				entry := backend.Entry{Addr: ip, Port: c.Port}
-				if !utils.IsIPv6(ip) {
-					backendMapV4[entry] = false
-				} else {
-					backendMapV6[entry] = false
+					log.Info("no IP address found for node - will fallback to use localhost address", "addresses", ips)
+				}
+
+				for _, ip := range ips {
+					entry, err := backend.New(&backend.Config{
+						Type:           backend.Discovery,
+						Address:        ip,
+						Port:           c.Port,
+						KubeConfigPath: c.K8sConfigFile,
+						Client:         nil,
+						KeepAddress:    false,
+					})
+					if err != nil {
+						return fmt.Errorf("failed to crate backend for address %q on port %d: %w", ip, c.Port, err)
+					}
+					backendMap[entry] = false
 				}
 			}
 		}
 
-		backend.SetKubeConfigPath(c.K8sConfigFile)
 		backend.Watch(ctx, c.BackendHealthCheckInterval, func() {
 			for i := range cluster.Network {
 				network := cluster.Network[i]
 				networkIP := network.IP()
-				isNetworkV6 := utils.IsIPv6(networkIP)
+
 				log.Debug("current ip to process", "ip", networkIP)
 
-				backendMap := &backendMapV4
-				if isNetworkV6 {
-					backendMap = &backendMapV6
-				}
-
-				for entry := range *backendMap {
-					log.Debug("entry.Check() for entry", "entry", entry)
-					var healthy bool
-					if c.ControlPlaneHealthCheck.Address != "" {
-						req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, c.ControlPlaneHealthCheck.Address, nil)
-						if reqErr != nil {
-							log.Error("create health check request", "err", reqErr)
-						} else if resp, doErr := cluster.healthCheckHTTPClient.Do(req); doErr != nil {
-							log.Error("health check request failed", "url", c.ControlPlaneHealthCheck.Address, "err", doErr)
-						} else {
-							resp.Body.Close()
-							healthy = resp.StatusCode == http.StatusOK
-							if !healthy {
-								log.Warn("health check returned non-200 status", "url", c.ControlPlaneHealthCheck.Address, "status", resp.StatusCode)
-							}
-						}
-					} else {
-						healthy = entry.Check()
+				for entry := range backendMap {
+					if !entry.IsSameFamily(networkIP) {
+						continue
 					}
-					if healthy {
-						log.Debug("entry.Check() true")
+					if entry.Check(ctx) {
 						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
 						_, err = network.AddIP(true, false)
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
-						if !(*backendMap)[entry] {
+						if !backendMap[entry] {
 							log.Info("added backend", "ip", network.IP())
 						}
 
 						err = cluster.routeMgr.Add(c.NodeName, network, true, false)
 						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
 							log.Warn(err.Error())
-						} else if err == nil && !(*backendMap)[entry] {
+						} else if err == nil && !backendMap[entry] {
 							log.Info("added route", "route", network.PrepareRoute())
 						} else if err == nil || errors.Is(err, fs.ErrExist) {
 							// Re-assert the route on every healthy cycle: routing daemons
@@ -246,15 +252,15 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 							}
 						}
 
-						(*backendMap)[entry] = true
+						backendMap[entry] = true
 						break
 					}
-					(*backendMap)[entry] = false
+					backendMap[entry] = false
 				}
 
 				deleteAddress := true
-				for entry := range *backendMap {
-					if (*backendMap)[entry] {
+				for entry := range backendMap {
+					if backendMap[entry] {
 						deleteAddress = false
 						break
 					}
@@ -361,27 +367,6 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		case <-ticker.C:
 		}
 	}
-}
-
-// kubernetesAddrBackendEntry converts an explicitly configured Kubernetes
-// API address override (config.KubernetesAddr, e.g. "https://127.0.0.1:6443"
-// on static-pod deployments) into a backend health-check entry. Returns nil
-// when no usable override is configured.
-func kubernetesAddrBackendEntry(kubernetesAddr string, defaultPort uint16) *backend.Entry {
-	if kubernetesAddr == "" {
-		return nil
-	}
-	u, err := url.Parse(kubernetesAddr)
-	if err != nil || u.Hostname() == "" {
-		return nil
-	}
-	port := defaultPort
-	if p := u.Port(); p != "" {
-		if parsed, err := strconv.ParseUint(p, 10, 16); err == nil {
-			port = uint16(parsed)
-		}
-	}
-	return &backend.Entry{Addr: u.Hostname(), Port: port}
 }
 
 func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clientset) ([]string, error) {
