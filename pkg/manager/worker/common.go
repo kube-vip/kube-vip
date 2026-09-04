@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -140,6 +141,13 @@ func (c *Common) OnStoppedLeading() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	log.Info("leader lost", "former leader", c.config.NodeName)
+
+	// Fail-fast for global leader election: exit immediately to let kubelet restart the pod
+	if c.config.IsOnGlobalLeaderElection() {
+		log.Error("lost global services leadership, exiting process immediately for pod restart")
+		os.Exit(1)
+	}
+
 	c.svcProcessor.Stop()
 
 	log.Error("lost services leadership, restarting kube-vip")
