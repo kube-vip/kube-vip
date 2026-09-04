@@ -2,6 +2,7 @@ package kubevip
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 )
@@ -24,7 +25,20 @@ func (c *Config) Validate() error {
 	if err := validateInstanceName(c.InstanceName); err != nil {
 		return err
 	}
+	if err := validateRoutingProtocol(c.RoutingProtocol); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// validateRoutingProtocol rejects values the kernel cannot represent: netlink
+// carries the address and route protocol in a single byte, so a larger value is
+// silently truncated on the wire and never matches on readback.
+func validateRoutingProtocol(protocol int) error {
+	if protocol < 0 || protocol > math.MaxUint8 {
+		return fmt.Errorf("routingProtocol %d is out of range, must be between 0 and %d", protocol, math.MaxUint8)
+	}
 	return nil
 }
 

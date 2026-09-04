@@ -10,6 +10,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
@@ -66,7 +67,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		}
 	})
 
-	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, p.leaseMgr, p.TunnelMgr, p.routeMgr)
+	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, &p.instancesMutex, p.leaseMgr, p.TunnelMgr, p.routeMgr, p.lockService)
 
 	ch := rw.ResultChan()
 	if d != nil {
@@ -84,11 +85,19 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			}
 
 			restart, err := epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
-				p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
+				&wg, p.clientSet, func(ctx context.Context, service *v1.Service, inst *instance.Instance) error {
+					return p.updateEgressConfiguration(ctx, service, inst)
+				})
 			if restart {
 				continue
-			} else if err != nil {
-				return fmt.Errorf("[%s] error while processing %s event: %w", provider.GetLabel(), event.Type, err)
+			}
+			if err != nil {
+				eventErr := fmt.Errorf("[%s] error while processing %s event: %w", provider.GetLabel(), event.Type, err)
+				if utils.IsPanicError(err) {
+					return eventErr
+				}
+				log.Error("endpoint watcher event failed", "provider", provider.GetLabel(), "type", event.Type, "error", eventErr)
+				continue
 			}
 
 		case watch.Error:

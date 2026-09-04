@@ -16,20 +16,27 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
-	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 // Cluster - The Cluster object manages the state of the cluster for a particular node
 type Cluster struct {
-	stop                  chan bool
-	stopMutex             sync.Mutex
+	stop                  chan struct{}
+	stopMu                sync.Mutex
+	service               *servicesWorker
 	Network               []vip.Network
 	arpMgr                *arp.Manager
 	routeMgr              *route.Manager
 	nodeLabelMgr          node.Labeler
 	labelAdded            bool
 	healthCheckHTTPClient *http.Client
+}
+
+type servicesWorker struct {
+	stop         chan struct{}
+	done         chan struct{}
+	stopping     bool
+	preserveVIPs map[string]struct{}
 }
 
 // InitCluster - Will attempt to initialise all of the required settings for the cluster
@@ -58,7 +65,7 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 	newCluster := &Cluster{
 		Network:               networks,
 		arpMgr:                arpMgr,
-		stop:                  make(chan bool),
+		stop:                  make(chan struct{}),
 		routeMgr:              routeMgr,
 		nodeLabelMgr:          nodeLabelMgr,
 		healthCheckHTTPClient: healthCheckHTTPClient,
@@ -95,14 +102,115 @@ func startNetworking(c *kubevip.Config, intfMgr *networkinterface.Manager) ([]vi
 
 // Stop - Will stop the Cluster and release VIP if needed
 func (cluster *Cluster) Stop() {
-	cluster.stopMutex.Lock()
-	defer cluster.stopMutex.Unlock()
-
-	// Close the stop channel, which will shut down the VIP (if needed)
-	if cluster.stop != nil {
-		close(cluster.stop)
-		cluster.stop = make(chan bool) // recreate channel for future use
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	if cluster.service != nil {
+		workers := cluster.service
+		if workers.stopping {
+			return
+		}
+		workers.stopping = true
+		cluster.stop = make(chan struct{})
+		close(workers.stop)
+		return
 	}
+	stop := cluster.stop
+	cluster.stop = make(chan struct{})
+	close(stop)
+}
+
+// StopAndWait signals the current Service worker generation and waits until it
+// has finished its datapath cleanup.
+func (cluster *Cluster) StopAndWait() {
+	cluster.stopAndWait(nil)
+}
+
+// StopAndWaitPreserving stops the current Service worker generation while
+// preserving the supplied VIPs for another Service that shares the same lease.
+func (cluster *Cluster) StopAndWaitPreserving(addresses ...string) {
+	preserve := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		preserve[address] = struct{}{}
+	}
+	cluster.stopAndWait(preserve)
+}
+
+func (cluster *Cluster) stopAndWait(preserveVIPs map[string]struct{}) {
+	workers, signal := cluster.prepareServiceStop(preserveVIPs)
+	if workers == nil {
+		return
+	}
+	if signal {
+		close(workers.stop)
+	}
+	<-workers.done
+}
+
+func (cluster *Cluster) prepareServiceStop(preserveVIPs map[string]struct{}) (*servicesWorker, bool) {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	workers := cluster.service
+	if workers == nil {
+		return nil, false
+	}
+	if workers.stopping {
+		workers.preserveVIPs = mergeVIPs(workers.preserveVIPs, preserveVIPs)
+		return workers, false
+	}
+	workers.stopping = true
+	workers.preserveVIPs = preserveVIPs
+	cluster.stop = make(chan struct{})
+	return workers, true
+}
+
+func (cluster *Cluster) startServicesWorker() (<-chan struct{}, chan struct{}, error) {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	if cluster.service != nil {
+		return nil, nil, fmt.Errorf("load balancer workers already running")
+	}
+	workers := &servicesWorker{stop: cluster.stop, done: make(chan struct{})}
+	cluster.service = workers
+	return workers.stop, workers.done, nil
+}
+
+func (cluster *Cluster) preserveServiceVIP(done chan struct{}, address string) bool {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	if cluster.service == nil || cluster.service.done != done {
+		return false
+	}
+	_, preserve := cluster.service.preserveVIPs[address]
+	return preserve
+}
+
+func mergeVIPs(existing, addresses map[string]struct{}) map[string]struct{} {
+	if len(addresses) == 0 {
+		return existing
+	}
+	if existing == nil {
+		existing = make(map[string]struct{}, len(addresses))
+	}
+	for address := range addresses {
+		existing[address] = struct{}{}
+	}
+	return existing
+}
+
+func (cluster *Cluster) finishServicesWorker(done chan struct{}) {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	if cluster.service == nil || cluster.service.done != done {
+		return
+	}
+	cluster.service = nil
+	close(done)
+}
+
+func (cluster *Cluster) StopChannel() <-chan struct{} {
+	cluster.stopMu.Lock()
+	defer cluster.stopMu.Unlock()
+	return cluster.stop
 }
 
 func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {
@@ -140,38 +248,34 @@ func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {
 	}, nil
 }
 
-// cleanupVIPs handles VIP removal based on the PreserveVIPOnLeadershipLoss configuration.
-// When preservation is enabled, IPv6 VIPs are always removed immediately to prevent DAD
-// failures on the new leader, while IPv4 VIPs are intentionally left in place.
-// When preservation is disabled (legacy behavior), all VIPs are removed.
 func (cluster *Cluster) cleanupVIPs(c *kubevip.Config) {
 	for i := range cluster.Network {
-		if c.EnableARP && cluster.arpMgr.Count(cluster.Network[i].ARPName()) > 1 {
+		cluster.cleanupVIP(c, cluster.Network[i])
+	}
+}
+
+func (cluster *Cluster) cleanupServiceVIPs(c *kubevip.Config, done chan struct{}) {
+	for i := range cluster.Network {
+		if cluster.preserveServiceVIP(done, cluster.Network[i].IP()) {
 			continue
 		}
+		cluster.cleanupVIP(c, cluster.Network[i])
+	}
+}
 
-		if c.PreserveVIPOnLeadershipLoss {
-			if utils.IsIPv6(cluster.Network[i].IP()) {
-				log.Info("[VIP] Removing IPv6 VIP immediately (required to prevent DAD failures on new leader)", "ip", cluster.Network[i].IP())
-				deleted, err := cluster.Network[i].DeleteIP()
-				if err != nil {
-					log.Warn(err.Error())
-				}
-				if deleted {
-					log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-				}
-			} else {
-				log.Info("[VIP] Preserving IPv4 VIP address on interface, only stopped ARP broadcasting", "ip", cluster.Network[i].IP())
-			}
-		} else {
-			log.Info("[VIP] Deleting VIP", "ip", cluster.Network[i].IP())
-			deleted, err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warn(err.Error())
-			}
-			if deleted {
-				log.Info("deleted address", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-			}
-		}
+func (cluster *Cluster) cleanupVIP(c *kubevip.Config, network vip.Network) {
+	// layer2Update already removed this instance's own claim before calling
+	// here, so any remaining count belongs to another service sharing the VIP.
+	if c.EnableARP && cluster.arpMgr.Count(network.ARPName()) > 0 {
+		return
+	}
+
+	log.Info("[VIP] Deleting VIP", "ip", network.IP())
+	deleted, err := network.DeleteIP()
+	if err != nil {
+		log.Warn(err.Error())
+	}
+	if deleted {
+		log.Info("deleted address", "IP", network.IP(), "interface", network.Interface())
 	}
 }

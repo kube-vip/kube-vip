@@ -58,7 +58,6 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
 	c.stop.Do(func() {
-		close(c.ipChan)
 		close(c.stopChan)
 	})
 	<-c.releasedChan
@@ -131,6 +130,7 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 func (c *DHCPv4Client) Start(ctx context.Context) error {
 	dhcpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer close(c.releasedChan)
 
 	lease, err := c.requestWithBackoff(dhcpCtx)
 	if err != nil {
@@ -197,7 +197,6 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			t1.Stop()
 			t2.Stop()
 
-			close(c.releasedChan)
 			return err
 		}
 	}
@@ -229,15 +228,32 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 		log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
 		lease, err = c.request(ctx, false)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			dur := backoff.Duration()
 			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 				log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
-				c.errorChan <- errMsg
+				select {
+				case c.errorChan <- errMsg:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-c.stopChan:
+				}
 				return nil, errMsg
 			}
 			log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
-			time.Sleep(dur)
+			timer := time.NewTimer(dur)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-c.stopChan:
+				timer.Stop()
+				return nil, context.Canceled
+			}
 			continue
 		}
 		backoff.Reset()
@@ -246,7 +262,13 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 
 	if c.ipChan != nil {
 		log.Debug("[DHCPv4] using channel")
-		c.ipChan <- lease.ACK.YourIPAddr.String()
+		select {
+		case c.ipChan <- lease.ACK.YourIPAddr.String():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-c.stopChan:
+			return nil, context.Canceled
+		}
 	}
 
 	return lease, nil

@@ -2,17 +2,20 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	log "log/slog"
 
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
@@ -46,18 +49,21 @@ type Instance struct {
 	DHCPv6Client        vip.DHCPClient
 	macvlanName         string
 	dhcpBroadcast       bool
+	dhcpInterfaceOwned  atomic.Bool
 
 	// Service use Vlan
 	IsVLAN        bool
 	VLANInterface string
+	vlanOwned     atomic.Bool
 
 	// External Gateway IP the service is forwarded from
 	UPNPGatewayIPs []string
 
 	// Kubernetes service mapping
-	ServiceSnapshot *v1.Service
-
-	dnsAddresses []string
+	ServiceUID       types.UID
+	ServiceAddresses []string
+	ServiceSnapshot  *v1.Service
+	cleanupInfo      *ServiceCleanupInfo
 
 	// AddCalled determined that ActionAdd was already performed for the instance
 	AddCalled bool
@@ -65,6 +71,48 @@ type Instance struct {
 	// LabelAdded determined that node was labeled with
 	// service-provided.kube-vip.io label
 	LabelAdded bool
+}
+
+func (instance *Instance) UID() types.UID {
+	return instance.ServiceUID
+}
+
+func (instance *Instance) Addresses() []string {
+	if instance.ServiceAddresses != nil {
+		return append([]string(nil), instance.ServiceAddresses...)
+	}
+	addresses, _ := FetchServiceAddresses(instance.ServiceSnapshot)
+	return addresses
+}
+
+type ServiceCleanupInfo struct {
+	Namespace             string
+	Name                  string
+	Lease                 string
+	ExternalTrafficPolicy v1.ServiceExternalTrafficPolicy
+}
+
+// CleanupInfo returns Service policy captured when the instance was created.
+func (instance *Instance) CleanupInfo() (ServiceCleanupInfo, bool) {
+	if instance == nil {
+		return ServiceCleanupInfo{}, false
+	}
+	if instance.cleanupInfo != nil {
+		return *instance.cleanupInfo, true
+	}
+	if instance.ServiceSnapshot == nil {
+		return ServiceCleanupInfo{}, false
+	}
+	return serviceCleanupInfo(instance.ServiceSnapshot), true
+}
+
+func serviceCleanupInfo(service *v1.Service) ServiceCleanupInfo {
+	return ServiceCleanupInfo{
+		Namespace:             service.Namespace,
+		Name:                  service.Name,
+		Lease:                 service.Annotations[kubevip.ServiceLease],
+		ExternalTrafficPolicy: service.Spec.ExternalTrafficPolicy,
+	}
 }
 
 type Port struct {
@@ -78,16 +126,25 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
 	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
+	cleanupInfo := serviceCleanupInfo(svc)
+	instance := &Instance{
+		ServiceUID:       svc.UID,
+		ServiceAddresses: append([]string(nil), instanceAddresses...),
+		ServiceSnapshot:  svc,
+		cleanupInfo:      &cleanupInfo,
+	}
+	if err := instance.initialize(ctx, svc, config, intfMgr, arpMgr, routeMgr, nodeLabelMgr, wg, instanceAddresses, instanceHostnames); err != nil {
+		return nil, errors.Join(err, instance.CleanupLinkAttachments())
+	}
+	return instance, nil
+}
+
+func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, config *kubevip.Config,
+	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
+	nodeLabelMgr node.Labeler, wg *sync.WaitGroup, instanceAddresses, instanceHostnames []string) error {
 	var newVips []*kubevip.Config
 	var link netlink.Link
 	var err error
-	var dnsAddresses []string
-
-	// Create new service
-	instance := &Instance{
-		ServiceSnapshot: svc,
-		dnsAddresses:    dnsAddresses,
-	}
 
 	for _, address := range instanceAddresses {
 		// Detect if we're using a specific interface for services
@@ -143,10 +200,10 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 
 		if link == nil {
 			if link, err = netlink.LinkByName(svcInterface); err != nil {
-				return nil, fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
+				return fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
 			}
 			if link == nil {
-				return nil, fmt.Errorf("failed to get interface %s", svcInterface)
+				return fmt.Errorf("failed to get interface %s", svcInterface)
 			}
 		}
 
@@ -163,7 +220,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 		}
 
 		if (config.Address != "" || config.VIP != "") && (ipv4AutoSubnet || ipv6AutoSubnet) {
-			return nil, fmt.Errorf("auto subnet discovery cannot be used if VIP address was provided")
+			return fmt.Errorf("auto subnet discovery cannot be used if VIP address was provided")
 		}
 
 		subnet := ""
@@ -172,7 +229,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			if ipv4AutoSubnet {
 				subnet, err = autoFindSubnet(link, address)
 				if err != nil {
-					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
+					return fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
 				}
 			} else {
 				if cidrs[0] != "" && cidrs[0] != kubevip.Auto {
@@ -185,7 +242,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			if ipv6AutoSubnet {
 				subnet, err = autoFindSubnet(link, address)
 				if err != nil {
-					return nil, fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
+					return fmt.Errorf("failed to automatically find subnet for service %s/%s with IP address %s on interface %s: %w", svc.Namespace, svc.Name, address, svcInterface, err)
 				}
 			} else {
 				if len(cidrs) > 1 && cidrs[1] != "" && cidrs[1] != kubevip.Auto {
@@ -198,26 +255,25 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 
 		// Generate new Virtual IP configuration
 		newVips = append(newVips, &kubevip.Config{
-			VIP:                         address,
-			Interface:                   svcInterface,
-			SingleNode:                  true,
-			EnableARP:                   config.EnableARP,
-			EnableBGP:                   config.EnableBGP,
-			BGPAttachIPToInterface:      config.BGPAttachIPToInterface,
-			VIPSubnet:                   subnet,
-			EnableRoutingTable:          config.EnableRoutingTable,
-			RoutingTableID:              config.RoutingTableID,
-			RoutingTableType:            config.RoutingTableType,
-			RoutingProtocol:             config.RoutingProtocol,
-			SkipDAD:                     config.SkipDAD,
-			ArpBroadcastRate:            config.ArpBroadcastRate,
-			EnableServiceSecurity:       config.EnableServiceSecurity,
-			DNSMode:                     config.DNSMode,
-			DHCPMode:                    config.DHCPMode,
-			DHCPBackoffAttempts:         config.DHCPBackoffAttempts,
-			DisableServiceUpdates:       config.DisableServiceUpdates,
-			EnableServicesElection:      config.EnableServicesElection,
-			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
+			VIP:                    address,
+			Interface:              svcInterface,
+			SingleNode:             true,
+			EnableARP:              config.EnableARP,
+			EnableBGP:              config.EnableBGP,
+			BGPAttachIPToInterface: config.BGPAttachIPToInterface,
+			VIPSubnet:              subnet,
+			EnableRoutingTable:     config.EnableRoutingTable,
+			RoutingTableID:         config.RoutingTableID,
+			RoutingTableType:       config.RoutingTableType,
+			RoutingProtocol:        config.RoutingProtocol,
+			SkipDAD:                config.SkipDAD,
+			ArpBroadcastRate:       config.ArpBroadcastRate,
+			EnableServiceSecurity:  config.EnableServiceSecurity,
+			DNSMode:                config.DNSMode,
+			DHCPMode:               config.DHCPMode,
+			DHCPBackoffAttempts:    config.DHCPBackoffAttempts,
+			DisableServiceUpdates:  config.DisableServiceUpdates,
+			EnableServicesElection: config.EnableServicesElection,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
@@ -256,10 +312,10 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 
 		if link == nil {
 			if link, err = netlink.LinkByName(svcInterface); err != nil {
-				return nil, fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
+				return fmt.Errorf("failed to get interface %s: %w", svcInterface, err)
 			}
 			if link == nil {
-				return nil, fmt.Errorf("failed to get interface %s", svcInterface)
+				return fmt.Errorf("failed to get interface %s", svcInterface)
 			}
 		}
 
@@ -295,7 +351,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 		if requestedIP != "" {
 			requestedIPs := strings.Split(requestedIP, ",")
 			if len(requestedIPs) > 2 {
-				return nil, fmt.Errorf("annotation %q cannot request more than one IPv4 and one Ipv6 address", kubevip.RequestedIP)
+				return fmt.Errorf("annotation %q cannot request more than one IPv4 and one Ipv6 address", kubevip.RequestedIP)
 			}
 			for _, ip := range requestedIPs {
 				netip := net.ParseIP(ip)
@@ -334,36 +390,40 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	// If this was purposely created with the address '0.0.0.0', or '::'
 	// we will create a macvlan on the main interface and a DHCP client
 	if len(instanceAddresses) > 2 && (slices.Contains(instanceAddresses, "0.0.0.0") || slices.Contains(instanceAddresses, "::")) {
-		return nil, fmt.Errorf("DHCP cannot be used if more than 2 addresses (one IPv4 and one IPv6) were specified")
+		return fmt.Errorf("DHCP cannot be used if more than 2 addresses (one IPv4 and one IPv6) were specified")
 	}
-	for i := range instance.VIPConfigs {
-		if instance.VIPConfigs[i].VIP == "0.0.0.0" {
-			err := instance.startDHCP(ctx, i, config.DHCPBackoffAttempts, wg)
+	for index := range instance.VIPConfigs {
+		if instance.VIPConfigs[index].VIP == "0.0.0.0" {
+			err := instance.startDHCP(ctx, index, config.DHCPBackoffAttempts, wg)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case err := <-instance.DHCPv4Client.ErrorChannel():
-				return nil, fmt.Errorf("error starting DHCPv4 for %s/%s: error: %s",
+				return fmt.Errorf("error starting DHCPv4 for %s/%s: error: %s",
 					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
 			case ip := <-instance.DHCPv4Client.IPChannel():
-				instance.VIPConfigs[i].Interface = instance.DHCPInterface
-				instance.VIPConfigs[i].VIP = ip
+				instance.VIPConfigs[index].Interface = instance.DHCPInterface
+				instance.VIPConfigs[index].VIP = ip
 				instance.DHCPInterfaceIPv4 = ip
 			}
 		}
-		if instance.VIPConfigs[i].VIP == "::" {
-			err := instance.startDHCP(ctx, i, config.DHCPBackoffAttempts, wg)
+		if instance.VIPConfigs[index].VIP == "::" {
+			err := instance.startDHCP(ctx, index, config.DHCPBackoffAttempts, wg)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case err := <-instance.DHCPv6Client.ErrorChannel():
-				return nil, fmt.Errorf("error starting DHCPv6 for %s/%s: error: %s",
+				return fmt.Errorf("error starting DHCPv6 for %s/%s: error: %s",
 					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
 			case ip := <-instance.DHCPv6Client.IPChannel():
-				instance.VIPConfigs[i].Interface = instance.DHCPInterface
-				instance.VIPConfigs[i].VIP = ip
+				instance.VIPConfigs[index].Interface = instance.DHCPInterface
+				instance.VIPConfigs[index].VIP = ip
 				instance.DHCPInterfaceIPv6 = ip
 			}
 		}
@@ -371,56 +431,56 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 		ddnsAnnotation, exists := svc.Annotations[kubevip.ServiceDDNS]
 
 		if exists {
-			instance.VIPConfigs[i].DDNS, err = strconv.ParseBool(ddnsAnnotation)
+			instance.VIPConfigs[index].DDNS, err = strconv.ParseBool(ddnsAnnotation)
 			if err != nil {
 				log.Error("Failed to add service", "err", err)
-				return nil, err
+				return err
 			}
 		}
 
 		if len(svc.Spec.IPFamilies) > 0 {
 			if len(svc.Spec.IPFamilies) > 1 {
-				instance.VIPConfigs[i].DHCPMode = utils.DualFamily
-				instance.VIPConfigs[i].DNSMode = utils.DualFamily
+				instance.VIPConfigs[index].DHCPMode = utils.DualFamily
+				instance.VIPConfigs[index].DNSMode = utils.DualFamily
 				switch *svc.Spec.IPFamilyPolicy {
 				case v1.IPFamilyPolicyRequireDualStack:
-					instance.VIPConfigs[i].IsDualStack = true
-					instance.VIPConfigs[i].RequireDualStack = true
+					instance.VIPConfigs[index].IsDualStack = true
+					instance.VIPConfigs[index].RequireDualStack = true
 				case v1.IPFamilyPolicyPreferDualStack:
-					instance.VIPConfigs[i].IsDualStack = true
-					instance.VIPConfigs[i].RequireDualStack = false
+					instance.VIPConfigs[index].IsDualStack = true
+					instance.VIPConfigs[index].RequireDualStack = false
 				default:
-					instance.VIPConfigs[i].IsDualStack = false
-					instance.VIPConfigs[i].RequireDualStack = false
+					instance.VIPConfigs[index].IsDualStack = false
+					instance.VIPConfigs[index].RequireDualStack = false
 				}
 			} else {
 				if strings.EqualFold(string(svc.Spec.IPFamilies[0]), utils.IPv4Family) {
-					instance.VIPConfigs[i].DHCPMode = strings.ToLower(utils.IPv4Family)
-					instance.VIPConfigs[i].DNSMode = strings.ToLower(utils.IPv4Family)
+					instance.VIPConfigs[index].DHCPMode = strings.ToLower(utils.IPv4Family)
+					instance.VIPConfigs[index].DNSMode = strings.ToLower(utils.IPv4Family)
 				} else {
-					instance.VIPConfigs[i].DHCPMode = strings.ToLower(utils.IPv6Family)
-					instance.VIPConfigs[i].DNSMode = strings.ToLower(utils.IPv6Family)
+					instance.VIPConfigs[index].DHCPMode = strings.ToLower(utils.IPv6Family)
+					instance.VIPConfigs[index].DNSMode = strings.ToLower(utils.IPv6Family)
 				}
 			}
 		}
 
-		instance.VIPConfigs[i].EgressWithNftables = config.EgressWithNftables
+		instance.VIPConfigs[index].EgressWithNftables = config.EgressWithNftables
 
-		c, err := cluster.InitCluster(instance.VIPConfigs[i], false, intfMgr, arpMgr, routeMgr, nodeLabelMgr)
+		c, err := cluster.InitCluster(instance.VIPConfigs[index], false, intfMgr, arpMgr, routeMgr, nodeLabelMgr)
 		if err != nil {
 			log.Error("failed to add service", "err", err)
-			return nil, err
+			return err
 		}
 
-		for i := range c.Network {
-			c.Network[i].SetServicePorts(svc)
+		for networkIndex := range c.Network {
+			c.Network[networkIndex].SetServicePorts(svc)
 		}
 
 		instance.Clusters = append(instance.Clusters, c)
-		log.Info("(svcs) adding VIP", "ip", instance.VIPConfigs[i].VIP, "interface", instance.VIPConfigs[i].Interface, "namespace", svc.Namespace, "name", svc.Name)
+		log.Info("(svcs) adding VIP", "ip", instance.VIPConfigs[index].VIP, "interface", instance.VIPConfigs[index].Interface, "namespace", svc.Namespace, "name", svc.Name)
 	}
 
-	return instance, nil
+	return nil
 }
 
 func autoFindInterface(ip string) (netlink.Link, error) {
@@ -480,16 +540,17 @@ func getAutoInterfaceName(link netlink.Link, defaultInterface string) string {
 	return link.Attrs().Name
 }
 
-func (i *Instance) addVLAN(parentInterface string, tag int) error {
-	var parent netlink.Link
-
+func (instance *Instance) addVLAN(parentInterface string, tag int) error {
 	interfaceName := fmt.Sprintf("%s.%d", parentInterface, tag)
+	parent, err := netlink.LinkByName(parentInterface)
+	if err != nil {
+		return fmt.Errorf("finding VLAN parent interface %s: %w", parentInterface, err)
+	}
 	iface, err := netlink.LinkByName(interfaceName)
 	if err != nil {
-		// check if parent interface doesnt exist
-		parent, err = netlink.LinkByName(parentInterface)
-		if err != nil {
-			return fmt.Errorf("error finding VLAN parent interface %s:  %v", parentInterface, err)
+		var notFound netlink.LinkNotFoundError
+		if !errors.As(err, &notFound) {
+			return fmt.Errorf("finding VLAN interface %s: %w", interfaceName, err)
 		}
 
 		log.Info("Creating new VLAN interface", "interface", interfaceName)
@@ -507,6 +568,7 @@ func (i *Instance) addVLAN(parentInterface string, tag int) error {
 		if err != nil {
 			return fmt.Errorf("could not add VLAN %s: %v", interfaceName, err)
 		}
+		instance.vlanOwned.Store(true)
 
 		err = netlink.LinkSetUp(vlan)
 		if err != nil {
@@ -525,26 +587,96 @@ func (i *Instance) addVLAN(parentInterface string, tag int) error {
 		}
 	}
 
-	i.VLANInterface = interfaceName
-	i.IsVLAN = true
+	instance.VLANInterface = interfaceName
+	instance.IsVLAN = true
 
 	return nil
 }
 
-func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint, wg *sync.WaitGroup) error {
-	if len(i.VIPConfigs) > 2 {
-		return fmt.Errorf("DHCP can be used with 2 VIP config maximally, got: %v", len(i.VIPConfigs))
+// CleanupLinkAttachments stops this instance's DHCP clients and removes only
+// VLAN or macvlan links created by this instance that are not used by a
+// remaining Service instance.
+func (instance *Instance) CleanupLinkAttachments(remaining ...*Instance) error {
+	var errs []error
+	if instance.DHCPv4Client != nil {
+		instance.DHCPv4Client.Stop()
 	}
-	parent, err := netlink.LinkByName(i.VIPConfigs[index].Interface)
+	if instance.DHCPv6Client != nil {
+		instance.DHCPv6Client.Stop()
+	}
+	if instance.dhcpInterfaceOwned.Load() {
+		if transferLinkAttachmentOwnership(instance.DHCPInterface, remaining, false) {
+			instance.dhcpInterfaceOwned.Store(false)
+		} else if err := deleteOwnedLink(instance.DHCPInterface, "DHCP"); err != nil {
+			errs = append(errs, err)
+		} else {
+			instance.dhcpInterfaceOwned.Store(false)
+		}
+	}
+	if instance.vlanOwned.Load() {
+		if transferLinkAttachmentOwnership(instance.VLANInterface, remaining, true) {
+			instance.vlanOwned.Store(false)
+		} else if err := deleteOwnedLink(instance.VLANInterface, "VLAN"); err != nil {
+			errs = append(errs, err)
+		} else {
+			instance.vlanOwned.Store(false)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func transferLinkAttachmentOwnership(name string, instances []*Instance, vlan bool) bool {
+	if name == "" {
+		return false
+	}
+	for _, instance := range instances {
+		if instance == nil {
+			continue
+		}
+		if vlan && instance.IsVLAN && instance.VLANInterface == name {
+			instance.vlanOwned.Store(true)
+			return true
+		}
+		if !vlan && (instance.IsDHCPv4 || instance.IsDHCPv6) && instance.DHCPInterface == name {
+			instance.dhcpInterfaceOwned.Store(true)
+			return true
+		}
+	}
+	return false
+}
+
+func deleteOwnedLink(name, kind string) error {
+	if name == "" {
+		return nil
+	}
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		var notFound netlink.LinkNotFoundError
+		if errors.As(err, &notFound) {
+			return nil
+		}
+		return fmt.Errorf("find %s interface %q: %w", kind, name, err)
+	}
+	if err := netlink.LinkDel(link); err != nil {
+		return fmt.Errorf("delete %s interface %q: %w", kind, name, err)
+	}
+	return nil
+}
+
+func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint, wg *sync.WaitGroup) error {
+	if len(instance.VIPConfigs) > 2 {
+		return fmt.Errorf("DHCP can be used with 2 VIP config maximally, got: %v", len(instance.VIPConfigs))
+	}
+	parent, err := netlink.LinkByName(instance.VIPConfigs[index].Interface)
 	if err != nil {
 		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
 	}
 
-	interfaceName := i.macvlanName
+	interfaceName := instance.macvlanName
 
 	if interfaceName == "" {
 		// Generate name from UID
-		interfaceName = fmt.Sprintf("vip-%s", i.ServiceSnapshot.UID[0:8])
+		interfaceName = fmt.Sprintf("vip-%s", instance.UID()[0:8])
 	}
 
 	// Check if the interface doesn't exist first
@@ -552,8 +684,8 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 	if err != nil {
 		log.Info("creating new macvlan interface for DHCP", "interface", interfaceName)
 
-		hwaddr, err := net.ParseMAC(i.DHCPInterfaceHwaddr)
-		if i.DHCPInterfaceHwaddr != "" && err != nil {
+		hwaddr, err := net.ParseMAC(instance.DHCPInterfaceHwaddr)
+		if instance.DHCPInterfaceHwaddr != "" && err != nil {
 			return err
 		} else if hwaddr == nil {
 			hwaddr, err = net.ParseMAC(vip.GenerateMac())
@@ -576,6 +708,7 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 		if err != nil {
 			return fmt.Errorf("could not add %s: %v", interfaceName, err)
 		}
+		instance.dhcpInterfaceOwned.Store(true)
 
 		err = netlink.LinkSetUp(mac)
 		if err != nil {
@@ -591,7 +724,7 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 	}
 
 	var initRebootFlag bool
-	ip := net.ParseIP(i.VIPConfigs[index].VIP)
+	ip := net.ParseIP(instance.VIPConfigs[index].VIP)
 
 	var client vip.DHCPClient
 	if ip.To4() != nil {
@@ -599,14 +732,14 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 		rpfilterSetting := "0"
 
 		// Check if we need to set an override rp_filter value for the interface
-		if i.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
+		if instance.ServiceSnapshot.Annotations[kubevip.RPFilter] != "" {
 			// Check the rp_filter value
-			rpFilter, err := strconv.Atoi(i.ServiceSnapshot.Annotations[kubevip.RPFilter])
+			rpFilter, err := strconv.Atoi(instance.ServiceSnapshot.Annotations[kubevip.RPFilter])
 			if err != nil {
 				log.Error("[DHCP] unable to process rp_filter", "value", rpFilter)
 			} else {
 				if rpFilter >= 0 && rpFilter < 3 { // Ensure the value is 0,1,2
-					rpfilterSetting = i.ServiceSnapshot.Annotations[kubevip.RPFilter]
+					rpfilterSetting = instance.ServiceSnapshot.Annotations[kubevip.RPFilter]
 				} else {
 					log.Error("[DHCP] rp_filter value not within range 0-2", "value", rpFilter)
 				}
@@ -618,38 +751,38 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 			log.Error("[DHCP] unable to write rp_filter", "value", rpfilterSetting, "err", err)
 		}
 
-		if i.DHCPInterfaceIPv4 != "" {
+		if instance.DHCPInterfaceIPv4 != "" {
 			initRebootFlag = true
 		}
 
-		client = vip.NewDHCPv4Client(iface, initRebootFlag, i.DHCPInterfaceIPv4, backoffAttempts, i.dhcpBroadcast)
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, instance.DHCPInterfaceIPv4, backoffAttempts, instance.dhcpBroadcast)
 
 		// Add the client so that we can call it to stop function
-		i.DHCPv4Client = client
+		instance.DHCPv4Client = client
 
 		// Set that DHCPv4 is enabled
-		i.IsDHCPv4 = true
+		instance.IsDHCPv4 = true
 	} else {
-		if i.DHCPInterfaceIPv6 != "" {
+		if instance.DHCPInterfaceIPv6 != "" {
 			initRebootFlag = true
 		}
 
-		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, i.DHCPInterfaceIPv6, backoffAttempts)
+		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
 		if err != nil {
 			return fmt.Errorf("unable to create client: %w", err)
 		}
 
 		// Add the client so that we can call it to stop function
-		i.DHCPv6Client = client
+		instance.DHCPv6Client = client
 
 		// Set that DHCPv6 is enabled
-		i.IsDHCPv6 = true
+		instance.IsDHCPv6 = true
 	}
 
 	// Add hostname to dhcp client if annotated
-	if i.DHCPHostname != "" {
-		log.Info("Hostname specified for dhcp lease", "interface", interfaceName, "hostname", i.DHCPHostname)
-		client.WithHostName(i.DHCPHostname)
+	if instance.DHCPHostname != "" {
+		log.Info("Hostname specified for dhcp lease", "interface", interfaceName, "hostname", instance.DHCPHostname)
+		client.WithHostName(instance.DHCPHostname)
 	}
 
 	wg.Go(func() {
@@ -659,8 +792,8 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 	})
 
 	// Set the name of the interface so that it can be removed on Service deletion
-	i.DHCPInterface = interfaceName
-	i.DHCPInterfaceHwaddr = iface.HardwareAddr.String()
+	instance.DHCPInterface = interfaceName
+	instance.DHCPInterfaceHwaddr = iface.HardwareAddr.String()
 
 	return nil
 }
@@ -740,9 +873,9 @@ func FetchServiceAddresses(s *v1.Service) ([]string, []string) {
 
 func FindServiceInstance(svc *v1.Service, instances []*Instance) *Instance {
 	log.Debug("finding service", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)
-	for i := range instances {
-		if instances[i].ServiceSnapshot.UID == svc.UID {
-			return instances[i]
+	for index := range instances {
+		if instances[index].UID() == svc.UID {
+			return instances[index]
 		}
 	}
 	log.Debug("instance not found", "namespace", svc.Namespace, "name", svc.Name, "UID", svc.UID)

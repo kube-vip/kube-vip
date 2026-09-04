@@ -51,6 +51,10 @@ jobs:
           go-version-file: go.mod
       - name: Run tests
         run: make unit-tests
+      - name: Run privileged network tests
+        run: |
+          sudo -E env PATH="$PATH" KUBE_VIP_REQUIRE_NETNS=1 go test -race ./pkg/services ./pkg/vip ./pkg/instance \
+            -run 'TestRecover|TestServiceAddressRetained|TestRetainControlPlaneVIPs|TestAddressProtocol|TestKubeVIPAddressProtocol|TestCleanupKubeVIPAddresses|TestMonitorDefaultInterfaceReturnsErrorWhenTestLinkIsSetDown|TestCleanupLinkAttachmentsOnlyDeletesOwnedVLAN'
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
