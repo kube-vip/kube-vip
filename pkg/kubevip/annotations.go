@@ -77,6 +77,9 @@ const (
 	// Name of the service lease object
 	ServiceLease = "kube-vip.io/leaseName"
 
+	// Versioned kube-vip ownership metadata stored on Kubernetes election Leases
+	LeaseVIPs = "kube-vip.io/lease-vips"
+
 	// Forces kube-vip to use per service election for this particular service
 	ForcePerServiceElection = "kube-vip.io/forcePerServiceElection"
 
