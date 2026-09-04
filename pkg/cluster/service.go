@@ -601,7 +601,7 @@ func (cluster *Cluster) layer2Update(ctx context.Context, network vip.Network, c
 
 	<-ctx.Done() // if cancel() execute
 	log.Debug("ending layer 2 update", "ip", ipString, "interface", network.Interface(), "ms", c.ArpBroadcastRate)
-	cluster.arpMgr.RemoveOnLeadershipLoss(arpInstance)
+	cluster.arpMgr.Remove(arpInstance)
 }
 
 func waitNDPResponder(ctx context.Context, ifaceName string) (*vip.NdpResponder, error) {

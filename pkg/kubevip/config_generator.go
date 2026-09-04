@@ -687,16 +687,6 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 		}
 	}
 
-	if c.PreserveVIPOnLeadershipLoss {
-		preserveVIPOnLeadershipLoss := []corev1.EnvVar{
-			{
-				Name:  vipPreserveOnLeadershipLoss,
-				Value: strconv.FormatBool(c.PreserveVIPOnLeadershipLoss),
-			},
-		}
-		newEnvironment = append(newEnvironment, preserveVIPOnLeadershipLoss...)
-	}
-
 	if c.DebounceTime != debouncer.DefaultTime {
 		debTime := corev1.EnvVar{
 			Name:  debounceTime,
