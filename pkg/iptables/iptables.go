@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -87,21 +86,6 @@ type IPTables struct {
 
 	nftables bool
 }
-
-// Stat represents a structured statistic entry.
-type Stat struct {
-	Packets     uint64     `json:"pkts"`
-	Bytes       uint64     `json:"bytes"`
-	Target      string     `json:"target"`
-	Protocol    string     `json:"prot"`
-	Opt         string     `json:"opt"`
-	Input       string     `json:"in"`
-	Output      string     `json:"out"`
-	Source      *net.IPNet `json:"source"`
-	Destination *net.IPNet `json:"destination"`
-	Options     string     `json:"options"`
-}
-
 type Option func(*IPTables)
 
 func IPFamily(proto Protocol) Option {
@@ -252,16 +236,6 @@ func (ipt *IPTables) DeleteIfExists(table, chain string, rulespec ...string) err
 }
 
 // List rules in specified table/chain
-func (ipt *IPTables) ListByID(table, chain string, id int) (string, error) {
-	args := []string{"-t", table, "-S", chain, strconv.Itoa(id)}
-	rule, err := ipt.executeList(args)
-	if err != nil {
-		return "", err
-	}
-	return rule[0], nil
-}
-
-// List rules in specified table/chain
 func (ipt *IPTables) List(table, chain string) ([]string, error) {
 	args := []string{"-t", table, "-S", chain}
 	return ipt.executeList(args)
@@ -311,129 +285,6 @@ func (ipt *IPTables) ChainExists(table, chain string) (bool, error) {
 	default:
 		return false, err
 	}
-}
-
-// Stats lists rules including the byte and packet counts
-func (ipt *IPTables) Stats(table, chain string) ([][]string, error) {
-	args := []string{"-t", table, "-L", chain, "-n", "-v", "-x"}
-	lines, err := ipt.executeList(args)
-	if err != nil {
-		return nil, err
-	}
-
-	appendSubnet := func(addr string) string {
-		if strings.IndexByte(addr, byte('/')) < 0 {
-			if strings.IndexByte(addr, '.') < 0 {
-				return addr + "/128"
-			}
-			return addr + "/32"
-		}
-		return addr
-	}
-
-	ipv6 := ipt.proto == ProtocolIPv6
-
-	rows := [][]string{}
-	for i, line := range lines {
-		// Skip over chain name and field header
-		if i < 2 {
-			continue
-		}
-
-		// Fields:
-		// 0=pkts 1=bytes 2=target 3=prot 4=opt 5=in 6=out 7=source 8=destination 9=options
-		line = strings.TrimSpace(line)
-		fields := strings.Fields(line)
-
-		// The ip6tables verbose output cannot be naively split due to the default "opt"
-		// field containing 2 single spaces.
-		if ipv6 {
-			// Check if field 6 is "opt" or "source" address
-			dest := fields[6]
-			ip, _, _ := net.ParseCIDR(dest)
-			if ip == nil {
-				ip = net.ParseIP(dest)
-			}
-
-			// If we detected a CIDR or IP, the "opt" field is empty.. insert it.
-			if ip != nil {
-				f := []string{}
-				f = append(f, fields[:4]...)
-				f = append(f, "  ") // Empty "opt" field for ip6tables
-				f = append(f, fields[4:]...)
-				fields = f
-			}
-		}
-
-		// Adjust "source" and "destination" to include netmask, to match regular
-		// List output
-		fields[7] = appendSubnet(fields[7])
-		fields[8] = appendSubnet(fields[8])
-
-		// Combine "options" fields 9... into a single space-delimited field.
-		options := fields[9:]
-		fields = fields[:9]
-		fields = append(fields, strings.Join(options, " "))
-		rows = append(rows, fields)
-	}
-	return rows, nil
-}
-
-// ParseStat parses a single statistic row into a Stat struct. The input should
-// be a string slice that is returned from calling the Stat method.
-func (ipt *IPTables) ParseStat(stat []string) (parsed Stat, err error) {
-	// For forward-compatibility, expect at least 10 fields in the stat
-	if len(stat) < 10 {
-		return parsed, fmt.Errorf("stat contained fewer fields than expected")
-	}
-
-	// Convert the fields that are not plain strings
-	parsed.Packets, err = strconv.ParseUint(stat[0], 0, 64)
-	if err != nil {
-		return parsed, fmt.Errorf(err.Error(), "could not parse packets")
-	}
-	parsed.Bytes, err = strconv.ParseUint(stat[1], 0, 64)
-	if err != nil {
-		return parsed, fmt.Errorf(err.Error(), "could not parse bytes")
-	}
-	_, parsed.Source, err = net.ParseCIDR(stat[7])
-	if err != nil {
-		return parsed, fmt.Errorf(err.Error(), "could not parse source")
-	}
-	_, parsed.Destination, err = net.ParseCIDR(stat[8])
-	if err != nil {
-		return parsed, fmt.Errorf(err.Error(), "could not parse destination")
-	}
-
-	// Put the fields that are strings
-	parsed.Target = stat[2]
-	parsed.Protocol = stat[3]
-	parsed.Opt = stat[4]
-	parsed.Input = stat[5]
-	parsed.Output = stat[6]
-	parsed.Options = stat[9]
-
-	return parsed, nil
-}
-
-// StructuredStats returns statistics as structured data which may be further
-// parsed and marshaled.
-func (ipt *IPTables) StructuredStats(table, chain string) ([]Stat, error) {
-	rawStats, err := ipt.Stats(table, chain)
-	if err != nil {
-		return nil, err
-	}
-
-	structStats := []Stat{}
-	for _, rawStat := range rawStats {
-		stat, err := ipt.ParseStat(rawStat)
-		if err != nil {
-			return nil, err
-		}
-		structStats = append(structStats, stat)
-	}
-
-	return structStats, nil
 }
 
 func (ipt *IPTables) executeList(args []string) ([]string, error) {
