@@ -16,6 +16,49 @@ var (
 		prometheus.HistogramOpts{Name: "kube_vip_service_reconcile_duration_seconds", Help: "How long AddOrModify takes end-to-end"},
 		[]string{"namespace"},
 	)
+	VIPAddresses = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_vip_addresses", Help: "VIP addresses currently held by interface and address family"},
+		[]string{"interface", "family"},
+	)
+	VIPOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_vip_operations_total", Help: "VIP address operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	ARPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_arp_advertisements_total", Help: "Gratuitous ARP advertisements by result"},
+		[]string{"result"},
+	)
+	NDPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_ndp_advertisements_total", Help: "Gratuitous NDP advertisements by result"},
+		[]string{"result"},
+	)
+	RouteOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_route_operations_total", Help: "Routing table operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	DNSResolutionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_dns_resolutions_total", Help: "DNS resolutions by result"},
+		[]string{"result"},
+	)
+	DNSIPChangesTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{Name: "kube_vip_dns_ip_changes_total", Help: "DNS-driven VIP IP changes"},
+	)
+	BGPRoutesAdvertised = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_bgp_routes_advertised", Help: "BGP routes currently advertised by address family"},
+		[]string{"family"},
+	)
+	BGPRouteOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_bgp_route_operations_total", Help: "BGP route operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	EgressRules = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_egress_rules", Help: "Egress SNAT rules currently configured by table"},
+		[]string{"table"},
+	)
+	EgressOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_egress_operations_total", Help: "Egress SNAT operations by operation and result"},
+		[]string{"op", "result"},
+	)
 
 	// This is a prometheus counter used to count the number of events received
 	// from the service watcher
@@ -35,6 +78,14 @@ var (
 		prometheus.GaugeOpts{Name: "kube_vip_is_leader", Help: "1 if this node currently holds the lease"},
 		[]string{"node", "lease_name"},
 	)
+	WatcherLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_watcher_loops", Help: "Live watcher loops by kind"},
+		[]string{"kind"},
+	)
+	ElectionLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_election_loops", Help: "Live leader election loops by type"},
+		[]string{"type"},
+	)
 	ServiceElectionLoops = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_service_election_loops",
 			Help: "Live per-service leader election restart loops on this node; more than 1 per service means loops leaked"},
@@ -50,6 +101,10 @@ var (
 			Help: "Per-service leader election failures by reason"},
 		[]string{"namespace", "name", "reason"},
 	)
+	WatcherRestartsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_watcher_restarts_total", Help: "Watcher restarts by kind and reason"},
+		[]string{"kind", "reason"},
+	)
 
 	// This is a prometheus gauge indicating the state of the sessions.
 	// 1 means "ESTABLISHED", 0 means "NOT ESTABLISHED"
@@ -59,6 +114,9 @@ var (
 		Name:      "bgp_session_info",
 		Help:      "Display state of session by setting metric for label value with current state to 1",
 	}, []string{"state", "peer"},
+	)
+	UPNPMappings = prometheus.NewGauge(
+		prometheus.GaugeOpts{Name: "kube_vip_upnp_mappings", Help: "UPNP mappings currently tracked"},
 	)
 
 	// General Health
@@ -74,12 +132,27 @@ func RegisterPrometheusMetrics() {
 		ActiveServices,
 		ServiceReconcileErrorsTotal,
 		ServiceReconcileDuration,
+		VIPAddresses,
+		VIPOperationsTotal,
+		ARPAdvertisementsTotal,
+		NDPAdvertisementsTotal,
+		RouteOperationsTotal,
+		DNSResolutionsTotal,
+		DNSIPChangesTotal,
+		BGPRoutesAdvertised,
+		BGPRouteOperationsTotal,
+		EgressRules,
+		EgressOperationsTotal,
 		LeaderTransitionsTotal,
 		IsLeader,
+		WatcherLoops,
+		ElectionLoops,
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
+		WatcherRestartsTotal,
 		BGPSessionInfoGauge,
+		UPNPMappings,
 		BuildInfo,
 		CountServiceWatchEvent,
 	)

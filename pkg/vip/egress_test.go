@@ -34,3 +34,15 @@ func Test_findRules(t *testing.T) {
 		})
 	}
 }
+
+func TestCountEgressSNATRules(t *testing.T) {
+	rules := []string{
+		fmt.Sprintf("-A POSTROUTING -s 10.0.0.2/32 -j SNAT --to-source 10.0.0.1 -m comment --comment \"%s-default\"", Comment),
+		fmt.Sprintf("-A POSTROUTING -s 10.0.0.3/32 -j RETURN -m comment --comment \"%s-default\"", Comment),
+		"-A POSTROUTING -s 10.0.0.4/32 -j SNAT --to-source 10.0.0.1 -m comment --comment \"other\"",
+	}
+
+	if got := countEgressSNATRules(rules); got != 1 {
+		t.Fatalf("countEgressSNATRules() = %d, want 1", got)
+	}
+}

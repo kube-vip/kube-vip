@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
 	ct "github.com/florianl/go-conntrack"
@@ -34,6 +35,7 @@ const Comment = "a3ViZS12aXAK=kube-vip"
 type Egress struct {
 	ipTablesClient *iptables.IPTables
 	comment        string
+	useNftables    bool
 }
 
 func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Protocol) (*Egress, error) {
@@ -54,6 +56,7 @@ func CreateIptablesClient(nftables bool, namespace string, protocol iptables.Pro
 
 	e.ipTablesClient, err = iptables.New(options...)
 	e.comment = Comment + "-" + namespace
+	e.useNftables = nftables
 	return e, err
 }
 
@@ -96,7 +99,9 @@ func (e *Egress) DeleteMangleMarkingForNetwork(podIP, name, network string) erro
 	return e.ipTablesClient.Delete("mangle", name, "-s", podIP, "-d", network, "-j", "MARK", "--set-mark", "64/64", "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) DeleteSourceNat(podIP, vip string) error {
+func (e *Egress) DeleteSourceNat(podIP, vip string) (err error) {
+	defer func() { e.observeSNATOperation("delete", err) }()
+
 	log.Info("[egress] Removing source nat", "podIP", podIP, "vip", vip)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
@@ -107,7 +112,9 @@ func (e *Egress) DeleteSourceNat(podIP, vip string) error {
 	return e.ipTablesClient.Delete("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) error {
+func (e *Egress) DeleteSourceNatForDestinationPort(podIP, vip, port, proto string) (err error) {
+	defer func() { e.observeSNATOperation("delete", err) }()
+
 	log.Info("[egress] Removing source nat", "podIP", podIP, "vip", vip, "destination port", port)
 
 	exists, _ := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
@@ -165,7 +172,9 @@ func (e *Egress) InsertMangeTableIntoPrerouting(name string) error {
 	return e.ipTablesClient.Insert("mangle", "PREROUTING", 1, "-j", name, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) InsertSourceNat(vip, podIP string) error {
+func (e *Egress) InsertSourceNat(vip, podIP string) (err error) {
+	defer func() { e.observeSNATOperation("add", err) }()
+
 	log.Info("[egress] Adding source nat", "original source", podIP, "new source", vip)
 	if exists, err := e.ipTablesClient.Exists("nat", "POSTROUTING", "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment); err != nil {
 		return err
@@ -178,7 +187,9 @@ func (e *Egress) InsertSourceNat(vip, podIP string) error {
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-m", "comment", "--comment", e.comment)
 }
 
-func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) error {
+func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto string) (err error) {
+	defer func() { e.observeSNATOperation("add", err) }()
+
 	log.Info("[egress] Adding source nat", "from", podIP, "to", vip, "port", port)
 	natRules, err := e.ipTablesClient.List("nat", "POSTROUTING")
 	if err != nil {
@@ -202,6 +213,79 @@ func (e *Egress) InsertSourceNatForDestinationPort(vip, podIP, port, proto strin
 	}
 
 	return e.ipTablesClient.Insert("nat", "POSTROUTING", 1, "-s", podIP+"/32", "-m", "mark", "--mark", "64/64", "-j", "SNAT", "--to-source", vip, "-p", proto, "--dport", port, "-m", "comment", "--comment", e.comment)
+}
+
+func (e *Egress) observeSNATOperation(op string, err error) {
+	result := "ok"
+	if err != nil {
+		result = "error"
+	} else {
+		e.setSNATRuleCount()
+	}
+	metrics.EgressOperationsTotal.WithLabelValues(op, result).Inc()
+}
+
+func (e *Egress) setSNATRuleCount() {
+	if e.ipTablesClient == nil {
+		return
+	}
+
+	rules, err := e.ipTablesClient.List(iptables.TableNat, iptables.ChainPOSTROUTING)
+	if err != nil {
+		log.Debug("[egress] unable to count iptables SNAT rules", "err", err)
+		return
+	}
+	count := countEgressSNATRules(rules)
+
+	// The iptables metric label is shared by both address families, so include
+	// rules from the other family in the same gauge when it is available.
+	otherProtocol := iptables.ProtocolIPv6
+	if e.ipTablesClient.Proto() == iptables.ProtocolIPv6 {
+		otherProtocol = iptables.ProtocolIPv4
+	}
+	options := []iptables.Option{
+		iptables.EnableNFTables(e.useNftables),
+		iptables.IPFamily(otherProtocol),
+	}
+	if otherProtocol == iptables.ProtocolIPv6 {
+		options = append(options, iptables.Timeout(5))
+	}
+	otherClient, err := iptables.New(options...)
+	if err == nil {
+		otherRules, listErr := otherClient.List(iptables.TableNat, iptables.ChainPOSTROUTING)
+		if listErr != nil {
+			log.Debug("[egress] unable to count ip6tables SNAT rules", "err", listErr)
+			return
+		}
+		count += countEgressSNATRules(otherRules)
+	}
+
+	metrics.EgressRules.WithLabelValues(iptables.TableNat).Set(float64(count))
+}
+
+func countEgressSNATRules(rules []string) int {
+	count := 0
+	for _, rule := range rules {
+		fields := strings.Fields(rule)
+		hasEgressComment := false
+		hasSNATTarget := false
+		for i := 0; i < len(fields); i++ {
+			switch fields[i] {
+			case "--comment":
+				if i+1 < len(fields) {
+					hasEgressComment = strings.HasPrefix(strings.Trim(fields[i+1], `"`), Comment+"-")
+				}
+			case "-j", "--jump":
+				if i+1 < len(fields) && fields[i+1] == "SNAT" {
+					hasSNATTarget = true
+				}
+			}
+		}
+		if hasEgressComment && hasSNATTarget {
+			count++
+		}
+	}
+	return count
 }
 
 func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts, srcPorts string) error {
@@ -371,6 +455,7 @@ func (e *Egress) CleanIPtables() error {
 	} else {
 		log.Warn("No existing mangle chain exists", "chain name", MangleChainName)
 	}
+	e.setSNATRuleCount()
 	return nil
 }
 

@@ -308,6 +308,10 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 }
 
 func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
+	watcherLoops := metrics.WatcherLoops.WithLabelValues("lease")
+	watcherLoops.Inc()
+	defer watcherLoops.Dec()
+
 	// Track this loop for the lifetime of the goroutine. There has to be at most
 	// one per service, so a value above 1 means loops leaked.
 	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
@@ -337,6 +341,7 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 				attempts.Inc()
 				err := serviceFunc(svcCtx, service, wg, true)
 				if err != nil {
+					metrics.WatcherRestartsTotal.WithLabelValues("lease", "leader_election_error").Inc()
 					log.Error(err.Error())
 				}
 			} else {

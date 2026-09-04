@@ -22,6 +22,10 @@ import (
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
 func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) error {
+	loops := metrics.WatcherLoops.WithLabelValues("service")
+	loops.Inc()
+	defer loops.Dec()
+
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -116,6 +120,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes services")
+			metrics.WatcherRestartsTotal.WithLabelValues("service", "watch_error").Inc()
 			watchErr := utils.WatchError(event.Object)
 			log.Error("services", "err", watchErr)
 			return utils.WrapPanicError(watchErr, "service watch failed")
@@ -129,6 +134,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	if watcherErr := context.Cause(watcherCtx); watcherErr != nil {
 		return watcherErr
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("service", "channel_closed").Inc()
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return utils.NewPanicError("service watch channel closed unexpectedly")
 }

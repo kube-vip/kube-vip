@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
@@ -72,6 +73,10 @@ func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 }
 
 func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) {
+	loops := metrics.ElectionLoops.WithLabelValues("kubernetes")
+	loops.Inc()
+	defer loops.Dec()
+
 	// we use the Lease lock type since edits to Leases are less common
 	// and fewer objects in the cluster watch "all Leases".
 	lock := &resourcelock.LeaseLock{
@@ -108,6 +113,10 @@ func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) {
 }
 
 func runEtcdLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
+	loops := metrics.ElectionLoops.WithLabelValues("etcd")
+	loops.Inc()
+	defer loops.Dec()
+
 	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.Mgr.EtcdClient},
 		Name:                 run.LeaseID.NamespacedName(),
@@ -147,6 +156,10 @@ type RunConfig struct {
 }
 
 func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
+	loops := metrics.WatcherLoops.WithLabelValues("node")
+	loops.Inc()
+	defer loops.Dec()
+
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
@@ -230,6 +243,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
+			metrics.WatcherRestartsTotal.WithLabelValues("node", "watch_error").Inc()
 			watchErr = fmt.Errorf("node watcher error: %w", utils.WatchError(event.Object))
 			log.Error("watcher", "err", watchErr)
 		default:
@@ -243,6 +257,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 	if ctx.Err() != nil {
 		return nil
 	}
+	metrics.WatcherRestartsTotal.WithLabelValues("node", "channel_closed").Inc()
 	return utils.NewPanicError("node watcher channel closed unexpectedly")
 }
 
