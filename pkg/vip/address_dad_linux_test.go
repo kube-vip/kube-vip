@@ -16,11 +16,10 @@ func TestAddIPPerCallDADSkipDoesNotPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	interfaceManager := networkinterface.NewManager()
 	configurator := &network{
 		address: address,
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "kube-vip-dad-test"}},
-		},
+		link:    interfaceManager.Get(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "kube-vip-dad-test"}}),
 	}
 
 	// The netlink operation may fail without CAP_NET_ADMIN, but the address

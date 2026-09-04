@@ -73,6 +73,7 @@ func (m *Manager) Add(object string, r route, precheck, update bool) error {
 		if added {
 			log.Debug("[RT] added route", "path", key, "object", object)
 		}
+		m.tracker[key] = itm
 	}
 
 	itm.objects[object] = true
@@ -112,6 +113,8 @@ func (m *Manager) Delete(object string, r route) error {
 }
 
 func (m *Manager) Clear() {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 	for _, itm := range m.tracker {
 		if err := itm.route.DeleteRoute(); err != nil {
 			log.Warn("[RT] failed to delete route", "err", err.Error())
@@ -121,6 +124,8 @@ func (m *Manager) Clear() {
 }
 
 func (m *Manager) Check(key string) bool {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 	_, exists := m.tracker[key]
 	return exists
 }
