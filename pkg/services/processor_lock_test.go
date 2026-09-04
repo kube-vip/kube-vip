@@ -84,6 +84,35 @@ func TestServiceLocksAreScopedByUID(t *testing.T) {
 	})
 }
 
+func TestAdmitServiceInstanceDoesNotRelockCollidingShard(t *testing.T) {
+	tracked := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "tracked", Namespace: "default", UID: types.UID("tracked"),
+	}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10", ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}}
+	candidate := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "candidate", Namespace: "default", UID: types.UID("candidate"),
+	}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10", ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+		serviceLocks:     keymutex.NewHashed(1),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := processor.admitServiceInstance(context.Background(), candidate, &sync.WaitGroup{})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("admitServiceInstance() error = nil, want shared VIP policy error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("admitServiceInstance() deadlocked on colliding Service lock shard")
+	}
+}
+
 func TestAdmissionDoesNotSerializeUnrelatedInstanceConstruction(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -130,6 +159,105 @@ func TestAdmissionDoesNotSerializeUnrelatedInstanceConstruction(t *testing.T) {
 	}
 }
 
+func TestAdmissionRejectsConflictWithPendingConstruction(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	processor := &Processor{
+		config:       &kubevip.Config{},
+		serviceLocks: keymutex.NewHashed(concurrentServiceLocks),
+		instanceFactory: func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			if svc.Name == "slow" {
+				close(started)
+				<-release
+			}
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		},
+	}
+	slow := admissionTestService("slow", "192.0.2.10")
+	conflicting := admissionTestService("conflicting", "192.0.2.10")
+
+	slowDone := make(chan error, 1)
+	go func() {
+		_, _, err := processor.admitServiceInstance(context.Background(), slow, &sync.WaitGroup{})
+		slowDone <- err
+	}()
+	<-started
+
+	conflictDone := make(chan error, 1)
+	go func() {
+		_, _, err := processor.admitServiceInstance(context.Background(), conflicting, &sync.WaitGroup{})
+		conflictDone <- err
+	}()
+	select {
+	case err := <-conflictDone:
+		if err == nil {
+			t.Fatal("conflicting admission ignored the pending VIP reservation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("conflicting admission waited for pending construction")
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	if err := <-slowDone; err != nil {
+		t.Fatalf("slow admission error = %v", err)
+	}
+}
+
+func TestAdmissionReleasesReservationAfterConstructionFailure(t *testing.T) {
+	processor := &Processor{
+		config:       &kubevip.Config{},
+		serviceLocks: keymutex.NewHashed(concurrentServiceLocks),
+		instanceFactory: func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			if svc.Name == "failed" {
+				return nil, errors.New("construction failed")
+			}
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		},
+	}
+	failed := admissionTestService("failed", "192.0.2.10")
+	replacement := admissionTestService("replacement", "192.0.2.10")
+
+	if _, _, err := processor.admitServiceInstance(context.Background(), failed, &sync.WaitGroup{}); err == nil {
+		t.Fatal("failed construction returned no error")
+	}
+	if _, added, err := processor.admitServiceInstance(context.Background(), replacement, &sync.WaitGroup{}); err != nil {
+		t.Fatalf("replacement admission error = %v", err)
+	} else if !added {
+		t.Fatal("replacement was not added after failed reservation cleanup")
+	}
+}
+
+func TestAdmissionDoesNotWaitForTrackedServiceLock(t *testing.T) {
+	processor := &Processor{config: &kubevip.Config{}}
+	trackedService := admissionTestService("tracked", "192.0.2.10")
+	processor.ServiceInstances = []*instance.Instance{{
+		ServiceUID:       trackedService.UID,
+		ServiceAddresses: []string{"192.0.2.10"},
+		ServiceSnapshot:  trackedService,
+	}}
+
+	unlockTracked := processor.lockService(trackedService.UID)
+	defer unlockTracked()
+	admitted := make(chan error, 1)
+	go func() {
+		release, err := processor.reserveServiceAdmission(admissionTestService("other", "192.0.2.20"))
+		if err == nil {
+			release()
+		}
+		admitted <- err
+	}()
+	select {
+	case err := <-admitted:
+		if err != nil {
+			t.Fatalf("unrelated admission returned an error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unrelated admission waited for the tracked Service lock")
+	}
+}
+
 func admissionTestService(name, address string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
@@ -163,6 +291,114 @@ func TestServiceChangedHandlesNilIPFamilyPolicy(t *testing.T) {
 	service.Spec.IPFamilyPolicy = &policy
 	if !serviceChanged(instance, service) {
 		t.Fatal("Service IP family policy change was not detected")
+	}
+}
+
+func TestServiceVIPSharingRequiresClusterPolicyAndElectionLease(t *testing.T) {
+	sharedVIP := "192.0.2.10"
+	tracked := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "tracked", Namespace: "default", UID: types.UID("tracked"),
+	}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP}}
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+	}
+
+	tests := []struct {
+		name                   string
+		service                *v1.Service
+		wantErr                bool
+		annotations            map[string]string
+		enableServicesElection bool
+		trackedTrafficPolicy   v1.ServiceExternalTrafficPolicy
+	}{
+		{
+			name: "cluster policy without service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}},
+		},
+		{
+			name: "common lease without service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+				Annotations: map[string]string{kubevip.ServiceLease: "shared"},
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}},
+			annotations: map[string]string{kubevip.ServiceLease: "shared"},
+		},
+		{
+			name: "common lease with service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+				Annotations: map[string]string{kubevip.ServiceLease: "shared"},
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}},
+			annotations:            map[string]string{kubevip.ServiceLease: "shared"},
+			enableServicesElection: true,
+		},
+		{
+			name: "different lease with service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+				Annotations: map[string]string{kubevip.ServiceLease: "different"},
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}},
+			annotations:            map[string]string{kubevip.ServiceLease: "shared"},
+			enableServicesElection: true,
+			wantErr:                true,
+		},
+		{
+			name: "local traffic policy without service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
+			wantErr: true,
+		},
+		{
+			name: "candidate local and tracked cluster without service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
+			trackedTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster,
+			wantErr:              true,
+		},
+		{
+			name: "candidate cluster and tracked local without service election",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}},
+			trackedTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+			wantErr:              true,
+		},
+		{
+			name: "common lease with local traffic policy",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+				Annotations: map[string]string{kubevip.ServiceLease: "shared"},
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: sharedVIP, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal}},
+			annotations:            map[string]string{kubevip.ServiceLease: "shared"},
+			enableServicesElection: true,
+			wantErr:                true,
+		},
+		{
+			name: "different VIP",
+			service: &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "other", Namespace: "default", UID: types.UID("other"),
+			}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.11"}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tracked.Annotations = test.annotations
+			tracked.Spec.ExternalTrafficPolicy = test.trackedTrafficPolicy
+			if tracked.Spec.ExternalTrafficPolicy == "" {
+				tracked.Spec.ExternalTrafficPolicy = test.service.Spec.ExternalTrafficPolicy
+			}
+			processor.config.EnableServicesElection = test.enableServicesElection
+			err := processor.validateServiceVIPLease(test.service)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("validateServiceVIPLease() error = %v, want error %t", err, test.wantErr)
+			}
+		})
 	}
 }
 
