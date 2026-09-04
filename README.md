@@ -37,6 +37,12 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Egress! Kube-vip will utilise a service loadbalancer as both the ingress and **egress** for a pod. 
 - ... manifest generation, vendor API integrations and many more...
 
+## Prometheus metrics
+
+kube-vip exposes a Prometheus endpoint at `/metrics` by default. See the
+[metrics reference](docs/metrics.md) for the complete metric catalog,
+configuration, labels, and example queries.
+
 ## Why?
 
 The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters, which at this time can involve a few components and configurations that all need to be managed. This was blogged about in detail by [thebsdbox](https://twitter.com/thebsdbox/) here -> [https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing](https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing).
