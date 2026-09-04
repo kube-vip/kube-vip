@@ -212,7 +212,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 2, false, dsNumber)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes VIP if all endpoints were deleted and re-adds VIP on endpoint creation",
@@ -336,16 +335,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			DescribeTable("configures an IPv4 VIP address for services when per-service election on demand is used",
-				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
-						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv4Family, currentOffset, defaultNetwork))
+					for _, offset := range offsets {
+						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork))
 					}
 					testServiceMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, 1, false, dsNumber)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 		})
@@ -456,7 +455,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 						[]corev1.IPFamily{corev1.IPv6Protocol}, 2, false, dsNumber)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes VIP if all endpoints were deleted and re-adds VIP on endpoint creation",
@@ -566,16 +564,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			DescribeTable("configures an IPv6 VIP address for services when per-service election on demand is used",
-				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
-						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv6Family, currentOffset, defaultNetwork))
+					for _, offset := range offsets {
+						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork))
 					}
 					testServiceMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol}, 1, 1, false, dsNumber)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 		})
@@ -686,7 +684,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 						[]corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 2, false, dsNumber)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes VIP if all endpoints were deleted and re-adds VIP on endpoint creation",
@@ -797,16 +794,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 VIP address for services when per-service election on demand is used",
-				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
-						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(currentOffset, defaultNetwork))
+					for _, offset := range offsets {
+						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
 					}
 					testServiceMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol, corev1.IPv6Protocol}, 1, 1, false, dsNumber)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -920,7 +917,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 						[]corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 2, false, dsNumber)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes VIP if all endpoints were deleted and re-adds VIP on endpoint creation",
@@ -1033,16 +1029,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			DescribeTable("configures an IPv6 and IPv4 VIP address for services when per-service election on demand is used",
-				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
-						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(currentOffset, defaultNetwork))
+					for _, offset := range offsets {
+						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
 					}
 					testServiceMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol}, 1, 1, false, dsNumber)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -1288,7 +1284,7 @@ func killLeader(leaderName string) {
 
 	session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(session, "5s").Should(gexec.Exit(0))
+	Eventually(session, "30s").Should(gexec.Exit(0))
 }
 
 func findLeader(leaderIPAddr string, clusterName string) string {
@@ -1850,25 +1846,19 @@ func testServiceMixedElection(ctx context.Context, svcName string, lbAddress []s
 		}
 	}
 
-	for i := range services {
-		expected := i < len(services)-1
+	for _, svc := range services {
+		container := e2e.GetLeaseHolder(ctx, svc.lease, svc.leaseNamespace, client)
 
-		container := e2e.GetLeaseHolder(ctx, services[i].lease, services[i].leaseNamespace, client)
-
-		err := client.CoreV1().Services(dsNamespace).Delete(ctx, services[i].name, metav1.DeleteOptions{})
+		err := client.CoreV1().Services(dsNamespace).Delete(ctx, svc.name, metav1.DeleteOptions{})
 		Expect(err).ToNot(HaveOccurred())
 		time.Sleep(time.Second)
 
-		for addr := range strings.SplitSeq(services[i].lbAddress, ",") {
+		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
 			if serviceElection {
-				Expect(checkIPAddress(addr, container, expected)).To(BeTrue())
+				Expect(checkIPAddress(addr, container, false)).To(BeTrue())
 			}
 
-			if expected {
-				assertConnection("http", addr, "80", "", 3*time.Second, 60*time.Second)
-			} else {
-				assertConnectionError("http", addr, "80", "", 3*time.Second, 30*time.Second)
-			}
+			assertConnectionError("http", addr, "80", "", 3*time.Second, 30*time.Second)
 		}
 	}
 

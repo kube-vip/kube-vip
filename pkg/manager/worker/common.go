@@ -17,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -96,7 +97,15 @@ func (c *Common) GlobalLeader(ctx context.Context, leaseName string) {
 		})
 	}
 
-	c.runGlobalElection(servicesCtx, c, leaseName, c.config, c.electionMgr)
+	var vips []string
+	if c.svcProcessor != nil {
+		var err error
+		vips, err = c.svcProcessor.ElectionVIPs(servicesCtx)
+		if err != nil {
+			log.Warn("unable to list Service VIPs for Lease metadata", "err", err)
+		}
+	}
+	c.runGlobalElection(servicesCtx, c, leaseName, c.config, c.electionMgr, vips)
 }
 
 func (c *Common) ServicesNoLeader(ctx context.Context) error {
@@ -155,7 +164,7 @@ func (c *Common) OnNewLeader(identity string) {
 }
 
 func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leaseName string,
-	config *kubevip.Config, electionManager *election.Manager) {
+	config *kubevip.Config, electionManager *election.Manager, vips []string) {
 
 	log.Debug("starting global election")
 	ns, leaseName := lease.NamespaceName(leaseName, config)
@@ -163,99 +172,73 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)
 	objectName := lease.ObjectName(leaseID, "svcs0")
 
-	// objLease, isNew, isSharedLease := c.leaseMgr.Add(leaseID, objectName)
+	objLease, _ := c.leaseMgr.Acquire(context.Background(), leaseID, objectName)
+	defer c.leaseMgr.Delete(leaseID, objectName, objLease)
+	electionCtx, cancelElection := objLease.NewElectionContext(ctx)
+	defer cancelElection()
 
-	objLease := c.leaseMgr.Add(ctx, leaseID)
-	isNew := objLease.Add(objectName)
-
-	// this service was already processed so we do not need to do anything
-	if !isNew {
-		log.Debug("this election was already done, waiting for it to finish", "lease", c.config.ServicesLeaseName)
-		// Wait for either the service context or lease context to be done
-		select {
-		case <-ctx.Done():
-			// Service was deleted
-			c.leaseMgr.Delete(leaseID, objectName, objLease)
-		case <-objLease.Ctx.Done():
-			// Leader election ended (leadership lost or context cancelled)
-		}
-		return
-	}
-
-	objLease.Lock()
-
-	defer func() {
-		objLease.Unlock()
-	}()
-
-	if objLease.Elected.Load() {
-		objLease.Unlock()
+	for !objLease.BeginElection() {
 		log.Debug("this election was already done, shared lease", "lease", leaseID.Name())
+		leaderGeneration, elected := objLease.WaitForLeaderGeneration(electionCtx)
+		if !elected {
+			if electionCtx.Err() != nil {
+				return
+			}
+			continue
+		}
 
-		// wait for leader election to start or context to be done
-		select {
-		case <-objLease.Started:
-		case <-objLease.Ctx.Done():
-			// Lease was cancelled (e.g., leader election ended), return immediately
-			// This allows the restart loop to create a fresh lease
-			log.Debug("lease context cancelled before leader election started", "lease", leaseID.Name())
+		leaderCtx, cancelLeader := context.WithCancel(electionCtx)
+		wg := sync.WaitGroup{}
+		wg.Go(func() {
+			a.OnStartedLeading(leaderCtx)
+		})
+		objLease.WaitForElectionEndAfter(electionCtx, leaderGeneration)
+		cancelLeader()
+		wg.Wait()
+		if electionCtx.Err() != nil {
 			return
 		}
-
-		a.OnStartedLeading(objLease.Ctx)
-
-		log.Debug("waiting for lease to finish", "lease", leaseID.Name())
-		// wait for leaderelection to be finished
-		<-objLease.Ctx.Done()
-
-		// we can do cleanup here
 		a.OnStoppedLeading()
 
 		log.Error("lost leadership, restarting kube-vip", "lease", leaseID.Name())
 		c.killFunc()
-
 		return
 	}
-
-	// For new leases (not shared), ensure cleanup when the leader election ends
-	// This is critical for the restartable service watcher to be able to restart
-	// the leader election after leadership loss
-	defer func() {
-		// Delete the lease from the manager so subsequent calls can create a fresh lease
-		// This handles the case where leader election ends due to:
-		// 1. Leadership loss (e.g., network timeout)
-		// 2. Context cancellation
-		// 3. Any other reason RunOrDie returns
-		c.leaseMgr.Delete(leaseID, objectName, objLease)
-	}()
-
 	wg := sync.WaitGroup{}
+	defer objLease.ElectionStopped()
 	defer wg.Wait()
 
 	run := &election.RunConfig{
 		Config:           config,
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
+		VIPs:             vips,
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
+			objLease.ElectionStarted()
 			wg.Go(func() {
-				objLease.Elected.Store(true)
-				objLease.Unlock()
-				close(objLease.Started)
 				a.OnStartedLeading(ctx)
 				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
 				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
 			})
 		},
 		OnStoppedLeading: func() {
-			objLease.Elected.Store(false)
+			objLease.ElectionStopped()
 			a.OnStoppedLeading()
 			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
 		},
 		OnNewLeader: a.OnNewLeader,
 	}
 
-	if err := election.RunOrDie(ctx, run, config); err != nil {
+	if err := election.RunOrDie(electionCtx, run, config); err != nil {
 		log.Error("leaderelection failed", "err", err, "id", config.NodeName, "name", leaseID.Name())
 	}
+}
+
+func controlPlaneElectionVIPs(config *kubevip.Config) []string {
+	configured := config.VIP
+	if config.Address != "" {
+		configured = config.Address
+	}
+	return vip.Split(configured)
 }

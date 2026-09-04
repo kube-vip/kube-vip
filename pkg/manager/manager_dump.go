@@ -104,21 +104,18 @@ func (sm *Manager) dumpServicesSection(ctx context.Context) {
 		fmt.Printf("Service Security Enabled: %t\n", sm.config.EnableServiceSecurity)
 
 		if sm.svcProcessor != nil {
-			instances := sm.svcProcessor.ServiceInstances
-			fmt.Printf("Kube-vip Active Service Instances: %d\n", len(instances))
-			for i, inst := range instances {
-				if inst.ServiceSnapshot != nil {
-					svc := inst.ServiceSnapshot
-					vipConfigs := ""
-					for j, cfg := range svc.Status.LoadBalancer.Ingress {
-						if j > 0 {
-							vipConfigs += ", "
-						}
-						vipConfigs += cfg.IP
+			services := sm.svcProcessor.ServiceSnapshots()
+			fmt.Printf("Kube-vip Active Service Instances: %d\n", len(services))
+			for i, svc := range services {
+				vipConfigs := ""
+				for j, cfg := range svc.Status.LoadBalancer.Ingress {
+					if j > 0 {
+						vipConfigs += ", "
 					}
-					fmt.Printf("  Service %d: %s/%s (Type: %s, VIPs: %s)\n",
-						i+1, svc.Namespace, svc.Name, svc.Spec.Type, vipConfigs)
+					vipConfigs += cfg.IP
 				}
+				fmt.Printf("  Service %d: %s/%s (Type: %s, VIPs: %s)\n",
+					i+1, svc.Namespace, svc.Name, svc.Spec.Type, vipConfigs)
 			}
 		}
 		if sm.clientSet != nil {
@@ -132,8 +129,6 @@ func (sm *Manager) dumpServicesSection(ctx context.Context) {
 				fmt.Println("Unable to retrieve all Services")
 			} else {
 				for x := range svcList.Items {
-
-					// Build all addresses
 					vipConfigs := ""
 					for j, cfg := range svcList.Items[x].Status.LoadBalancer.Ingress {
 						if j > 0 {
