@@ -41,6 +41,15 @@ const concurrentServiceLocks = 128
 
 var errServiceAddressPending = errors.New("service load-balancer address pending")
 
+type serviceVIPClaim struct {
+	uid                   types.UID
+	namespace             string
+	name                  string
+	leaseID               string
+	externalTrafficPolicy v1.ServiceExternalTrafficPolicy
+	addresses             []string
+}
+
 type Processor struct {
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
@@ -48,17 +57,19 @@ type Processor struct {
 
 	// instancesMutex protects membership of ServiceInstances. Mutable fields on each
 	// instance are protected separately by serviceLocks, keyed by Instance.UID().
-	ServiceInstances []*instance.Instance
-	instancesMutex   sync.RWMutex
-	serviceCleanupMu sync.Mutex
-	recoveryMu       sync.Mutex
-	recovered        bool
-	serviceLocks     keymutex.KeyMutex
-	serviceLocksOnce sync.Once
-	electionsMutex   sync.Mutex
-	elections        map[string]*serviceElection
-	nextMemberToken  atomic.Uint64
-	electionLoops    sync.Map
+	ServiceInstances  []*instance.Instance
+	instancesMutex    sync.RWMutex
+	serviceCleanupMu  sync.Mutex
+	vipAdmissionMu    sync.Mutex
+	pendingAdmissions map[types.UID]*serviceVIPClaim
+	recoveryMu        sync.Mutex
+	recovered         bool
+	serviceLocks      keymutex.KeyMutex
+	serviceLocksOnce  sync.Once
+	electionsMutex    sync.Mutex
+	elections         map[string]*serviceElection
+	nextMemberToken   atomic.Uint64
+	electionLoops     sync.Map
 
 	bgpServer *bgp.Server
 
@@ -300,9 +311,15 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	return nil
 }
 
-// admitServiceInstance constructs and tracks a Service instance under its
-// Service lock. Callers must not already hold that lock.
+// admitServiceInstance reserves VIP admission before constructing and tracking
+// a Service instance. Callers must not hold an admission or Service lock.
 func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, bool, error) {
+	releaseAdmission, err := p.reserveServiceAdmission(svc)
+	if err != nil {
+		return nil, false, err
+	}
+	defer releaseAdmission()
+
 	unlockService := p.lockService(svc.UID)
 	defer unlockService()
 
@@ -311,13 +328,37 @@ func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, w
 		return serviceInstance, false, nil
 	}
 
-	serviceInstance, err := p.createServiceInstance(ctx, svc, wg)
+	serviceInstance, err = p.createServiceInstance(ctx, svc, wg)
 	if err != nil {
 		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
 		return nil, false, fmt.Errorf("unable to create instance for service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
 	p.appendServiceInstance(serviceInstance)
 	return serviceInstance, true, nil
+}
+
+func (p *Processor) reserveServiceAdmission(svc *v1.Service) (func(), error) {
+	p.vipAdmissionMu.Lock()
+	defer p.vipAdmissionMu.Unlock()
+
+	reservation, err := p.newServiceVIPClaim(svc, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.validateServiceVIPClaim(reservation); err != nil {
+		return nil, err
+	}
+	if p.pendingAdmissions == nil {
+		p.pendingAdmissions = make(map[types.UID]*serviceVIPClaim)
+	}
+	p.pendingAdmissions[svc.UID] = reservation
+	return func() {
+		p.vipAdmissionMu.Lock()
+		defer p.vipAdmissionMu.Unlock()
+		if p.pendingAdmissions[svc.UID] == reservation {
+			delete(p.pendingAdmissions, svc.UID)
+		}
+	}, nil
 }
 
 func (p *Processor) createServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, error) {
@@ -754,6 +795,88 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 		serviceInstance.AddCalled = false
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+	return nil
+}
+
+// validateServiceVIPLease permits shared VIPs only for Cluster traffic policy.
+// With Service election enabled, both Services must also resolve to the same
+// lease. The caller must hold vipAdmissionMu; tracked instances expose immutable
+// admission metadata, so validation does not acquire Service locks.
+func (p *Processor) validateServiceVIPLease(svc *v1.Service) error {
+	claim, err := p.newServiceVIPClaim(svc, nil)
+	if err != nil {
+		return err
+	}
+	return p.validateServiceVIPClaim(claim)
+}
+
+func (p *Processor) validateServiceVIPClaim(claim *serviceVIPClaim) error {
+	if len(claim.addresses) == 0 {
+		return nil
+	}
+	for _, tracked := range p.serviceInstances() {
+		if tracked == nil || tracked.UID() == claim.uid {
+			continue
+		}
+		cleanupInfo, ok := tracked.CleanupInfo()
+		if !ok {
+			continue
+		}
+		leaseNamespace, leaseName := lease.ServiceNameFor(cleanupInfo.Namespace, cleanupInfo.Name, cleanupInfo.Lease)
+		trackedClaim := &serviceVIPClaim{
+			uid:                   tracked.UID(),
+			namespace:             cleanupInfo.Namespace,
+			name:                  cleanupInfo.Name,
+			leaseID:               lease.NewID(p.config.LeaderElectionType, leaseNamespace, leaseName).NamespacedName(),
+			externalTrafficPolicy: cleanupInfo.ExternalTrafficPolicy,
+			addresses:             tracked.Addresses(),
+		}
+		if err := p.validateServiceVIPConflict(claim, trackedClaim); err != nil {
+			return err
+		}
+	}
+	for uid, pending := range p.pendingAdmissions {
+		if uid == claim.uid || pending == nil {
+			continue
+		}
+		if err := p.validateServiceVIPConflict(claim, pending); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Processor) newServiceVIPClaim(service *v1.Service, addresses []string) (*serviceVIPClaim, error) {
+	if service == nil {
+		return nil, fmt.Errorf("cannot create VIP claim for nil service")
+	}
+	if addresses == nil {
+		addresses, _ = instance.FetchServiceAddresses(service)
+	}
+	namespace, name := lease.ServiceName(service)
+	return &serviceVIPClaim{
+		uid:                   service.UID,
+		namespace:             service.Namespace,
+		name:                  service.Name,
+		leaseID:               lease.NewID(p.config.LeaderElectionType, namespace, name).NamespacedName(),
+		externalTrafficPolicy: service.Spec.ExternalTrafficPolicy,
+		addresses:             append([]string(nil), addresses...),
+	}, nil
+}
+
+func (p *Processor) validateServiceVIPConflict(claim, other *serviceVIPClaim) error {
+	if claim.externalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster &&
+		other.externalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster &&
+		(!p.config.EnableServicesElection || claim.leaseID == other.leaseID) {
+		return nil
+	}
+	for _, address := range claim.addresses {
+		for _, otherAddress := range other.addresses {
+			if address == otherAddress {
+				return fmt.Errorf("VIP %q cannot be shared with service %s/%s", address, other.namespace, other.name)
+			}
+		}
+	}
 	return nil
 }
 

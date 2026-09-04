@@ -564,8 +564,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip IPv4 services routing table mode functionality with mixed election", Ordered, func() {
@@ -618,16 +618,16 @@ var _ = Describe("kube-vip routing table mode", func() {
 			})
 
 			DescribeTable("configures an IPv4 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
+					for _, offset := range offsets {
 						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork))
 					}
 					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -695,8 +695,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip IPv6 services routing table mode functionality with mixed election", Ordered, func() {
@@ -749,16 +749,16 @@ var _ = Describe("kube-vip routing table mode", func() {
 			})
 
 			DescribeTable("configures an IPv6 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
+					for _, offset := range offsets {
 						lbAddresses = append(lbAddresses, e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork))
 					}
 					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -827,8 +827,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip DualStack services routing table mode functionality with mixed election - IPv4 primary", Ordered, func() {
@@ -881,16 +881,16 @@ var _ = Describe("kube-vip routing table mode", func() {
 			})
 
 			DescribeTable("configures an IPv4 and IPv6 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
+					for _, offset := range offsets {
 						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
 					}
 					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -961,8 +961,8 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip DualStack services routing table mode functionality with mixed election - IPv6 primary", Ordered, func() {
@@ -1017,16 +1017,16 @@ var _ = Describe("kube-vip routing table mode", func() {
 			})
 
 			DescribeTable("configures an IPv6 and IPv4 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddresses := []string{}
-					for range 2 {
+					for _, offset := range offsets {
 						lbAddresses = append(lbAddresses, e2e.GenerateDualStackVIP(offset, defaultNetwork))
 					}
 					testServiceRTMixedElection(ctx, svcName, lbAddresses, "plndr-svcs-lock", "kube-system", fmt.Sprintf("kubevip-%s", svcName), dsNamespace,
 						trafficPolicy, client, svcElection, ipFamily, 1, 1, dsNumber, false, clusterName)
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -1082,16 +1082,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false, dsNumber, false)
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
-					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
-						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1159,16 +1149,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false, dsNumber, false)
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork)
-					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
-						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1242,16 +1222,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
-			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateDualStackVIP(offset, defaultNetwork)
-					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
-						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
 			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted when common lease is used",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateDualStackVIP(offset, defaultNetwork)
@@ -1317,16 +1287,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 					lbAddress := e2e.GenerateDualStackVIP(offset, defaultNetwork)
 					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
 						trafficPolicy, client, svcElection, ipFamily, 1, false, dsNumber, false)
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only removes route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					lbAddress := e2e.GenerateDualStackVIP(offset, defaultNetwork)
-					testServiceRT(ctx, svcName, lbAddress, fmt.Sprintf("kubevip-%s", svcName), dsNamespace, clusterName,
-						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1407,7 +1367,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes route if all endpoint were deleted, and re-adds when endpoints are created",
@@ -1486,7 +1445,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes route if all endpoint were deleted, and re-adds when endpoints are created",
@@ -1566,7 +1524,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes route if all endpoint were deleted, and re-adds when endpoints are created",
@@ -1646,7 +1603,6 @@ var _ = Describe("kube-vip routing table mode", func() {
 						trafficPolicy, client, svcElection, ipFamily, 2, false, dsNumber, false)
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
 			DescribeTable("removes route if all endpoint were deleted, and re-adds when endpoints are created",
@@ -1782,7 +1738,7 @@ func testServiceRTMixedElection(ctx context.Context, svcName string, lbAddress [
 		}
 	}
 
-	for i, svc := range services {
+	for _, svc := range services {
 		By(withTimestamp(fmt.Sprintf("deleting service %s/%s\n", dsNamespace, svc.name)))
 
 		container := fmt.Sprintf("%s-control-plane", clusterName)
@@ -1794,10 +1750,9 @@ func testServiceRTMixedElection(ctx context.Context, svcName string, lbAddress [
 		Expect(err).ToNot(HaveOccurred())
 		time.Sleep(time.Second)
 
-		expected := i < len(services)-1
 		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
-			By(withTimestamp(fmt.Sprintf("checking route presence for address %q on container %q - expected: %t", addr, container, expected)))
-			e2e.CheckRoutePresence(addr, container, expected)
+			By(withTimestamp(fmt.Sprintf("checking route for address %q was removed from container %q", addr, container)))
+			e2e.CheckRoutePresence(addr, container, false)
 		}
 	}
 }
