@@ -10,6 +10,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 
 	log "log/slog"
 )
@@ -25,36 +26,22 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	log.Info("cluster membership", "namespace", leaseID.Namespace(), "lock", leaseID.Name(), "id", c.NodeName)
 
 	objectName := lease.ObjectName(leaseID, "cp")
-	objLease := leaseMgr.Add(ctx, leaseID)
-	isNew := objLease.Add(objectName)
+	objLease, _ := leaseMgr.Acquire(context.Background(), leaseID, objectName)
+	defer leaseMgr.Delete(leaseID, objectName, objLease)
 
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
-	// Start a goroutine that will delete the lease when the service context is cancelled.
-	// This is important for proper cleanup when a service is deleted - it ensures that
-	// the lease context (svcLease.Ctx) gets cancelled, which causes RunOrDie to return.
-	// Without this, RunOrDie would continue running until leadership is naturally lost.
-	wg.Go(func() {
-		<-objLease.Ctx.Done()
-		leaseMgr.Delete(leaseID, objectName, objLease)
-	})
+	electionCtx, cancelElection := objLease.NewElectionContext(ctx)
+	defer cancelElection()
 
-	if !isNew {
-		log.Debug("this election was already done, waiting for it to finish", "lease", leaseName)
-		<-objLease.Ctx.Done()
-		return nil
-	}
-
+	stop := cluster.StopChannel()
 	wg.Go(func() {
 		select {
-		case <-cluster.stop:
-		case <-ctx.Done():
+		case <-stop:
+			cancelElection()
+		case <-electionCtx.Done():
 		}
-
-		log.Info("Received termination, signaling cluster shutdown")
-		// Cancel the leader context, which will in turn cancel the leadership
-		objLease.Cancel()
 	})
 
 	// (attempt to) Remove the virtual IP, in case it already exists
@@ -69,54 +56,59 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		}
 	}
 
-	objLease.Lock()
+	for {
+		if !objLease.BeginElection() {
+			log.Debug("this election was already done, shared lease", "lease", leaseName)
+			leaderGeneration, elected := objLease.WaitForLeaderGeneration(electionCtx)
+			if !elected {
+				if electionCtx.Err() != nil {
+					return nil
+				}
+				// The runner that owned this shared lease's election ended it
+				// without ever being elected; take over the campaign ourselves
+				// instead of leaving the lease without an active runner.
+				continue
+			}
 
-	defer func() {
-		objLease.Unlock()
-	}()
+			leaderCtx, cancelLeader := context.WithCancel(electionCtx)
+			leaderWG := sync.WaitGroup{}
+			leaderWG.Go(func() {
+				cluster.OnStartedLeading(leaderCtx, c, em, bgpServer, killFunc, true)
+			})
 
-	// this object is sharing lease with another object
-	if objLease.Elected.Load() {
-		log.Debug("this election was already done, shared lease", "lease", leaseName)
-		// wait for leader election to start or context to be done
-		select {
-		case <-objLease.Started:
-		case <-objLease.Ctx.Done():
-			// Lease was cancelled (e.g., leader election ended), return immediately
-			// This allows the restart loop to create a fresh lease
-			log.Debug("lease context cancelled before leader election started", "lease", leaseName)
-			return fmt.Errorf("lease %q context cancelled before leader election started", leaseName)
+			log.Debug("cluster waiting for shared election to finish", "lease", leaseName)
+			objLease.WaitForElectionEndAfter(electionCtx, leaderGeneration)
+			cancelLeader()
+			leaderWG.Wait()
+
+			cluster.OnStoppedLeading(c, bgpServer)
+
+			return nil
 		}
-
-		cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, true)
-
-		log.Debug("cluster waiting for leader context done", "lease", leaseName)
-		// wait for leaderelection to be finished
-		<-objLease.Ctx.Done()
-
-		cluster.OnStoppedLeading(c, objLease, bgpServer)
-
-		return nil
+		break
 	}
+	defer objLease.ElectionStopped()
 
 	run := &election.RunConfig{
 		Config:           c,
 		LeaseID:          leaseID,
 		LeaseAnnotations: c.LeaseAnnotations,
+		VIPs:             controlPlaneElectionVIPs(c),
 		Mgr:              em,
-		OnStartedLeading: func(context.Context) { //nolint TODO: potential clean code
-			cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, false)
+		OnStartedLeading: func(ctx context.Context) {
+			objLease.ElectionStarted()
+			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc, false)
 		},
 		OnStoppedLeading: func() {
-			objLease.Elected.Store(false)
-			cluster.OnStoppedLeading(c, objLease, bgpServer)
+			objLease.ElectionStopped()
+			cluster.OnStoppedLeading(c, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
 			cluster.OnNewLeader(identity, c)
 		},
 	}
 
-	if err := election.RunOrDie(objLease.Ctx, run, c); err != nil {
+	if err := election.RunOrDie(electionCtx, run, c); err != nil {
 		cluster.Stop()
 		return fmt.Errorf("leaderelection failed: %w", err)
 	}
@@ -124,47 +116,31 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	return nil
 }
 
-func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Lease,
-	em *election.Manager, bgpServer *bgp.Server, killFunc func(), isShared bool) {
-	objLease.Elected.Store(true)
-	objLease.Unlock()
-
-	// When we become leader, ensure we can take over VIPs even if they're preserved on other nodes
-	if !isShared {
-		close(objLease.Started)
+func controlPlaneElectionVIPs(config *kubevip.Config) []string {
+	configured := config.VIP
+	if config.Address != "" {
+		configured = config.Address
 	}
+	return vip.Split(configured)
+}
 
+func (cluster *Cluster) OnStartedLeading(ctx context.Context, c *kubevip.Config,
+	em *election.Manager, bgpServer *bgp.Server, killFunc func(), _ bool) {
 	labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
 	if err := cluster.nodeLabelMgr.AddLabel(labels); err != nil {
 		log.Error("error adding label to node", "err", err)
 	}
 	cluster.labelAdded = true
 
-	if c.PreserveVIPOnLeadershipLoss {
-		log.Info("Becoming leader with VIP preservation enabled - ensuring VIP takeover")
-		// Force add the VIPs (this will work even if they exist due to the precheck logic)
-		for i := range cluster.Network {
-			added, err := cluster.Network[i].AddIP(true, false)
-			if err != nil {
-				log.Error("failed to ensure VIP on leader takeover", "vip", cluster.Network[i].IP(), "err", err)
-			} else if added {
-				log.Info("took over VIP as new leader", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-			} else {
-				log.Info("VIP already configured on interface", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
-			}
-		}
-	}
-
 	// As we're leading lets start the vip service
-	err := cluster.StartVipService(objLease.Ctx, c, em, bgpServer, killFunc)
+	err := cluster.StartVipService(ctx, c, em, bgpServer, killFunc)
 	if err != nil {
 		log.Error("starting VIP service on leader", "err", err)
 		killFunc()
 	}
 }
 
-func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Lease,
-	bgpServer *bgp.Server) {
+func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, bgpServer *bgp.Server) {
 	// we can do cleanup here
 	log.Info("This node is becoming a follower within the cluster")
 
@@ -176,9 +152,6 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 		cluster.labelAdded = false
 	}
 
-	// Stop the cluster context if it is running
-	objLease.Cancel()
-
 	cluster.cleanupVIPs(c)
 
 	log.Error("lost leadership, restarting kube-vip")
@@ -187,25 +160,6 @@ func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, objLease *lease.Leas
 func (cluster *Cluster) OnNewLeader(identity string, c *kubevip.Config) {
 	// we're notified when new leader elected
 	log.Info("New leader", "leader", identity)
-
-	// If we're not the new leader and we have VIPs preserved from previous leadership,
-	// we need to clean them up to avoid conflicts.
-	if identity != c.NodeName && c.PreserveVIPOnLeadershipLoss {
-		log.Info("Cleaning up preserved VIPs as another node became leader", "new_leader", identity)
-		for i := range cluster.Network {
-			deleted, err := cluster.Network[i].DeleteIP()
-			if err != nil {
-				log.Warn("failed to cleanup preserved VIP", "vip", cluster.Network[i].IP(), "err", err)
-			}
-			if deleted {
-				log.Info("cleaned up preserved VIP to avoid conflict", "IP", cluster.Network[i].IP(),
-					"interface", cluster.Network[i].Interface(), "new_leader", identity)
-			} else {
-				log.Debug("VIP was not present on this node", "IP", cluster.Network[i].IP(),
-					"interface", cluster.Network[i].Interface())
-			}
-		}
-	}
 }
 
 func generateLabelsFromConfig(addr, labelKey string) map[string]string {
