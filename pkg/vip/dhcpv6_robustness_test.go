@@ -2,6 +2,7 @@ package vip
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -34,6 +35,38 @@ func TestDHCPv6StopReleasesManagerReferenceForParentInterface(t *testing.T) {
 
 	if got := references.Load(); got != 1 {
 		t.Fatalf("manager reference count = %d, want 1 after stopping one VLAN client", got)
+	}
+}
+
+func TestDHCPv6ClientManagerSharesOneClientPerParentInterface(t *testing.T) {
+	references := &atomic.Int32{}
+	references.Store(1)
+	shared := &DHCPv6InternalClient{references: references}
+	manager := &DHCPv6ClientManager{
+		clients: map[string]*DHCPv6InternalClient{"parent0": shared},
+	}
+
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Go(func() {
+			client, err := manager.Add("parent0")
+			if err != nil {
+				t.Errorf("Add() error = %v", err)
+				return
+			}
+			if client != shared {
+				t.Errorf("Add() client = %p, want the shared client %p", client, shared)
+			}
+			manager.Delete("parent0")
+		})
+	}
+	wg.Wait()
+
+	if got := manager.Get("parent0"); got != shared {
+		t.Fatalf("shared client = %v, want it retained while still referenced", got)
+	}
+	if got := references.Load(); got != 1 {
+		t.Fatalf("manager reference count = %d, want 1", got)
 	}
 }
 
