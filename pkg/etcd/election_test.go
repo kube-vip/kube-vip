@@ -88,6 +88,40 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRunElectionAllowsImmediateSameMemberRestart(t *testing.T) {
+	g := NewWithT(t)
+	cli := client(g)
+	defer cli.Close()
+
+	uniqueID := rand.Uint64()
+	config := &etcd.LeaderElectionConfig{
+		EtcdConfig:           etcd.ClientConfig{Client: cli},
+		Name:                 randomElectionNameForTest("same-member-restart"),
+		MemberID:             "same-member",
+		MemberUniqueID:       &uniqueID,
+		LeaseDurationSeconds: 1,
+	}
+
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		started := make(chan struct{})
+		config.Callbacks = baseCallbacksForName(config.MemberID)
+		config.Callbacks.OnStartedLeading = func(context.Context) {
+			close(started)
+			cancel()
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- etcd.RunElection(ctx, config) }()
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("attempt %d did not become leader", i+1)
+		}
+		g.Expect(receiveElectionResult(t, done)).To(Succeed())
+	}
+}
+
 func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
@@ -193,4 +227,15 @@ func client(g Gomega) *clientv3.Client {
 	})
 	g.Expect(err).NotTo(HaveOccurred())
 	return c
+}
+
+func receiveElectionResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for election to stop")
+		return nil
+	}
 }
