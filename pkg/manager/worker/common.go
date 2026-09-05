@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -20,9 +21,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+type controlPlaneCluster interface {
+	StartCluster(context.Context, *kubevip.Config, *election.Manager, *bgp.Server, *lease.Manager, func()) error
+	StartVipService(context.Context, *kubevip.Config, *election.Manager, cluster.BGPRouteManager, func()) error
+}
+
 type Common struct {
 	arpMgr       *arp.Manager
-	cpCluster    *cluster.Cluster
+	cpCluster    controlPlaneCluster
 	intfMgr      *networkinterface.Manager
 	config       *kubevip.Config
 	closing      *atomic.Bool

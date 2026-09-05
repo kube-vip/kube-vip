@@ -434,6 +434,7 @@ type mockNetwork struct {
 	present          bool
 	routePresent     bool
 	deleteRouteCalls int
+	deleteRouteErr   error
 }
 
 func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
@@ -472,6 +473,9 @@ func (m *mockNetwork) DeleteRoute() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deleteRouteCalls++
+	if m.deleteRouteErr != nil {
+		return m.deleteRouteErr
+	}
 	m.routePresent = false
 	return nil
 }
