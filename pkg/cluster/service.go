@@ -279,10 +279,14 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			}
 		})
 
+		var deleteErrors []error
 		for i := range cluster.Network {
-			if err := cluster.routeMgr.Delete(c.NodeName, cluster.Network[i]); err != nil {
-				log.Warn("deleting route", "err", err)
+			if deleteErr := cluster.routeMgr.Delete(c.NodeName, cluster.Network[i]); deleteErr != nil {
+				deleteErrors = append(deleteErrors, fmt.Errorf("deleting route for %s: %w", cluster.Network[i].IP(), deleteErr))
 			}
+		}
+		if err := errors.Join(deleteErrors...); err != nil {
+			return err
 		}
 	}
 
