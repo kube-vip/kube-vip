@@ -13,47 +13,47 @@ import (
 
 // Peer defines a BGP Peer
 type BGPPeer struct {
-	Address      string
-	Port         uint16
-	Interface    string
-	AS           uint32
-	Password     string
-	MultiHop     bool
-	MpbgpNexthop string
-	MpbgpIPv4    string
-	MpbgpIPv6    string
+	Address      string `yaml:"address"`
+	Port         uint16 `yaml:"port"`
+	Interface    string `yaml:"interface"`
+	AS           uint32 `yaml:"as"`
+	Password     string `yaml:"password"`
+	MultiHop     bool   `yaml:"multiHop"`
+	MpbgpNexthop string `yaml:"mpbgpNexthop"`
+	MpbgpIPv4    string `yaml:"mpbgpIPv4"`
+	MpbgpIPv6    string `yaml:"mpbgpIPv6"`
 
 	// BFD Configuration
-	BFDEnabled          bool
-	BFDReceiveInterval  uint32
-	BFDTransmitInterval uint32
-	BFDDetectMultiplier uint32
+	BFDEnabled          bool   `yaml:"bfdEnabled"`
+	BFDReceiveInterval  uint32 `yaml:"bfdReceiveInterval"`
+	BFDTransmitInterval uint32 `yaml:"bfdTransmitInterval"`
+	BFDDetectMultiplier uint32 `yaml:"bfdDetectMultiplier"`
 }
 
 // Config defines the BGP server configuration
 type BGPConfig struct {
-	AS           uint32
-	RouterID     string
-	SourceIP     string
-	SourceIF     string
-	MpbgpNexthop string
-	MpbgpIPv4    string
-	MpbgpIPv6    string
+	AS           uint32 `yaml:"as"`
+	RouterID     string `yaml:"routerID"`
+	SourceIP     string `yaml:"sourceIP"`
+	SourceIF     string `yaml:"sourceIF"`
+	MpbgpNexthop string `yaml:"mpbgpNexthop"`
+	MpbgpIPv4    string `yaml:"mpbgpIPv4"`
+	MpbgpIPv6    string `yaml:"mpbgpIPv6"`
 
-	HoldTime          uint64
-	KeepaliveInterval uint64
+	HoldTime          uint64 `yaml:"holdTime"`
+	KeepaliveInterval uint64 `yaml:"keepaliveInterval"`
 
-	Peers []BGPPeer
+	Peers []BGPPeer `yaml:"peers"`
 
-	Zebra ZebraConfig
+	Zebra ZebraConfig `yaml:"zebra"`
 }
 
 // Defines Zebra connection configuration. More on the topic - https://github.com/osrg/gobgp/blob/master/docs/sources/zebra.md#configuration
 type ZebraConfig struct {
-	Enabled      bool
-	URL          string
-	Version      uint32
-	SoftwareName string
+	Enabled      bool   `yaml:"enabled"`
+	URL          string `yaml:"url"`
+	Version      uint32 `yaml:"version"`
+	SoftwareName string `yaml:"softwareName"`
 }
 
 // BGP Peer layout is as follows:
