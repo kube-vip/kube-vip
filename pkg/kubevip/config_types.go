@@ -181,7 +181,7 @@ type Config struct {
 	K8sConfigFile string `yaml:"k8sConfigFile"`
 
 	// DNSMode, this will set the mode DSN lookup will be performed (first, ipv4, ipv6, dual)
-	DNSMode string `yaml:"dnsDualStackMode"`
+	DNSMode string `json:"dnsDualStackMode" yaml:"dnsDualStackMode"`
 
 	// IsDualStack reports if service is DualStack.
 	IsDualStack bool
@@ -191,7 +191,7 @@ type Config struct {
 
 	// DNSMode, this will set the mode DHCP lookup will be performed for DDNS (ipv4, ipv6, dual). By default will be the same as DNSMode.
 	// If DNSMode is 'first', IPv4 will be used.
-	DHCPMode string `yaml:"dhcpDualStackMode"`
+	DHCPMode string `json:"dhcpDualStackMode" yaml:"dhcpDualStackMode"`
 
 	// DisableServiceUpdates, if true, kube-vip will only advertise service, but it will not update service's Status.LoadBalancer.Ingress slice
 	DisableServiceUpdates bool `yaml:"disableServiceUpdates"`
