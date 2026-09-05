@@ -321,6 +321,9 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.ArpBroadcastRate = i64
+	} else if c.ArpBroadcastRate == 0 {
+		// default to three seconds
+		c.ArpBroadcastRate = 3000
 	}
 
 	// Determine if VIP should be preserved on leadership loss
@@ -422,6 +425,12 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(dhcpMode)
 	if env != "" {
 		c.DHCPMode = env
+	} else if c.DHCPMode == "" {
+		if c.DNSMode != "first" {
+			c.DHCPMode = c.DNSMode
+		} else {
+			c.DHCPMode = strings.ToLower(utils.IPv4Family)
+		}
 	}
 
 	// DHCP backoff attempts
