@@ -40,24 +40,25 @@ type Cluster struct {
 	provider *cluster.Provider
 }
 
-func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
-	c := &Cluster{
+func NewCluster(spec *ClusterSpec) *Cluster {
+	return &Cluster{
 		ClusterSpec: spec,
+		provider: cluster.NewProvider(
+			cluster.ProviderWithLogger(spec.Logger),
+			cluster.ProviderWithDocker(),
+		),
 	}
+}
 
-	c.provider = cluster.NewProvider(
-		cluster.ProviderWithLogger(spec.Logger),
-		cluster.ProviderWithDocker(),
-	)
-
+func (c *Cluster) Create(ctx context.Context) {
 	c.Logger.Printf("Creating kind nodes")
 	c.initKindCluster()
 
 	c.Logger.Printf("Loading kube-vip image into nodes")
-	Expect(e2e.LoadDockerImageToKind(spec.Logger, spec.KubeVIPImage, spec.Name)).To(Succeed())
+	Expect(e2e.LoadDockerImageToKind(c.Logger, c.KubeVIPImage, c.Name)).To(Succeed())
 
 	c.Logger.Printf("Loading traefik image into nodes")
-	if err := e2e.LoadDockerImageToKind(spec.Logger, "ghcr.io/traefik/whoami:v1.11", spec.Name); err != nil {
+	if err := e2e.LoadDockerImageToKind(c.Logger, "ghcr.io/traefik/whoami:v1.11", c.Name); err != nil {
 		c.Logger.Warnf("failed to load image ghcr.io/traefik/whoami:v1.11 into kind cluster, image will be downloaded after pod deployment, error: %s", err.Error())
 	}
 
@@ -77,8 +78,6 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	c.Logger.Printf("Checking %d nodes etcd is available through VIP", c.ClusterSpec.Nodes)
 	c.VerifyEtcdThroughVIP(ctx, 15*time.Second)
-
-	return c
 }
 
 func (c *Cluster) initKindCluster() {

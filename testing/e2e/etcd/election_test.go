@@ -36,7 +36,9 @@ func (t *testConfig) cleanup() {
 		return
 	}
 
-	t.cluster.Delete()
+	if t.cluster != nil {
+		t.cluster.Delete()
+	}
 	Expect(os.RemoveAll(t.kubeVipManifestPath)).To(Succeed())
 	Expect(os.RemoveAll(t.etcdCertsFolder)).To(Succeed())
 }
@@ -99,7 +101,8 @@ var _ = Describe("kube-vip with etcd leader election", func() {
 				Logger:               test.logger,
 			}
 
-			test.cluster = etcd.CreateCluster(ctx, spec)
+			test.cluster = etcd.NewCluster(spec)
+			test.cluster.Create(ctx)
 		})
 	})
 
