@@ -78,8 +78,8 @@ func TestSessionLossStopsLeadership(t *testing.T) {
 	close(sessionDone)
 
 	err := receive(t, runDone)
-	if err == nil || !strings.Contains(err.Error(), "session ended") {
-		t.Fatalf("run error = %v, want session-ended error", err)
+	if err == nil || err.Error() != "election session ended" {
+		t.Fatalf("run error = %v, want %q", err, "election session ended")
 	}
 	if got := started.Load(); got != 1 {
 		t.Fatalf("OnStartedLeading calls = %d, want 1", got)

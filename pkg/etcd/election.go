@@ -74,9 +74,11 @@ func RunElectionOrDie(ctx context.Context, config *LeaderElectionConfig) error {
 	return nil
 }
 
-// RunElection starts a client with the provided config or panics.
-// RunElection blocks until leader election loop is
-// stopped by ctx or it has stopped holding the leader lease.
+// RunElection starts a client with the provided config.
+// RunElection blocks until the leader election loop is stopped. Cancellation of
+// ctx is a clean shutdown and returns nil. If the etcd session ends independently
+// of ctx, RunElection returns "election session ended" because the caller must
+// start a new election with a new session.
 func RunElection(ctx context.Context, config *LeaderElectionConfig) (runErr error) {
 	var memberID uint64
 	if config.MemberUniqueID != nil {
