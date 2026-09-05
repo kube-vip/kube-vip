@@ -2,13 +2,23 @@ package bgp
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	api "github.com/osrg/gobgp/v4/api"
 	gobgp "github.com/osrg/gobgp/v4/pkg/server"
 )
+
+func TestAddHostDoesNotTrackInvalidCIDR(t *testing.T) {
+	b, _ := newEmbeddedHostTestServer(t)
+
+	if err := b.AddHost(context.Background(), "not-a-cidr", "default/service"); err == nil {
+		t.Fatal("AddHost unexpectedly accepted an invalid CIDR")
+	}
+	if len(b.tracker) != 0 {
+		t.Fatalf("tracker = %#v, want empty after failed add", b.tracker)
+	}
+}
 
 func TestAddHostRetriesAfterGoBGPFailure(t *testing.T) {
 	b, first := newEmbeddedHostTestServer(t)
@@ -22,6 +32,9 @@ func TestAddHostRetriesAfterGoBGPFailure(t *testing.T) {
 	}
 	if err := b.AddHost(context.Background(), addr, object); err == nil {
 		t.Fatal("AddHost unexpectedly succeeded while GoBGP was stopped")
+	}
+	if len(b.tracker) != 0 {
+		t.Fatalf("tracker = %#v, want empty after failed AddPath", b.tracker)
 	}
 
 	// The kube-vip Server object survives the daemon recovery. A retry must add
@@ -73,6 +86,34 @@ func TestAddHostReAddsAfterFailedDeleteOnBGPRecovery(t *testing.T) {
 	}
 }
 
+func TestAddHostDoesNotAddPathForNewReference(t *testing.T) {
+	b, raw := newEmbeddedHostTestServer(t)
+	const addr = "10.0.0.36/32"
+
+	if err := b.AddHost(context.Background(), addr, "default/first"); err != nil {
+		t.Fatalf("initial AddHost: %v", err)
+	}
+	if err := raw.StopBgp(context.Background(), &api.StopBgpRequest{}); err != nil {
+		t.Fatalf("stopping embedded BGP server: %v", err)
+	}
+
+	if err := b.AddHost(context.Background(), addr, "default/second"); err != nil {
+		t.Fatalf("adding a second reference called AddPath: %v", err)
+	}
+	if got := len(b.tracker[addr]); got != 2 {
+		t.Fatalf("tracker reference count = %d, want 2", got)
+	}
+	if err := b.DelHost(context.Background(), addr, "default/first"); err != nil {
+		t.Fatalf("deleting first reference called DeletePath: %v", err)
+	}
+	if got := len(b.tracker[addr]); got != 1 {
+		t.Fatalf("tracker reference count = %d, want 1", got)
+	}
+	if err := b.AddHost(context.Background(), addr, "default/second"); err == nil {
+		t.Fatal("reconciling an existing reference did not call AddPath")
+	}
+}
+
 func newEmbeddedHostTestServer(t *testing.T) (*Server, *gobgp.BgpServer) {
 	t.Helper()
 	raw := startEmbeddedRawBGP(t)
@@ -84,28 +125,4 @@ func newEmbeddedHostTestServer(t *testing.T) (*Server, *gobgp.BgpServer) {
 		},
 		tracker: make(map[string]map[string]bool),
 	}, raw
-}
-
-func startEmbeddedRawBGP(t *testing.T) *gobgp.BgpServer {
-	t.Helper()
-	raw := gobgp.NewBgpServer()
-	go raw.Serve()
-	if err := raw.StartBgp(context.Background(), &api.StartBgpRequest{
-		Global: &api.Global{
-			Asn:        65000,
-			RouterId:   "192.0.2.1",
-			ListenPort: -1,
-		},
-	}); err != nil {
-		t.Fatalf("starting embedded BGP server: %v", err)
-	}
-	var stopOnce sync.Once
-	t.Cleanup(func() {
-		stopOnce.Do(func() {
-			if err := raw.StopBgp(context.Background(), &api.StopBgpRequest{}); err != nil {
-				t.Logf("stopping embedded BGP server: %v", err)
-			}
-		})
-	})
-	return raw
 }

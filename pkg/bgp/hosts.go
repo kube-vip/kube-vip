@@ -26,13 +26,14 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 		return fmt.Errorf("failed to get path for %v", ip)
 	}
 
-	// The tracker can outlive the GoBGP server or retain a route after a
-	// failed withdrawal. Re-adding the path keeps the daemon and tracker in
-	// sync; GoBGP treats an identical path as an idempotent operation.
-	if _, err := b.s.AddPath(apiutil.AddPathRequest{
-		Paths: []*apiutil.Path{p},
-	}); err != nil {
-		return err
+	if !exists || objects[object] {
+		// Without Add-Path, GoBGP replaces an identical path. Re-add an existing
+		// reference so reconciliation can recover after a failed withdrawal.
+		if _, err := b.s.AddPath(apiutil.AddPathRequest{
+			Paths: []*apiutil.Path{p},
+		}); err != nil {
+			return err
+		}
 	}
 
 	if !exists {
