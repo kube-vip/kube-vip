@@ -64,20 +64,20 @@ type Config struct {
 	LoseLeadershipTimeoutSeconds int `yaml:"loseLeadershipTimeoutSeconds"`
 
 	// Annotations will define if we're going to wait and lookup configuration from Kubernetes node annotations
-	Annotations string
+	Annotations string `yaml:"annotations"`
 
 	// LeaderElectionType defines the backend to run the leader election: kubernetes or etcd. Defaults to kubernetes.
 	// Etcd doesn't support load balancer mode (EnableLoadBalancer=true) or any other feature that depends on the kube-api server.
 	LeaderElectionType string `yaml:"leaderElectionType"`
 
 	// KubernetesLeaderElection defines the settings around Kubernetes KubernetesLeaderElection
-	KubernetesLeaderElection
+	KubernetesLeaderElection `yaml:",inline"`
 
 	// Etcd defines all the settings for the etcd client.
-	Etcd Etcd
+	Etcd Etcd `yaml:"etcd"`
 
 	// AddPeersAsBackends, this will automatically add RAFT peers as backends to a loadbalancer
-	AddPeersAsBackends bool `yaml:"addPeersAsBackends"`
+	AddPeersAsBackends bool `yaml:"-"`
 
 	// VIP is the Virtual IP address exposed for the cluster (TODO: deprecate)
 	VIP string `yaml:"vip"`
@@ -107,10 +107,10 @@ type Config struct {
 	NodeName string `yaml:"leaseNodeName"`
 
 	// SingleNode will start the cluster as a single Node (Raft disabled)
-	SingleNode bool `yaml:"singleNode"`
+	SingleNode bool `yaml:"-"`
 
 	// StartAsLeader, this will start this node as the leader before other nodes connect
-	StartAsLeader bool `yaml:"startAsLeader"`
+	StartAsLeader bool `yaml:"-"`
 
 	// Interface is the network interface to bind to (default: First Adapter)
 	Interface string `yaml:"interface,omitempty"`
@@ -146,16 +146,16 @@ type Config struct {
 	SkipDAD bool `yaml:"skipDAD"`
 
 	// BGP Configuration
-	BGPConfig     BGPConfig
-	BGPPeerConfig BGPPeer
-	BGPPeers      []string
+	BGPConfig     BGPConfig `yaml:"bgpConfig"`
+	BGPPeerConfig BGPPeer   `yaml:"bgpPeerConfig"`
+	BGPPeers      []string  `yaml:"-"`
 
 	// ControlPlaneHealthCheck configures HTTP polling of the control plane when using BGP without
 	// leader election. If the health check fails, the BGP route will be withdrawn.
 	ControlPlaneHealthCheck HealthCheck `yaml:"controlPlaneHealthCheck,omitempty"`
 
 	// LoadBalancers are the various services we can load balance over
-	LoadBalancers []LoadBalancer `yaml:"loadBalancers,omitempty"`
+	LoadBalancers []LoadBalancer `yaml:"-"`
 
 	// The hostport used to expose Prometheus metrics over an HTTP server
 	PrometheusHTTPServer string `yaml:"prometheusHTTPServer,omitempty"`
@@ -163,16 +163,16 @@ type Config struct {
 	// Egress configuration
 
 	// EgressPodCidr, this contains the pod cidr range to ignore Egress
-	EgressPodCidr string
+	EgressPodCidr string `yaml:"egressPodCidr"`
 
 	// EgressServiceCidr, this contains the service cidr range to ignore
-	EgressServiceCidr string
+	EgressServiceCidr string `yaml:"egressServiceCidr"`
 
 	// EnableInternalSNAT, this will enable the internal SNAT rule that kube-vip adds to the egress chain
-	EnableInternalSNAT bool
+	EnableInternalSNAT bool `yaml:"enableInternalSNAT"`
 
 	// EgressWithNftables, this will use the iptables-nftables OVER iptables
-	EgressWithNftables bool
+	EgressWithNftables bool `yaml:"egressWithNftables"`
 
 	// ServicesLeaseName, this will set the lease name for services leader in arp mode
 	ServicesLeaseName string `yaml:"servicesLeaseName"`
@@ -184,10 +184,10 @@ type Config struct {
 	DNSMode string `yaml:"dnsDualStackMode"`
 
 	// IsDualStack reports if service is DualStack.
-	IsDualStack bool
+	IsDualStack bool `yaml:"-"`
 
 	// RequireDualStack defines if DualStack is required for the service. Based on service's Spec.ipFamilyPolicy field.
-	RequireDualStack bool
+	RequireDualStack bool `yaml:"-"`
 
 	// DNSMode, this will set the mode DHCP lookup will be performed for DDNS (ipv4, ipv6, dual). By default will be the same as DNSMode.
 	// If DNSMode is 'first', IPv4 will be used.
@@ -223,7 +223,7 @@ type Config struct {
 	EgressClean bool `yaml:"egressClean"`
 
 	// ConfigFile defines the path to a JSON/YAML configuration file
-	ConfigFile string `yaml:"configFile"`
+	ConfigFile string `yaml:"-"`
 
 	// DHCPBackoffAttempts defines how many times will DHCP client try to obtain address (unlimited when 0)
 	DHCPBackoffAttempts uint `yaml:"dhcpBackoffAttempts"`
@@ -244,24 +244,24 @@ type KubernetesLeaderElection struct {
 	LeaseName string `yaml:"leaseName"`
 
 	// Lease Duration - length of time a lease can be held for
-	LeaseDuration int
+	LeaseDuration int `yaml:"leaseDuration"`
 
 	// RenewDeadline - length of time a host can attempt to renew its lease
-	RenewDeadline int
+	RenewDeadline int `yaml:"renewDeadline"`
 
 	// RetryPeriod - length of time (in seconds) the LeaderElector clients should wait between tries of actions
-	RetryPeriod int
+	RetryPeriod int `yaml:"retryPeriod"`
 
 	// LeaseAnnotations - annotations which will be given to the lease object
-	LeaseAnnotations map[string]string
+	LeaseAnnotations map[string]string `yaml:"leaseAnnotations"`
 }
 
 // Etcd defines all the settings for the etcd client.
 type Etcd struct {
-	CAFile         string
-	ClientCertFile string
-	ClientKeyFile  string
-	Endpoints      []string
+	CAFile         string   `yaml:"caFile"`
+	ClientCertFile string   `yaml:"clientCertFile"`
+	ClientKeyFile  string   `yaml:"clientKeyFile"`
+	Endpoints      []string `yaml:"endpoints"`
 }
 
 // HealthCheck defines HTTP health-check settings for control-plane polling when using BGP
@@ -287,7 +287,7 @@ type LoadBalancer struct {
 	Name string `yaml:"name"`
 
 	// Ports exposed by a LoadBalancer
-	Ports []Port
+	Ports []Port `yaml:"ports"`
 
 	// BindToVip will bind the load balancer port to the VIP itself
 	BindToVip bool `yaml:"bindToVip"`
