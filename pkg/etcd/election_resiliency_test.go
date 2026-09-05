@@ -3,187 +3,240 @@ package etcd
 import (
 	"context"
 	"errors"
-	"sync"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
-func TestWatchLeaderChangesHandlesObserveChannelClosure(t *testing.T) {
-	client, session := newElectionUnitClient(t, func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-		return nil, errors.New("watch stream disconnected")
-	})
-	election := concurrency.NewElection(session, "kube-vip-test")
-
-	var stopped atomic.Int32
-	m := &member{
-		client:   client,
-		election: election,
-		isLeader: true,
-		callbacks: LeaderCallbacks{
-			OnStoppedLeading: func() { stopped.Add(1) },
+func TestObserverFailureBeforeCampaignSuccess(t *testing.T) {
+	campaignCanceled := make(chan struct{})
+	e := &fakeElection{
+		campaign: func(ctx context.Context, _ string) error {
+			<-ctx.Done()
+			close(campaignCanceled)
+			return ctx.Err()
 		},
+		observe: closedObserveChannel(),
 	}
 
-	result := make(chan any, 1)
-	go func() {
-		defer func() { result <- recover() }()
-		m.watchLeaderChanges(context.Background())
-	}()
-
+	err := testMember(e).run(context.Background(), make(chan struct{}))
+	if err == nil || !strings.Contains(err.Error(), "leader observation ended") {
+		t.Fatalf("run error = %v, want leader observation error", err)
+	}
 	select {
-	case recovered := <-result:
-		if recovered != nil {
-			t.Fatalf("watchLeaderChanges panicked when Observe closed: %v", recovered)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("watchLeaderChanges did not finish after Observe closed")
-	}
-
-	// DEFECT: pkg/etcd/election.go:160-169 reads from the Observe channel
-	// without checking its closed state. An etcd watch disconnect therefore
-	// supplies a nil response and panics instead of reporting leadership loss.
-	if got := stopped.Load(); got != 1 {
-		t.Fatalf("OnStoppedLeading calls = %d, want 1 after Observe closure", got)
+	case <-campaignCanceled:
+	default:
+		t.Fatal("campaign was not stopped before run returned")
 	}
 }
 
-func TestTryToBeLeaderStopsPromptlyWhenContextIsCanceled(t *testing.T) {
-	client, session := newElectionUnitClient(t, func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-		return &clientv3.GetResponse{Header: &pb.ResponseHeader{Revision: 1}}, nil
-	})
-	election := concurrency.NewElection(session, "kube-vip-test")
-
-	var started atomic.Int32
-	m := &member{
-		client:         client,
-		election:       election,
-		memberID:       "node-a",
-		leaseTTL:       1,
-		weAreTheLeader: make(chan struct{}, 1),
-		callbacks: LeaderCallbacks{
-			OnStartedLeading: func(context.Context) { started.Add(1) },
-		},
+func TestCampaignErrorStopsWatcher(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	observeCanceled := make(chan struct{})
+	e := &fakeElection{
+		campaign:        func(context.Context, string) error { return errors.New("campaign failed") },
+		observe:         observe,
+		observeCanceled: observeCanceled,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	done := make(chan struct{})
-	go func() {
-		m.tryToBeLeader(ctx, &wg)
-		close(done)
-	}()
-
+	err := testMember(e).run(context.Background(), make(chan struct{}))
+	if err == nil || !strings.Contains(err.Error(), "campaign failed") {
+		t.Fatalf("run error = %v, want campaign error", err)
+	}
 	select {
-	case <-m.weAreTheLeader:
+	case <-observeCanceled:
 	case <-time.After(time.Second):
-		t.Fatal("Campaign did not signal leadership")
+		t.Fatal("watcher context was not canceled before run returned")
 	}
+}
+
+func TestSessionLossStopsLeadership(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	sessionDone := make(chan struct{})
+	e := successfulFakeElection(observe)
+	var started, stopped atomic.Int32
+	leading := make(chan struct{})
+	m := testMember(e)
+	m.leaderDelay = 0
+	m.callbacks.OnStartedLeading = func(ctx context.Context) {
+		started.Add(1)
+		close(leading)
+		<-ctx.Done()
+	}
+	m.callbacks.OnStoppedLeading = func() { stopped.Add(1) }
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(context.Background(), sessionDone) }()
+	select {
+	case <-leading:
+	case <-time.After(time.Second):
+		t.Fatal("leadership did not start")
+	}
+	close(sessionDone)
+
+	err := receive(t, runDone)
+	if err == nil || !strings.Contains(err.Error(), "session ended") {
+		t.Fatalf("run error = %v, want session-ended error", err)
+	}
+	if got := started.Load(); got != 1 {
+		t.Fatalf("OnStartedLeading calls = %d, want 1", got)
+	}
+	if got := stopped.Load(); got != 1 {
+		t.Fatalf("OnStoppedLeading calls = %d, want 1", got)
+	}
+}
+
+func TestCancellationStopsElectionWithoutStartingLeadership(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	e := successfulFakeElection(observe)
+	var started atomic.Int32
+	m := testMember(e)
+	m.callbacks.OnStartedLeading = func(context.Context) { started.Add(1) }
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(ctx, make(chan struct{})) }()
+	waitFor(t, &e.keyCalls, 1)
 	cancel()
 
-	prompt := true
-	select {
-	case <-done:
-	case <-time.After(250 * time.Millisecond):
-		prompt = false
-	}
-
-	// Keep the test goroutine cleanup deterministic even when the current
-	// implementation is still sleeping for its one-second lease TTL.
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("tryToBeLeader did not finish after context cancellation")
-	}
-	wg.Wait()
-
-	// DEFECT: pkg/etcd/election.go:219-227 unconditionally sleeps for the
-	// lease TTL after Campaign. Cancellation during that window delays election
-	// restart and still invokes OnStartedLeading with an already-canceled context.
-	if !prompt {
-		t.Error("tryToBeLeader remained blocked in the lease-TTL sleep after cancellation")
+	if err := receive(t, runDone); err != nil {
+		t.Fatalf("run error = %v, want nil for caller cancellation", err)
 	}
 	if got := started.Load(); got != 0 {
-		t.Fatalf("OnStartedLeading calls after cancellation = %d, want 0", got)
+		t.Fatalf("OnStartedLeading calls = %d, want 0", got)
 	}
 }
 
-type electionUnitKV struct {
-	clientv3.KV
-	get func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error)
+func TestCancellationStopsBlockedCampaign(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	e := &fakeElection{
+		campaign: func(ctx context.Context, _ string) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		observe: observe,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- testMember(e).run(ctx, make(chan struct{})) }()
+	waitFor(t, &e.observeCalls, 1)
+	cancel()
+
+	if err := receive(t, runDone); err != nil {
+		t.Fatalf("run error = %v, want nil for caller cancellation", err)
+	}
 }
 
-func (f *electionUnitKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	return f.get(ctx, key, opts...)
+func TestObserverTerminationRacingCampaignNeverStartsLeadership(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		observe := make(chan *clientv3.GetResponse)
+		campaignRelease := make(chan struct{})
+		e := &fakeElection{
+			campaign: func(context.Context, string) error {
+				<-campaignRelease
+				return nil
+			},
+			key:     "/election/member",
+			observe: observe,
+		}
+		var started atomic.Int32
+		m := testMember(e)
+		m.callbacks.OnStartedLeading = func(context.Context) { started.Add(1) }
+
+		runDone := make(chan error, 1)
+		go func() { runDone <- m.run(context.Background(), make(chan struct{})) }()
+		waitFor(t, &e.observeCalls, 1)
+		close(observe)
+		waitFor(t, &m.state, 2)
+		close(campaignRelease)
+		if err := receive(t, runDone); err == nil {
+			t.Fatal("run returned nil after observer termination")
+		}
+		if got := started.Load(); got != 0 {
+			t.Fatalf("iteration %d: OnStartedLeading calls = %d, want 0", i, got)
+		}
+	}
 }
 
-func (f *electionUnitKV) Txn(context.Context) clientv3.Txn {
-	return &electionUnitTxn{}
+type fakeElection struct {
+	campaign        func(context.Context, string) error
+	key             string
+	observe         chan *clientv3.GetResponse
+	observeCanceled chan struct{}
+	keyCalls        atomic.Int32
+	observeCalls    atomic.Int32
 }
 
-type electionUnitTxn struct{ clientv3.Txn }
-
-func (t *electionUnitTxn) If(...clientv3.Cmp) clientv3.Txn  { return t }
-func (t *electionUnitTxn) Then(...clientv3.Op) clientv3.Txn { return t }
-func (t *electionUnitTxn) Else(...clientv3.Op) clientv3.Txn { return t }
-func (t *electionUnitTxn) Commit() (*clientv3.TxnResponse, error) {
-	return &clientv3.TxnResponse{
-		Header:    &pb.ResponseHeader{Revision: 1},
-		Succeeded: true,
-	}, nil
+func (e *fakeElection) Campaign(ctx context.Context, memberID string) error {
+	return e.campaign(ctx, memberID)
 }
 
-type electionUnitLease struct{ clientv3.Lease }
-
-func (f *electionUnitLease) KeepAlive(ctx context.Context, _ clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	ch := make(chan *clientv3.LeaseKeepAliveResponse)
-	go func() {
-		<-ctx.Done()
-		close(ch)
-	}()
-	return ch, nil
+func (e *fakeElection) Key() string {
+	e.keyCalls.Add(1)
+	return e.key
 }
 
-func (f *electionUnitLease) Revoke(context.Context, clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
-	return &clientv3.LeaseRevokeResponse{}, nil
+func (e *fakeElection) Observe(ctx context.Context) <-chan *clientv3.GetResponse {
+	e.observeCalls.Add(1)
+	if e.observeCanceled != nil {
+		go func() {
+			<-ctx.Done()
+			close(e.observeCanceled)
+		}()
+	}
+	return e.observe
 }
 
-func (f *electionUnitLease) Close() error { return nil }
+func successfulFakeElection(observe chan *clientv3.GetResponse) *fakeElection {
+	return &fakeElection{
+		campaign: func(context.Context, string) error { return nil },
+		key:      "/election/member",
+		observe:  observe,
+	}
+}
 
-type electionUnitWatcher struct{ clientv3.Watcher }
+func testMember(e election) *member {
+	return &member{
+		election:    e,
+		memberID:    "member",
+		leaderDelay: time.Hour,
+		callbacks: LeaderCallbacks{
+			OnStartedLeading: func(context.Context) {},
+			OnStoppedLeading: func() {},
+			OnNewLeader:      func(string) {},
+		},
+	}
+}
 
-func (f *electionUnitWatcher) Watch(context.Context, string, ...clientv3.OpOption) clientv3.WatchChan {
-	ch := make(chan clientv3.WatchResponse)
+func closedObserveChannel() chan *clientv3.GetResponse {
+	ch := make(chan *clientv3.GetResponse)
 	close(ch)
 	return ch
 }
 
-func (f *electionUnitWatcher) RequestProgress(context.Context) error { return nil }
-func (f *electionUnitWatcher) Close() error                          { return nil }
-
-func newElectionUnitClient(t *testing.T, get func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error)) (*clientv3.Client, *concurrency.Session) {
+func waitFor(t *testing.T, value *atomic.Int32, want int32) {
 	t.Helper()
-
-	client := clientv3.NewCtxClient(context.Background())
-	client.KV = &electionUnitKV{get: get}
-	client.Lease = &electionUnitLease{}
-	client.Watcher = &electionUnitWatcher{}
-
-	session, err := concurrency.NewSession(client,
-		concurrency.WithLease(clientv3.LeaseID(42)),
-		concurrency.WithTTL(1),
-	)
-	if err != nil {
-		client.Close()
-		t.Fatalf("creating election test session: %v", err)
+	deadline := time.Now().Add(time.Second)
+	for value.Load() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("value = %d, want %d", value.Load(), want)
+		}
+		time.Sleep(time.Millisecond)
 	}
-	t.Cleanup(func() {
-		_ = session.Close()
-		_ = client.Close()
-	})
-	return client, session
 }
+
+func receive(t *testing.T, ch <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for election to stop")
+		return nil
+	}
+}
+
+var _ election = (*fakeElection)(nil)
