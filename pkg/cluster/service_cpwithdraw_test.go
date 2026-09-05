@@ -14,7 +14,7 @@ func TestStartVipService_WithdrawsStaticRouteOnContextCancel(t *testing.T) {
 		EnableBGP: true,
 		NodeName:  "cp-node-1",
 	}
-	cancelContext, _ := startVipService(t, cfg, bgpManager)
+	cancelContext := startVipService(t, cfg, bgpManager)
 
 	expectEventually(t, bgpManager.isAnnounced, "route should be announced")
 	cancelContext()
