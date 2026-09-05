@@ -100,7 +100,7 @@ func TestBGPHealthCheckLoop_StopsOnContextCancel(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	cancelContext, _ := startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
+	cancelContext := startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
 
 	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
 		"route should be announced")
@@ -195,7 +195,7 @@ func (e *testError) Error() string { return e.msg }
 // startVipService launches vipService in a goroutine with a mock network and
 // registers a cleanup to cancel the context and wait for it to finish.
 // Uses InitCluster so the real code parses certs for the BGP health check client.
-func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRouteManager) (context.CancelFunc, <-chan struct{}) {
+func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRouteManager) context.CancelFunc {
 	t.Helper()
 
 	c, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
@@ -217,7 +217,7 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRoute
 		<-done
 	})
 
-	return cancel, done
+	return cancel
 }
 
 // startRoutingTableVipService launches vipService in routing-table mode with a
