@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -209,6 +210,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 						} else if resp, doErr := cluster.healthCheckHTTPClient.Do(req); doErr != nil {
 							log.Error("health check request failed", "url", c.ControlPlaneHealthCheck.Address, "err", doErr)
 						} else {
+							_, _ = io.Copy(io.Discard, resp.Body)
 							resp.Body.Close()
 							healthy = resp.StatusCode == http.StatusOK
 							if !healthy {
@@ -282,6 +284,16 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 	if c.EnableBGP {
 		<-ctx.Done()
+		if c.ControlPlaneHealthCheck.Address == "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			for i := range cluster.Network {
+				network := cluster.Network[i]
+				if err := bgpServer.DelHost(cleanupCtx, network.CIDR(), c.NodeName); err != nil {
+					log.Error("failed to withdraw route", "address", network.CIDR(), "error", err)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -294,6 +306,16 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 	routeAnnounced := false
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
+	withdrawOnCancel := func() {
+		if !routeAnnounced {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := bgpServer.DelHost(cleanupCtx, vipCIDR, c.NodeName); err != nil {
+			log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
+		}
+	}
 
 	log.Info("Starting BGP health check",
 		"address", c.ControlPlaneHealthCheck.Address,
@@ -315,9 +337,14 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 			if err != nil {
 				healthErr = err
 			} else {
-				defer resp.Body.Close()
 				statusCode = resp.StatusCode
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
+		}
+		if ctx.Err() != nil {
+			withdrawOnCancel()
+			return
 		}
 
 		healthy := healthErr == nil && statusCode == http.StatusOK
@@ -352,11 +379,7 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 
 		select {
 		case <-ctx.Done():
-			if routeAnnounced {
-				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
-					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
-				}
-			}
+			withdrawOnCancel()
 			return
 		case <-ticker.C:
 		}
