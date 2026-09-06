@@ -107,6 +107,64 @@ func KillKubeVip(clusterName, node string, graceful bool) error {
 	return runDocker(clusterName, "exec", node, "pkill", signal, "kube-vip")
 }
 
+// KillAndStashKubeVip atomically removes the static-pod manifest and sends
+// SIGKILL to the process it identified. Removing the manifest first prevents
+// kubelet from restarting kube-vip before a failover can be observed.
+func KillAndStashKubeVip(clusterName, node, manifestName string) (string, error) {
+	src, dst, err := podManifestPaths(manifestName)
+	if err != nil {
+		return "", fmt.Errorf("kill and stash kube-vip on node %q in cluster %q: %w", node, clusterName, err)
+	}
+	if err := validateFaultTarget(clusterName, node); err != nil {
+		return "", err
+	}
+
+	script := fmt.Sprintf(`pid="$(pgrep -x kube-vip)" && set -- $pid && test "$#" -eq 1 && mv %s %s && { kill -KILL "$1" && printf '%%s' "$1" || { mv %s %s; exit 1; }; }`, src, dst, dst, src)
+	output, err := runDockerOutput(clusterName, "exec", node, "sh", "-c", script)
+	if err != nil {
+		return "", err
+	}
+
+	return singlePID(output)
+}
+
+// KubeVipPID returns the PID of the single kube-vip process running in a Kind
+// node. Static-pod restarts get a new PID, which lets fault tests distinguish a
+// process restart from a node-container restart.
+func KubeVipPID(clusterName, node string) (string, error) {
+	if err := validateFaultTarget(clusterName, node); err != nil {
+		return "", err
+	}
+
+	output, err := runDockerOutput(clusterName, "exec", node, "pgrep", "-x", "kube-vip")
+	if err != nil {
+		return "", err
+	}
+
+	return singlePID(output)
+}
+
+// NodeRunning reports whether the Kind node container is still running.
+func NodeRunning(clusterName, node string) (bool, error) {
+	if err := validateFaultTarget(clusterName, node); err != nil {
+		return false, err
+	}
+
+	output, err := runDockerOutput(clusterName, "inspect", "--format={{.State.Running}}", node)
+	if err != nil {
+		return false, err
+	}
+
+	switch strings.TrimSpace(output) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("node %q in cluster %q returned invalid running state %q", node, clusterName, strings.TrimSpace(output))
+	}
+}
+
 // RestartNode models a complete node failure and recovery by restarting its
 // Docker container. The caller can use HealNode when it also needs a Ready
 // check after a network fault.
@@ -192,6 +250,22 @@ func runDocker(clusterName string, args ...string) error {
 	return runDockerAllow(clusterName, nil, args...)
 }
 
+func runDockerOutput(clusterName string, args ...string) (string, error) {
+	var output bytes.Buffer
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		details := strings.TrimSpace(output.String())
+		if details != "" {
+			return "", fmt.Errorf("cluster %q: docker %s failed: %w: %s", clusterName, strings.Join(args, " "), err, details)
+		}
+		return "", fmt.Errorf("cluster %q: docker %s failed: %w", clusterName, strings.Join(args, " "), err)
+	}
+
+	return strings.TrimSpace(output.String()), nil
+}
+
 func runDockerAllow(clusterName string, allowedErrors []string, args ...string) error {
 	var output bytes.Buffer
 	cmd := exec.Command("docker", args...)
@@ -222,6 +296,14 @@ func validateFaultTarget(clusterName, node string) error {
 	}
 
 	return nil
+}
+
+func singlePID(output string) (string, error) {
+	pids := strings.Fields(output)
+	if len(pids) != 1 {
+		return "", fmt.Errorf("expected one kube-vip process, found %d in %q", len(pids), strings.TrimSpace(output))
+	}
+	return pids[0], nil
 }
 
 func podManifestPaths(manifestName string) (string, string, error) {
