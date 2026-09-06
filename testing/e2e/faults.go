@@ -289,9 +289,19 @@ type dockerOutput func(clusterName string, args ...string) (string, error)
 
 func restoreKubelet(clusterName, node string, run dockerRun) error {
 	if err := run(clusterName, "exec", node, "systemctl", "start", "kubelet"); err != nil {
+		if dockerContainerMissing(err) {
+			return nil
+		}
 		return err
 	}
-	return run(clusterName, "exec", node, "systemctl", "is-active", "--quiet", "kubelet")
+	if err := run(clusterName, "exec", node, "systemctl", "is-active", "--quiet", "kubelet"); err != nil && !dockerContainerMissing(err) {
+		return err
+	}
+	return nil
+}
+
+func dockerContainerMissing(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such container")
 }
 
 func runDockerOutput(clusterName string, args ...string) (string, error) {

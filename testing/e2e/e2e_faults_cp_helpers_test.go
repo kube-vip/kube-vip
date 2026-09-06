@@ -46,3 +46,29 @@ func TestValidateARPFailover(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateARPTransfer(t *testing.T) {
+	tests := []struct {
+		name      string
+		newLeader string
+		owners    []string
+		wantError string
+	}{
+		{name: "sole replacement owner", newLeader: "node-b", owners: []string{"node-b"}},
+		{name: "stale former owner allowed while kubelet stopped", newLeader: "node-b", owners: []string{"node-a", "node-b"}},
+		{name: "replacement missing", newLeader: "node-b", owners: []string{"node-a"}, wantError: "does not own VIP"},
+		{name: "VIP missing", newLeader: "node-b", wantError: "does not own VIP"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateARPTransfer(test.newLeader, test.owners)
+			if test.wantError == "" && err != nil {
+				t.Fatalf("validateARPTransfer() error = %v", err)
+			}
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("validateARPTransfer() error = %v, want substring %q", err, test.wantError)
+			}
+		})
+	}
+}
