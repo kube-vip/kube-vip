@@ -43,7 +43,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 
 			cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
 			kvPeers := []*e2e.BGPPeerValues{
-				{IP: server.LocalIPv4, AS: bgp.GoBGPAS, IPFamily: utils.IPv4Family},
+				{IP: server.LocalIPv4, AS: bgp.GoBGPAS, Port: bgp.GoBGPPort, IPFamily: utils.IPv4Family},
 			}
 
 			kindCluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{

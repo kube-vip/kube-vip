@@ -29,6 +29,7 @@ func TestParseBgpAnnotations(t *testing.T) {
 		"bgp/peer-asn":       "64000",
 		"bgp/src-ip":         "10.0.0.254",
 		"bgp/peer-ip":        "10.0.0.1",
+		"bgp/peer-port":      "1179",
 		"bgp/peer-multi-hop": "true",
 	}
 
@@ -41,6 +42,7 @@ func TestParseBgpAnnotations(t *testing.T) {
 	assert.Equal(t, uint32(64000), bgpPeer.AS, "bgpPeer.AS parsed incorrectly")
 	assert.Equal(t, "10.0.0.254", bgpConfig.RouterID, "bgpConfig.RouterID parsed incorrectly")
 	assert.Equal(t, true, bgpPeer.MultiHop, "bgpPeer.MultiHop parsed incorrectly")
+	assert.Equal(t, uint16(1179), bgpPeer.Port, "bgpPeer.Port parsed incorrectly")
 	assert.EqualValues(t, 15, bgpConfig.HoldTime, "base bgpConfig.HoldTime should not be overwritten")
 	assert.EqualValues(t, 5, bgpConfig.KeepaliveInterval, "base bgpConfig.KeepaliveInterval should not be overwritten")
 
@@ -49,6 +51,7 @@ func TestParseBgpAnnotations(t *testing.T) {
 		"bgp/peer-asn":       "64000",
 		"bgp/src-ip":         "10.0.0.254",
 		"bgp/peer-ip":        "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/peer-port":      "1179",
 		"bgp/bgp-pass":       "cGFzc3dvcmQ=", // dummy password for the test, gosec linter disabled
 		"bgp/peer-multi-hop": "true",
 	}
@@ -59,9 +62,9 @@ func TestParseBgpAnnotations(t *testing.T) {
 	}
 
 	bgpPeers := []kubevip.BGPPeer{
-		{Address: "10.0.0.1", AS: uint32(64000), Password: "password", MultiHop: true},
-		{Address: "10.0.0.2", AS: uint32(64000), Password: "password", MultiHop: true},
-		{Address: "10.0.0.3", AS: uint32(64000), Password: "password", MultiHop: true},
+		{Address: "10.0.0.1", AS: uint32(64000), Port: 1179, Password: "password", MultiHop: true},
+		{Address: "10.0.0.2", AS: uint32(64000), Port: 1179, Password: "password", MultiHop: true},
+		{Address: "10.0.0.3", AS: uint32(64000), Port: 1179, Password: "password", MultiHop: true},
 	}
 	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
 	assert.Equal(t, "10.0.0.3", bgpPeer.Address, "bgpPeer.Address parsed incorrectly")
@@ -91,11 +94,12 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 	}
 
 	node.Annotations = map[string]string{ //nolint:gosec
-		"bgp/bgp-peers-0-node-asn": "65000",
-		"bgp/bgp-peers-0-peer-asn": "64000",
-		"bgp/bgp-peers-0-peer-ip":  "10.0.0.1,10.0.0.2,10.0.0.3",
-		"bgp/bgp-peers-0-src-ip":   "10.0.0.254",
-		"bgp/bgp-peers-0-bgp-pass": "cGFzc3dvcmQ=", // dummy password for the test, gosec linter disabled
+		"bgp/bgp-peers-0-node-asn":  "65000",
+		"bgp/bgp-peers-0-peer-asn":  "64000",
+		"bgp/bgp-peers-0-peer-ip":   "10.0.0.1,10.0.0.2,10.0.0.3",
+		"bgp/bgp-peers-0-peer-port": "1179",
+		"bgp/bgp-peers-0-src-ip":    "10.0.0.254",
+		"bgp/bgp-peers-0-bgp-pass":  "cGFzc3dvcmQ=", // dummy password for the test, gosec linter disabled
 	}
 
 	bgpConfig, bgpPeer, err := parseBgpAnnotations(bgpConfigBase, node, "bgp")
@@ -104,9 +108,9 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 	}
 
 	bgpPeers := []kubevip.BGPPeer{
-		{Address: "10.0.0.1", AS: uint32(64000), Password: "password"},
-		{Address: "10.0.0.2", AS: uint32(64000), Password: "password"},
-		{Address: "10.0.0.3", AS: uint32(64000), Password: "password"},
+		{Address: "10.0.0.1", AS: uint32(64000), Port: 1179, Password: "password"},
+		{Address: "10.0.0.2", AS: uint32(64000), Port: 1179, Password: "password"},
+		{Address: "10.0.0.3", AS: uint32(64000), Port: 1179, Password: "password"},
 	}
 	assert.Equal(t, bgpPeers, bgpConfig.Peers, "bgpConfig.Peers parsed incorrectly")
 	assert.Equal(t, "10.0.0.254", bgpConfig.SourceIP, "bgpConfig.SourceIP parsed incorrectly")
