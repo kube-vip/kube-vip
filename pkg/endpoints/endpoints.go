@@ -314,9 +314,7 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 
 	// Track this loop for the lifetime of the goroutine. There has to be at most
 	// one per service, so a value above 1 means loops leaked.
-	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
-	loops.Inc()
-	defer loops.Dec()
+	defer metrics.TrackServiceElectionLoop(service.Namespace, service.Name)()
 
 	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
 
