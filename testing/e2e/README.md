@@ -25,6 +25,10 @@ The E2E tests:
 * Attempts to connect to the control plane using the VIP
     * The new leader will need send ndp advertisements before this can succeed within a timeout
 
+Fault recovery helpers are idempotent so they can be registered with `DeferCleanup`
+before a fault is injected. This ensures partial setup failures still reconnect
+nodes, remove API-server firewall rules, and restore static-pod manifests.
+
 ## Prometheus metrics helpers
 
 The E2E build also provides helpers for checking the metrics endpoint from
