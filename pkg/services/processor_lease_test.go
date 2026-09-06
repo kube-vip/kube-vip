@@ -20,8 +20,18 @@ func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
 	first := servicecontext.New(context.Background())
 	second := servicecontext.New(context.Background())
 	const vip = "192.0.2.10"
+	localA := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "local-a", UID: "local-a"},
+		Spec: v1.ServiceSpec{
+			LoadBalancerIP:        vip,
+			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+		},
+	}
+	localB := localA.DeepCopy()
+	localB.Name = "local-b"
+	localB.UID = "local-b"
 	references := map[string]map[string]bool{
-		vip: {"local-a": true, "local-b": true},
+		vip: {string(localA.UID): true, string(localB.UID): true},
 	}
 
 	// Hold deletion's lifecycle section so the endpoint update is queued in
@@ -31,22 +41,22 @@ func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
 	updated := make(chan bool, 1)
 	wg.Go(func() {
 		updated <- p.withActiveService(first, func() {
-			references[vip]["local-a"] = true
+			references[vip][string(localA.UID)] = true
 		})
 	})
 
 	first.Cancel()
-	delete(references[vip], "local-a")
+	delete(references[vip], string(localA.UID))
 	p.lifecycleMutex.Unlock()
 	wg.Wait()
 
 	if <-updated {
 		t.Fatal("endpoint update reconciled after its Service was cancelled")
 	}
-	if references[vip]["local-a"] {
+	if references[vip][string(localA.UID)] {
 		t.Fatal("deleted Service restored its shared VIP reference")
 	}
-	if !references[vip]["local-b"] || second.Ctx.Err() != nil {
+	if !references[vip][string(localB.UID)] || second.Ctx.Err() != nil {
 		t.Fatal("deleting one Local Service disturbed the other shared VIP owner")
 	}
 }
