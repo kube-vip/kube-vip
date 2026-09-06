@@ -45,6 +45,9 @@ const (
 )
 
 func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
+	if ctx.Ctx.Err() != nil {
+		return nil
+	}
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -170,6 +173,9 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 	// protect against addService while reading
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	startTime := time.Now()
 
