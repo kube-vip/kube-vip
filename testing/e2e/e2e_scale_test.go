@@ -38,6 +38,7 @@ const (
 	scaleClusterConvergenceLimit  = 5 * time.Minute
 	scaleChurnDuration            = 10 * time.Minute
 	scaleChurnInterval            = time.Second
+	scaleMinimumChurnRate         = 0.9
 	scaleChurnMaxServices         = 25
 	scaleElectionServiceCount     = 10
 	scaleElectionCycles           = 10
@@ -116,11 +117,11 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 				EnableNodeLabeling:         "false",
 				EnableServiceSecurity:      "true",
 				PerServiceElectionOnDemand: "true",
+				PrometheusHTTPServer:       ":2112",
 			},
 			Logger:    e2e.TestLogger{},
 			ConfigMtx: ConfigMtx,
 		})
-		Expect(e2e.InstallScaleWorkerKubeconfigs(suite.cluster)).To(Succeed())
 		suite.client, err = e2e.BuildScaleClient(suite.cluster.RestCfg, scaleClientQPS, scaleClientBurst)
 		Expect(err).NotTo(HaveOccurred())
 		suite.cluster.Client = suite.client
@@ -133,7 +134,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 
 		By("waiting for kube-vip metrics on the control-plane and worker nodes")
 		Eventually(func() error {
-			return e2e.WaitForScaleMetrics(suite.cluster.Name, suite.nodeNames)
+			return e2e.WaitForScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
 
 		Expect(e2e.EnsureScaleNamespace(suite.ctx, suite.client, suite.namespace)).To(Succeed())
@@ -185,10 +186,9 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		Expect(e2e.WaitForScaleActiveServices(suite.ctx, suite.cluster.Name, suite.nodeNames, suite.namespace,
 			len(serviceNames), remaining)).To(Succeed())
 
-		spotChecks := []string{vips[0], vips[len(vips)/2], vips[len(vips)-1]}
 		remaining = time.Until(deadline)
 		Expect(remaining).To(BeNumerically(">", 0))
-		Expect(e2e.WaitForScaleVIPs(suite.cluster.Name, suite.nodeNames, spotChecks, remaining)).To(Succeed())
+		Expect(e2e.WaitForScaleVIPs(suite.ctx, suite.cluster.Name, suite.nodeNames, vips, remaining)).To(Succeed())
 
 		elapsed := time.Since(started)
 		By(fmt.Sprintf("all %d services became active and spot-check VIPs were advertised in %s", len(serviceNames), elapsed))
@@ -198,13 +198,14 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 	It("keeps active service count exact and reconcile errors flat during ten-minute churn", func() {
 		defer suite.cleanupScenario(scaleScenarioChurn)
 
-		beforeMetrics, err := e2e.SnapshotScaleMetrics(suite.cluster.Name, suite.nodeNames)
+		beforeMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 
 		active := make(map[string]struct{}, scaleChurnMaxServices)
 		nextOrdinal := 0
 		step := 0
-		deadline := time.Now().Add(scaleChurnDuration)
+		churnStarted := time.Now()
+		deadline := churnStarted.Add(scaleChurnDuration)
 		ticker := time.NewTicker(scaleChurnInterval)
 		defer ticker.Stop()
 
@@ -220,6 +221,8 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 				}
 			}
 		}
+		achievedRate := float64(step) / time.Since(churnStarted).Seconds()
+		Expect(achievedRate).To(BeNumerically(">=", scaleMinimumChurnRate), "completed %d operations at %.2f operations/second", step, achievedRate)
 
 		services, err := e2e.ListScaleServices(suite.ctx, suite.client, suite.namespace, scaleScenarioChurn)
 		Expect(err).NotTo(HaveOccurred())
@@ -232,10 +235,11 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		Expect(e2e.WaitForScaleActiveServices(suite.ctx, suite.cluster.Name, suite.nodeNames, suite.namespace,
 			len(active), scaleClusterConvergenceLimit)).To(Succeed())
 
-		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.cluster.Name, suite.nodeNames)
+		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		Expect(err).NotTo(HaveOccurred())
-		reconcileDelta := e2e.ScaleCounterDelta(beforeMetrics, afterMetrics,
+		reconcileDelta, found := e2e.ScaleCounterDelta(beforeMetrics, afterMetrics,
 			"kube_vip_service_reconcile_errors_total", map[string]string{"namespace": suite.namespace})
+		Expect(found).To(BeTrue(), "reconcile error metric was absent")
 		By(fmt.Sprintf("churn left %d services with reconcile-error delta %.0f", len(active), reconcileDelta))
 		Expect(reconcileDelta).To(BeNumerically("<=", scaleReconcileErrorDeltaLimit))
 	})
@@ -257,7 +261,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 			_, err := e2e.ScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, leaseNames)
 			return err
 		}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
-		beforeMetrics, err := e2e.SnapshotScaleMetrics(suite.cluster.Name, suite.nodeNames)
+		beforeMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 
 		for cycle := 0; cycle < scaleElectionCycles; cycle++ {
@@ -268,15 +272,16 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 			Expect(e2e.KillKubeVip(suite.cluster.Name, victim, false)).To(Succeed())
 
 			Eventually(func() error {
-				return e2e.WaitForScaleMetrics(suite.cluster.Name, suite.nodeNames)
+				return e2e.WaitForScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 			}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
 			Expect(e2e.WaitForScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, leaseNames, previous, victim,
 				scaleClusterConvergenceLimit)).To(Succeed())
 		}
 
-		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.cluster.Name, suite.nodeNames)
+		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		Expect(err).NotTo(HaveOccurred())
-		transitionDelta := e2e.ScaleTransitionDelta(beforeMetrics, afterMetrics, leaseNames)
+		transitionDelta, found := e2e.ScaleTransitionDelta(beforeMetrics, afterMetrics, leaseNames)
+		Expect(found).To(BeTrue(), "transition metric was absent")
 		By(fmt.Sprintf("all %d service leases reacquired with %.0f total transition delta", len(leaseNames), transitionDelta))
 		Expect(transitionDelta).To(BeNumerically("<=", scaleTransitionDeltaLimit))
 	})
