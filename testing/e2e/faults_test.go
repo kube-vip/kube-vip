@@ -99,6 +99,43 @@ func TestSinglePID(t *testing.T) {
 	}
 }
 
+func TestRestoreKubelet(t *testing.T) {
+	tests := []struct {
+		name      string
+		failAt    int
+		err       error
+		wantError bool
+		wantCalls int
+	}{
+		{name: "starts active kubelet", wantCalls: 2},
+		{name: "already deleted before start", failAt: 1, err: errors.New("docker exec: No such container: node"), wantCalls: 1},
+		{name: "deleted before active check", failAt: 2, err: errors.New("No such container: node"), wantCalls: 2},
+		{name: "start failure", failAt: 1, err: errors.New("injected failure"), wantError: true, wantCalls: 1},
+		{name: "inactive kubelet", failAt: 2, err: errors.New("inactive"), wantError: true, wantCalls: 2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			run := func(_ string, _ ...string) error {
+				calls++
+				if calls == test.failAt {
+					return test.err
+				}
+				return nil
+			}
+
+			err := restoreKubelet("cluster", "node", run)
+			if (err != nil) != test.wantError {
+				t.Fatalf("restoreKubelet() error = %v, wantError %t", err, test.wantError)
+			}
+			if calls != test.wantCalls {
+				t.Fatalf("restoreKubelet() calls = %d, want %d", calls, test.wantCalls)
+			}
+		})
+	}
+}
+
 func TestPodManifestPaths(t *testing.T) {
 	tests := []struct {
 		name      string
