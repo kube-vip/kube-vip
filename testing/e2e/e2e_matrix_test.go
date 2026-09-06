@@ -29,7 +29,12 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e/matrix"
 )
 
-const matrixClusterNodes = 1
+const (
+	matrixClusterNodes   = 1
+	matrixMetricTimeout  = 120 * time.Second
+	matrixMetricInterval = 2 * time.Second
+	matrixMetricGap      = time.Second
+)
 
 type matrixDeployment struct {
 	cluster   *e2e.Cluster
@@ -352,13 +357,17 @@ func assertMatrixBGPVIP(ctx context.Context, client api.GoBgpServiceClient, vipA
 
 func assertMatrixMetrics(ctx context.Context, deployment *matrixDeployment, combo matrix.Combo, serviceName string) {
 	hasService := serviceName != ""
+	nodes := matrixNodeNames(deployment)
 	if shouldAssertMatrixLeader(combo, hasService) {
+		if !hasMetricCapability(ctx, deployment.cluster.Name, nodes, "kube_vip_is_leader") {
+			return
+		}
 		leaseName := matrixLeaderLease(combo, serviceName)
 		labels := map[string]string{"lease_name": leaseName}
 		assertMetricValue := func() (float64, error) {
 			var total float64
-			for _, node := range deployment.cluster.Nodes {
-				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node.String())
+			for _, node := range nodes {
+				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node)
 				if err != nil {
 					return 0, err
 				}
@@ -371,10 +380,13 @@ func assertMatrixMetrics(ctx context.Context, deployment *matrixDeployment, comb
 	}
 
 	if hasService {
+		if !hasMetricCapability(ctx, deployment.cluster.Name, nodes, "kube_vip_active_services") {
+			return
+		}
 		activeServices := func() (float64, error) {
 			var total float64
-			for _, node := range deployment.cluster.Nodes {
-				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node.String())
+			for _, node := range nodes {
+				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node)
 				if err != nil {
 					return 0, err
 				}
@@ -384,9 +396,120 @@ func assertMatrixMetrics(ctx context.Context, deployment *matrixDeployment, comb
 			}
 			return total, nil
 		}
-		Eventually(activeServices, "120s", "2s").Should(BeNumerically(">=", float64(1)))
-		Consistently(activeServices, "10s", "2s").Should(BeNumerically(">=", float64(1)))
+		Eventually(activeServices, matrixMetricTimeout, matrixMetricInterval).Should(Equal(float64(1)))
+		Consistently(activeServices, 10*time.Second, matrixMetricInterval).Should(Equal(float64(1)))
 	}
+
+	assertMatrixLoopMetrics(ctx, deployment, combo, hasService, nodes)
+}
+
+func matrixNodeNames(deployment *matrixDeployment) []string {
+	nodes := make([]string, 0, len(deployment.cluster.Nodes))
+	for _, node := range deployment.cluster.Nodes {
+		nodes = append(nodes, node.String())
+	}
+	return nodes
+}
+
+type matrixLoopMetric struct {
+	name     string
+	labels   map[string]string
+	expected float64
+}
+
+func assertMatrixLoopMetrics(ctx context.Context, deployment *matrixDeployment, combo matrix.Combo, hasService bool, nodes []string) {
+	for _, assertion := range matrixLoopMetrics(combo, hasService) {
+		if !hasMetricCapabilityWithLabels(ctx, deployment.cluster.Name, nodes, assertion.name, assertion.labels) {
+			continue
+		}
+		for _, node := range nodes {
+			assertEventuallyStableMetric(
+				ctx,
+				deployment.cluster.Name,
+				node,
+				assertion.name,
+				assertion.labels,
+				assertion.expected,
+				matrixMetricTimeout,
+				matrixMetricInterval,
+				matrixMetricGap,
+			)
+		}
+	}
+}
+
+func matrixLoopMetrics(combo matrix.Combo, hasService bool) []matrixLoopMetric {
+	assertions := make([]matrixLoopMetric, 0, 4)
+	if hasService {
+		serviceWatchers := float64(1)
+		// On-demand mode runs the forced per-service watcher alongside the
+		// regular service watcher. The latter may ignore this annotated
+		// service, but its watcher loop is still live.
+		if combo.Election == matrix.ElectionOnDemand {
+			serviceWatchers = 2
+		}
+		assertions = append(assertions,
+			matrixLoopMetric{
+				name:     "kube_vip_watcher_loops",
+				labels:   map[string]string{"kind": "service"},
+				expected: serviceWatchers,
+			},
+			matrixLoopMetric{
+				name:     "kube_vip_watcher_loops",
+				labels:   map[string]string{"kind": "endpoint"},
+				expected: 1,
+			},
+		)
+		if combo.Election == matrix.ElectionPerService {
+			assertions = append(assertions, matrixLoopMetric{
+				name:     "kube_vip_watcher_loops",
+				labels:   map[string]string{"kind": "lease"},
+				expected: 1,
+			})
+		}
+	}
+
+	electionLoops := 0
+	// ARP's control-plane worker always uses the control-plane election. BGP
+	// disables it in its manifest, while routing-table control-plane startup
+	// directly serves the VIP and does not create an election loop.
+	if combo.Mode == matrix.ModeARP && (combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth) {
+		electionLoops++
+	}
+	if hasService {
+		switch combo.Mode {
+		case matrix.ModeARP:
+			if combo.Election == matrix.ElectionPerService {
+				electionLoops++
+			} else {
+				// ARP uses GlobalLeader for every non per-service service
+				// arrangement, including the no-election matrix value.
+				electionLoops++
+			}
+		case matrix.ModeBGP:
+			if combo.Election == matrix.ElectionPerService || combo.Election == matrix.ElectionOnDemand {
+				electionLoops++
+			}
+		case matrix.ModeRT:
+			switch combo.Election {
+			case matrix.ElectionGlobal, matrix.ElectionPerService:
+				electionLoops++
+			case matrix.ElectionOnDemand:
+				electionLoops++
+				if combo.Function == matrix.FunctionBoth {
+					electionLoops++
+				}
+			}
+		}
+	}
+	if electionLoops > 0 {
+		assertions = append(assertions, matrixLoopMetric{
+			name:     "kube_vip_election_loops",
+			labels:   map[string]string{"type": "kubernetes"},
+			expected: float64(electionLoops),
+		})
+	}
+	return assertions
 }
 
 func shouldAssertMatrixLeader(combo matrix.Combo, hasService bool) bool {

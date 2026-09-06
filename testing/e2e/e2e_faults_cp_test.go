@@ -28,16 +28,25 @@ import (
 )
 
 const (
-	faultClusterNodeCount      = 3
-	faultLeaseNamespace        = "kube-system"
-	faultLeaseName             = "plndr-cp-lock"
-	faultTransitionMetric      = "kube_vip_leader_election_transitions_total"
-	faultPollInterval          = time.Second
-	faultMetricGap             = time.Second
-	faultConvergenceTimeout    = 120 * time.Second
-	faultLeaseObservationLimit = 15 * time.Second
-	faultSteadyStateWindow     = 5 * time.Second
-	faultTransitionDeltaLimit  = 4.0
+	faultClusterNodeCount       = 3
+	faultLeaseNamespace         = "kube-system"
+	faultLeaseName              = "plndr-cp-lock"
+	faultTransitionMetric       = "kube_vip_leader_election_transitions_total"
+	faultWatcherLoopsMetric     = "kube_vip_watcher_loops"
+	faultElectionLoopsMetric    = "kube_vip_election_loops"
+	faultVIPAddressesMetric     = "kube_vip_vip_addresses"
+	faultVIPOperationsMetric    = "kube_vip_vip_operations_total"
+	faultRouteOperationsMetric  = "kube_vip_route_operations_total"
+	faultBGPOperationsMetric    = "kube_vip_bgp_route_operations_total"
+	faultEgressOperationsMetric = "kube_vip_egress_operations_total"
+	faultWatcherRestartMetric   = "kube_vip_watcher_restarts_total"
+	faultPollInterval           = time.Second
+	faultMetricGap              = time.Second
+	faultConvergenceTimeout     = 120 * time.Second
+	faultLeaseObservationLimit  = 15 * time.Second
+	faultSteadyStateWindow      = 5 * time.Second
+	faultTransitionDeltaLimit   = 4.0
+	faultCounterQuietTolerance  = 0.1
 )
 
 type controlPlaneFaultSuite struct {
@@ -199,6 +208,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			return
 		}
 
+		suite.requireFaultMetricCapabilities()
 		before := suite.transitionSnapshot()
 		oldLeader := suite.waitForLeader()
 
@@ -214,6 +224,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		By(withTimestamp(fmt.Sprintf("lease %s/%s is held by remaining node %q while %q is blackholed", faultLeaseNamespace, suite.election.leaseName, *lease.Spec.HolderIdentity, oldLeader)))
 		suite.assertLeaderMetric(newLeader)
 		suite.assertOneLeader(oldLeader)
+		suite.assertFaultMetrics(newLeader, before, true, "API server blackhole")
 
 		By(withTimestamp(fmt.Sprintf("restoring the API server connection on %q", oldLeader)))
 		Expect(e2e.RestoreAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())
@@ -224,6 +235,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		suite.assertLeaderMetric(recoveredLeader)
 		suite.assertOneLeader()
 		suite.assertSteadyLeader(recoveredLeader)
+		suite.assertFaultMetrics(recoveredLeader, nil, false, "API server blackhole recovery")
 		suite.assertTransitionCounterStable(before, "API server blackhole and recovery")
 	})
 
@@ -241,6 +253,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
 			return
 		}
+		suite.requireFaultMetricCapabilities()
 
 		before := suite.transitionSnapshot()
 		oldLease := suite.waitForLease()
@@ -274,6 +287,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		suite.assertLeaderMetric(recoveredLeader)
 		suite.assertOneLeader()
 		suite.assertSteadyLeader(recoveredLeader)
+		suite.assertFaultMetrics(recoveredLeader, before, false, "SIGKILL and kube-vip restart")
 		suite.assertTransitionCounterStable(before, "SIGKILL and kube-vip restart")
 	})
 
@@ -282,6 +296,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			Skip(fmt.Sprintf("%s control-plane mode does not use a Kubernetes election lease", Mode))
 		}
 
+		suite.requireFaultMetricCapabilities()
 		beforeDelete := suite.transitionSnapshot()
 		oldLease := suite.getLease()
 		oldUID := string(oldLease.UID)
@@ -295,6 +310,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		suite.assertLeaderMetric(leader)
 		suite.assertOneLeader()
 		suite.assertSteadyLeader(leader)
+		suite.assertFaultMetrics(leader, beforeDelete, false, "lease deletion")
 		suite.assertTransitionCounterStable(beforeDelete, "lease deletion")
 
 		beforeSteal := suite.transitionSnapshot()
@@ -310,6 +326,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		suite.assertOneLeader()
 		stableLeader := suite.waitForLeader()
 		suite.assertSteadyLeader(stableLeader)
+		suite.assertFaultMetrics(stableLeader, beforeSteal, false, "lease stealing")
 		suite.assertTransitionCounterStable(beforeSteal, "lease stealing")
 	})
 
@@ -324,6 +341,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			return
 		}
 
+		suite.requireFaultMetricCapabilities()
 		before := suite.transitionSnapshot()
 		oldLeader := suite.waitForLeader()
 
@@ -339,6 +357,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		suite.assertLeaderMetric(leader)
 		suite.assertOneLeader()
 		suite.assertSteadyLeader(leader)
+		suite.assertFaultMetrics(leader, before, false, "control-plane node restart")
 		suite.assertTransitionCounterStable(before, "control-plane node restart")
 	})
 })
@@ -533,6 +552,200 @@ func (s *controlPlaneFaultSuite) waitForMetrics(node string) {
 		_, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
 		return err
 	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+}
+
+func (s *controlPlaneFaultSuite) requireFaultMetricCapabilities() {
+	s.metrics = hasMetricCapabilityWithLabels(
+		s.ctx,
+		s.cluster.Name,
+		s.nodes,
+		faultElectionLoopsMetric,
+		map[string]string{"type": "kubernetes"},
+	)
+	if !s.metrics {
+		return
+	}
+	if Mode == ModeARP && !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultVIPAddressesMetric) {
+		s.metrics = false
+	}
+	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, s.operationMetric()) {
+		s.metrics = false
+	}
+}
+
+func (s *controlPlaneFaultSuite) operationMetric() string {
+	if Mode == ModeRT {
+		return faultRouteOperationsMetric
+	}
+	return faultVIPOperationsMetric
+}
+
+func (s *controlPlaneFaultSuite) assertFaultMetrics(leader string, before faultMetricSnapshot, watcherRestart bool, fault string) {
+	if !s.metrics {
+		return
+	}
+	s.assertLoopLiveness()
+	if Mode == ModeARP || hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultVIPAddressesMetric) {
+		s.assertVIPAddresses(leader)
+	}
+	s.assertQuietOperationCounter(fault)
+	if before != nil {
+		s.assertWatcherRestartDelta(before, watcherRestart, fault)
+	}
+}
+
+func (s *controlPlaneFaultSuite) assertLoopLiveness() {
+	electionLabels := map[string]string{"type": "kubernetes"}
+	if !hasMetricCapabilityWithLabels(s.ctx, s.cluster.Name, s.nodes, faultElectionLoopsMetric, electionLabels) {
+		return
+	}
+	for _, node := range s.nodes {
+		assertEventuallyStableMetric(
+			s.ctx,
+			s.cluster.Name,
+			node,
+			faultElectionLoopsMetric,
+			electionLabels,
+			1,
+			faultConvergenceTimeout,
+			faultPollInterval,
+			faultMetricGap,
+		)
+	}
+
+	// The control-plane fault manifest does not enable the service or IPVS
+	// watcher. If a future production change exposes a node watcher here, check
+	// it as well; absence is expected for this topology, not a failed metric.
+	nodeWatcherLabels := map[string]string{"kind": "node"}
+	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultWatcherLoopsMetric) {
+		By(withTimestamp("skipping node watcher loop assertion: this control-plane topology has no node watcher series"))
+		return
+	}
+	if !hasMetricCapabilityWithLabels(s.ctx, s.cluster.Name, s.nodes, faultWatcherLoopsMetric, nodeWatcherLabels) {
+		return
+	}
+	for _, node := range s.nodes {
+		assertEventuallyStableMetric(
+			s.ctx,
+			s.cluster.Name,
+			node,
+			faultWatcherLoopsMetric,
+			nodeWatcherLabels,
+			1,
+			faultConvergenceTimeout,
+			faultPollInterval,
+			faultMetricGap,
+		)
+	}
+}
+
+func (s *controlPlaneFaultSuite) assertVIPAddresses(leader string) {
+	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultVIPAddressesMetric) {
+		return
+	}
+	labels := map[string]string{"interface": "eth0", "family": utils.IPv4Family}
+	// Routing-table mode owns the VIP as a route, so ip addr and the address
+	// gauge must both report no interface VIP on every node.
+	for _, node := range s.nodes {
+		expected := float64(0)
+		if Mode == ModeARP && node == leader {
+			expected = 1
+		}
+
+		groundTruthMetric := func() (float64, error) {
+			metrics, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
+			if err != nil {
+				return 0, err
+			}
+			if !e2e.CheckIPAddressPresence(s.vip, node, expected == 1) {
+				return 0, fmt.Errorf("docker ip addr ground truth for VIP %q on %q does not match expected presence %t", s.vip, node, expected == 1)
+			}
+			return e2e.SumMetric(metrics, faultVIPAddressesMetric, labels), nil
+		}
+		Eventually(groundTruthMetric, faultConvergenceTimeout, faultPollInterval).Should(Equal(expected))
+	}
+}
+
+func (s *controlPlaneFaultSuite) assertQuietOperationCounter(fault string) {
+	primary := s.operationMetric()
+	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, primary) {
+		return
+	}
+	s.assertQuietCounter(primary, fault)
+
+	// BGP and egress faults are covered by separate suites when those files
+	// are present. Keep this helper reusable when those optional series are
+	// exposed by a combined topology without making the current ARP/RT suite
+	// depend on either production metric family.
+	for _, name := range []string{faultRouteOperationsMetric, faultBGPOperationsMetric, faultEgressOperationsMetric} {
+		if name == primary || !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, name) {
+			continue
+		}
+		s.assertQuietCounter(name, fault)
+	}
+}
+
+func (s *controlPlaneFaultSuite) assertQuietCounter(name, fault string) {
+	By(withTimestamp(fmt.Sprintf("checking %s stays quiet after %s", name, fault)))
+	Eventually(func() error {
+		first := s.transitionSnapshot()
+		time.Sleep(faultMetricGap)
+		second := s.transitionSnapshot()
+		observed := false
+		for _, node := range s.nodes {
+			delta, ok := e2e.CounterSumDelta(first[node], second[node], name, nil)
+			if !ok {
+				continue
+			}
+			observed = true
+			if delta < 0 {
+				delta = 0
+			}
+			if delta > faultCounterQuietTolerance {
+				return fmt.Errorf("counter %s on %q changed by %.0f during the steady-state window", name, node, delta)
+			}
+		}
+		if !observed {
+			return fmt.Errorf("counter %s was not present in both steady-state samples", name)
+		}
+		return nil
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+}
+
+func (s *controlPlaneFaultSuite) assertWatcherRestartDelta(before faultMetricSnapshot, shouldIncrement bool, fault string) {
+	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultWatcherRestartMetric) {
+		return
+	}
+
+	By(withTimestamp(fmt.Sprintf("checking watcher restart counter after %s", fault)))
+	matcher := Equal(float64(0))
+	if shouldIncrement {
+		matcher = BeNumerically(">=", float64(1))
+	}
+	Eventually(func() (float64, error) {
+		first := s.transitionSnapshot()
+		time.Sleep(faultMetricGap)
+		second := s.transitionSnapshot()
+		if metricSnapshotTotal(first) != metricSnapshotTotal(second) {
+			return 0, fmt.Errorf("watcher restart counter is still changing")
+		}
+
+		delta := metricSnapshotTotal(second) - metricSnapshotTotal(before)
+		if delta < 0 {
+			// A process/node restart resets Prometheus counters. Treat that as
+			// no observed increment; it must not look like a negative delta.
+			delta = 0
+		}
+		return delta, nil
+	}, faultConvergenceTimeout, faultPollInterval).Should(matcher)
+}
+
+func metricSnapshotTotal(snapshot faultMetricSnapshot) float64 {
+	var total float64
+	for _, metrics := range snapshot {
+		total += e2e.SumMetric(metrics, faultWatcherRestartMetric, nil)
+	}
+	return total
 }
 
 func (s *controlPlaneFaultSuite) waitForNodeReady(nodeName string) {
