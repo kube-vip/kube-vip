@@ -37,10 +37,18 @@ import (
 )
 
 const (
-	GoBGPAS   uint32 = 65500
-	KubevipAS uint32 = 65501
-	GoBGPPort uint32 = 50051
+	GoBGPAS      uint32 = 65500
+	KubevipAS    uint32 = 65501
+	GoBGPPort    uint16 = 1179
+	GoBGPAPIPort uint32 = 50051
 )
+
+type configValues struct {
+	AS   uint32
+	Port uint16
+	IPv4 string
+	IPv6 string
+}
 
 // ---------------------------------------------------------------------------
 // Server — GoBGP daemon lifecycle + gRPC client
@@ -54,8 +62,10 @@ type Server struct {
 	LocalIPv6 string
 	TempDir   string
 
-	kill chan any
-	done chan error
+	kill   chan any
+	done   chan error
+	stdout *lockedBuffer
+	stderr *lockedBuffer
 }
 
 // NewServer starts a GoBGP daemon and connects a gRPC client.
@@ -75,6 +85,7 @@ func NewServer(tempDir string) *Server {
 	v6addr, _, err := deployment.GetLocalIPv6(networkInterface)
 	Expect(err).ToNot(HaveOccurred())
 	s.LocalIPv6 = v6addr.String()
+	Expect(validateBindAddresses(s.LocalIPv4, s.LocalIPv6)).To(Succeed())
 
 	// Render GoBGP config and start daemon
 	curDir, err := os.Getwd()
@@ -87,15 +98,17 @@ func NewServer(tempDir string) *Server {
 	configPath := filepath.Join(tempDir, "config.toml")
 	f, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	Expect(err).ToNot(HaveOccurred())
-	Expect(tmpl.Execute(f, &e2e.BGPPeerValues{AS: GoBGPAS})).To(Succeed())
+	Expect(tmpl.Execute(f, configValues{AS: GoBGPAS, Port: GoBGPPort, IPv4: s.LocalIPv4, IPv6: s.LocalIPv6})).To(Succeed())
 	f.Close()
 
 	s.kill = make(chan any)
-	s.done, err = runGoBGP(configPath, net.JoinHostPort(s.LocalIPv4, strconv.Itoa(int(GoBGPPort))), s.kill)
+	apiAddress := net.JoinHostPort(s.LocalIPv4, strconv.Itoa(int(GoBGPAPIPort)))
+	apiHosts := apiAddress + "," + net.JoinHostPort(s.LocalIPv6, strconv.Itoa(int(GoBGPAPIPort)))
+	s.done, s.stdout, s.stderr, err = runGoBGP(configPath, apiHosts, apiAddress, s.kill)
 	Expect(err).ToNot(HaveOccurred())
 
 	// Connect gRPC client (default: IPv4)
-	s.Client, err = newGoBGPClient(s.LocalIPv4, GoBGPPort)
+	s.Client, err = newGoBGPClient(s.LocalIPv4, GoBGPAPIPort)
 	Expect(err).ToNot(HaveOccurred())
 
 	return s
@@ -111,14 +124,14 @@ func BuildServerFromInfo(ipv4, ipv6, tempDir string) *Server {
 	}
 
 	var err error
-	s.Client, err = newGoBGPClient(ipv4, GoBGPPort)
+	s.Client, err = newGoBGPClient(ipv4, GoBGPAPIPort)
 	Expect(err).ToNot(HaveOccurred())
 	return s
 }
 
 // NewClientIPv6 creates a second gRPC client connection via IPv6.
 func (s *Server) NewClientIPv6() api.GoBgpServiceClient {
-	c, err := newGoBGPClient(s.LocalIPv6, GoBGPPort)
+	c, err := newGoBGPClient(s.LocalIPv6, GoBGPAPIPort)
 	Expect(err).ToNot(HaveOccurred())
 	return c
 }
@@ -167,7 +180,7 @@ func (s *Server) AddClusterPeers(ctx context.Context, clusterNodes []nodes.Node,
 				Peer: &api.Peer{
 					Conf: &api.PeerConf{
 						NeighborAddress: p.IP,
-						PeerAsn:         uint32(p.AS),
+						PeerAsn:         p.AS,
 					},
 					AfiSafis: []*api.AfiSafi{
 						{Config: &api.AfiSafiConfig{Enabled: true, Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}}},
@@ -180,6 +193,58 @@ func (s *Server) AddClusterPeers(ctx context.Context, clusterNodes []nodes.Node,
 	}
 
 	return peers
+}
+
+// WaitForEstablished waits until every requested neighbor is established.
+func (s *Server) WaitForEstablished(ctx context.Context, peers []*e2e.BGPPeerValues) error {
+	deadline := time.Now().Add(120 * time.Second)
+	var state string
+	for time.Now().Before(deadline) {
+		var err error
+		state, err = peerState(ctx, s.Client, peers)
+		if err == nil {
+			return nil
+		}
+		state = err.Error() + "; " + state
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("timed out waiting for BGP neighbors: %s%s", state, s.logs())
+}
+
+func peerState(ctx context.Context, client api.GoBgpServiceClient, expected []*e2e.BGPPeerValues) (string, error) {
+	peerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	stream, err := client.ListPeer(peerCtx, &api.ListPeerRequest{})
+	if err != nil {
+		return "", err
+	}
+	wanted := make(map[string]struct{}, len(expected))
+	for _, peer := range expected {
+		wanted[peer.IP] = struct{}{}
+	}
+	states := make([]string, 0, len(expected))
+	for {
+		peer, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return strings.Join(states, ", "), recvErr
+		}
+		address := peer.GetPeer().GetConf().GetNeighborAddress()
+		if _, ok := wanted[address]; !ok {
+			continue
+		}
+		state := peer.GetPeer().GetState().GetSessionState()
+		states = append(states, fmt.Sprintf("%s=%s", address, state))
+		if state == api.PeerState_SESSION_STATE_ESTABLISHED {
+			delete(wanted, address)
+		}
+	}
+	if len(wanted) != 0 {
+		return strings.Join(states, ", "), fmt.Errorf("%d/%d neighbors are not established", len(wanted), len(expected))
+	}
+	return strings.Join(states, ", "), nil
 }
 
 // RemovePeers deletes the given peers from GoBGP.
@@ -344,6 +409,17 @@ func joinNonEmpty(ss []string) string {
 	return result
 }
 
+func validateBindAddresses(ipv4, ipv6 string) error {
+	v4, v6 := net.ParseIP(ipv4), net.ParseIP(ipv6)
+	if v4 == nil || v4.To4() == nil || v4.IsUnspecified() {
+		return fmt.Errorf("invalid IPv4 bridge address %q", ipv4)
+	}
+	if v6 == nil || v6.To4() != nil || v6.IsUnspecified() || v6.IsLinkLocalUnicast() {
+		return fmt.Errorf("invalid IPv6 bridge address %q", ipv6)
+	}
+	return nil
+}
+
 func newGoBGPClient(address string, port uint32) (api.GoBgpServiceClient, error) {
 	target := net.JoinHostPort(address, strconv.Itoa(int(port)))
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -353,26 +429,41 @@ func newGoBGPClient(address string, port uint32) (api.GoBgpServiceClient, error)
 	return api.NewGoBgpServiceClient(conn), nil
 }
 
-func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
+func runGoBGP(config, apiHosts, readyAddress string, kill <-chan any) (chan error, *lockedBuffer, *lockedBuffer, error) {
 	By("starting GoBGP server")
-	cmd := exec.Command("../../bin/gobgpd", "--api-hosts", address, "-f", config)
+	cmd := exec.Command("../../bin/gobgpd", "--api-hosts", apiHosts, "-f", config) //nolint:gosec // arguments are generated by the test harness
 	stdout := &lockedBuffer{}
 	stderr := &lockedBuffer{}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	stdoutFile, err := os.Create(filepath.Join(filepath.Dir(config), "gobgpd.stdout"))
+	if err != nil {
+		return nil, stdout, stderr, fmt.Errorf("create GoBGP stdout log: %w", err)
+	}
+	stderrFile, err := os.Create(filepath.Join(filepath.Dir(config), "gobgpd.stderr"))
+	if err != nil {
+		stdoutFile.Close()
+		return nil, stdout, stderr, fmt.Errorf("create GoBGP stderr log: %w", err)
+	}
+	cmd.Stdout = io.MultiWriter(stdout, stdoutFile)
+	cmd.Stderr = io.MultiWriter(stderr, stderrFile)
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start GoBGP: %w", err)
+		stdoutFile.Close()
+		stderrFile.Close()
+		return nil, stdout, stderr, fmt.Errorf("start GoBGP: %w", err)
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	if err := waitForGoBGPReady(address, done, stdout, stderr, 15*time.Second); err != nil {
+	go func() {
+		done <- cmd.Wait()
+		stdoutFile.Close()
+		stderrFile.Close()
+	}()
+	if err := waitForGoBGPReady(readyAddress, done, stdout, stderr, 15*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		select {
 		case <-done:
 		default:
 		}
-		return nil, fmt.Errorf("start GoBGP on %s: %w", address, err)
+		return nil, stdout, stderr, fmt.Errorf("start GoBGP API on %s: %w", apiHosts, err)
 	}
 
 	stopped := make(chan error, 1)
@@ -390,7 +481,16 @@ func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
 			stopped <- nil
 		}
 	}()
-	return stopped, nil
+	return stopped, stdout, stderr, nil
+}
+
+func (s *Server) logs() string {
+	if s.stdout != nil && s.stderr != nil {
+		return formatProcessLogs(s.stdout, s.stderr)
+	}
+	stdout, _ := os.ReadFile(filepath.Join(s.TempDir, "gobgpd.stdout"))
+	stderr, _ := os.ReadFile(filepath.Join(s.TempDir, "gobgpd.stderr"))
+	return formatProcessLogs(bytes.NewBuffer(stdout), bytes.NewBuffer(stderr))
 }
 
 func waitForGoBGPReady(address string, exited <-chan error, stdout, stderr fmt.Stringer, timeout time.Duration) error {
