@@ -931,6 +931,7 @@ var _ = Describe("kube-vip BGP mode", func() {
 				kvPeer := e2e.BGPPeerValues{
 					IP:       server.LocalIPv4,
 					AS:       bgp.GoBGPAS,
+					Port:     bgp.GoBGPPort,
 					IPFamily: utils.IPv4Family,
 				}
 				Expect(annotateNodes(ctx, "test", kindCluster.Client, kvPeer, bgp.KubevipAS)).To(Succeed())
@@ -1019,10 +1020,10 @@ func setupEnv(ctx context.Context, cpVIP *string,
 
 	kvPeers := []*e2e.BGPPeerValues{}
 	if slices.Contains(peerAddrFamily, utils.IPv4Family) {
-		kvPeers = append(kvPeers, &e2e.BGPPeerValues{IP: server.LocalIPv4, AS: bgp.GoBGPAS, IPFamily: utils.IPv4Family})
+		kvPeers = append(kvPeers, &e2e.BGPPeerValues{IP: server.LocalIPv4, AS: bgp.GoBGPAS, Port: bgp.GoBGPPort, IPFamily: utils.IPv4Family})
 	}
 	if slices.Contains(peerAddrFamily, utils.IPv6Family) {
-		kvPeers = append(kvPeers, &e2e.BGPPeerValues{IP: server.LocalIPv6, AS: bgp.GoBGPAS, IPFamily: utils.IPv6Family})
+		kvPeers = append(kvPeers, &e2e.BGPPeerValues{IP: server.LocalIPv6, AS: bgp.GoBGPAS, Port: bgp.GoBGPPort, IPFamily: utils.IPv6Family})
 	}
 
 	fixedV4Nexthop := defaultFixedNexthopv4

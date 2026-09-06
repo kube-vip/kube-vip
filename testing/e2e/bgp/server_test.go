@@ -7,9 +7,9 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	api "github.com/osrg/gobgp/v4/api"
@@ -24,15 +24,33 @@ func (testGoBGPServer) GetBgp(context.Context, *api.GetBgpRequest) (*api.GetBgpR
 	return &api.GetBgpResponse{Global: &api.Global{Asn: GoBGPAS}}, nil
 }
 
-func TestConfigDisablesBGPListener(t *testing.T) {
+func TestConfigUsesUnprivilegedBGPListener(t *testing.T) {
 	t.Parallel()
 
-	config, err := os.ReadFile("config.toml.tmpl")
+	tmpl, err := template.ParseFiles("config.toml.tmpl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config), "port = -1") {
-		t.Fatal("GoBGP test config must disable its privileged BGP listener")
+	var config bytes.Buffer
+	if err := tmpl.Execute(&config, configValues{AS: GoBGPAS, Port: GoBGPPort, IPv4: "172.18.0.1", IPv6: "fd00::1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"port = 1179", `local-address-list = ["172.18.0.1", "fd00::1"]`} {
+		if !strings.Contains(config.String(), expected) {
+			t.Fatalf("GoBGP test config does not contain %q", expected)
+		}
+	}
+}
+
+func TestValidateBindAddresses(t *testing.T) {
+	t.Parallel()
+	if err := validateBindAddresses("172.18.0.1", "fd00::1"); err != nil {
+		t.Fatalf("validateBindAddresses() error = %v", err)
+	}
+	for _, pair := range [][2]string{{"", "fd00::1"}, {"::1", "fd00::1"}, {"172.18.0.1", "fe80::1"}} {
+		if err := validateBindAddresses(pair[0], pair[1]); err == nil {
+			t.Fatalf("validateBindAddresses(%q, %q) succeeded", pair[0], pair[1])
+		}
 	}
 }
 
