@@ -152,6 +152,7 @@ e2e-tests-bgp: get-whoami get-gobgp
 	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) --label-filter='!faults && !scale' ./testing/e2e
 
 e2e-tests-faults: get-whoami
+	@test "$(TEST_MODE)" = "arp" -o "$(TEST_MODE)" = "rt" || (echo "fault tests support TEST_MODE=arp or TEST_MODE=rt; BGP is not implemented" >&2; exit 1)
 	GOMAXPROCS=4 TEST_MODE=$(TEST_MODE) K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) --label-filter=faults ./testing/e2e
 
 e2e-tests-etcd: get-whoami
