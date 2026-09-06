@@ -148,20 +148,28 @@ type exclusionRule struct {
 // next to the generator instead of hiding them in the greedy selector.
 var exclusions = []exclusionRule{
 	{
-		name: "control-plane-only mode requires its supported election arrangement",
+		name: "bgp does not use the no-election service arrangement",
 		match: func(c Combo) bool {
-			if c.Function != FunctionCP {
-				return false
-			}
-			if c.Mode == ModeARP {
-				return c.Election != ElectionGlobal
-			}
-			return c.Election != ElectionNone
+			return c.Mode == ModeBGP && c.Election == ElectionNone
 		},
 	},
 	{
 		name:  "wireguard has no runnable e2e deployment",
 		match: func(c Combo) bool { return c.Mode == ModeWireGuard },
+	},
+	{
+		name: "routing-table and BGP service elections require a service function",
+		match: func(c Combo) bool {
+			return (c.Mode == ModeRT || c.Mode == ModeBGP) && c.Function == FunctionCP &&
+				(c.Election == ElectionPerService || c.Election == ElectionOnDemand)
+		},
+	},
+	{
+		name: "per-service election requires a service function",
+		match: func(c Combo) bool {
+			return c.Mode != ModeRT && c.Mode != ModeBGP && c.Function == FunctionCP &&
+				(c.Election == ElectionPerService || c.Election == ElectionOnDemand)
+		},
 	},
 }
 
@@ -177,7 +185,8 @@ func ExclusionReason(c Combo) string {
 }
 
 // IsExcluded reports whether a combo is intentionally omitted from the
-// matrix.
+// matrix. The exclusions include the RT and BGP service-election constraint:
+// those election modes are only meaningful when a service is present.
 func IsExcluded(c Combo) bool {
 	return ExclusionReason(c) != ""
 }

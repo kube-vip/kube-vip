@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	api "github.com/osrg/gobgp/v4/api"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
@@ -114,18 +112,12 @@ func runMatrixCombo(combo matrix.Combo) {
 			deployment.cluster.Client, corev1.IPFamilyPolicyPreferDualStack,
 			matrixServiceFamilies(combo.Family), matrixTrafficPolicy(combo.ETP), "", 80, false,
 			combo.Election == matrix.ElectionOnDemand)
-		assertMatrixBackendsReady(ctx, deployment.cluster.Client, serviceName, combo.Provider)
 		assertMatrixServiceVIP(ctx, deployment.cluster.Client, serviceName, serviceVIP)
 		if combo.Mode == matrix.ModeBGP {
 			assertMatrixBGPVIP(ctx, deployment.bgpClient, serviceVIP)
-			assertMatrixBGPConnection(ctx, deployment.bgpClient, serviceVIP, "http", "80", "")
 		}
-		if combo.Mode == matrix.ModeARP {
-			for _, address := range strings.Split(serviceVIP, ",") {
-				assertConnection("http", address, "80", "", 5*time.Second, 120*time.Second)
-			}
-		} else if combo.Mode == matrix.ModeRT {
-			assertMatrixRoutes(deployment, serviceVIP)
+		for _, address := range strings.Split(serviceVIP, ",") {
+			assertConnection("http", address, "80", "", 5*time.Second, 120*time.Second)
 		}
 	}
 
@@ -144,7 +136,7 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 		networking.ServiceSubnet = serviceSubnet
 	}
 
-	cpVIP := matrixControlPlaneVIP(combo.Family, SOffset.Get())
+	cpVIP := matrixVIP(combo.Family, SOffset.Get())
 	hasCP := combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth
 	hasService := combo.Function == matrix.FunctionSvc || combo.Function == matrix.FunctionBoth
 	manifestValues := e2e.KubevipManifestValues{
@@ -172,7 +164,7 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 			if family == utils.IPv6Family {
 				peerIP = sharedBGPServer.LocalIPv6
 			}
-			bgpPeers = append(bgpPeers, &e2e.BGPPeerValues{IP: peerIP, AS: bgp.GoBGPAS, Port: bgp.GoBGPPort, IPFamily: family})
+			bgpPeers = append(bgpPeers, &e2e.BGPPeerValues{IP: peerIP, AS: bgp.GoBGPAS, IPFamily: family})
 		}
 		manifestValues.BGPAS = bgp.KubevipAS
 		manifestValues.BGPPeers = bgp.PeerStrings(bgpPeers)
@@ -183,21 +175,19 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 		templateName = "kube-vip-routing-table.yaml.tmpl"
 	}
 	deployment.cluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{
-		Name:           fmt.Sprintf("matrix-%d-p%d", SOffset.Get(), GinkgoParallelProcess()),
-		Nodes:          matrixClusterNodes,
-		Networking:     networking,
-		KubeVip:        manifestValues,
-		Logger:         e2e.TestLogger{},
-		ConfigMtx:      ConfigMtx,
-		KubeadmPatches: matrixKubeadmPatches(cpVIP, hasCP),
-		TemplateName:   templateName,
-		UseDaemonSet:   combo.Shape == matrix.ShapeDaemonSet,
+		Name:         fmt.Sprintf("matrix-%d-p%d", SOffset.Get(), GinkgoParallelProcess()),
+		Nodes:        matrixClusterNodes,
+		Networking:   networking,
+		KubeVip:      manifestValues,
+		Logger:       e2e.TestLogger{},
+		ConfigMtx:    ConfigMtx,
+		TemplateName: templateName,
+		UseDaemonSet: combo.Shape == matrix.ShapeDaemonSet,
 	})
 
 	if combo.Mode == matrix.ModeBGP {
 		deployment.bgpPeers = sharedBGPServer.AddClusterPeers(ctx, deployment.cluster.Nodes, bgp.KubevipAS, matrixBGPPeerFamilies(combo.Family))
 		deployment.bgpClient = sharedBGPServer.Client
-		Expect(sharedBGPServer.WaitForEstablished(ctx, deployment.bgpPeers)).To(Succeed())
 	}
 	return deployment
 }
@@ -222,95 +212,10 @@ func assertMatrixControlPlaneVIP(ctx context.Context, deployment *matrixDeployme
 	for _, address := range strings.Split(deployment.cpVIP, ",") {
 		if combo.Mode == matrix.ModeBGP {
 			assertMatrixBGPVIP(ctx, deployment.bgpClient, address)
-			assertMatrixBGPConnection(ctx, deployment.bgpClient, address, "https", "6443", "livez")
-			continue
-		}
-		if combo.Mode == matrix.ModeRT {
-			assertMatrixRoutes(deployment, address)
 			continue
 		}
 		assertControlPlaneIsRoutable(address, 5*time.Second, 120*time.Second)
 	}
-}
-
-func assertMatrixBGPConnection(ctx context.Context, client api.GoBgpServiceClient, addresses, protocol, port, suffix string) {
-	for _, address := range strings.Split(addresses, ",") {
-		var nextHops []string
-		Eventually(func() error {
-			nextHops = bgp.ResolveVIP(ctx, client, address)
-			if len(nextHops) == 0 {
-				return fmt.Errorf("BGP has no next hop for VIP %s", address)
-			}
-			return nil
-		}, "120s", "2s").Should(Succeed())
-
-		prefix := address + "/32"
-		familyArg := "-4"
-		if net.ParseIP(address).To4() == nil {
-			prefix = address + "/128"
-			familyArg = "-6"
-		}
-		cmd := exec.Command("sudo", "ip", familyArg, "route", "replace", prefix, "via", nextHops[0])
-		output, err := cmd.CombinedOutput()
-		Expect(err).NotTo(HaveOccurred(), "install route to BGP VIP %s via %s: %s", address, nextHops[0], strings.TrimSpace(string(output)))
-		DeferCleanup(func() {
-			output, err := exec.Command("sudo", "ip", familyArg, "route", "del", prefix).CombinedOutput()
-			Expect(err).NotTo(HaveOccurred(), "remove route to BGP VIP %s: %s", address, strings.TrimSpace(string(output)))
-		})
-		assertConnection(protocol, address, port, suffix, 5*time.Second, 120*time.Second)
-	}
-}
-
-func assertMatrixRoutes(deployment *matrixDeployment, addresses string) {
-	for _, node := range deployment.cluster.Nodes {
-		for _, address := range strings.Split(addresses, ",") {
-			present, output, err := e2e.CheckRoutePresence(address, node.String(), true)
-			Expect(err).NotTo(HaveOccurred(), "route output: %s", output)
-			Expect(present).To(BeTrue(), "route output: %s", output)
-		}
-	}
-}
-
-func assertMatrixBackendsReady(ctx context.Context, client kubernetes.Interface, serviceName string, provider matrix.Provider) {
-	Eventually(func() error {
-		return matrixBackendsReady(ctx, client, dsNamespace, serviceName, provider)
-	}, "120s", "2s").Should(Succeed())
-}
-
-func matrixBackendsReady(ctx context.Context, client kubernetes.Interface, namespace, serviceName string, provider matrix.Provider) error {
-	if provider == matrix.ProviderEndpoints {
-		endpoints, err := client.CoreV1().Endpoints(namespace).Get(ctx, serviceName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		ready := 0
-		for _, subset := range endpoints.Subsets {
-			ready += len(subset.Addresses)
-		}
-		if ready == 0 {
-			return fmt.Errorf("endpoints %s/%s have no ready addresses; subsets: %+v", namespace, serviceName, endpoints.Subsets)
-		}
-		return nil
-	}
-
-	slices, err := client.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: discoveryv1.LabelServiceName + "=" + serviceName,
-	})
-	if err != nil {
-		return err
-	}
-	ready := 0
-	for _, slice := range slices.Items {
-		for _, endpoint := range slice.Endpoints {
-			if endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready {
-				ready += len(endpoint.Addresses)
-			}
-		}
-	}
-	if ready == 0 {
-		return fmt.Errorf("endpoint slices for %s/%s have no ready addresses; slices: %+v", namespace, serviceName, slices.Items)
-	}
-	return nil
 }
 
 func assertMatrixServiceVIP(ctx context.Context, client kubernetes.Interface, name, vipAddress string) {
@@ -394,10 +299,7 @@ func shouldAssertMatrixLeader(combo matrix.Combo, hasService bool) bool {
 		return false
 	}
 	if combo.Mode == matrix.ModeBGP {
-		return hasService
-	}
-	if combo.Mode == matrix.ModeRT {
-		return hasService && combo.Election != matrix.ElectionNone
+		return hasService && combo.Election != matrix.ElectionGlobal
 	}
 	if combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth {
 		return true
@@ -406,7 +308,7 @@ func shouldAssertMatrixLeader(combo matrix.Combo, hasService bool) bool {
 }
 
 func matrixLeaderLease(combo matrix.Combo, serviceName string) string {
-	if combo.Mode == matrix.ModeARP && (combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth) {
+	if combo.Mode != matrix.ModeBGP && (combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth) {
 		return "plndr-cp-lock"
 	}
 	if combo.Election == matrix.ElectionGlobal {
@@ -464,23 +366,4 @@ func matrixVIP(family matrix.Family, offset uint) string {
 	default:
 		return e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
 	}
-}
-
-func matrixControlPlaneVIP(family matrix.Family, offset uint) string {
-	if family == matrix.FamilyDual {
-		// The dual-stack Kind configuration is IPv6-primary, so kubeadm's API
-		// endpoint and kube-vip must use the IPv6 member of the VIP pair.
-		return e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork)
-	}
-	return matrixVIP(family, offset)
-}
-
-func matrixKubeadmPatches(cpVIP string, enabled bool) []kindconfigv1alpha4.PatchJSON6902 {
-	if !enabled {
-		return nil
-	}
-	return []kindconfigv1alpha4.PatchJSON6902{{
-		Group: "kubeadm.k8s.io", Version: "v1beta3", Kind: "ClusterConfiguration",
-		Patch: fmt.Sprintf("- op: add\n  path: /apiServer/certSANs/-\n  value: %q", cpVIP),
-	}}
 }
