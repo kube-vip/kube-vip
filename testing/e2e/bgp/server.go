@@ -9,6 +9,7 @@
 package bgp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -17,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -352,15 +355,23 @@ func newGoBGPClient(address string, port uint32) (api.GoBgpServiceClient, error)
 
 func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
 	By("starting GoBGP server")
-	cmd := exec.Command("../../bin/gobgpd", "-f", config)
+	cmd := exec.Command("../../bin/gobgpd", "--api-hosts", address, "-f", config)
+	stdout := &lockedBuffer{}
+	stderr := &lockedBuffer{}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start GoBGP: %w", err)
 	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	if err := waitForProcessReady(address, done, 15*time.Second); err != nil {
+	if err := waitForGoBGPReady(address, done, stdout, stderr, 15*time.Second); err != nil {
 		_ = cmd.Process.Kill()
+		select {
+		case <-done:
+		default:
+		}
 		return nil, fmt.Errorf("start GoBGP on %s: %w", address, err)
 	}
 
@@ -368,7 +379,7 @@ func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
 	go func() {
 		select {
 		case err := <-done:
-			stopped <- fmt.Errorf("GoBGP exited unexpectedly: %w", err)
+			stopped <- fmt.Errorf("GoBGP exited unexpectedly: %w%s", err, formatProcessLogs(stdout, stderr))
 		case <-kill:
 			By("stopping GoBGP server")
 			if err := cmd.Process.Kill(); err != nil {
@@ -382,7 +393,14 @@ func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
 	return stopped, nil
 }
 
-func waitForProcessReady(address string, exited <-chan error, timeout time.Duration) error {
+func waitForGoBGPReady(address string, exited <-chan error, stdout, stderr fmt.Stringer, timeout time.Duration) error {
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create GoBGP API client: %w", err)
+	}
+	defer conn.Close()
+	client := api.NewGoBgpServiceClient(conn)
+
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -392,17 +410,49 @@ func waitForProcessReady(address string, exited <-chan error, timeout time.Durat
 		select {
 		case err := <-exited:
 			if err == nil {
-				return fmt.Errorf("process exited before becoming ready")
+				return fmt.Errorf("process exited before becoming ready%s", formatProcessLogs(stdout, stderr))
 			}
-			return fmt.Errorf("process exited before becoming ready: %w", err)
+			return fmt.Errorf("process exited before becoming ready: %w%s", err, formatProcessLogs(stdout, stderr))
 		case <-deadline.C:
-			return fmt.Errorf("timed out waiting for TCP readiness")
+			return fmt.Errorf("timed out waiting for GoBGP API readiness%s", formatProcessLogs(stdout, stderr))
 		case <-ticker.C:
-			conn, err := net.DialTimeout("tcp", address, time.Second)
-			if err == nil {
-				_ = conn.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			response, err := client.GetBgp(ctx, &api.GetBgpRequest{})
+			cancel()
+			if err == nil && response.GetGlobal().GetAsn() == GoBGPAS {
 				return nil
 			}
 		}
 	}
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+func formatProcessLogs(stdout, stderr fmt.Stringer) string {
+	var sections []string
+	if output := strings.TrimSpace(stdout.String()); output != "" {
+		sections = append(sections, "stdout:\n"+output)
+	}
+	if output := strings.TrimSpace(stderr.String()); output != "" {
+		sections = append(sections, "stderr:\n"+output)
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(sections, "\n")
 }
