@@ -260,7 +260,7 @@ func (e *Egress) setSNATRuleCount() {
 		count += countEgressSNATRules(otherRules)
 	}
 
-	metrics.EgressRules.WithLabelValues(iptables.TableNat).Set(float64(count))
+	metrics.SetEgressRules(iptables.TableNat, count)
 }
 
 func countEgressSNATRules(rules []string) int {
