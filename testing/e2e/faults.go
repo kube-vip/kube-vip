@@ -107,25 +107,59 @@ func KillKubeVip(clusterName, node string, graceful bool) error {
 	return runDocker(clusterName, "exec", node, "pkill", signal, "kube-vip")
 }
 
-// KillAndStashKubeVip atomically removes the static-pod manifest and sends
-// SIGKILL to the process it identified. Removing the manifest first prevents
-// kubelet from restarting kube-vip before a failover can be observed.
-func KillAndStashKubeVip(clusterName, node, manifestName string) (string, error) {
-	src, dst, err := podManifestPaths(manifestName)
-	if err != nil {
-		return "", fmt.Errorf("kill and stash kube-vip on node %q in cluster %q: %w", node, clusterName, err)
-	}
+// KillAndSuppressKubeVip stops kubelet before sending SIGKILL to the single
+// kube-vip process. Kind bind-mounts the static-pod manifest from the host, so
+// moving that file inside the node fails with EBUSY. Stopping kubelet prevents
+// a restart without modifying the test-owned host mount source.
+func KillAndSuppressKubeVip(clusterName, node string) (string, error) {
 	if err := validateFaultTarget(clusterName, node); err != nil {
 		return "", err
 	}
 
-	script := fmt.Sprintf(`pid="$(pgrep -x kube-vip)" && set -- $pid && test "$#" -eq 1 && mv %s %s && { kill -KILL "$1" && printf '%%s' "$1" || { mv %s %s; exit 1; }; }`, src, dst, dst, src)
-	output, err := runDockerOutput(clusterName, "exec", node, "sh", "-c", script)
-	if err != nil {
+	return killAndSuppressKubeVip(clusterName, node, runDocker, runDockerOutput)
+}
+
+func killAndSuppressKubeVip(clusterName, node string, run dockerRun, output dockerOutput) (pid string, err error) {
+	restore := true
+	defer func() {
+		if !restore {
+			return
+		}
+		if restoreErr := restoreKubelet(clusterName, node, run); restoreErr != nil {
+			err = fmt.Errorf("%w; additionally failed to restore kubelet: %v", err, restoreErr)
+		}
+	}()
+	if err := run(clusterName, "exec", node, "systemctl", "stop", "kubelet"); err != nil {
 		return "", err
 	}
 
-	return singlePID(output)
+	if err := run(clusterName, "exec", node, "sh", "-c", "! systemctl is-active --quiet kubelet"); err != nil {
+		return "", fmt.Errorf("verify kubelet stopped on node %q: %w", node, err)
+	}
+	pids, err := output(clusterName, "exec", node, "pgrep", "-x", "kube-vip")
+	if err != nil {
+		return "", err
+	}
+	pid, err = singlePID(pids)
+	if err != nil {
+		return "", err
+	}
+	if err := run(clusterName, "exec", node, "kill", "-KILL", pid); err != nil {
+		return "", err
+	}
+
+	restore = false
+	return pid, nil
+}
+
+// RestoreKubeVip restarts kubelet after KillAndSuppressKubeVip and verifies
+// that static-pod reconciliation is active again.
+func RestoreKubeVip(clusterName, node string) error {
+	if err := validateFaultTarget(clusterName, node); err != nil {
+		return err
+	}
+
+	return restoreKubelet(clusterName, node, runDocker)
 }
 
 // KubeVipPID returns the PID of the single kube-vip process running in a Kind
@@ -248,6 +282,16 @@ func RestorePodManifest(clusterName, node, manifestName string) error {
 
 func runDocker(clusterName string, args ...string) error {
 	return runDockerAllow(clusterName, nil, args...)
+}
+
+type dockerRun func(clusterName string, args ...string) error
+type dockerOutput func(clusterName string, args ...string) (string, error)
+
+func restoreKubelet(clusterName, node string, run dockerRun) error {
+	if err := run(clusterName, "exec", node, "systemctl", "start", "kubelet"); err != nil {
+		return err
+	}
+	return run(clusterName, "exec", node, "systemctl", "is-active", "--quiet", "kubelet")
 }
 
 func runDockerOutput(clusterName string, args ...string) (string, error) {
