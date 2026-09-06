@@ -618,7 +618,29 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
 	if svcCtx != nil {
-		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+		// If no leader election is enabled, delete routes here
+		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
+			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
+			if errs := endpoints.ClearRoutes(svc, &p.ServiceInstances, p.routeMgr); len(errs) == 0 {
+				svcCtx.ConfiguredNetworks.Clear()
+			}
+		}
+
+		if !p.config.EnableServicesElection {
+			// If this is an active service then and additional leaderElection will handle stopping
+			err = p.deleteService(svcCtx.Ctx, svc.UID)
+			if err != nil {
+				log.Error(err.Error())
+			}
+		}
+
+		// Calls the cancel function of the context
+		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		svcCtx.Cancel()
+		p.svcMap.Delete(svc.UID)
+		p.updateActiveServicesMetric()
+
+		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 	}
 	// Drop the per-service election series so a recreated service starts clean.
 	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
