@@ -54,6 +54,8 @@ type Processor struct {
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
 	svcMap        sync.Map
+	servicesMu    sync.Mutex
+	services      map[types.NamespacedName]types.UID
 
 	// instancesMutex protects membership of ServiceInstances. Mutable fields on each
 	// instance are protected separately by serviceLocks, keyed by Instance.UID().
@@ -112,6 +114,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	processor := &Processor{
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
+		services:         make(map[types.NamespacedName]types.UID),
 		ServiceInstances: []*instance.Instance{},
 		serviceLock:      NewServiceLock(),
 		bgpServer:        bgpServer,
@@ -241,7 +244,6 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				// As the next function will create a new context when nil
 				svcCtx = nil
 				svcInstance = nil
-				p.updateActiveServicesMetric()
 			}
 		}
 	}
@@ -265,6 +267,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			p.updateActiveServicesMetric()
 		}
 	}
+	p.trackService(svc)
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
@@ -945,6 +948,14 @@ func (p *Processor) updateActiveServicesMetric() {
 		if err := p.serviceLock.Unlock(uid); err != nil {
 			log.Error("failed to release service lock", "uid", uid, "err", err)
 		}
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) updateActiveServicesMetricLocked() {
+	counts := map[string]int{}
+	for service := range p.services {
+		counts[service.Namespace]++
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
