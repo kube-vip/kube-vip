@@ -96,10 +96,6 @@ func matrixShard() (int, int) {
 }
 
 func runMatrixCombo(combo matrix.Combo) {
-	if combo.Mode == matrix.ModeWireGuard {
-		Skip("WireGuard matrix entries are retained for pairwise coverage, but WireGuard has no e2e setup yet")
-	}
-
 	ctx := context.Background()
 	deployment := createMatrixDeployment(ctx, combo)
 	registerMatrixCleanup(ctx, deployment)
@@ -119,6 +115,9 @@ func runMatrixCombo(combo matrix.Combo) {
 		assertMatrixServiceVIP(ctx, deployment.cluster.Client, serviceName, serviceVIP)
 		if combo.Mode == matrix.ModeBGP {
 			assertMatrixBGPVIP(ctx, deployment.bgpClient, serviceVIP)
+		}
+		for _, address := range strings.Split(serviceVIP, ",") {
+			assertConnection("http", address, "80", "", 5*time.Second, 120*time.Second)
 		}
 	}
 
@@ -151,6 +150,7 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 		EnableServiceSecurity:      "true",
 		PerServiceElectionOnDemand: strconv.FormatBool(combo.Election == matrix.ElectionOnDemand),
 		Mode:                       string(combo.Mode),
+		PrometheusHTTPServer:       ":2112",
 	}
 
 	deployment := &matrixDeployment{cpVIP: cpVIP}
@@ -263,7 +263,7 @@ func assertMatrixMetrics(ctx context.Context, deployment *matrixDeployment, comb
 		assertMetricValue := func() (float64, error) {
 			var total float64
 			for _, node := range deployment.cluster.Nodes {
-				metrics, err := e2e.ScrapeMetrics(deployment.cluster.Name, node.String())
+				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node.String())
 				if err != nil {
 					return 0, err
 				}
@@ -279,7 +279,7 @@ func assertMatrixMetrics(ctx context.Context, deployment *matrixDeployment, comb
 		activeServices := func() (float64, error) {
 			var total float64
 			for _, node := range deployment.cluster.Nodes {
-				metrics, err := e2e.ScrapeMetrics(deployment.cluster.Name, node.String())
+				metrics, err := e2e.ScrapeMetrics(ctx, deployment.cluster.Name, node.String())
 				if err != nil {
 					return 0, err
 				}
