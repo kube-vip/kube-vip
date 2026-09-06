@@ -38,6 +38,7 @@ type KubevipManifestValues struct {
 type BGPPeerValues struct {
 	IP       string
 	AS       uint32
+	Port     uint16
 	MPBGP    string
 	IPFamily string
 }
@@ -53,9 +54,14 @@ func (pv *BGPPeerValues) String() string {
 		tmpIP = fmt.Sprintf("[%s]", tmpIP)
 	}
 
-	if pv.MPBGP != "" {
-		return fmt.Sprintf("%s:%d::false/mpbgp_nexthop=%s", tmpIP, pv.AS, pv.MPBGP)
+	port := pv.Port
+	if port == 0 {
+		port = 179
 	}
 
-	return fmt.Sprintf("%s:%d::false", tmpIP, pv.AS)
+	if pv.MPBGP != "" {
+		return fmt.Sprintf("%s:%d::false:%d:mpbgp_nexthop=%s", tmpIP, pv.AS, port, pv.MPBGP)
+	}
+
+	return fmt.Sprintf("%s:%d::false:%d", tmpIP, pv.AS, port)
 }
