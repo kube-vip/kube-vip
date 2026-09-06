@@ -4,7 +4,6 @@
 package etcd_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -44,16 +43,13 @@ func (t *testConfig) cleanup() {
 }
 
 var _ = Describe("kube-vip with etcd leader election", func() {
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-
 	test := &testConfig{}
 
 	AfterEach(func() {
 		test.cleanup()
 	})
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx SpecContext) {
 		By("configuring test", func() {
 			var err error
 			format.UseStringerRepresentation = true // Otherwise error stacks have binary format.
@@ -107,7 +103,7 @@ var _ = Describe("kube-vip with etcd leader election", func() {
 	})
 
 	When("an etcd node is removed", func() {
-		It("elects a new kube-vip leader and provides a VIP to the second node", func() {
+		It("elects a new kube-vip leader and provides a VIP to the second node", func(ctx SpecContext) {
 			By("removing as member and killing the first node", func() {
 				test.cluster.DeleteEtcdMember(ctx, test.cluster.Nodes[0], test.cluster.Nodes[1])
 			})

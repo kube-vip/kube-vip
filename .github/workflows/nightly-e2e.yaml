@@ -53,32 +53,59 @@ jobs:
           go-version-file: go.mod
       - name: Build image locally
         run: make dockerx86Local
+      - name: Prepare Etcd artifacts
+        if: always()
+        run: |
+          mkdir -p /tmp/kube-vip-etcd-artifacts
+          : > /tmp/kube-vip-etcd-artifacts/suite.log
+          printf '[]\n' > /tmp/kube-vip-etcd-artifacts/report.json
       - name: Run Etcd tests
         id: etcd
         # Scheduled failures are tolerated only during the initial stabilization window.
         # The enforcement step below makes manual runs and later schedules blocking.
         continue-on-error: true
-        run: DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true GINKGO_ARGS="--json-report=/tmp/kube-vip-test-report-etcd.json --output-dir=/tmp" make e2e-tests-etcd
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true \
+            GINKGO_ARGS="--json-report=report.json --output-dir=/tmp/kube-vip-etcd-artifacts" \
+            make e2e-tests-etcd 2>&1 | tee /tmp/kube-vip-etcd-artifacts/suite.log
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
       - name: Summarize Etcd suite
         if: always()
         env:
           OUTCOME: ${{ steps.etcd.outcome }}
-        run: 'echo "### Etcd E2E result: ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"'
+          EXIT_CODE: ${{ steps.etcd.outputs.exit_code }}
+        run: |
+          echo "### Etcd E2E result: ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"
+          printf '{"outcome":"%s","exit_code":%s,"event":"%s","cutoff":"2026-10-01"}\n' \
+            "${OUTCOME:-skipped}" "${EXIT_CODE:-null}" "$GITHUB_EVENT_NAME" \
+            > /tmp/kube-vip-etcd-artifacts/result.json
       - name: Save logs
         uses: actions/upload-artifact@v7
+        continue-on-error: true
         with:
           name: etcd-e2e-logs
-          path: /tmp/kube-vip-test*
-          if-no-files-found: error
+          path: |
+            /tmp/kube-vip-etcd-artifacts
+            /tmp/kube-vip-test*
+          if-no-files-found: warn
         if: always()
       - name: Enforce Etcd result
-        if: steps.etcd.outcome == 'failure'
+        if: always()
         env:
           EVENT_NAME: ${{ github.event_name }}
+          OUTCOME: ${{ steps.etcd.outcome }}
         run: |
-          if test "$EVENT_NAME" = schedule && test "$(date -u +%Y-%m-%d)" \< 2026-10-01; then
-            echo "::warning::etcd e2e suite failed during stabilization through 2026-09-30"
+          if test "$OUTCOME" = success; then
             exit 0
           fi
-          echo "::error::etcd e2e suite failed; see the etcd-e2e-logs artifact"
+          if test "$EVENT_NAME" = schedule && test "$(date -u +%Y-%m-%d)" \< 2026-10-01; then
+            echo "::warning::etcd e2e suite outcome was ${OUTCOME:-skipped} during stabilization through 2026-09-30"
+            exit 0
+          fi
+          echo "::error::etcd e2e suite outcome was ${OUTCOME:-skipped}; see the etcd-e2e-logs artifact"
           exit 1
