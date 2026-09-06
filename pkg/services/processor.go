@@ -39,6 +39,8 @@ type Processor struct {
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
 	svcMap        sync.Map
+	servicesMu    sync.Mutex
+	services      map[types.NamespacedName]types.UID
 
 	// Keeps track of all running instances
 	ServiceInstances []*instance.Instance
@@ -81,6 +83,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	return &Processor{
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
+		services:         make(map[types.NamespacedName]types.UID),
 		ServiceInstances: []*instance.Instance{},
 		serviceLocks:     keymutex.NewHashed(concurrentServiceLocks),
 		bgpServer:        bgpServer,
@@ -203,7 +206,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// As the next function will create a new context when nil
 				svcCtx = nil
 				svcInstance = nil
-				p.updateActiveServicesMetric()
 			}
 		}
 	}
@@ -228,8 +230,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
 		}
 		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
-		p.updateActiveServicesMetric()
 	}
+	p.trackService(svc)
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
@@ -372,10 +374,9 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 		// Drop the per-service election series so a recreated service starts clean.
 		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-		p.updateActiveServicesMetric()
-
 		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 	}
+	p.untrackService(svc)
 
 	return nil
 }
@@ -461,6 +462,7 @@ func (p *Processor) dropCancelledServiceContext(uid types.UID, svcCtx *serviceco
 		return svcCtx
 	}
 	p.svcMap.Delete(uid)
+	p.untrackServiceUID(uid)
 	return nil
 }
 
@@ -483,12 +485,41 @@ func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
 		svc.Annotations[kubevip.ServiceLease] != i.ServiceSnapshot.Annotations[kubevip.ServiceLease]
 }
 
-func (p *Processor) updateActiveServicesMetric() {
-	counts := map[string]int{}
-	for _, inst := range p.ServiceInstances {
-		if inst.ServiceSnapshot != nil {
-			counts[inst.ServiceSnapshot.Namespace]++
+func (p *Processor) trackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	if p.services == nil {
+		p.services = make(map[types.NamespacedName]types.UID)
+	}
+	p.services[types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}] = svc.UID
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	key := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	if p.services[key] == svc.UID {
+		delete(p.services, key)
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackServiceUID(uid types.UID) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	for key, currentUID := range p.services {
+		if currentUID == uid {
+			delete(p.services, key)
 		}
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) updateActiveServicesMetricLocked() {
+	counts := map[string]int{}
+	for service := range p.services {
+		counts[service.Namespace]++
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
