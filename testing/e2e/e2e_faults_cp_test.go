@@ -4,13 +4,17 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -34,20 +38,51 @@ const (
 	faultLeaseObservationLimit = 15 * time.Second
 	faultSteadyStateWindow     = 5 * time.Second
 	faultTransitionDeltaLimit  = 4.0
+	faultKubeVipManifest       = "kube-vip.yaml"
 )
 
 type controlPlaneFaultSuite struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	cluster *e2e.Cluster
-	client  kubernetes.Interface
-	vip     string
-	nodes   []string
-	tempDir string
-	metrics bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	cluster  *e2e.Cluster
+	client   kubernetes.Interface
+	vip      string
+	nodes    []string
+	tempDir  string
+	metrics  bool
+	election faultElectionMode
+}
+
+type faultElectionMode struct {
+	enabled   bool
+	leaseName string
 }
 
 type faultMetricSnapshot map[string]map[string]float64
+
+func controlPlaneElectionMode(mode string) faultElectionMode {
+	if mode == ModeARP {
+		return faultElectionMode{enabled: true, leaseName: faultLeaseName}
+	}
+	return faultElectionMode{}
+}
+
+func validateARPFailover(oldLeader, newLeader string, owners []string) error {
+	if len(owners) == 0 {
+		return fmt.Errorf("VIP has no owner while lease is held by %q", newLeader)
+	}
+	if newLeader != oldLeader {
+		for _, owner := range owners {
+			if owner == oldLeader {
+				return fmt.Errorf("stale VIP ownership remains on former leader %q", oldLeader)
+			}
+		}
+	}
+	if len(owners) != 1 || owners[0] != newLeader {
+		return fmt.Errorf("elected leader %q does not own VIP; owners are %v", newLeader, owners)
+	}
+	return nil
+}
 
 var _ = Describe("kube-vip control-plane election and VIP failover faults", Label("faults"), Serial, Ordered, func() {
 	if Mode != ModeARP && Mode != ModeRT {
@@ -59,8 +94,9 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 	BeforeAll(func() {
 		suite.ctx, suite.cancel = context.WithCancel(context.Background())
 		var err error
-		suite.tempDir, err = os.MkdirTemp("", fmt.Sprintf("kube-vip-faults-%s-", Mode))
+		suite.tempDir, err = os.MkdirTemp("", fmt.Sprintf("kube-vip-test-faults-%s-", Mode))
 		Expect(err).NotTo(HaveOccurred())
+		suite.election = controlPlaneElectionMode(Mode)
 
 		offset := SOffset.Get()
 		suite.vip = e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
@@ -106,16 +142,24 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 
 		By(withTimestamp("waiting for the control-plane VIP to become routable"))
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
-		leader := suite.waitForLeader()
-		suite.waitForLease()
-		suite.assertLeaderMetric(leader)
-		suite.assertOneLeader()
-		suite.assertSteadyLeader(leader)
+		if suite.election.enabled {
+			leader := suite.waitForLeader()
+			suite.waitForVIPOwner(leader)
+			suite.assertLeaderMetric(leader)
+			suite.assertOneLeader()
+			suite.assertSteadyLeader(leader)
+		} else {
+			suite.assertNoElectionLease()
+			By(withTimestamp(fmt.Sprintf("%s mode is configured without control-plane election; validating process and node recovery only", Mode)))
+		}
 	})
 
 	AfterAll(func() {
 		if suite.cluster != nil {
-			suite.cluster.SaveLogs(suite.ctx, suite.tempDir)
+			By(withTimestamp(fmt.Sprintf("saving fault artifacts to %q", suite.tempDir)))
+			if err := e2e.GetLogs(suite.ctx, suite.client, suite.tempDir, suite.cluster.Name); err != nil {
+				By(withTimestamp(fmt.Sprintf("fault artifact collection failed: %v", err)))
+			}
 			suite.cluster.Delete()
 		}
 		if suite.cancel != nil {
@@ -127,6 +171,16 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 	})
 
 	It("keeps the VIP available while the leader loses API access and recovers", func() {
+		if !suite.election.enabled {
+			node := suite.nodes[0]
+			By(withTimestamp(fmt.Sprintf("blackholing the API server from non-electing %s node %q", Mode, node)))
+			Expect(e2e.BlackholeAPIServer(suite.cluster.Name, node)).To(Succeed())
+			DeferCleanup(func() { Expect(e2e.RestoreAPIServer(suite.cluster.Name, node)).To(Succeed()) })
+			assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
+			Expect(e2e.RestoreAPIServer(suite.cluster.Name, node)).To(Succeed())
+			return
+		}
+
 		before := suite.transitionSnapshot()
 		oldLeader := suite.waitForLeader()
 
@@ -139,7 +193,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		newLeader := suite.waitForDifferentLeader(oldLeader)
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
 		lease := suite.waitForLease(oldLeader)
-		By(withTimestamp(fmt.Sprintf("lease %s/%s is held by remaining node %q while %q is blackholed", faultLeaseNamespace, faultLeaseName, *lease.Spec.HolderIdentity, oldLeader)))
+		By(withTimestamp(fmt.Sprintf("lease %s/%s is held by remaining node %q while %q is blackholed", faultLeaseNamespace, suite.election.leaseName, *lease.Spec.HolderIdentity, oldLeader)))
 		suite.assertLeaderMetric(newLeader)
 		suite.assertOneLeader(oldLeader)
 
@@ -156,18 +210,43 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 	})
 
 	It("recovers after SIGKILL of the kube-vip leader", func() {
-		before := suite.transitionSnapshot()
-		oldLeader := suite.waitForLeader()
+		if !suite.election.enabled {
+			node := suite.nodes[0]
+			oldPID, err := e2e.KubeVipPID(suite.cluster.Name, node)
+			Expect(err).NotTo(HaveOccurred())
+			By(withTimestamp(fmt.Sprintf("sending SIGKILL to kube-vip PID %s on non-electing %s node %q", oldPID, Mode, node)))
+			killTime := time.Now()
+			Expect(e2e.KillKubeVip(suite.cluster.Name, node, false)).To(Succeed())
+			suite.waitForKubeVipRestart(node, oldPID)
+			By(withTimestamp(fmt.Sprintf("kube-vip restarted on %q after %s", node, time.Since(killTime))))
+			suite.assertNodeRunning(node)
+			assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
+			return
+		}
 
-		By(withTimestamp(fmt.Sprintf("sending SIGKILL to kube-vip on leader %q", oldLeader)))
-		Expect(e2e.KillKubeVip(suite.cluster.Name, oldLeader, false)).To(Succeed())
+		before := suite.transitionSnapshot()
+		oldLease := suite.waitForLease()
+		oldLeader := *oldLease.Spec.HolderIdentity
+		suite.waitForVIPOwner(oldLeader)
+
+		By(withTimestamp(fmt.Sprintf("removing the static-pod manifest and sending SIGKILL to kube-vip on elected leader %q", oldLeader)))
+		oldPID, err := e2e.KillAndStashKubeVip(suite.cluster.Name, oldLeader, faultKubeVipManifest)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			Expect(e2e.RestorePodManifest(suite.cluster.Name, oldLeader, faultKubeVipManifest)).To(Succeed())
+		})
+		By(withTimestamp(fmt.Sprintf("sent SIGKILL to kube-vip PID %s on elected leader %q", oldPID, oldLeader)))
+		suite.assertNodeRunning(oldLeader)
 
 		newLeader := suite.waitForDifferentLeader(oldLeader)
+		suite.waitForARPFailover(oldLeader, newLeader)
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
-		suite.waitForLease(oldLeader)
 		suite.assertLeaderMetric(newLeader)
 
+		By(withTimestamp(fmt.Sprintf("restoring the kube-vip static-pod manifest on %q", oldLeader)))
+		Expect(e2e.RestorePodManifest(suite.cluster.Name, oldLeader, faultKubeVipManifest)).To(Succeed())
 		By(withTimestamp(fmt.Sprintf("waiting for kube-vip metrics to return on restarted node %q", oldLeader)))
+		suite.waitForKubeVip(oldLeader)
 		suite.waitForMetrics(oldLeader)
 		recoveredLeader := suite.waitForLeader()
 		suite.assertLeaderMetric(recoveredLeader)
@@ -177,12 +256,16 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 	})
 
 	It("reacquires the lease after deletion and lease stealing", func() {
+		if !suite.election.enabled {
+			Skip(fmt.Sprintf("%s control-plane mode does not use a Kubernetes election lease", Mode))
+		}
+
 		beforeDelete := suite.transitionSnapshot()
 		oldLease := suite.getLease()
 		oldUID := string(oldLease.UID)
 
-		By(withTimestamp(fmt.Sprintf("deleting lease %s/%s", faultLeaseNamespace, faultLeaseName)))
-		Expect(e2e.DeleteLease(suite.ctx, suite.client, faultLeaseNamespace, faultLeaseName)).To(Succeed())
+		By(withTimestamp(fmt.Sprintf("deleting lease %s/%s", faultLeaseNamespace, suite.election.leaseName)))
+		Expect(e2e.DeleteLease(suite.ctx, suite.client, faultLeaseNamespace, suite.election.leaseName)).To(Succeed())
 		recreatedLease := suite.waitForLease()
 		Expect(string(recreatedLease.UID)).NotTo(Equal(oldUID))
 		leader := suite.waitForLeader()
@@ -194,9 +277,9 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 
 		beforeSteal := suite.transitionSnapshot()
 		const stolenHolder = "fault-injector"
-		By(withTimestamp(fmt.Sprintf("overwriting lease %s/%s with holder %q", faultLeaseNamespace, faultLeaseName, stolenHolder)))
+		By(withTimestamp(fmt.Sprintf("overwriting lease %s/%s with holder %q", faultLeaseNamespace, suite.election.leaseName, stolenHolder)))
 		Eventually(func() error {
-			return e2e.StealLease(suite.ctx, suite.client, faultLeaseNamespace, faultLeaseName, stolenHolder)
+			return e2e.StealLease(suite.ctx, suite.client, faultLeaseNamespace, suite.election.leaseName, stolenHolder)
 		}, faultLeaseObservationLimit, faultPollInterval).Should(Succeed())
 		suite.waitForLeaseHolder(stolenHolder)
 		suite.waitForLease(stolenHolder)
@@ -209,6 +292,16 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 	})
 
 	It("fully recovers after restarting the leader node", func() {
+		if !suite.election.enabled {
+			node := suite.nodes[0]
+			By(withTimestamp(fmt.Sprintf("restarting non-electing %s node %q", Mode, node)))
+			Expect(e2e.RestartNode(suite.cluster.Name, node)).To(Succeed())
+			suite.waitForNodeReady(node)
+			suite.waitForKubeVip(node)
+			assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
+			return
+		}
+
 		before := suite.transitionSnapshot()
 		oldLeader := suite.waitForLeader()
 
@@ -240,61 +333,98 @@ func buildFaultClient(config *rest.Config) kubernetes.Interface {
 }
 
 func (s *controlPlaneFaultSuite) waitForLeader() string {
-	// RT mode keeps the VIP in a route instead of an interface address, so the
-	// existing Docker IP lookup used by ARP mode cannot identify its leader.
-	if Mode == ModeRT {
-		lease := s.waitForLease()
-		return *lease.Spec.HolderIdentity
-	}
-
-	var leader string
-	Eventually(func() (string, error) {
-		leader = findLeader(s.vip, s.cluster.Name)
-		if leader == "" {
-			return "", fmt.Errorf("VIP %s has no leader", s.vip)
-		}
-		return leader, nil
-	}, faultConvergenceTimeout, faultPollInterval).ShouldNot(BeEmpty())
-	return leader
+	Expect(s.election.enabled).To(BeTrue(), "%s mode has no control-plane election leader", Mode)
+	return *s.waitForLease().Spec.HolderIdentity
 }
 
 func (s *controlPlaneFaultSuite) waitForDifferentLeader(oldLeader string) string {
-	if Mode == ModeRT {
-		var leader string
-		Eventually(func() (string, error) {
-			lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, faultLeaseName, metav1.GetOptions{})
-			if err != nil {
-				return "", err
-			}
-			if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
-				return "", fmt.Errorf("lease %s/%s has no holder", faultLeaseNamespace, faultLeaseName)
-			}
-			if *lease.Spec.HolderIdentity == oldLeader {
-				return "", fmt.Errorf("lease %s/%s is still held by %s", faultLeaseNamespace, faultLeaseName, oldLeader)
-			}
-			leader = *lease.Spec.HolderIdentity
-			return leader, nil
-		}, faultConvergenceTimeout, faultPollInterval).ShouldNot(BeEmpty())
-		return leader
-	}
+	return *s.waitForLease(oldLeader).Spec.HolderIdentity
+}
 
-	var leader string
+func (s *controlPlaneFaultSuite) waitForARPFailover(oldLeader, newLeader string) {
+	Eventually(func() error {
+		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("observe election transfer: %w", err)
+		}
+		if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
+			return fmt.Errorf("lease %s/%s has no holder", faultLeaseNamespace, s.election.leaseName)
+		}
+		if *lease.Spec.HolderIdentity != newLeader {
+			return fmt.Errorf("lease %s/%s is held by %q, want %q", faultLeaseNamespace, s.election.leaseName, *lease.Spec.HolderIdentity, newLeader)
+		}
+		owners, err := s.vipOwners()
+		if err != nil {
+			return err
+		}
+		return validateARPFailover(oldLeader, newLeader, owners)
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+	By(withTimestamp(fmt.Sprintf("election and sole VIP ownership transferred from %q to %q", oldLeader, newLeader)))
+}
+
+func (s *controlPlaneFaultSuite) waitForVIPOwner(want string) {
+	Eventually(func() error {
+		owners, err := s.vipOwners()
+		if err != nil {
+			return err
+		}
+		if len(owners) != 1 || owners[0] != want {
+			return fmt.Errorf("VIP %s owners are %v, want only %q", s.vip, owners, want)
+		}
+		return nil
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+}
+
+func (s *controlPlaneFaultSuite) vipOwners() ([]string, error) {
+	owners := make([]string, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		var output bytes.Buffer
+		cmd := exec.Command("docker", "exec", node, "ip", "-o", "addr", "show", "to", s.vip+"/32")
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("inspect VIP %s on node %q: %w: %s", s.vip, node, err, strings.TrimSpace(output.String()))
+		}
+		if strings.TrimSpace(output.String()) != "" {
+			owners = append(owners, node)
+		}
+	}
+	return owners, nil
+}
+
+func (s *controlPlaneFaultSuite) waitForKubeVipRestart(node, oldPID string) {
 	Eventually(func() (string, error) {
-		candidate := findLeader(s.vip, s.cluster.Name)
-		if candidate == "" {
-			return "", fmt.Errorf("VIP %s has no leader", s.vip)
+		pid, err := e2e.KubeVipPID(s.cluster.Name, node)
+		if err != nil {
+			return "", err
 		}
-		if candidate == oldLeader {
-			return "", fmt.Errorf("VIP %s is still held by %s", s.vip, oldLeader)
+		if pid == oldPID {
+			return "", fmt.Errorf("kube-vip PID %s is still running on %q", oldPID, node)
 		}
-		leader = candidate
-		return leader, nil
+		return pid, nil
 	}, faultConvergenceTimeout, faultPollInterval).ShouldNot(BeEmpty())
-	return leader
+}
+
+func (s *controlPlaneFaultSuite) waitForKubeVip(node string) {
+	Eventually(func() error {
+		_, err := e2e.KubeVipPID(s.cluster.Name, node)
+		return err
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+}
+
+func (s *controlPlaneFaultSuite) assertNodeRunning(node string) {
+	running, err := e2e.NodeRunning(s.cluster.Name, node)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(running).To(BeTrue(), "SIGKILL must stop kube-vip, not its node container")
+}
+
+func (s *controlPlaneFaultSuite) assertNoElectionLease() {
+	_, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, faultLeaseName, metav1.GetOptions{})
+	Expect(apierrors.IsNotFound(err)).To(BeTrue(), "non-electing %s mode unexpectedly exposed control-plane lease %s/%s: %v", Mode, faultLeaseNamespace, faultLeaseName, err)
 }
 
 func (s *controlPlaneFaultSuite) getLease() *coordinationv1.Lease {
-	lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, faultLeaseName, metav1.GetOptions{})
+	lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	return lease
 }
@@ -307,15 +437,15 @@ func (s *controlPlaneFaultSuite) waitForLease(excludedHolders ...string) *coordi
 
 	var current *coordinationv1.Lease
 	Eventually(func() error {
-		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, faultLeaseName, metav1.GetOptions{})
+		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 		if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
-			return fmt.Errorf("lease %s/%s has no holder", faultLeaseNamespace, faultLeaseName)
+			return fmt.Errorf("lease %s/%s has no holder", faultLeaseNamespace, s.election.leaseName)
 		}
 		if _, skip := excluded[*lease.Spec.HolderIdentity]; skip {
-			return fmt.Errorf("lease %s/%s is still held by excluded node %q", faultLeaseNamespace, faultLeaseName, *lease.Spec.HolderIdentity)
+			return fmt.Errorf("lease %s/%s is still held by excluded node %q", faultLeaseNamespace, s.election.leaseName, *lease.Spec.HolderIdentity)
 		}
 		current = lease
 		return nil
@@ -326,12 +456,12 @@ func (s *controlPlaneFaultSuite) waitForLease(excludedHolders ...string) *coordi
 func (s *controlPlaneFaultSuite) waitForLeaseHolder(holder string) *coordinationv1.Lease {
 	var current *coordinationv1.Lease
 	Eventually(func() error {
-		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, faultLeaseName, metav1.GetOptions{})
+		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 		if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != holder {
-			return fmt.Errorf("lease %s/%s is not held by %q", faultLeaseNamespace, faultLeaseName, holder)
+			return fmt.Errorf("lease %s/%s is not held by %q", faultLeaseNamespace, s.election.leaseName, holder)
 		}
 		current = lease
 		return nil
@@ -373,7 +503,7 @@ func (s *controlPlaneFaultSuite) assertLeaderMetric(leader string) {
 		s.cluster.Name,
 		leader,
 		"kube_vip_is_leader",
-		map[string]string{"node": leader, "lease_name": faultLeaseName},
+		map[string]string{"node": leader, "lease_name": s.election.leaseName},
 		Equal(float64(1)),
 		faultConvergenceTimeout,
 		faultPollInterval,
@@ -389,7 +519,7 @@ func (s *controlPlaneFaultSuite) assertSteadyLeader(leader string) {
 		s.cluster.Name,
 		leader,
 		"kube_vip_is_leader",
-		map[string]string{"node": leader, "lease_name": faultLeaseName},
+		map[string]string{"node": leader, "lease_name": s.election.leaseName},
 		Equal(float64(1)),
 		faultSteadyStateWindow,
 		faultPollInterval,
@@ -417,7 +547,7 @@ func (s *controlPlaneFaultSuite) assertOneLeader(skipNodes ...string) {
 			if err != nil {
 				return 0, err
 			}
-			value, ok := e2e.MaxMetric(metrics, "kube_vip_is_leader", map[string]string{"lease_name": faultLeaseName})
+			value, ok := e2e.MaxMetric(metrics, "kube_vip_is_leader", map[string]string{"lease_name": s.election.leaseName})
 			if !ok {
 				continue
 			}
@@ -454,7 +584,7 @@ func (s *controlPlaneFaultSuite) assertTransitionCounterStable(before faultMetri
 	if !s.metrics {
 		return
 	}
-	labels := map[string]string{"lease_name": faultLeaseName}
+	labels := map[string]string{"lease_name": s.election.leaseName}
 	stableValues := make(map[string]float64)
 	totalDelta := 0.0
 	observed := 0
