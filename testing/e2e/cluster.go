@@ -99,6 +99,16 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(tmpl.Execute(manifestFile, spec.KubeVip)).To(Succeed())
 	manifestFile.Close()
+	workerManifestPath := manifestPath
+	if spec.WorkerNodes > 0 {
+		workerManifestPath = filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-worker.yaml", spec.Name))
+		workerManifest, createErr := os.Create(workerManifestPath)
+		Expect(createErr).NotTo(HaveOccurred())
+		workerValues := spec.KubeVip
+		workerValues.ConfigPath = "/etc/kubernetes/kubelet.conf"
+		Expect(tmpl.Execute(workerManifest, workerValues)).To(Succeed())
+		Expect(workerManifest.Close()).To(Succeed())
+	}
 
 	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
@@ -140,7 +150,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
 	}
 	for i := 0; i < spec.WorkerNodes; i++ {
-		appendNode(kindconfigv1alpha4.WorkerRole, manifestPath)
+		appendNode(kindconfigv1alpha4.WorkerRole, workerManifestPath)
 	}
 
 	// Create cluster
