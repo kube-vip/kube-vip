@@ -135,7 +135,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
 	}
 	for i := 0; i < spec.WorkerNodes; i++ {
-		appendNode(kindconfigv1alpha4.WorkerRole, manifestPath)
+		appendNode(kindconfigv1alpha4.WorkerRole, workerManifestPath)
 	}
 
 	// Create cluster

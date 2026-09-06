@@ -5,7 +5,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"time"
@@ -19,13 +18,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
-	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 )
 
 const (
-	scaleWorkerKubeconfigPath = "/etc/kubernetes/admin.conf"
 	scalePollInterval         = time.Second
 	scaleSuiteLabel           = "scale.kube-vip.io/suite"
 	scaleSuiteValue           = "pr13"
@@ -58,40 +55,6 @@ func BuildScaleClient(config *rest.Config, qps float32, burst int) (kubernetes.I
 		return nil, fmt.Errorf("create scale Kubernetes client: %w", err)
 	}
 	return client, nil
-}
-
-func InstallScaleWorkerKubeconfigs(cluster *Cluster) error {
-	if cluster == nil || cluster.Provider == nil {
-		return fmt.Errorf("scale cluster or provider is nil")
-	}
-
-	kubeconfig, err := cluster.Provider.KubeConfig(cluster.Name, false)
-	if err != nil {
-		return fmt.Errorf("get internal kubeconfig for cluster %q: %w", cluster.Name, err)
-	}
-	encoded := base64.StdEncoding.EncodeToString([]byte(kubeconfig))
-
-	for _, node := range cluster.Nodes {
-		role, err := node.Role()
-		if err != nil {
-			return fmt.Errorf("get role for node %q: %w", node.String(), err)
-		}
-		if role != string(kindconfigv1alpha4.WorkerRole) {
-			continue
-		}
-
-		script := fmt.Sprintf(
-			"printf '%%s' '%s' | base64 -d > %s && chmod 600 %s",
-			encoded,
-			scaleWorkerKubeconfigPath,
-			scaleWorkerKubeconfigPath,
-		)
-		if err := node.Command("bash", "-c", script).Run(); err != nil {
-			return fmt.Errorf("install kubeconfig on worker %q: %w", node.String(), err)
-		}
-	}
-
-	return nil
 }
 
 func EnsureScaleNamespace(ctx context.Context, client kubernetes.Interface, namespace string) error {
@@ -332,43 +295,45 @@ func WaitForScaleServiceCount(ctx context.Context, client kubernetes.Interface, 
 	return nil
 }
 
-func WaitForScaleMetrics(clusterName string, nodes []string) error {
+func WaitForScaleMetrics(ctx context.Context, clusterName string, nodes []string) error {
 	for _, node := range nodes {
-		if _, err := ScrapeMetrics(clusterName, node); err != nil {
+		if _, err := ScrapeMetrics(ctx, clusterName, node); err != nil {
 			return fmt.Errorf("scrape metrics from node %q: %w", node, err)
 		}
 	}
 	return nil
 }
 
-func ScaleActiveServices(clusterName string, nodes []string, namespace string) (float64, error) {
+func ScaleActiveServices(ctx context.Context, clusterName string, nodes []string, namespace string) (float64, bool, error) {
 	maximum := 0.0
+	found := false
 	for _, node := range nodes {
-		metrics, err := ScrapeMetrics(clusterName, node)
+		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		value, matches := MetricValue(metrics, "kube_vip_active_services", map[string]string{"namespace": namespace})
 		if matches > 1 {
-			return 0, fmt.Errorf("active-services metric on node %q matched %d series", node, matches)
+			return 0, false, fmt.Errorf("active-services metric on node %q matched %d series", node, matches)
 		}
+		found = found || matches == 1
 		if matches == 1 && value > maximum {
 			maximum = value
 		}
 	}
-	return maximum, nil
+	return maximum, found, nil
 }
 
 func WaitForScaleActiveServices(ctx context.Context, clusterName string, nodes []string, namespace string, expected int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastError error
 	for {
-		active, err := ScaleActiveServices(clusterName, nodes, namespace)
+		active, found, err := ScaleActiveServices(ctx, clusterName, nodes, namespace)
 		if err == nil {
-			if active == float64(expected) {
+			if found && active == float64(expected) {
 				return nil
 			}
-			lastError = fmt.Errorf("active service metric is %.0f, want %d", active, expected)
+			lastError = fmt.Errorf("active service metric found=%t value=%.0f, want %d", found, active, expected)
 		} else {
 			lastError = err
 		}
@@ -382,22 +347,21 @@ func WaitForScaleActiveServices(ctx context.Context, clusterName string, nodes [
 	}
 }
 
-func WaitForScaleVIPs(clusterName string, nodes []string, vips []string, timeout time.Duration) error {
+func WaitForScaleVIPs(ctx context.Context, clusterName string, nodes []string, vips []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastError error
 	for {
 		allAdvertised := true
 		for _, vip := range vips {
-			advertised := false
+			owners := 0
 			for _, node := range nodes {
 				if CheckIPAddressPresence(vip, node, true) {
-					advertised = true
-					break
+					owners++
 				}
 			}
-			if !advertised {
+			if owners != 1 {
 				allAdvertised = false
-				lastError = fmt.Errorf("VIP %q was not found on any Kind node", vip)
+				lastError = fmt.Errorf("VIP %q has %d owners, want exactly one", vip, owners)
 				break
 			}
 		}
@@ -407,7 +371,9 @@ func WaitForScaleVIPs(clusterName string, nodes []string, vips []string, timeout
 		if time.Now().After(deadline) {
 			return fmt.Errorf("VIP spot checks did not converge: %w", lastError)
 		}
-		time.Sleep(scalePollInterval)
+		if err := waitForScalePoll(ctx, deadline); err != nil {
+			return err
+		}
 	}
 }
 
@@ -470,10 +436,10 @@ func waitForScalePoll(ctx context.Context, deadline time.Time) error {
 	}
 }
 
-func SnapshotScaleMetrics(clusterName string, nodes []string) (ScaleMetricSnapshot, error) {
+func SnapshotScaleMetrics(ctx context.Context, clusterName string, nodes []string) (ScaleMetricSnapshot, error) {
 	snapshot := make(ScaleMetricSnapshot, len(nodes))
 	for _, node := range nodes {
-		metrics, err := ScrapeMetrics(clusterName, node)
+		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
 			return nil, fmt.Errorf("scrape metrics from node %q: %w", node, err)
 		}
@@ -482,10 +448,15 @@ func SnapshotScaleMetrics(clusterName string, nodes []string) (ScaleMetricSnapsh
 	return snapshot, nil
 }
 
-func ScaleCounterDelta(before, after ScaleMetricSnapshot, name string, labelsForMetric map[string]string) float64 {
+func ScaleCounterDelta(before, after ScaleMetricSnapshot, name string, labelsForMetric map[string]string) (float64, bool) {
 	var total float64
+	found := false
 	for node, afterMetrics := range after {
 		beforeMetrics := before[node]
+		if len(matchingMetricValues(beforeMetrics, name, labelsForMetric)) == 0 || len(matchingMetricValues(afterMetrics, name, labelsForMetric)) == 0 {
+			continue
+		}
+		found = true
 		beforeValue := SumMetric(beforeMetrics, name, labelsForMetric)
 		afterValue := SumMetric(afterMetrics, name, labelsForMetric)
 		delta := afterValue - beforeValue
@@ -494,15 +465,23 @@ func ScaleCounterDelta(before, after ScaleMetricSnapshot, name string, labelsFor
 		}
 		total += delta
 	}
-	return total
+	return total, found
 }
 
-func ScaleTransitionDelta(before, after ScaleMetricSnapshot, leaseNames []string) float64 {
+func ScaleTransitionDelta(before, after ScaleMetricSnapshot, leaseNames []string) (float64, bool) {
 	var total float64
+	found := false
 	for node, afterMetrics := range after {
 		beforeMetrics := before[node]
 		for _, leaseName := range leaseNames {
 			labelsForMetric := map[string]string{"lease_name": leaseName}
+			if _, beforeMatches := MetricValue(beforeMetrics, "kube_vip_leader_election_transitions_total", labelsForMetric); beforeMatches == 0 {
+				continue
+			}
+			if _, afterMatches := MetricValue(afterMetrics, "kube_vip_leader_election_transitions_total", labelsForMetric); afterMatches == 0 {
+				continue
+			}
+			found = true
 			beforeValue := SumMetric(beforeMetrics, "kube_vip_leader_election_transitions_total", labelsForMetric)
 			afterValue := SumMetric(afterMetrics, "kube_vip_leader_election_transitions_total", labelsForMetric)
 			delta := afterValue - beforeValue
@@ -512,7 +491,7 @@ func ScaleTransitionDelta(before, after ScaleMetricSnapshot, leaseNames []string
 			total += delta
 		}
 	}
-	return total
+	return total, found
 }
 
 func ScaleLeaseHolders(ctx context.Context, client kubernetes.Interface, namespace string, leaseNames []string) (map[string]string, error) {
