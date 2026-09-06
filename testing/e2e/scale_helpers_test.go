@@ -2,17 +2,49 @@
 
 package e2e
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestScaleCounterDeltaReportsMetricPresence(t *testing.T) {
-	before := ScaleMetricSnapshot{"node": {`counter{namespace="test"}`: 2}}
-	after := ScaleMetricSnapshot{"node": {`counter{namespace="test"}`: 5}}
-
-	if delta, found := ScaleCounterDelta(before, after, "counter", map[string]string{"namespace": "test"}); delta != 3 || !found {
-		t.Fatalf("ScaleCounterDelta() = (%v, %t), want (3, true)", delta, found)
+func TestScaleCounterDelta(t *testing.T) {
+	metric := func(value float64) ScaleMetricSnapshot {
+		return ScaleMetricSnapshot{"node": {`counter{namespace="test"}`: value}}
 	}
-	if delta, found := ScaleCounterDelta(before, after, "missing", nil); delta != 0 || found {
-		t.Fatalf("ScaleCounterDelta() for missing metric = (%v, %t), want (0, false)", delta, found)
+	empty := ScaleMetricSnapshot{"node": {}}
+	tests := []struct {
+		name      string
+		before    ScaleMetricSnapshot
+		after     ScaleMetricSnapshot
+		wantDelta float64
+		wantError string
+	}{
+		{name: "absent before and after", before: empty, after: empty},
+		{name: "initialized to zero", before: empty, after: metric(0)},
+		{name: "absent before nonzero after", before: empty, after: metric(1), wantError: "presence changed"},
+		{name: "absent after", before: metric(1), after: empty, wantError: "presence changed"},
+		{name: "absent after zero", before: metric(0), after: empty, wantError: "presence changed"},
+		{name: "stable", before: metric(2), after: metric(2)},
+		{name: "reset", before: metric(5), after: metric(2), wantError: "reset"},
+		{name: "increment", before: metric(2), after: metric(5), wantDelta: 3},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			delta, err := ScaleCounterDelta(test.before, test.after, "counter", map[string]string{"namespace": "test"})
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("ScaleCounterDelta() error = %v", err)
+				}
+				if delta != test.wantDelta {
+					t.Fatalf("ScaleCounterDelta() delta = %v, want %v", delta, test.wantDelta)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("ScaleCounterDelta() error = %v, want error containing %q", err, test.wantError)
+			}
+		})
 	}
 }
 
