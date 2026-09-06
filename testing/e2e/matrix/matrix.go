@@ -99,7 +99,7 @@ type Axis struct {
 }
 
 var axisTable = []Axis{
-	{Name: "mode", Values: []string{string(ModeARP), string(ModeBGP), string(ModeRT), string(ModeWireGuard)}},
+	{Name: "mode", Values: []string{string(ModeARP), string(ModeBGP), string(ModeRT)}},
 	{Name: "function", Values: []string{string(FunctionCP), string(FunctionSvc), string(FunctionBoth)}},
 	{Name: "family", Values: []string{string(FamilyV4), string(FamilyV6), string(FamilyDual)}},
 	{Name: "election", Values: []string{string(ElectionGlobal), string(ElectionPerService), string(ElectionOnDemand), string(ElectionNone)}},
@@ -154,10 +154,8 @@ var exclusions = []exclusionRule{
 		},
 	},
 	{
-		name: "wireguard currently covers services, not control-plane-only or hybrid combos",
-		match: func(c Combo) bool {
-			return c.Mode == ModeWireGuard && c.Function != FunctionSvc
-		},
+		name:  "wireguard has no runnable e2e deployment",
+		match: func(c Combo) bool { return c.Mode == ModeWireGuard },
 	},
 	{
 		name: "routing-table and BGP service elections require a service function",
@@ -260,7 +258,7 @@ type valuePair struct {
 
 func validCrossProduct() []Combo {
 	combos := make([]Combo, 0, FullCrossProductCount())
-	for _, mode := range []Mode{ModeARP, ModeBGP, ModeRT, ModeWireGuard} {
+	for _, mode := range []Mode{ModeARP, ModeBGP, ModeRT} {
 		for _, function := range []Function{FunctionCP, FunctionSvc, FunctionBoth} {
 			for _, family := range []Family{FamilyV4, FamilyV6, FamilyDual} {
 				for _, election := range []Election{ElectionGlobal, ElectionPerService, ElectionOnDemand, ElectionNone} {
