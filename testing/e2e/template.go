@@ -33,6 +33,7 @@ type KubevipManifestValues struct {
 	EnableServiceSecurity                   string
 	PerServiceElectionOnDemand              string
 	PrometheusHTTPServer                    string
+	KubeletPKIPath                          string
 }
 
 type BGPPeerValues struct {
