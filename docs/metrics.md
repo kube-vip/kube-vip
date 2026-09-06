@@ -3,8 +3,9 @@
 kube-vip exposes Prometheus metrics from every kube-vip process. The metrics
 endpoint is enabled by default at `:2112/metrics` and can be configured with
 the `--prometheusHTTPServer` flag, the `prometheusHTTPServer` configuration
-field, or the `prometheus_server` environment variable. Set the address to an
-empty string to disable the endpoint.
+field, or the `prometheus_server` environment variable. The flag defaults to
+`:2112`; configuration-file and environment values override it only when they
+are non-empty.
 
 Scrape each kube-vip pod or node-local process separately. Most gauges describe
 the state managed by that process, while counters and histograms describe work
@@ -51,7 +52,7 @@ rate(kube_vip_leader_election_transitions_total[5m])
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `kube_vip_manager_bgp_session_info` | Gauge | `state`, `peer` | BGP session state for a peer. For each peer, the current GoBGP state has value `1` and the other state series have value `0`; `peer` is emitted as `address:179`. |
+| `kube_vip_manager_bgp_session_info` | Gauge | `state`, `peer` | BGP session state for a peer. For each peer, the current GoBGP state has value `1` and the other state series have value `0`; `peer` contains the address and configured remote port. |
 
 This metric is only useful when BGP is enabled. A session alert should select
 the state that represents an established session in the deployed GoBGP
@@ -76,4 +77,3 @@ sum by (result) (rate(kube_vip_service_reconcile_errors_total[5m]))
 histogram_quantile(0.99,
   sum by (le) (rate(kube_vip_service_reconcile_duration_seconds_bucket[5m])))
 ```
-
