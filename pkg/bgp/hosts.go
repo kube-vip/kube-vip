@@ -19,9 +19,6 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 	objects, exists := b.tracker[addr]
 
 	if !exists {
-		b.tracker[addr] = make(map[string]bool)
-		objects = b.tracker[addr]
-
 		ip, _, err := net.ParseCIDR(addr)
 		if err != nil {
 			metrics.BGPRouteOperationsTotal.WithLabelValues("add", "error").Inc()
@@ -40,6 +37,8 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 			metrics.BGPRouteOperationsTotal.WithLabelValues("add", "error").Inc()
 			return err
 		}
+		objects = make(map[string]bool)
+		b.tracker[addr] = objects
 		family := utils.IPv4Family
 		if ip.To4() == nil {
 			family = utils.IPv6Family
@@ -93,6 +92,17 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		}
 		metrics.BGPRoutesAdvertised.WithLabelValues(family).Dec()
 		delete(b.tracker, addr)
+		familyStillAdvertised := false
+		for trackedAddress := range b.tracker {
+			trackedIP, _, err := net.ParseCIDR(trackedAddress)
+			if err == nil && (trackedIP.To4() == nil) == (ip.To4() == nil) {
+				familyStillAdvertised = true
+				break
+			}
+		}
+		if !familyStillAdvertised {
+			metrics.BGPRoutesAdvertised.DeleteLabelValues(family)
+		}
 		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects), "object", object)
 	} else {
 		log.Debug("[BGP] deleting from tracker only", "addr", addr, "object", object)

@@ -495,7 +495,7 @@ func setEgressRulesGauge(tableName string, IPv6 bool) {
 		count += len(rules)
 	}
 
-	metrics.EgressRules.WithLabelValues(tableName).Set(float64(count))
+	metrics.SetEgressRules(tableName, count)
 }
 
 func GetTable(IPv6 bool) *nftables.Table {

@@ -219,7 +219,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
 			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
 		}
+		p.mutex.Lock()
 		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
+		p.mutex.Unlock()
 		p.updateActiveServicesMetric()
 	}
 

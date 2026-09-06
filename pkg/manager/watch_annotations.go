@@ -111,7 +111,7 @@ func annotationsWatcher(ctx context.Context, clientSet,
 			// Un-used
 		case watch.Error:
 			log.Error("Error attempting to watch Kubernetes Nodes")
-			metrics.WatcherRestartsTotal.WithLabelValues("annotations", "watch_error").Inc()
+			metrics.WatcherFailuresTotal.WithLabelValues("annotations", "watch_error").Inc()
 			log.Error("annotations watcher failed", "err", utils.WatchError(event.Object))
 		default:
 		}
@@ -120,7 +120,7 @@ func annotationsWatcher(ctx context.Context, clientSet,
 	if ctx.Err() != nil {
 		return nil
 	}
-	metrics.WatcherRestartsTotal.WithLabelValues("annotations", "channel_closed").Inc()
+	metrics.WatcherFailuresTotal.WithLabelValues("annotations", "channel_closed").Inc()
 	return utils.NewPanicError("annotations watcher channel closed unexpectedly")
 }
 
