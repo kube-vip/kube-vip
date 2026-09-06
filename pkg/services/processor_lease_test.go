@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
@@ -13,6 +14,42 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 )
+
+func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
+	p := &Processor{}
+	first := servicecontext.New(context.Background())
+	second := servicecontext.New(context.Background())
+	const vip = "192.0.2.10"
+	references := map[string]map[string]bool{
+		vip: {"local-a": true, "local-b": true},
+	}
+
+	// Hold deletion's lifecycle section so the endpoint update is queued in
+	// the same state observed in the E2E failure.
+	p.lifecycleMutex.Lock()
+	var wg sync.WaitGroup
+	updated := make(chan bool, 1)
+	wg.Go(func() {
+		updated <- p.withActiveService(first, func() {
+			references[vip]["local-a"] = true
+		})
+	})
+
+	first.Cancel()
+	delete(references[vip], "local-a")
+	p.lifecycleMutex.Unlock()
+	wg.Wait()
+
+	if <-updated {
+		t.Fatal("endpoint update reconciled after its Service was cancelled")
+	}
+	if references[vip]["local-a"] {
+		t.Fatal("deleted Service restored its shared VIP reference")
+	}
+	if !references[vip]["local-b"] || second.Ctx.Err() != nil {
+		t.Fatal("deleting one Local Service disturbed the other shared VIP owner")
+	}
+}
 
 func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 	for _, ignored := range []bool{false, true} {
