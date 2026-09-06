@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- Prometheus counters and gauges for VIP, ARP, NDP, route, and DNS dataplane
+  operations, including restart-safe DNS VIP ownership accounting.
 - Prometheus metrics for build information, service activity, reconciliation,
   leader election, and watcher-loop liveness, with a metrics reference guide.
 - Configurable control-plane health check for BGP mode without leader election

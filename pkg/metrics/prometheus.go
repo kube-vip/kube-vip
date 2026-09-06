@@ -9,6 +9,9 @@ import (
 var (
 	serviceElectionLoopsMu   sync.Mutex
 	serviceElectionLoopCount = map[string]int{}
+	vipAddressesMu           sync.Mutex
+	vipAddressReferences     = map[string]int{}
+	vipAddressLabelCounts    = map[string]int{}
 )
 
 var (
@@ -136,6 +139,51 @@ func RegisterPrometheusMetrics() {
 		BuildInfo,
 		CountServiceWatchEvent,
 	)
+}
+
+// TrackVIPAddress adds a reference to an address and increments the aggregate
+// gauge only when that address gains its first owner in this process.
+func TrackVIPAddress(iface, family, address string) {
+	addressKey := iface + "\x00" + family + "\x00" + address
+	labelKey := iface + "\x00" + family
+
+	vipAddressesMu.Lock()
+	defer vipAddressesMu.Unlock()
+
+	if vipAddressReferences[addressKey] == 0 {
+		vipAddressLabelCounts[labelKey]++
+		VIPAddresses.WithLabelValues(iface, family).Inc()
+	}
+	vipAddressReferences[addressKey]++
+}
+
+// UntrackVIPAddress removes an address reference and deletes the aggregate
+// series when no tracked addresses remain for its interface and family.
+func UntrackVIPAddress(iface, family, address string) {
+	addressKey := iface + "\x00" + family + "\x00" + address
+	labelKey := iface + "\x00" + family
+
+	vipAddressesMu.Lock()
+	defer vipAddressesMu.Unlock()
+
+	references := vipAddressReferences[addressKey]
+	if references == 0 {
+		return
+	}
+	if references > 1 {
+		vipAddressReferences[addressKey] = references - 1
+		return
+	}
+
+	delete(vipAddressReferences, addressKey)
+	remaining := vipAddressLabelCounts[labelKey] - 1
+	if remaining == 0 {
+		delete(vipAddressLabelCounts, labelKey)
+		VIPAddresses.DeleteLabelValues(iface, family)
+		return
+	}
+	vipAddressLabelCounts[labelKey] = remaining
+	VIPAddresses.WithLabelValues(iface, family).Dec()
 }
 
 // TrackServiceElectionLoop increments the loop gauge and returns a function
