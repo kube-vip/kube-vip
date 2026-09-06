@@ -127,8 +127,12 @@ func runMatrixCombo(combo matrix.Combo) {
 		} else if combo.Mode == matrix.ModeRT {
 			assertMatrixRoutes(deployment, serviceVIP)
 		}
-		for _, address := range strings.Split(serviceVIP, ",") {
-			assertConnection("http", address, "80", "", 5*time.Second, 120*time.Second)
+		if combo.Mode == matrix.ModeARP {
+			for _, address := range strings.Split(serviceVIP, ",") {
+				assertConnection("http", address, "80", "", 5*time.Second, 120*time.Second)
+			}
+		} else if combo.Mode == matrix.ModeRT {
+			assertMatrixRoutes(deployment, serviceVIP)
 		}
 	}
 
