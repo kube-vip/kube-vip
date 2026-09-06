@@ -13,6 +13,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
@@ -33,7 +34,7 @@ func PartitionNode(clusterName, node string) error {
 		return err
 	}
 
-	return runDocker(clusterName, "network", "disconnect", kindNetworkName, node)
+	return runDockerAllow(clusterName, []string{"is not connected"}, "network", "disconnect", kindNetworkName, node)
 }
 
 // HealNode models recovery from a node-level network partition by reconnecting
@@ -44,7 +45,7 @@ func HealNode(clusterName, node string) error {
 		return err
 	}
 
-	if err := runDocker(clusterName, "network", "connect", kindNetworkName, node); err != nil {
+	if err := runDockerAllow(clusterName, []string{"already exists"}, "network", "connect", kindNetworkName, node); err != nil {
 		return err
 	}
 
@@ -72,8 +73,8 @@ func BlackholeAPIServer(clusterName, node string) error {
 		return err
 	}
 
-	return runDocker(clusterName,
-		"exec", node, "iptables", "-I", "OUTPUT", "-p", "tcp", "--dport", "6443", "-j", "DROP",
+	return runDocker(clusterName, "exec", node, "sh", "-c",
+		"iptables -C OUTPUT -p tcp --dport 6443 -j DROP || iptables -I OUTPUT -p tcp --dport 6443 -j DROP",
 	)
 }
 
@@ -85,8 +86,8 @@ func RestoreAPIServer(clusterName, node string) error {
 		return err
 	}
 
-	return runDocker(clusterName,
-		"exec", node, "iptables", "-D", "OUTPUT", "-p", "tcp", "--dport", "6443", "-j", "DROP",
+	return runDocker(clusterName, "exec", node, "sh", "-c",
+		"while iptables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do iptables -D OUTPUT -p tcp --dport 6443 -j DROP; done",
 	)
 }
 
@@ -123,7 +124,7 @@ func DeleteLease(ctx context.Context, client kubernetes.Interface, namespace, na
 	if client == nil {
 		return fmt.Errorf("delete lease %s/%s: client is nil", namespace, name)
 	}
-	if err := client.CoordinationV1().Leases(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+	if err := client.CoordinationV1().Leases(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete lease %s/%s: %w", namespace, name, err)
 	}
 
@@ -168,7 +169,8 @@ func StashPodManifest(clusterName, node, manifestName string) error {
 		return err
 	}
 
-	return runDocker(clusterName, "exec", node, "mv", src, dst)
+	return runDocker(clusterName, "exec", node, "sh", "-c",
+		fmt.Sprintf("if [ -e %s ]; then mv %s %s; elif [ ! -e %s ]; then exit 1; fi", src, src, dst, dst))
 }
 
 // RestorePodManifest models static-pod recovery by moving a stashed manifest
@@ -182,16 +184,26 @@ func RestorePodManifest(clusterName, node, manifestName string) error {
 		return err
 	}
 
-	return runDocker(clusterName, "exec", node, "mv", dst, src)
+	return runDocker(clusterName, "exec", node, "sh", "-c",
+		fmt.Sprintf("if [ -e %s ]; then mv %s %s; elif [ ! -e %s ]; then exit 1; fi", dst, dst, src, src))
 }
 
 func runDocker(clusterName string, args ...string) error {
+	return runDockerAllow(clusterName, nil, args...)
+}
+
+func runDockerAllow(clusterName string, allowedErrors []string, args ...string) error {
 	var output bytes.Buffer
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
 		details := strings.TrimSpace(output.String())
+		for _, allowed := range allowedErrors {
+			if strings.Contains(strings.ToLower(details), strings.ToLower(allowed)) {
+				return nil
+			}
+		}
 		if details != "" {
 			return fmt.Errorf("cluster %q: docker %s failed: %w: %s", clusterName, strings.Join(args, " "), err, details)
 		}
