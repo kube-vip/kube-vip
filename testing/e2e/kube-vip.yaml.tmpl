@@ -122,6 +122,11 @@ spec:
     volumeMounts:
     - mountPath: /etc/kubernetes/admin.conf
       name: kubeconfig
+{{- if .KubeletPKIPath }}
+    - mountPath: {{ .KubeletPKIPath }}
+      name: kubelet-pki
+      readOnly: true
+{{- end }}
 {{- if .ControlPlaneHealthCheckCAPath }}
     - mountPath: {{ .ControlPlaneHealthCheckCAPath }}
       name: health-check-ca
@@ -136,6 +141,12 @@ spec:
   - hostPath:
       path: "{{ .ConfigPath }}"
     name: kubeconfig
+{{- if .KubeletPKIPath }}
+  - hostPath:
+      path: {{ .KubeletPKIPath }}
+      type: Directory
+    name: kubelet-pki
+{{- end }}
 {{- if .ControlPlaneHealthCheckCAPath }}
   - hostPath:
       path: {{ .ControlPlaneHealthCheckCAPath }}

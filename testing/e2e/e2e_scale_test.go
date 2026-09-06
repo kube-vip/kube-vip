@@ -96,7 +96,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 
 		suite.ctx, suite.cancel = context.WithCancel(context.Background())
 		var err error
-		suite.tempDir, err = os.MkdirTemp("", "kube-vip-scale-")
+		suite.tempDir, err = os.MkdirTemp("", "kube-vip-test-scale-")
 		Expect(err).NotTo(HaveOccurred())
 
 		suite.baseOffset = SOffset.Get()
@@ -131,6 +131,11 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		}
 		Expect(suite.nodeNames).To(HaveLen(scaleControlPlaneNodes + scaleWorkerNodes))
 		Expect(len(suite.nodeNames)).To(BeNumerically("<=", scaleMaxKindNodes))
+
+		By("waiting for kube-vip static pods and containers on the control-plane and worker nodes")
+		Eventually(func() error {
+			return e2e.WaitForKubeVipReady(suite.ctx, suite.client, suite.nodeNames)
+		}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
 
 		By("waiting for kube-vip metrics on the control-plane and worker nodes")
 		Eventually(func() error {
@@ -191,7 +196,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		Expect(e2e.WaitForScaleVIPs(suite.ctx, suite.cluster.Name, suite.nodeNames, vips, remaining)).To(Succeed())
 
 		elapsed := time.Since(started)
-		By(fmt.Sprintf("all %d services became active and spot-check VIPs were advertised in %s", len(serviceNames), elapsed))
+		By(fmt.Sprintf("all %d services became active and all VIPs were advertised in %s", len(serviceNames), elapsed))
 		Expect(elapsed).To(BeNumerically("<", scaleAdvertisementP100Bound))
 	})
 
