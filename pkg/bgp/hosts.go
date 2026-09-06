@@ -143,6 +143,17 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		metrics.BGPRoutesAdvertised.WithLabelValues(family).Dec()
 		delete(b.tracker, addr)
 		delete(b.nextHops, addr)
+		familyStillAdvertised := false
+		for trackedAddress := range b.tracker {
+			trackedIP, _, err := net.ParseCIDR(trackedAddress)
+			if err == nil && (trackedIP.To4() == nil) == (ip.To4() == nil) {
+				familyStillAdvertised = true
+				break
+			}
+		}
+		if !familyStillAdvertised {
+			metrics.BGPRoutesAdvertised.DeleteLabelValues(family)
+		}
 		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects), "object", object)
 	} else {
 		delete(objects, object)
