@@ -12,7 +12,7 @@ spec:
     args:
     - manager
     - --prometheusHTTPServer
-    - ""
+    - "{{ .PrometheusHTTPServer }}"
     env:
     - name: vip_loglevel
       value: "-4"
@@ -20,8 +20,6 @@ spec:
     - name: lb_class_legacy_handling
       value: "false"
     - name: lb_class_name
-    - name: prometheus_server
-      value: :2112
     - name: disable_service_updates
       value: "false"
     - name: vip_arp
