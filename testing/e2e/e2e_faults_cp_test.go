@@ -41,15 +41,16 @@ const (
 )
 
 type controlPlaneFaultSuite struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	cluster  *e2e.Cluster
-	client   kubernetes.Interface
-	vip      string
-	nodes    []string
-	tempDir  string
-	metrics  bool
-	election faultElectionMode
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cluster        *e2e.Cluster
+	client         kubernetes.Interface
+	vip            string
+	nodes          []string
+	tempDir        string
+	metrics        bool
+	election       faultElectionMode
+	suppressedNode string
 }
 
 type faultElectionMode struct {
@@ -81,6 +82,15 @@ func validateARPFailover(oldLeader, newLeader string, owners []string) error {
 		return fmt.Errorf("elected leader %q does not own VIP; owners are %v", newLeader, owners)
 	}
 	return nil
+}
+
+func validateARPTransfer(newLeader string, owners []string) error {
+	for _, owner := range owners {
+		if owner == newLeader {
+			return nil
+		}
+	}
+	return fmt.Errorf("replacement leader %q does not own VIP; owners are %v (a stale owner is expected until the stopped kubelet restarts)", newLeader, owners)
 }
 
 var _ = Describe("kube-vip control-plane election and VIP failover faults", Label("faults"), Serial, Ordered, func() {
@@ -169,6 +179,15 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		}
 	})
 
+	AfterEach(func() {
+		if suite.suppressedNode == "" || suite.cluster == nil {
+			return
+		}
+		By(withTimestamp(fmt.Sprintf("restoring kubelet on %q before fault-suite teardown", suite.suppressedNode)))
+		Expect(e2e.RestoreKubeVip(suite.cluster.Name, suite.suppressedNode)).To(Succeed())
+		suite.suppressedNode = ""
+	})
+
 	It("keeps the VIP available while the leader loses API access and recovers", func() {
 		if !suite.election.enabled {
 			node := suite.nodes[0]
@@ -231,21 +250,25 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		By(withTimestamp(fmt.Sprintf("stopping kubelet and sending SIGKILL to kube-vip on elected leader %q", oldLeader)))
 		oldPID, err := e2e.KillAndSuppressKubeVip(suite.cluster.Name, oldLeader)
 		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func() {
-			Expect(e2e.RestoreKubeVip(suite.cluster.Name, oldLeader)).To(Succeed())
-		})
+		suite.suppressedNode = oldLeader
 		By(withTimestamp(fmt.Sprintf("sent SIGKILL to kube-vip PID %s on elected leader %q", oldPID, oldLeader)))
 		suite.assertNodeRunning(oldLeader)
 
 		newLeader := suite.waitForDifferentLeader(oldLeader)
-		suite.waitForARPFailover(oldLeader, newLeader)
+		suite.waitForARPTransfer(newLeader)
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
 		suite.assertLeaderMetric(newLeader)
+		owners, err := suite.vipOwners()
+		Expect(err).NotTo(HaveOccurred())
+		By(withTimestamp(fmt.Sprintf("lease and reachability transferred to %q while kubelet is stopped on %q; current VIP owners: %v", newLeader, oldLeader, owners)))
 
 		By(withTimestamp(fmt.Sprintf("restarting kubelet to restore kube-vip on %q", oldLeader)))
 		Expect(e2e.RestoreKubeVip(suite.cluster.Name, oldLeader)).To(Succeed())
+		suite.suppressedNode = ""
+		suite.waitForKubeVipRestart(oldLeader, oldPID)
+		suite.waitForNonLeader(oldLeader, newLeader)
+		suite.waitForARPFailover(oldLeader, newLeader)
 		By(withTimestamp(fmt.Sprintf("waiting for kube-vip metrics to return on restarted node %q", oldLeader)))
-		suite.waitForKubeVip(oldLeader)
 		suite.waitForMetrics(oldLeader)
 		recoveredLeader := suite.waitForLeader()
 		suite.assertLeaderMetric(recoveredLeader)
@@ -359,6 +382,40 @@ func (s *controlPlaneFaultSuite) waitForARPFailover(oldLeader, newLeader string)
 		return validateARPFailover(oldLeader, newLeader, owners)
 	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
 	By(withTimestamp(fmt.Sprintf("election and sole VIP ownership transferred from %q to %q", oldLeader, newLeader)))
+}
+
+func (s *controlPlaneFaultSuite) waitForARPTransfer(newLeader string) {
+	Eventually(func() error {
+		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("observe election transfer while kubelet is stopped: %w", err)
+		}
+		if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != newLeader {
+			return fmt.Errorf("lease %s/%s is not held by replacement leader %q", faultLeaseNamespace, s.election.leaseName, newLeader)
+		}
+		owners, err := s.vipOwners()
+		if err != nil {
+			return err
+		}
+		return validateARPTransfer(newLeader, owners)
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+}
+
+func (s *controlPlaneFaultSuite) waitForNonLeader(node, leader string) {
+	Eventually(func() error {
+		lease, err := s.client.CoordinationV1().Leases(faultLeaseNamespace).Get(s.ctx, s.election.leaseName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if lease.Spec.HolderIdentity == nil {
+			return fmt.Errorf("replacement kube-vip on %q is not confirmed as a nonleader: lease %s/%s has no holder", node, faultLeaseNamespace, s.election.leaseName)
+		}
+		if *lease.Spec.HolderIdentity != leader {
+			return fmt.Errorf("replacement kube-vip on %q is not a nonleader: lease %s/%s holder is %q, want %q", node, faultLeaseNamespace, s.election.leaseName, *lease.Spec.HolderIdentity, leader)
+		}
+		return nil
+	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
+	By(withTimestamp(fmt.Sprintf("replacement kube-vip on %q started as nonleader behind %q", node, leader)))
 }
 
 func (s *controlPlaneFaultSuite) waitForVIPOwner(want string) {
