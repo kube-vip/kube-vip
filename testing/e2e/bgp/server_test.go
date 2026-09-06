@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
 	"strings"
 	"testing"
 	"text/template"
