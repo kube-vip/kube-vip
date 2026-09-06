@@ -113,8 +113,8 @@ var (
 			Help: "Per-service leader election failures by reason"},
 		[]string{"namespace", "name", "reason"},
 	)
-	WatcherRestartsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "kube_vip_watcher_restarts_total", Help: "Watcher restarts by kind and reason"},
+	WatcherFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_watcher_failures_total", Help: "Watcher failures by kind and reason"},
 		[]string{"kind", "reason"},
 	)
 
@@ -162,12 +162,21 @@ func RegisterPrometheusMetrics() {
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
-		WatcherRestartsTotal,
+		WatcherFailuresTotal,
 		BGPSessionInfoGauge,
 		UPNPMappings,
 		BuildInfo,
 		CountServiceWatchEvent,
 	)
+}
+
+// SetEgressRules updates a table snapshot and removes an empty dynamic series.
+func SetEgressRules(table string, count int) {
+	if count == 0 {
+		EgressRules.DeleteLabelValues(table)
+		return
+	}
+	EgressRules.WithLabelValues(table).Set(float64(count))
 }
 
 // TrackVIPAddress adds a reference to an address and increments the aggregate

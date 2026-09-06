@@ -15,6 +15,8 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
@@ -82,6 +84,25 @@ func TestConfigureServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 	}
 	if got := currentService.Annotations[kubevip.ActiveEndpoint]; got != selectedEndpoint {
 		t.Fatalf("active endpoint = %q, want %q", got, selectedEndpoint)
+	}
+}
+
+func TestSetUPNPMappingSnapshotCountsMappingsNotGateways(t *testing.T) {
+	metrics.UPNPMappings.Set(0)
+	t.Cleanup(func() { metrics.UPNPMappings.Set(0) })
+
+	serviceInstance := &instance.Instance{UPNPGatewayIPs: []string{"192.0.2.1"}}
+	setUPNPMappingSnapshot(serviceInstance, 0, 3)
+	if got := testutil.ToFloat64(metrics.UPNPMappings); got != 3 {
+		t.Fatalf("UPnP mapping gauge = %v, want 3", got)
+	}
+	if serviceInstance.UPNPMappingCount != 3 {
+		t.Fatalf("tracked UPnP mappings = %d, want 3", serviceInstance.UPNPMappingCount)
+	}
+
+	setUPNPMappingSnapshot(serviceInstance, 3, 1)
+	if got := testutil.ToFloat64(metrics.UPNPMappings); got != 1 {
+		t.Fatalf("UPnP mapping gauge after refresh = %v, want 1", got)
 	}
 }
 

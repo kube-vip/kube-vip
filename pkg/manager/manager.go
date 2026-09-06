@@ -24,7 +24,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/manager/worker"
-	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/node"
@@ -418,7 +417,6 @@ func (sm *Manager) startMode(ctx context.Context) error {
 						sm.Kill()
 						return fmt.Errorf("failed to reconcile services, non-recoverable error: %w", err)
 					} else {
-						metrics.WatcherRestartsTotal.WithLabelValues("service", "watch_error").Inc()
 						log.Error("failed to reconcile services, restarting", "error", err)
 					}
 				}

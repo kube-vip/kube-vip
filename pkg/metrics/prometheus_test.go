@@ -177,7 +177,7 @@ func TestPR14CMetricsRegisterAndTrack(t *testing.T) {
 	BGPRouteOperationsTotal.Reset()
 	EgressRules.Reset()
 	EgressOperationsTotal.Reset()
-	WatcherRestartsTotal.Reset()
+	WatcherFailuresTotal.Reset()
 	BGPSessionInfoGauge.Reset()
 	UPNPMappings.Set(0)
 	t.Cleanup(func() {
@@ -185,7 +185,7 @@ func TestPR14CMetricsRegisterAndTrack(t *testing.T) {
 		BGPRouteOperationsTotal.Reset()
 		EgressRules.Reset()
 		EgressOperationsTotal.Reset()
-		WatcherRestartsTotal.Reset()
+		WatcherFailuresTotal.Reset()
 		BGPSessionInfoGauge.Reset()
 		UPNPMappings.Set(0)
 	})
@@ -196,7 +196,7 @@ func TestPR14CMetricsRegisterAndTrack(t *testing.T) {
 		BGPRouteOperationsTotal,
 		EgressRules,
 		EgressOperationsTotal,
-		WatcherRestartsTotal,
+		WatcherFailuresTotal,
 		BGPSessionInfoGauge,
 		UPNPMappings,
 	)
@@ -205,7 +205,7 @@ func TestPR14CMetricsRegisterAndTrack(t *testing.T) {
 	BGPRouteOperationsTotal.WithLabelValues("add", "ok").Inc()
 	EgressRules.WithLabelValues("kube_vip_v4").Set(2)
 	EgressOperationsTotal.WithLabelValues("delete", "error").Inc()
-	WatcherRestartsTotal.WithLabelValues("service", "watch_error").Inc()
+	WatcherFailuresTotal.WithLabelValues("service", "watch_error").Inc()
 	BGPSessionInfoGauge.WithLabelValues("ESTABLISHED", "127.0.0.1:179").Set(1)
 	UPNPMappings.Set(3)
 
@@ -232,12 +232,33 @@ func TestPR14CMetricsRegisterAndTrack(t *testing.T) {
 		"kube_vip_bgp_route_operations_total",
 		"kube_vip_egress_rules",
 		"kube_vip_egress_operations_total",
-		"kube_vip_watcher_restarts_total",
+		"kube_vip_watcher_failures_total",
 		"kube_vip_manager_bgp_session_info",
 		"kube_vip_upnp_mappings",
 	} {
 		if !seen[name] {
 			t.Errorf("PR-14c metric %q was not registered", name)
 		}
+	}
+}
+
+func TestSetEgressRulesDeletesEmptyTableSeries(t *testing.T) {
+	EgressRules.Reset()
+	t.Cleanup(EgressRules.Reset)
+
+	SetEgressRules("kube_vip_v4", 2)
+	if got := testutil.ToFloat64(EgressRules.WithLabelValues("kube_vip_v4")); got != 2 {
+		t.Fatalf("egress rules = %v, want 2", got)
+	}
+	SetEgressRules("kube_vip_v4", 0)
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(EgressRules)
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering egress rules: %v", err)
+	}
+	if len(families) != 0 {
+		t.Fatalf("empty egress table series remains: %v", families)
 	}
 }

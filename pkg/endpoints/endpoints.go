@@ -339,7 +339,7 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 				attempts.Inc()
 				err := serviceFunc(svcCtx, service, wg, true)
 				if err != nil {
-					metrics.WatcherRestartsTotal.WithLabelValues("lease", "leader_election_error").Inc()
+					metrics.WatcherFailuresTotal.WithLabelValues("lease", "leader_election_error").Inc()
 					log.Error(err.Error())
 				}
 			} else {

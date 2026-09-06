@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- Prometheus metrics for BGP route ownership, egress rules and operations,
+  watcher failures, and successful UPnP mappings.
 - Prometheus counters and gauges for VIP, ARP, NDP, route, and DNS dataplane
   operations, including restart-safe DNS VIP ownership accounting.
 - Prometheus metrics for build information, service activity, reconciliation,

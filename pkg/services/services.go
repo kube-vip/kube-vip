@@ -474,7 +474,8 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 			log.Error("[service] nftables egress teardown", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
 		}
 	}
-	metrics.UPNPMappings.Sub(float64(len(serviceInstance.UPNPGatewayIPs)))
+	metrics.UPNPMappings.Sub(float64(serviceInstance.UPNPMappingCount))
+	serviceInstance.UPNPMappingCount = 0
 
 	if !shared {
 		for x := range serviceInstance.Clusters {
@@ -768,7 +769,8 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	leaseDurationSec := upnpLeaseDurationForServiceSec(s)
 
 	// Reset Gateway IPs to remove stale addresses
-	previousMappings := len(s.UPNPGatewayIPs)
+	previousMappings := s.UPNPMappingCount
+	successfulMappings := 0
 	s.UPNPGatewayIPs = make([]string, 0)
 
 	vips, _ := instance.FetchServiceAddresses(s.ServiceSnapshot)
@@ -810,6 +812,7 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				}
 
 				if forwardSucessful {
+					successfulMappings++
 					ip, err := gw.ConnectionClient.GetExternalIPAddress()
 					if err == nil {
 						s.UPNPGatewayIPs = append(s.UPNPGatewayIPs, ip)
@@ -822,7 +825,12 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	// Remove duplicate IPs
 	slices.Sort(s.UPNPGatewayIPs)
 	s.UPNPGatewayIPs = slices.Compact(s.UPNPGatewayIPs)
-	metrics.UPNPMappings.Add(float64(len(s.UPNPGatewayIPs) - previousMappings))
+	setUPNPMappingSnapshot(s, previousMappings, successfulMappings)
+}
+
+func setUPNPMappingSnapshot(s *instance.Instance, previous, current int) {
+	s.UPNPMappingCount = current
+	metrics.UPNPMappings.Add(float64(current - previous))
 }
 
 func (p *Processor) updateStatus(ctx context.Context, i *instance.Instance) error {
@@ -967,8 +975,10 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			p.mutex.Lock()
 			// Skip logging if no service instances
 			if len(p.ServiceInstances) == 0 {
+				p.mutex.Unlock()
 				continue
 			}
 
@@ -979,6 +989,7 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 					log.Warn("[UPNP] Error updating service", "ip", p.ServiceInstances[i].ServiceSnapshot.Name, "err", err)
 				}
 			}
+			p.mutex.Unlock()
 		}
 	}
 }
