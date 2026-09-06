@@ -16,6 +16,9 @@ func TestGenerateIsPairwiseComplete(t *testing.T) {
 
 	seenCombos := make(map[string]struct{}, len(combos))
 	for _, combo := range combos {
+		if combo.Mode == ModeWireGuard {
+			t.Fatalf("unrunnable WireGuard combo was emitted: %s", combo)
+		}
 		if IsExcluded(combo) {
 			t.Fatalf("excluded combo was emitted: %s (%s)", combo, ExclusionReason(combo))
 		}
@@ -81,7 +84,7 @@ func TestGenerateRespectsKnownExclusions(t *testing.T) {
 }
 
 func TestFullCrossProductCount(t *testing.T) {
-	if got, want := FullCrossProductCount(), 1152; got != want {
+	if got, want := FullCrossProductCount(), 864; got != want {
 		t.Fatalf("FullCrossProductCount() = %d, want %d", got, want)
 	}
 }
