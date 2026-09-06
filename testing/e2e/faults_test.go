@@ -8,6 +8,31 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+func TestSinglePID(t *testing.T) {
+	tests := []struct {
+		name      string
+		output    string
+		want      string
+		wantError bool
+	}{
+		{name: "one process", output: "123\n", want: "123"},
+		{name: "no process", wantError: true},
+		{name: "multiple processes", output: "123\n456\n", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := singlePID(test.output)
+			if (err != nil) != test.wantError {
+				t.Fatalf("singlePID() error = %v, wantError %t", err, test.wantError)
+			}
+			if got != test.want {
+				t.Fatalf("singlePID() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestPodManifestPaths(t *testing.T) {
 	tests := []struct {
 		name      string
