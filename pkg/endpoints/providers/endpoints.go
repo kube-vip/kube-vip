@@ -156,3 +156,37 @@ func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
 		return 0
 	})
 }
+
+func (ep *Endpoints) GetBackends(servicePort v1.ServicePort, nodeName string, local bool) ([]Backend, error) {
+	seen := map[Backend]struct{}{}
+	backends := []Backend{}
+	for _, subset := range ep.endpoints.Subsets {
+		targetPort := ResolvePortWithLookup(servicePort, func(name string) int32 {
+			for _, port := range subset.Ports {
+				if port.Name == name && port.Protocol == servicePort.Protocol {
+					return port.Port
+				}
+			}
+			return 0
+		})
+		for _, address := range subset.Addresses {
+			if local && !legacyEndpointIsLocal(address, nodeName) {
+				continue
+			}
+			backend := Backend{Address: strings.Split(address.IP, "/")[0], Port: targetPort}
+			if _, ok := seen[backend]; ok {
+				continue
+			}
+			seen[backend] = struct{}{}
+			backends = append(backends, backend)
+		}
+	}
+	return backends, nil
+}
+
+func legacyEndpointIsLocal(address v1.EndpointAddress, nodeName string) bool {
+	if address.NodeName != nil {
+		return *address.NodeName == nodeName
+	}
+	return address.Hostname == nodeName
+}
