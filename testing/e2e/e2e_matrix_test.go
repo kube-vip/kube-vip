@@ -144,7 +144,7 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 		networking.ServiceSubnet = serviceSubnet
 	}
 
-	cpVIP := matrixVIP(combo.Family, SOffset.Get())
+	cpVIP := matrixControlPlaneVIP(combo.Family, SOffset.Get())
 	hasCP := combo.Function == matrix.FunctionCP || combo.Function == matrix.FunctionBoth
 	hasService := combo.Function == matrix.FunctionSvc || combo.Function == matrix.FunctionBoth
 	manifestValues := e2e.KubevipManifestValues{
@@ -172,7 +172,7 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 			if family == utils.IPv6Family {
 				peerIP = sharedBGPServer.LocalIPv6
 			}
-			bgpPeers = append(bgpPeers, &e2e.BGPPeerValues{IP: peerIP, AS: bgp.GoBGPAS, IPFamily: family})
+			bgpPeers = append(bgpPeers, &e2e.BGPPeerValues{IP: peerIP, AS: bgp.GoBGPAS, Port: bgp.GoBGPPort, IPFamily: family})
 		}
 		manifestValues.BGPAS = bgp.KubevipAS
 		manifestValues.BGPPeers = bgp.PeerStrings(bgpPeers)
@@ -183,19 +183,21 @@ func createMatrixDeployment(ctx context.Context, combo matrix.Combo) *matrixDepl
 		templateName = "kube-vip-routing-table.yaml.tmpl"
 	}
 	deployment.cluster = e2e.CreateCluster(ctx, &e2e.ClusterSpec{
-		Name:         fmt.Sprintf("matrix-%d-p%d", SOffset.Get(), GinkgoParallelProcess()),
-		Nodes:        matrixClusterNodes,
-		Networking:   networking,
-		KubeVip:      manifestValues,
-		Logger:       e2e.TestLogger{},
-		ConfigMtx:    ConfigMtx,
-		TemplateName: templateName,
-		UseDaemonSet: combo.Shape == matrix.ShapeDaemonSet,
+		Name:           fmt.Sprintf("matrix-%d-p%d", SOffset.Get(), GinkgoParallelProcess()),
+		Nodes:          matrixClusterNodes,
+		Networking:     networking,
+		KubeVip:        manifestValues,
+		Logger:         e2e.TestLogger{},
+		ConfigMtx:      ConfigMtx,
+		KubeadmPatches: matrixKubeadmPatches(cpVIP, hasCP),
+		TemplateName:   templateName,
+		UseDaemonSet:   combo.Shape == matrix.ShapeDaemonSet,
 	})
 
 	if combo.Mode == matrix.ModeBGP {
 		deployment.bgpPeers = sharedBGPServer.AddClusterPeers(ctx, deployment.cluster.Nodes, bgp.KubevipAS, matrixBGPPeerFamilies(combo.Family))
 		deployment.bgpClient = sharedBGPServer.Client
+		Expect(sharedBGPServer.WaitForEstablished(ctx, deployment.bgpPeers)).To(Succeed())
 	}
 	return deployment
 }
@@ -262,7 +264,9 @@ func assertMatrixBGPConnection(ctx context.Context, client api.GoBgpServiceClien
 func assertMatrixRoutes(deployment *matrixDeployment, addresses string) {
 	for _, node := range deployment.cluster.Nodes {
 		for _, address := range strings.Split(addresses, ",") {
-			Expect(e2e.CheckRoutePresence(address, node.String(), true)).To(BeTrue())
+			present, output, err := e2e.CheckRoutePresence(address, node.String(), true)
+			Expect(err).NotTo(HaveOccurred(), "route output: %s", output)
+			Expect(present).To(BeTrue(), "route output: %s", output)
 		}
 	}
 }
@@ -460,4 +464,23 @@ func matrixVIP(family matrix.Family, offset uint) string {
 	default:
 		return e2e.GenerateVIP(utils.IPv4Family, offset, defaultNetwork)
 	}
+}
+
+func matrixControlPlaneVIP(family matrix.Family, offset uint) string {
+	if family == matrix.FamilyDual {
+		// The dual-stack Kind configuration is IPv6-primary, so kubeadm's API
+		// endpoint and kube-vip must use the IPv6 member of the VIP pair.
+		return e2e.GenerateVIP(utils.IPv6Family, offset, defaultNetwork)
+	}
+	return matrixVIP(family, offset)
+}
+
+func matrixKubeadmPatches(cpVIP string, enabled bool) []kindconfigv1alpha4.PatchJSON6902 {
+	if !enabled {
+		return nil
+	}
+	return []kindconfigv1alpha4.PatchJSON6902{{
+		Group: "kubeadm.k8s.io", Version: "v1beta3", Kind: "ClusterConfiguration",
+		Patch: fmt.Sprintf("- op: add\n  path: /apiServer/certSANs/-\n  value: %q", cpVIP),
+	}}
 }
