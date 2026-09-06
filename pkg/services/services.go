@@ -634,7 +634,8 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	}
 
 	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
-	metrics.UPNPMappings.Sub(float64(len(serviceInstance.UPNPGatewayIPs)))
+	metrics.UPNPMappings.Sub(float64(serviceInstance.UPNPMappingCount))
+	serviceInstance.UPNPMappingCount = 0
 
 	return nil
 }
@@ -899,7 +900,8 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	leaseDurationSec := upnpLeaseDurationForServiceSec(s)
 
 	// Reset Gateway IPs to remove stale addresses
-	previousMappings := len(s.UPNPGatewayIPs)
+	previousMappings := s.UPNPMappingCount
+	successfulMappings := 0
 	s.UPNPGatewayIPs = make([]string, 0)
 
 	vips, _ := instance.FetchServiceAddresses(s.ServiceSnapshot)
@@ -941,6 +943,7 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				}
 
 				if forwardSucessful {
+					successfulMappings++
 					ip, err := gw.ConnectionClient.GetExternalIPAddress()
 					if err == nil {
 						s.UPNPGatewayIPs = append(s.UPNPGatewayIPs, ip)
@@ -953,7 +956,12 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	// Remove duplicate IPs
 	slices.Sort(s.UPNPGatewayIPs)
 	s.UPNPGatewayIPs = slices.Compact(s.UPNPGatewayIPs)
-	metrics.UPNPMappings.Add(float64(len(s.UPNPGatewayIPs) - previousMappings))
+	setUPNPMappingSnapshot(s, previousMappings, successfulMappings)
+}
+
+func setUPNPMappingSnapshot(s *instance.Instance, previous, current int) {
+	s.UPNPMappingCount = current
+	metrics.UPNPMappings.Add(float64(current - previous))
 }
 
 // updateStatus reads and updates tracked instance state. The caller must hold the
