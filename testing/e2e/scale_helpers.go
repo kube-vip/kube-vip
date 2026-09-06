@@ -448,24 +448,39 @@ func SnapshotScaleMetrics(ctx context.Context, clusterName string, nodes []strin
 	return snapshot, nil
 }
 
-func ScaleCounterDelta(before, after ScaleMetricSnapshot, name string, labelsForMetric map[string]string) (float64, bool) {
+func ScaleCounterDelta(before, after ScaleMetricSnapshot, name string, labelsForMetric map[string]string) (float64, error) {
 	var total float64
-	found := false
-	for node, afterMetrics := range after {
+	nodes := make(map[string]struct{}, len(before)+len(after))
+	for node := range before {
+		nodes[node] = struct{}{}
+	}
+	for node := range after {
+		nodes[node] = struct{}{}
+	}
+
+	for node := range nodes {
 		beforeMetrics := before[node]
-		if len(matchingMetricValues(beforeMetrics, name, labelsForMetric)) == 0 || len(matchingMetricValues(afterMetrics, name, labelsForMetric)) == 0 {
+		afterMetrics := after[node]
+		beforeFound := len(matchingMetricValues(beforeMetrics, name, labelsForMetric)) > 0
+		afterFound := len(matchingMetricValues(afterMetrics, name, labelsForMetric)) > 0
+		if !beforeFound && !afterFound {
 			continue
 		}
-		found = true
+		if !beforeFound && afterFound && SumMetric(afterMetrics, name, labelsForMetric) == 0 {
+			// Prometheus counter vectors create a series lazily on first use.
+			continue
+		}
+		if beforeFound != afterFound {
+			return 0, fmt.Errorf("counter %q presence changed on node %q: before=%t after=%t", name, node, beforeFound, afterFound)
+		}
 		beforeValue := SumMetric(beforeMetrics, name, labelsForMetric)
 		afterValue := SumMetric(afterMetrics, name, labelsForMetric)
-		delta := afterValue - beforeValue
-		if delta < 0 {
-			delta = afterValue
+		if afterValue < beforeValue {
+			return 0, fmt.Errorf("counter %q reset on node %q: before=%v after=%v", name, node, beforeValue, afterValue)
 		}
-		total += delta
+		total += afterValue - beforeValue
 	}
-	return total, found
+	return total, nil
 }
 
 func ScaleTransitionDelta(before, after ScaleMetricSnapshot, leaseNames []string) (float64, bool) {
