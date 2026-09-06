@@ -176,8 +176,37 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	if spec.UseDaemonSet {
 		deployDaemonSet(ctx, c, manifestPath)
 	}
+	Eventually(func() error {
+		return kubeVipPodsReady(ctx, c.Client, spec.Nodes)
+	}, "120s", "2s").Should(Succeed())
 
 	return c
+}
+
+func kubeVipPodsReady(ctx context.Context, client kubernetes.Interface, expected int) error {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
+	if err != nil {
+		return err
+	}
+	ready := 0
+	states := make([]string, 0, len(pods.Items))
+	for _, pod := range pods.Items {
+		isReady := false
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+				isReady = true
+				break
+			}
+		}
+		if isReady {
+			ready++
+		}
+		states = append(states, fmt.Sprintf("%s=%s ready=%t", pod.Name, pod.Status.Phase, isReady))
+	}
+	if ready < expected {
+		return fmt.Errorf("kube-vip pods are not ready: %d/%d; states: %v", ready, expected, states)
+	}
+	return nil
 }
 
 func deployDaemonSet(ctx context.Context, c *Cluster, manifestPath string) {
