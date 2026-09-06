@@ -69,7 +69,9 @@ type Processor struct {
 	electionCoordinators *serviceelection.Manager
 	electionLoops        sync.Map
 
-	bgpServer *bgp.Server
+	mutex          sync.Mutex
+	lifecycleMutex sync.Mutex
+	bgpServer      *bgp.Server
 
 	clientSet   *kubernetes.Clientset
 	rwClientSet *kubernetes.Clientset
@@ -694,9 +696,10 @@ func serviceMatchesWatcher(svc *v1.Service, forcedOnly bool) bool {
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
-	defer p.refreshOwnedServiceVIPs()
+	p.lifecycleMutex.Lock()
+	defer p.lifecycleMutex.Unlock()
 
-	svcCtx, cleanupCtx, err := p.retireServiceContext(svc)
+	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return err
 	}
@@ -705,6 +708,11 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
 	if svcCtx != nil {
+		// Stop every producer before tearing down the tracked instance. Endpoint
+		// reconciliation uses lifecycleMutex too, so no queued event can restore
+		// datapath state after this point.
+		svcCtx.Cancel()
+
 		// If no leader election is enabled, delete routes here
 		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
@@ -713,18 +721,20 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 			}
 		}
 
-		if !p.config.EnableServicesElection {
-			// If this is an active service then and additional leaderElection will handle stopping
-			err = p.deleteService(svcCtx.Ctx, svc.UID)
-			if err != nil {
-				log.Error(err.Error())
-			}
+		// Delete synchronously even with per-Service election. Waiting for the
+		// election callback leaves a window in which a queued callback can add the
+		// deleted Service again.
+		if err = p.deleteService(context.WithoutCancel(svcCtx.Ctx), svc.UID); err != nil {
+			log.Error(err.Error())
 		}
 
-		// Calls the cancel function of the context
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		svcCtx.Cancel()
-		p.svcMap.Delete(svc.UID)
+		ns, name := lease.ServiceName(svc)
+		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+		p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
+		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+		// Drop the per-service election series so a recreated service starts clean.
+		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		p.updateActiveServicesMetric()
 
 		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
@@ -737,14 +747,19 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	return nil
 }
 
-// retireServiceContext preemptively cancels the published Service context before
-// acquiring the Service lock, then rechecks ownership under the lock.
-func (p *Processor) retireServiceContext(svc *v1.Service) (*servicecontext.Context, context.Context, error) {
-	// Cancel before locking so in-flight Service work can release the lock.
-	contextBeforeLock, err := p.cancelPublishedServiceContext(svc.UID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("(svcs) unable to get context: %w", err)
+func (p *Processor) withActiveService(svcCtx *servicecontext.Context, reconcile func()) bool {
+	p.lifecycleMutex.Lock()
+	defer p.lifecycleMutex.Unlock()
+	if svcCtx.Ctx.Err() != nil {
+		return false
 	}
+	reconcile()
+	return true
+}
+
+func (p *Processor) Stop() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 
 	p.serviceLock.Lock(svc.UID)
 	defer func() {
