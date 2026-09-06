@@ -29,7 +29,7 @@ spec:
     - name: vip_cidr
       value: "32"
     - name: vip_leaderelection
-      value: "false"
+      value: "{{ if .VipElectionEnable }}{{ .VipElectionEnable }}{{ else }}false{{ end }}"
     - name: vip_interface
       value: lo
     - name: bgp_enable
