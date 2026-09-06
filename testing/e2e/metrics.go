@@ -4,8 +4,8 @@
 package e2e
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -15,12 +15,15 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 // ScrapeMetrics gets and parses the Prometheus metrics exposed by kube-vip in
 // a Kind node. nodeName may be either a Kind node suffix or its full container
 // name.
-func ScrapeMetrics(clusterName, nodeName string) (map[string]float64, error) {
+func ScrapeMetrics(ctx context.Context, clusterName, nodeName string) (map[string]float64, error) {
 	if clusterName == "" {
 		return nil, fmt.Errorf("cluster name is empty")
 	}
@@ -33,7 +36,7 @@ func ScrapeMetrics(clusterName, nodeName string) (map[string]float64, error) {
 		containerName = fmt.Sprintf("%s-%s", clusterName, nodeName)
 	}
 
-	cmd := exec.Command("docker", "exec", containerName, "curl", "-fsS", "http://127.0.0.1:2112/metrics")
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerName, "curl", "-fsS", "http://127.0.0.1:2112/metrics")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	payload, err := cmd.Output()
@@ -132,9 +135,9 @@ func CounterDelta(before, after map[string]float64, name string, labels map[stri
 }
 
 // EventuallyMetric retries a metric scrape until its value satisfies matcher.
-func EventuallyMetric(clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
+func EventuallyMetric(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
 	Eventually(func() (float64, error) {
-		metrics, err := ScrapeMetrics(clusterName, node)
+		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
 			return 0, err
 		}
@@ -145,9 +148,9 @@ func EventuallyMetric(clusterName, node, name string, labels map[string]string, 
 
 // ConsistentlyMetric repeatedly scrapes a metric while its value satisfies
 // matcher.
-func ConsistentlyMetric(clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
+func ConsistentlyMetric(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
 	Consistently(func() (float64, error) {
-		metrics, err := ScrapeMetrics(clusterName, node)
+		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
 			return 0, err
 		}
@@ -160,14 +163,14 @@ func ConsistentlyMetric(clusterName, node, name string, labels map[string]string
 // across samples separated by gap. The observed window is (samples-1)*gap
 // plus scrape latency. A single transient scrape error is retried once for
 // each sample.
-func MetricStable(clusterName, node, name string, labels map[string]string, samples int, gap time.Duration) (float64, error) {
+func MetricStable(ctx context.Context, clusterName, node, name string, labels map[string]string, samples int, gap time.Duration) (float64, error) {
 	if samples < 2 {
 		return 0, fmt.Errorf("samples must be at least 2")
 	}
 
 	var stableValue float64
 	for sample := 0; sample < samples; sample++ {
-		metrics, err := scrapeMetricsRetryOnce(clusterName, node)
+		metrics, err := scrapeMetricsRetryOnce(ctx, clusterName, node)
 		if err != nil {
 			return 0, err
 		}
@@ -183,7 +186,11 @@ func MetricStable(clusterName, node, name string, labels map[string]string, samp
 		}
 
 		if sample+1 < samples {
-			time.Sleep(gap)
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(gap):
+			}
 		}
 	}
 
@@ -202,13 +209,13 @@ func singleMetricValue(metrics map[string]float64, name string, labels map[strin
 	}
 }
 
-func scrapeMetricsRetryOnce(clusterName, node string) (map[string]float64, error) {
-	metrics, err := ScrapeMetrics(clusterName, node)
+func scrapeMetricsRetryOnce(ctx context.Context, clusterName, node string) (map[string]float64, error) {
+	metrics, err := ScrapeMetrics(ctx, clusterName, node)
 	if err == nil {
 		return metrics, nil
 	}
 
-	retryMetrics, retryErr := ScrapeMetrics(clusterName, node)
+	retryMetrics, retryErr := ScrapeMetrics(ctx, clusterName, node)
 	if retryErr == nil {
 		return retryMetrics, nil
 	}
@@ -216,78 +223,38 @@ func scrapeMetricsRetryOnce(clusterName, node string) (map[string]float64, error
 }
 
 func parseMetrics(payload string) (map[string]float64, error) {
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("parse Prometheus text: %w", err)
+	}
+
+	familyList := make([]*dto.MetricFamily, 0, len(families))
+	for _, family := range families {
+		familyList = append(familyList, family)
+	}
+	samples, err := expfmt.ExtractSamples(&expfmt.DecodeOptions{}, familyList...)
+	if err != nil {
+		return nil, fmt.Errorf("extract Prometheus samples: %w", err)
+	}
+
 	metrics := make(map[string]float64)
-	scanner := bufio.NewScanner(strings.NewReader(payload))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		name, labels, value, err := parseMetricSample(line)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", lineNumber, err)
+	for _, sample := range samples {
+		name := string(sample.Metric[model.MetricNameLabel])
+		labels := make(map[string]string, len(sample.Metric)-1)
+		for label, value := range sample.Metric {
+			if label != model.MetricNameLabel {
+				labels[string(label)] = string(value)
+			}
 		}
 		key := canonicalMetricKey(name, labels)
 		if _, exists := metrics[key]; exists {
-			return nil, fmt.Errorf("line %d: duplicate sample %s", lineNumber, key)
+			return nil, fmt.Errorf("duplicate sample %s", key)
 		}
-		metrics[key] = value
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan payload: %w", err)
+		metrics[key] = float64(sample.Value)
 	}
 
 	return metrics, nil
-}
-
-func parseMetricSample(line string) (string, map[string]string, float64, error) {
-	nameEnd := 0
-	for nameEnd < len(line) && isMetricNameChar(line[nameEnd], nameEnd == 0) {
-		nameEnd++
-	}
-	if nameEnd == 0 {
-		return "", nil, 0, fmt.Errorf("invalid metric name")
-	}
-
-	name := line[:nameEnd]
-	position := nameEnd
-	labels := map[string]string{}
-	if position < len(line) && line[position] == '{' {
-		labelEnd, err := closingBrace(line, position+1)
-		if err != nil {
-			return "", nil, 0, err
-		}
-		labels, err = parseLabelSet(line[position+1 : labelEnd])
-		if err != nil {
-			return "", nil, 0, err
-		}
-		position = labelEnd + 1
-	}
-
-	if position >= len(line) || !isWhitespace(line[position]) {
-		return "", nil, 0, fmt.Errorf("metric %s is missing a value", name)
-	}
-	for position < len(line) && isWhitespace(line[position]) {
-		position++
-	}
-	valueStart := position
-	for position < len(line) && !isWhitespace(line[position]) {
-		position++
-	}
-	if valueStart == position {
-		return "", nil, 0, fmt.Errorf("metric %s is missing a value", name)
-	}
-
-	value, err := strconv.ParseFloat(line[valueStart:position], 64)
-	if err != nil {
-		return "", nil, 0, fmt.Errorf("invalid value for metric %s: %w", name, err)
-	}
-	return name, labels, value, nil
 }
 
 func parseMetricKey(key string) (string, map[string]string, bool) {
@@ -337,32 +304,6 @@ func canonicalMetricKey(name string, labels map[string]string) string {
 	}
 	builder.WriteByte('}')
 	return builder.String()
-}
-
-func closingBrace(line string, start int) (int, error) {
-	inQuotes := false
-	escaped := false
-	for position := start; position < len(line); position++ {
-		character := line[position]
-		if inQuotes {
-			if escaped {
-				escaped = false
-			} else if character == '\\' {
-				escaped = true
-			} else if character == '"' {
-				inQuotes = false
-			}
-			continue
-		}
-
-		switch character {
-		case '"':
-			inQuotes = true
-		case '}':
-			return position, nil
-		}
-	}
-	return 0, fmt.Errorf("unterminated label set")
 }
 
 func parseLabelSet(labelSet string) (map[string]string, error) {
