@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +39,17 @@ func TestMatrixLeaderCapability(t *testing.T) {
 				t.Fatalf("matrixLeaderLease() = %q, want %q", matrixLeaderLease(test.combo, "test"), test.lease)
 			}
 		})
+	}
+}
+
+func TestMatrixKubeadmPatches(t *testing.T) {
+	t.Parallel()
+	if patches := matrixKubeadmPatches("fd00::10", false); patches != nil {
+		t.Fatalf("matrixKubeadmPatches() = %#v when control plane is disabled", patches)
+	}
+	patches := matrixKubeadmPatches("fd00::10", true)
+	if len(patches) != 1 || !strings.Contains(patches[0].Patch, `value: "fd00::10"`) {
+		t.Fatalf("matrixKubeadmPatches() = %#v, want IPv6 certificate SAN", patches)
 	}
 }
 

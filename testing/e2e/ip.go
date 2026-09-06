@@ -170,33 +170,44 @@ func CheckIPAddressPresenceByLease(ctx context.Context, name, namespace, ip stri
 	return CheckIPAddressPresence(ip, container, expected)
 }
 
-func CheckRoutePresence(ip string, container string, expected bool) bool {
+func CheckRoutePresence(ip string, container string, expected bool) (bool, string, error) {
 	family := "-4"
 	if utils.IsIPv6(ip) {
 		family = "-6"
 	}
 
 	result := false
+	var output string
+	var commandErr error
 	Eventually(func() bool {
 		cmdOut := new(bytes.Buffer)
 		cmdErr := new(bytes.Buffer)
 
+		prefix := ip + "/32"
+		if family == "-6" {
+			prefix = ip + "/128"
+		}
 		cmd := exec.Command(
-			"docker", "exec", container, "ip", family, "route", "show", "table", "198",
+			"docker", "exec", container, "ip", family, "route", "show", "table", "198", "exact", prefix,
 		)
 
 		cmd.Stdout = cmdOut
 		cmd.Stderr = cmdErr
-		cmd.Run()
+		commandErr = cmd.Run()
+		output = strings.TrimSpace(cmdOut.String())
+		if commandErr != nil {
+			commandErr = fmt.Errorf("inspect %s routes in container %q: %w: %s", family, container, commandErr, strings.TrimSpace(cmdErr.String()))
+			return false
+		}
 
 		By("Routes: " + cmdOut.String())
 
-		result = strings.Contains(cmdOut.String(), ip) == expected
+		result = (output != "") == expected
 
 		return result
-	}, "120s", "1s").Should(BeTrue())
+	}, "120s", "1s").Should(BeTrue(), "route output: %q; error: %v", output, commandErr)
 
-	return result
+	return result, output, commandErr
 }
 
 func CheckLeasePresence(ctx context.Context, name, namespace string, client kubernetes.Interface, expected bool) *coordinationv1.Lease {
