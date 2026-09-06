@@ -124,9 +124,9 @@ type network struct {
 	// anycast semantics, e.g. ECMP, must not use DAD
 	dadSkip bool
 
-	// trackedVIPAddresses contains the addresses represented in VIPAddresses.
-	// AddIP and DeleteIP access it while holding link.Lock.
-	trackedVIPAddresses map[string]struct{}
+	// trackedVIPAddress is this network's reference represented in VIPAddresses.
+	// AddIP, DeleteIP, and SetIP access it while holding link.Lock.
+	trackedVIPAddress string
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
@@ -416,8 +416,8 @@ func (configurator *network) ReplaceRoute() error {
 			route.Realm = 2
 		}
 		if err := netlink.RouteReplace(route); err != nil {
-		metrics.RouteOperationsTotal.WithLabelValues("replace", "error").Inc()
-		return err
+			metrics.RouteOperationsTotal.WithLabelValues("replace", "error").Inc()
+			return err
 		}
 		metrics.RouteOperationsTotal.WithLabelValues("replace", "ok").Inc()
 		return nil
@@ -471,43 +471,40 @@ func (configurator *network) shouldSkipDAD(override bool) bool {
 	return override || configurator.dadSkip
 }
 
-func (configurator *network) accountVIPAddressAdd(existing *netlink.Addr) {
-	if existing != nil || configurator.address == nil {
-		return
-	}
-
-	if configurator.trackedVIPAddresses == nil {
-		configurator.trackedVIPAddresses = make(map[string]struct{})
-	}
-	key := configurator.address.String()
-	if _, ok := configurator.trackedVIPAddresses[key]; ok {
-		return
-	}
-
-	family := utils.IPv4Family
-	if utils.IsIPv6(configurator.address.IP.String()) {
-		family = utils.IPv6Family
-	}
-	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Inc()
-	configurator.trackedVIPAddresses[key] = struct{}{}
-}
-
-func (configurator *network) accountVIPAddressDelete() {
+func (configurator *network) accountVIPAddressAdd() {
 	if configurator.address == nil {
 		return
 	}
 
 	key := configurator.address.String()
-	if _, ok := configurator.trackedVIPAddresses[key]; !ok {
+	if configurator.trackedVIPAddress == key {
 		return
 	}
-	delete(configurator.trackedVIPAddresses, key)
-
-	family := utils.IPv4Family
-	if utils.IsIPv6(configurator.address.IP.String()) {
-		family = utils.IPv6Family
+	if configurator.trackedVIPAddress != "" {
+		configurator.accountVIPAddressDelete()
 	}
-	metrics.VIPAddresses.WithLabelValues(configurator.link.Intf.Attrs().Name, family).Dec()
+
+	metrics.TrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(configurator.address), key)
+	configurator.trackedVIPAddress = key
+}
+
+func (configurator *network) accountVIPAddressDelete() {
+	if configurator.trackedVIPAddress == "" {
+		return
+	}
+
+	tracked, err := netlink.ParseAddr(configurator.trackedVIPAddress)
+	if err == nil {
+		metrics.UntrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(tracked), configurator.trackedVIPAddress)
+	}
+	configurator.trackedVIPAddress = ""
+}
+
+func addressFamily(address *netlink.Addr) string {
+	if utils.IsIPv6(address.IP.String()) {
+		return utils.IPv6Family
+	}
+	return utils.IPv4Family
 }
 
 // AddIP - Add an IP address to the interface
@@ -542,6 +539,7 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 	}
 
 	if existing != nil && existing.ValidLft > lifetime {
+		configurator.accountVIPAddressAdd()
 		metrics.VIPOperationsTotal.WithLabelValues("add", "ok").Inc()
 		return false, nil
 	}
@@ -567,7 +565,7 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", intf.Attrs().Name))
 	}
 
-	configurator.accountVIPAddressAdd(existing)
+	configurator.accountVIPAddressAdd()
 
 	if configurator.nftables {
 		if err := configurator.configureNFTables(); err != nil {
