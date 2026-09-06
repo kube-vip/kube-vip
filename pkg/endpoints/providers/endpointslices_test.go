@@ -75,6 +75,34 @@ func TestEndpointslicesReplacingSliceUpdatesState(t *testing.T) {
 	assertEndpoints(t, provider, []string{"10.0.0.2"})
 }
 
+func TestEndpointslicesDeduplicatesAddressesAcrossSlices(t *testing.T) {
+	provider := NewEndpointslices().(*Endpointslices)
+	nodeName := "node-1"
+	for _, name := range []string{"slice-1", "slice-2"} {
+		if err := provider.LoadObject(&discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Endpoints:  []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}, NodeName: &nodeName}},
+		}, func() {}); err != nil {
+			t.Fatalf("LoadObject returned error: %v", err)
+		}
+	}
+
+	got, err := provider.GetAllEndpoints()
+	if err != nil {
+		t.Fatalf("GetAllEndpoints returned error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "10.0.0.1" {
+		t.Fatalf("GetAllEndpoints = %v (length %d), want one deduplicated endpoint", got, len(got))
+	}
+	local, err := provider.GetLocalEndpoints(nodeName, &kubevip.Config{})
+	if err != nil {
+		t.Fatalf("GetLocalEndpoints returned error: %v", err)
+	}
+	if len(local) != 1 || local[0] != "10.0.0.1" {
+		t.Fatalf("GetLocalEndpoints = %v (length %d), want one deduplicated endpoint", local, len(local))
+	}
+}
+
 func TestEndpointslicesEndpointConditions(t *testing.T) {
 	yes, no := true, false
 	nodeName := "node-1"
@@ -134,6 +162,9 @@ func assertLocalEndpoints(t *testing.T, provider *Endpointslices, nodeName strin
 
 func assertStringSet(t *testing.T, got, want []string) {
 	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("endpoint length mismatch: got %v, want %v", got, want)
+	}
 	counts := map[string]int{}
 	for _, value := range got {
 		counts[value]++
