@@ -52,6 +52,7 @@ type Server struct {
 	TempDir   string
 
 	kill chan any
+	done chan error
 }
 
 // NewServer starts a GoBGP daemon and connects a gRPC client.
@@ -87,7 +88,8 @@ func NewServer(tempDir string) *Server {
 	f.Close()
 
 	s.kill = make(chan any)
-	go runGoBGP(configPath, s.kill)
+	s.done, err = runGoBGP(configPath, net.JoinHostPort(s.LocalIPv4, strconv.Itoa(int(GoBGPPort))), s.kill)
+	Expect(err).ToNot(HaveOccurred())
 
 	// Connect gRPC client (default: IPv4)
 	s.Client, err = newGoBGPClient(s.LocalIPv4, GoBGPPort)
@@ -123,6 +125,10 @@ func (s *Server) Stop() {
 	if s.kill != nil {
 		close(s.kill)
 		s.kill = nil
+	}
+	if s.done != nil {
+		Expect(<-s.done).To(Succeed())
+		s.done = nil
 	}
 }
 
@@ -344,11 +350,59 @@ func newGoBGPClient(address string, port uint32) (api.GoBgpServiceClient, error)
 	return api.NewGoBgpServiceClient(conn), nil
 }
 
-func runGoBGP(config string, kill chan any) {
+func runGoBGP(config, address string, kill <-chan any) (chan error, error) {
 	By("starting GoBGP server")
 	cmd := exec.Command("../../bin/gobgpd", "-f", config)
-	go cmd.Run()
-	<-kill
-	By("stopping GoBGP server")
-	_ = cmd.Process.Kill()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start GoBGP: %w", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	if err := waitForProcessReady(address, done, 15*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("start GoBGP on %s: %w", address, err)
+	}
+
+	stopped := make(chan error, 1)
+	go func() {
+		select {
+		case err := <-done:
+			stopped <- fmt.Errorf("GoBGP exited unexpectedly: %w", err)
+		case <-kill:
+			By("stopping GoBGP server")
+			if err := cmd.Process.Kill(); err != nil {
+				stopped <- err
+				return
+			}
+			<-done
+			stopped <- nil
+		}
+	}()
+	return stopped, nil
+}
+
+func waitForProcessReady(address string, exited <-chan error, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-exited:
+			if err == nil {
+				return fmt.Errorf("process exited before becoming ready")
+			}
+			return fmt.Errorf("process exited before becoming ready: %w", err)
+		case <-deadline.C:
+			return fmt.Errorf("timed out waiting for TCP readiness")
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", address, time.Second)
+			if err == nil {
+				_ = conn.Close()
+				return nil
+			}
+		}
+	}
 }
