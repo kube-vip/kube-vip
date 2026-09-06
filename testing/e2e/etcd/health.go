@@ -22,30 +22,77 @@ import (
 func (c *Cluster) expectEtcdNodeHealthy(ctx context.Context, node nodes.Node, timeout time.Duration) {
 	httpClient := c.newEtcdHTTPClient()
 	client := c.newEtcdClient(e2e.NodeIPv4(node))
+	defer client.Close()
 	nodeEtcdEndpoint := etcdEndpointForNode(node)
-	Eventually(func(g Gomega) error {
-		health, err := getEtcdHealth(httpClient, node)
-		g.Expect(err).NotTo(HaveOccurred())
+	err := waitForEtcdHealth(ctx, timeout, time.Second, func(probeCtx context.Context) error {
+		health, err := getEtcdHealth(probeCtx, httpClient, node)
+		if err != nil {
+			return fmt.Errorf("checking member health: %w", err)
+		}
 		if !health.Healthy() {
 			c.Logger.Printf("Member %s is not healthy with reason: %s", node.String(), health.Reason)
+			return fmt.Errorf("member is not healthy: %s", health.Reason)
 		}
-		g.Expect(health.Healthy()).To(BeTrue(), "member is not healthy with reason: %s", health.Reason)
-		statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
-		defer statusCancel()
-		status, err := client.Status(statusCtx, nodeEtcdEndpoint)
-		g.Expect(err).NotTo(HaveOccurred())
 
-		g.Expect(status.Errors).To(BeEmpty(), "member should not have any errors in status")
-		g.Expect(status.IsLearner).To(BeFalse(), "member should not be a learner")
+		status, err := client.Status(probeCtx, nodeEtcdEndpoint)
+		if err != nil {
+			return fmt.Errorf("checking member status: %w", err)
+		}
+		if len(status.Errors) != 0 {
+			return fmt.Errorf("member status contains errors: %v", status.Errors)
+		}
+		if status.IsLearner {
+			return errors.New("member is still a learner")
+		}
 
-		alarmsCtx, alarmsCancel := context.WithTimeout(ctx, 2*time.Second)
-		defer alarmsCancel()
-		alarms, err := client.AlarmList(alarmsCtx)
-		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(alarms.Alarms).To(BeEmpty(), "cluster should not have any alarms")
+		alarms, err := client.AlarmList(probeCtx)
+		if err != nil {
+			return fmt.Errorf("listing cluster alarms: %w", err)
+		}
+		if len(alarms.Alarms) != 0 {
+			return fmt.Errorf("cluster has alarms: %v", alarms.Alarms)
+		}
 
 		return nil
-	}, timeout).Should(Succeed(), "node %s should eventually be healthy", node.String())
+	})
+	Expect(err).NotTo(HaveOccurred(), "node %s should eventually be healthy", node.String())
+}
+
+func waitForEtcdHealth(ctx context.Context, timeout, interval time.Duration, check func(context.Context) error) error {
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var lastErr error
+	for {
+		if err := deadlineCtx.Err(); err != nil {
+			return etcdHealthWaitError(ctx, err, lastErr)
+		}
+
+		probeCtx, probeCancel := context.WithTimeout(deadlineCtx, 2*time.Second)
+		lastErr = check(probeCtx)
+		probeCancel()
+		if lastErr == nil {
+			return nil
+		}
+
+		timer := time.NewTimer(interval)
+		select {
+		case <-deadlineCtx.Done():
+			timer.Stop()
+			return etcdHealthWaitError(ctx, deadlineCtx.Err(), lastErr)
+		case <-timer.C:
+		}
+	}
+}
+
+func etcdHealthWaitError(ctx context.Context, deadlineErr, lastErr error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("waiting for etcd health: %w", ctx.Err())
+	}
+	if lastErr != nil {
+		return fmt.Errorf("waiting for etcd health: %w (last probe: %v)", deadlineErr, lastErr)
+	}
+	return fmt.Errorf("waiting for etcd health: %w", deadlineErr)
 }
 
 func (c *Cluster) newEtcdHTTPClient() *http.Client {
@@ -75,8 +122,8 @@ func (h *etcdHealthCheckResponse) Healthy() bool {
 	return h.Health == "true"
 }
 
-func getEtcdHealth(c *http.Client, node nodes.Node) (*etcdHealthCheckResponse, error) {
-	req, err := http.NewRequest("GET", etcdHealthEndpoint(node), nil)
+func getEtcdHealth(ctx context.Context, c *http.Client, node nodes.Node) (*etcdHealthCheckResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, etcdHealthEndpoint(node), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +134,7 @@ func getEtcdHealth(c *http.Client, node nodes.Node) (*etcdHealthCheckResponse, e
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Wrapf(err, "etcd member not ready, returned http status %d", resp.StatusCode)
+		return nil, fmt.Errorf("etcd member not ready, returned HTTP status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
