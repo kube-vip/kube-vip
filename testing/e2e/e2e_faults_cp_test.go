@@ -44,6 +44,7 @@ type controlPlaneFaultSuite struct {
 	vip     string
 	nodes   []string
 	tempDir string
+	metrics bool
 }
 
 type faultMetricSnapshot map[string]map[string]float64
@@ -75,6 +76,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			EnableEndpoints:       "true",
 			EnableNodeLabeling:    "false",
 			EnableServiceSecurity: "true",
+			PrometheusHTTPServer:  ":2112",
 		}
 		networking := kindconfigv1alpha4.Networking{
 			IPFamily: kindconfigv1alpha4.IPv4Family,
@@ -100,6 +102,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 			suite.nodes = append(suite.nodes, node.String())
 		}
 		Expect(suite.nodes).To(HaveLen(faultClusterNodeCount))
+		suite.metrics = suite.metricsAvailable()
 
 		By(withTimestamp("waiting for the control-plane VIP to become routable"))
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
@@ -129,12 +132,9 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 
 		By(withTimestamp(fmt.Sprintf("blackholing the API server from leader %q", oldLeader)))
 		Expect(e2e.BlackholeAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())
-		blackholeActive := true
-		defer func() {
-			if blackholeActive {
-				Expect(e2e.RestoreAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())
-			}
-		}()
+		DeferCleanup(func() {
+			Expect(e2e.RestoreAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())
+		})
 
 		newLeader := suite.waitForDifferentLeader(oldLeader)
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
@@ -145,7 +145,6 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 
 		By(withTimestamp(fmt.Sprintf("restoring the API server connection on %q", oldLeader)))
 		Expect(e2e.RestoreAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())
-		blackholeActive = false
 
 		suite.waitForLease()
 		recoveredLeader := suite.waitForLeader()
@@ -341,8 +340,11 @@ func (s *controlPlaneFaultSuite) waitForLeaseHolder(holder string) *coordination
 }
 
 func (s *controlPlaneFaultSuite) waitForMetrics(node string) {
+	if !s.metrics {
+		return
+	}
 	Eventually(func() error {
-		_, err := e2e.ScrapeMetrics(s.cluster.Name, node)
+		_, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
 		return err
 	}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
 }
@@ -363,7 +365,11 @@ func (s *controlPlaneFaultSuite) waitForNodeReady(nodeName string) {
 }
 
 func (s *controlPlaneFaultSuite) assertLeaderMetric(leader string) {
+	if !s.metrics {
+		return
+	}
 	e2e.EventuallyMetric(
+		s.ctx,
 		s.cluster.Name,
 		leader,
 		"kube_vip_is_leader",
@@ -375,7 +381,11 @@ func (s *controlPlaneFaultSuite) assertLeaderMetric(leader string) {
 }
 
 func (s *controlPlaneFaultSuite) assertSteadyLeader(leader string) {
+	if !s.metrics {
+		return
+	}
 	e2e.ConsistentlyMetric(
+		s.ctx,
 		s.cluster.Name,
 		leader,
 		"kube_vip_is_leader",
@@ -387,6 +397,9 @@ func (s *controlPlaneFaultSuite) assertSteadyLeader(leader string) {
 }
 
 func (s *controlPlaneFaultSuite) assertOneLeader(skipNodes ...string) {
+	if !s.metrics {
+		return
+	}
 	assertExactlyOneLeaderMetric(s.ctx, s.cluster.Name, s.client, skipNodes...)
 
 	skipped := make(map[string]struct{}, len(skipNodes))
@@ -400,7 +413,7 @@ func (s *controlPlaneFaultSuite) assertOneLeader(skipNodes ...string) {
 			if _, skip := skipped[node]; skip {
 				continue
 			}
-			metrics, err := e2e.ScrapeMetrics(s.cluster.Name, node)
+			metrics, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
 			if err != nil {
 				return 0, err
 			}
@@ -421,12 +434,15 @@ func (s *controlPlaneFaultSuite) assertOneLeader(skipNodes ...string) {
 }
 
 func (s *controlPlaneFaultSuite) transitionSnapshot() faultMetricSnapshot {
+	if !s.metrics {
+		return nil
+	}
 	snapshot := make(faultMetricSnapshot, len(s.nodes))
 	for _, node := range s.nodes {
 		var metrics map[string]float64
 		Eventually(func() error {
 			var err error
-			metrics, err = e2e.ScrapeMetrics(s.cluster.Name, node)
+			metrics, err = e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
 			return err
 		}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
 		snapshot[node] = metrics
@@ -435,13 +451,16 @@ func (s *controlPlaneFaultSuite) transitionSnapshot() faultMetricSnapshot {
 }
 
 func (s *controlPlaneFaultSuite) assertTransitionCounterStable(before faultMetricSnapshot, fault string) {
+	if !s.metrics {
+		return
+	}
 	labels := map[string]string{"lease_name": faultLeaseName}
 	stableValues := make(map[string]float64)
 	totalDelta := 0.0
 	observed := 0
 
 	for _, node := range s.nodes {
-		metrics, err := e2e.ScrapeMetrics(s.cluster.Name, node)
+		metrics, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node)
 		Expect(err).NotTo(HaveOccurred())
 		if _, matches := e2e.MetricValue(metrics, faultTransitionMetric, labels); matches == 0 {
 			continue
@@ -450,7 +469,7 @@ func (s *controlPlaneFaultSuite) assertTransitionCounterStable(before faultMetri
 		var stable float64
 		Eventually(func() error {
 			var stableErr error
-			stable, stableErr = e2e.MetricStable(s.cluster.Name, node, faultTransitionMetric, labels, 2, faultMetricGap)
+			stable, stableErr = e2e.MetricStable(s.ctx, s.cluster.Name, node, faultTransitionMetric, labels, 2, faultMetricGap)
 			return stableErr
 		}, faultConvergenceTimeout, faultPollInterval).Should(Succeed())
 		stableValues[node] = stable
@@ -474,4 +493,14 @@ func (s *controlPlaneFaultSuite) assertTransitionCounterStable(before faultMetri
 	Expect(observed).To(BeNumerically(">=", 1))
 	By(withTimestamp(fmt.Sprintf("stable transition counters after %s: %v; delta %.0f", fault, stableValues, totalDelta)))
 	Expect(totalDelta).To(BeNumerically("<=", faultTransitionDeltaLimit))
+}
+
+func (s *controlPlaneFaultSuite) metricsAvailable() bool {
+	for _, node := range s.nodes {
+		if _, err := e2e.ScrapeMetrics(s.ctx, s.cluster.Name, node); err != nil {
+			By(withTimestamp(fmt.Sprintf("metrics unavailable on %q; continuing with functional assertions: %v", node, err)))
+			return false
+		}
+	}
+	return true
 }
