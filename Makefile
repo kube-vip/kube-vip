@@ -16,7 +16,7 @@ TARGETOS=linux
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
-GO_VERSION := 1.26.6
+GO_VERSION := $(word 2,$(shell grep '^go ' go.mod))
 K8S_VERSION ?= v1.35.0
 GINKGO_ARGS ?=
 GINKGO_PROCS ?=
