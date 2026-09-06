@@ -38,7 +38,6 @@ const (
 	faultLeaseObservationLimit = 15 * time.Second
 	faultSteadyStateWindow     = 5 * time.Second
 	faultTransitionDeltaLimit  = 4.0
-	faultKubeVipManifest       = "kube-vip.yaml"
 )
 
 type controlPlaneFaultSuite struct {
@@ -229,11 +228,11 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		oldLeader := *oldLease.Spec.HolderIdentity
 		suite.waitForVIPOwner(oldLeader)
 
-		By(withTimestamp(fmt.Sprintf("removing the static-pod manifest and sending SIGKILL to kube-vip on elected leader %q", oldLeader)))
-		oldPID, err := e2e.KillAndStashKubeVip(suite.cluster.Name, oldLeader, faultKubeVipManifest)
+		By(withTimestamp(fmt.Sprintf("stopping kubelet and sending SIGKILL to kube-vip on elected leader %q", oldLeader)))
+		oldPID, err := e2e.KillAndSuppressKubeVip(suite.cluster.Name, oldLeader)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() {
-			Expect(e2e.RestorePodManifest(suite.cluster.Name, oldLeader, faultKubeVipManifest)).To(Succeed())
+			Expect(e2e.RestoreKubeVip(suite.cluster.Name, oldLeader)).To(Succeed())
 		})
 		By(withTimestamp(fmt.Sprintf("sent SIGKILL to kube-vip PID %s on elected leader %q", oldPID, oldLeader)))
 		suite.assertNodeRunning(oldLeader)
@@ -243,8 +242,8 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		assertControlPlaneIsRoutable(suite.vip, 2*time.Second, faultConvergenceTimeout)
 		suite.assertLeaderMetric(newLeader)
 
-		By(withTimestamp(fmt.Sprintf("restoring the kube-vip static-pod manifest on %q", oldLeader)))
-		Expect(e2e.RestorePodManifest(suite.cluster.Name, oldLeader, faultKubeVipManifest)).To(Succeed())
+		By(withTimestamp(fmt.Sprintf("restarting kubelet to restore kube-vip on %q", oldLeader)))
+		Expect(e2e.RestoreKubeVip(suite.cluster.Name, oldLeader)).To(Succeed())
 		By(withTimestamp(fmt.Sprintf("waiting for kube-vip metrics to return on restarted node %q", oldLeader)))
 		suite.waitForKubeVip(oldLeader)
 		suite.waitForMetrics(oldLeader)
