@@ -136,6 +136,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -183,6 +184,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -203,7 +205,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, currentOffset, defaultNetwork)
 					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber, func(node string) {
-						e2e.EventuallyMetric(clusterName, node, "kube_vip_active_services", map[string]string{
+						e2e.EventuallyMetric(ctx, clusterName, node, "kube_vip_active_services", map[string]string{
 							"namespace": dsNamespace,
 						}, BeNumerically(">=", float64(1)), 60*time.Second, 2*time.Second)
 					})
@@ -1260,7 +1262,7 @@ func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, clien
 				continue
 			}
 
-			metrics, err := e2e.ScrapeMetrics(clusterName, node.Name)
+			metrics, err := e2e.ScrapeMetrics(ctx, clusterName, node.Name)
 			if err != nil {
 				return 0, err
 			}
