@@ -5,6 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
 var (
 	serviceElectionLoopsMu   sync.Mutex
 	serviceElectionLoopCount = map[string]int{}
@@ -107,30 +108,6 @@ func RegisterPrometheusMetrics() {
 			CountServiceWatchEvent,
 		)
 	})
-}
-
-// TrackServiceElectionLoop increments the loop gauge and returns a function
-// that decrements it and removes the series after the final loop exits.
-func TrackServiceElectionLoop(namespace, name string) func() {
-	key := namespace + "\x00" + name
-	serviceElectionLoopsMu.Lock()
-	serviceElectionLoopCount[key]++
-	ServiceElectionLoops.WithLabelValues(namespace, name).Inc()
-	serviceElectionLoopsMu.Unlock()
-
-	return func() {
-		serviceElectionLoopsMu.Lock()
-		defer serviceElectionLoopsMu.Unlock()
-
-		count := serviceElectionLoopCount[key]
-		if count <= 1 {
-			delete(serviceElectionLoopCount, key)
-			ServiceElectionLoops.DeleteLabelValues(namespace, name)
-			return
-		}
-		serviceElectionLoopCount[key] = count - 1
-		ServiceElectionLoops.WithLabelValues(namespace, name).Dec()
-	}
 }
 
 // TrackServiceElectionLoop increments the loop gauge and returns a function
