@@ -59,7 +59,7 @@ func TestGenerateRespectsKnownExclusions(t *testing.T) {
 	t.Parallel()
 
 	cases := []Combo{
-		{Mode: ModeBGP, Function: FunctionSvc, Family: FamilyV4, Election: ElectionNone, Shape: ShapeStaticPod, Provider: ProviderSlices, ETP: ETPCluster},
+		{Mode: ModeBGP, Function: FunctionCP, Family: FamilyV4, Election: ElectionGlobal, Shape: ShapeStaticPod, Provider: ProviderSlices, ETP: ETPCluster},
 		{Mode: ModeWireGuard, Function: FunctionCP, Family: FamilyV4, Election: ElectionGlobal, Shape: ShapeStaticPod, Provider: ProviderSlices, ETP: ETPCluster},
 		{Mode: ModeARP, Function: FunctionCP, Family: FamilyV4, Election: ElectionPerService, Shape: ShapeStaticPod, Provider: ProviderSlices, ETP: ETPCluster},
 		{Mode: ModeRT, Function: FunctionCP, Family: FamilyV4, Election: ElectionOnDemand, Shape: ShapeStaticPod, Provider: ProviderSlices, ETP: ETPCluster},
@@ -80,6 +80,26 @@ func TestGenerateRespectsKnownExclusions(t *testing.T) {
 		ETP:      ETPLocal,
 	}) {
 		t.Error("valid RT service-election combo was excluded")
+	}
+}
+
+func TestGeneratedCombosHaveRunnableConfiguration(t *testing.T) {
+	t.Parallel()
+
+	for _, combo := range Generate() {
+		hasService := combo.Function == FunctionSvc || combo.Function == FunctionBoth
+		if !hasService && (combo.Election == ElectionPerService || combo.Election == ElectionOnDemand) {
+			t.Errorf("generated service election without service function: %s", combo)
+		}
+		if combo.Function == FunctionCP {
+			wantElection := ElectionNone
+			if combo.Mode == ModeARP {
+				wantElection = ElectionGlobal
+			}
+			if combo.Election != wantElection {
+				t.Errorf("generated unsupported control-plane election: %s", combo)
+			}
+		}
 	}
 }
 
