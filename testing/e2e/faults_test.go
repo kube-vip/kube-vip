@@ -3,10 +3,76 @@
 package e2e
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 )
+
+func TestKillAndSuppressKubeVip(t *testing.T) {
+	tests := []struct {
+		name        string
+		failAt      int
+		pidOutput   string
+		wantPID     string
+		wantError   bool
+		wantRestore bool
+	}{
+		{name: "kills exact process after stopping kubelet", pidOutput: "123\n", wantPID: "123"},
+		{name: "restores after stop reports failure", failAt: 1, wantError: true, wantRestore: true},
+		{name: "restores after inactive check fails", failAt: 2, wantError: true, wantRestore: true},
+		{name: "restores after process lookup fails", failAt: 3, wantError: true, wantRestore: true},
+		{name: "restores when multiple processes exist", pidOutput: "123\n456\n", wantError: true, wantRestore: true},
+		{name: "restores after kill fails", failAt: 4, pidOutput: "123\n", wantError: true, wantRestore: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls [][]string
+			call := 0
+			run := func(_ string, args ...string) error {
+				call++
+				calls = append(calls, append([]string(nil), args...))
+				if call == test.failAt {
+					return errors.New("injected failure")
+				}
+				return nil
+			}
+			output := func(_ string, args ...string) (string, error) {
+				call++
+				calls = append(calls, append([]string(nil), args...))
+				if call == test.failAt {
+					return "", errors.New("injected failure")
+				}
+				return test.pidOutput, nil
+			}
+
+			pid, err := killAndSuppressKubeVip("cluster", "node", run, output)
+			if (err != nil) != test.wantError {
+				t.Fatalf("killAndSuppressKubeVip() error = %v, wantError %t", err, test.wantError)
+			}
+			if pid != test.wantPID {
+				t.Fatalf("killAndSuppressKubeVip() PID = %q, want %q", pid, test.wantPID)
+			}
+			if !reflect.DeepEqual(calls[0], []string{"exec", "node", "systemctl", "stop", "kubelet"}) {
+				t.Fatalf("first call = %v, want kubelet stop", calls[0])
+			}
+			restored := false
+			for _, got := range calls {
+				if reflect.DeepEqual(got, []string{"exec", "node", "systemctl", "start", "kubelet"}) {
+					restored = true
+				}
+			}
+			if restored != test.wantRestore {
+				t.Fatalf("kubelet restored = %t, want %t; calls: %v", restored, test.wantRestore, calls)
+			}
+			if !test.wantError && !reflect.DeepEqual(calls[len(calls)-1], []string{"exec", "node", "kill", "-KILL", "123"}) {
+				t.Fatalf("last call = %v, want exact PID kill", calls[len(calls)-1])
+			}
+		})
+	}
+}
 
 func TestSinglePID(t *testing.T) {
 	tests := []struct {
