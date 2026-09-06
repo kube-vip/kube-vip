@@ -242,9 +242,9 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 
 		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 		Expect(err).NotTo(HaveOccurred())
-		reconcileDelta, found := e2e.ScaleCounterDelta(beforeMetrics, afterMetrics,
+		reconcileDelta, err := e2e.ScaleCounterDelta(beforeMetrics, afterMetrics,
 			"kube_vip_service_reconcile_errors_total", map[string]string{"namespace": suite.namespace})
-		Expect(found).To(BeTrue(), "reconcile error metric was absent")
+		Expect(err).NotTo(HaveOccurred())
 		By(fmt.Sprintf("churn left %d services with reconcile-error delta %.0f", len(active), reconcileDelta))
 		Expect(reconcileDelta).To(BeNumerically("<=", scaleReconcileErrorDeltaLimit))
 	})
