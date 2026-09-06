@@ -38,8 +38,11 @@ backends grow.
 | `kube_vip_dns_ip_changes_total` | Counter | — | Number of DNS-backed VIP changes where the resolved address changed. |
 
 The VIP address gauge is state-based: an address is counted once per
-interface/family and is removed when kube-vip releases it. Operation counters
-are attempt/outcome signals and should normally be queried with `rate()`.
+interface/family, including when kube-vip reclaims an existing address after a
+restart. DNS changes transfer ownership from the old address to the new one,
+and the label series is removed when kube-vip releases the final address for
+that interface/family. Operation counters are attempt/outcome signals and
+should normally be queried with `rate()`.
 
 Useful examples:
 
