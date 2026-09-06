@@ -9,6 +9,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 
@@ -104,6 +105,8 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.Started() {
 				return
 			}
+			metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(1)
 			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
@@ -111,6 +114,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 				return
 			}
 			cluster.OnStoppedLeading(c, bgpServer)
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
 		},
 		OnNewLeader: func(identity string) {
 			cluster.OnNewLeader(identity, c)
