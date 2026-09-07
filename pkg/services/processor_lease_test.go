@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	log "log/slog"
 	"sync"
 	"testing"
 
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -18,36 +20,57 @@ import (
 func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
 	p := &Processor{}
 	first := servicecontext.New(context.Background())
-	second := servicecontext.New(context.Background())
-	const vip = "192.0.2.10"
-	references := map[string]map[string]bool{
-		vip: {"local-a": true, "local-b": true},
+	uid := types.UID("service-uid")
+	p.svcMap.Store(uid, first)
+	server, err := bgp.NewBGPServer(kubevip.BGPConfig{
+		AS:       64512,
+		RouterID: "192.0.2.1",
+		Peers: []kubevip.BGPPeer{{
+			Address: "192.0.2.2",
+			AS:      64513,
+		}},
+	}, log.LevelError)
+	if err != nil {
+		t.Fatalf("NewBGPServer() error = %v", err)
+	}
+	if err := server.Start(context.Background(), nil); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+
+	const route = "2001:db8::10/128"
+	const owner = "default/example"
+	if err := server.AddHost(context.Background(), route, owner); err != nil {
+		t.Fatalf("initial AddHost() error = %v", err)
 	}
 
-	// Hold deletion's lifecycle section so the endpoint update is queued in
-	// the same state observed in the E2E failure.
 	p.lifecycleMutex.Lock()
 	var wg sync.WaitGroup
 	updated := make(chan bool, 1)
 	wg.Go(func() {
-		updated <- p.withActiveService(first, func() {
-			references[vip]["local-a"] = true
+		updated <- p.withActiveService(uid, first, func() {
+			if err := server.AddHost(first.Ctx, route, owner); err != nil {
+				t.Errorf("stale AddHost() error = %v", err)
+			}
 		})
 	})
 
 	first.Cancel()
-	delete(references[vip], "local-a")
+	if err := server.DelHost(context.WithoutCancel(first.Ctx), route, owner); err != nil {
+		t.Fatalf("DelHost() error = %v", err)
+	}
 	p.lifecycleMutex.Unlock()
 	wg.Wait()
 
 	if <-updated {
 		t.Fatal("endpoint update reconciled after its Service was cancelled")
 	}
-	if references[vip]["local-a"] {
-		t.Fatal("deleted Service restored its shared VIP reference")
+	routes, err := server.ListAdvertisedRoutes(context.Background(), true)
+	if err != nil {
+		t.Fatalf("ListAdvertisedRoutes() error = %v", err)
 	}
-	if !references[vip]["local-b"] || second.Ctx.Err() != nil {
-		t.Fatal("deleting one Local Service disturbed the other shared VIP owner")
+	if len(routes) != 0 {
+		t.Fatalf("stale endpoint reconciliation re-advertised %s", route)
 	}
 }
 

@@ -142,6 +142,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		svc = s
 	}
 
+	p.lifecycleMutex.Lock()
+	defer p.lifecycleMutex.Unlock()
+
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
@@ -224,20 +227,26 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	}
 
 	// this goroutine starts service handling function (with or without leaderelection)
-	if !svcCtx.IsWatchedLocked() {
+	if svcCtx.StartWatching() {
 		wg.Go(func() {
 			watchWg := sync.WaitGroup{}
 			defer func() {
 				// wait for the sub-goroutines and tag service as not watched
 				watchWg.Wait()
-				svcCtx.SetWatched(false)
+				svcCtx.StopWatching()
 			}()
 
 			watchWg.Go(func() {
 				// start if service is not already watched/handled
 				// signal endpoints goroutine we are ready to start and run service handling function
 				log.Info("(svcs) service function starting", "uid", svc.UID)
-				err = serviceFunc.Run(svcCtx, svc, wg)
+				if serviceFunc.UsesLeaderElection {
+					err = serviceFunc.Run(svcCtx, svc, wg)
+				} else {
+					p.withActiveService(svc.UID, svcCtx, func() {
+						err = serviceFunc.Run(svcCtx, svc, wg)
+					})
+				}
 				if err != nil {
 					log.Error(err.Error())
 					if utils.IsPanicError(err) {
@@ -267,9 +276,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			})
 
 		})
-
-		// tag service as watched
-		svcCtx.SetWatched(true)
 	}
 
 	if !p.config.EnableServicesElection {
@@ -316,20 +322,34 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
-	p.lifecycleMutex.Lock()
+	var svcCtx *servicecontext.Context
+	for {
+		var err error
+		svcCtx, err = p.getServiceContext(svc.UID)
+		if err != nil {
+			return fmt.Errorf("(svcs) unable to get context: %w", err)
+		}
+		if svcCtx != nil {
+			svcCtx.Cancel()
+			if err := svcCtx.WaitForWatchingStopped(context.Background()); err != nil {
+				return fmt.Errorf("wait for service watcher: %w", err)
+			}
+		}
+
+		p.lifecycleMutex.Lock()
+		currentCtx, err := p.getServiceContext(svc.UID)
+		if err != nil {
+			p.lifecycleMutex.Unlock()
+			return fmt.Errorf("(svcs) unable to get context: %w", err)
+		}
+		if currentCtx == svcCtx {
+			break
+		}
+		p.lifecycleMutex.Unlock()
+	}
 	defer p.lifecycleMutex.Unlock()
 
-	svcCtx, err := p.getServiceContext(svc.UID)
-	if err != nil {
-		return fmt.Errorf("(svcs) unable to get context: %w", err)
-	}
-
 	if svcCtx != nil {
-		// Stop every producer before tearing down the tracked instance. Endpoint
-		// reconciliation uses lifecycleMutex too, so no queued event can restore
-		// datapath state after this point.
-		svcCtx.Cancel()
-
 		// If no leader election is enabled, delete routes here
 		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
@@ -341,7 +361,7 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		// Delete synchronously even with per-Service election. Waiting for the
 		// election callback leaves a window in which a queued callback can add the
 		// deleted Service again.
-		if err = p.deleteService(context.WithoutCancel(svcCtx.Ctx), svc.UID); err != nil {
+		if err := p.deleteService(context.WithoutCancel(svcCtx.Ctx), svc.UID); err != nil {
 			log.Error(err.Error())
 		}
 
@@ -360,10 +380,14 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	return nil
 }
 
-func (p *Processor) withActiveService(svcCtx *servicecontext.Context, reconcile func()) bool {
+func (p *Processor) withActiveService(uid types.UID, svcCtx *servicecontext.Context, reconcile func()) bool {
 	p.lifecycleMutex.Lock()
 	defer p.lifecycleMutex.Unlock()
 	if svcCtx.Ctx.Err() != nil {
+		return false
+	}
+	current, err := p.getServiceContext(uid)
+	if err != nil || current != svcCtx {
 		return false
 	}
 	reconcile()
