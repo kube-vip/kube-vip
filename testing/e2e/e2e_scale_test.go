@@ -26,6 +26,7 @@ const (
 	// Runner guardrails keep the nightly suite bounded while exercising a real
 	// multi-node Kind topology.
 	scaleControlPlaneNodes = 3
+	scaleWorkerNodes       = 0
 	scaleMaxKindNodes      = 3
 	scaleMaxServices       = 150
 	scaleServiceBatchSize  = 25
@@ -89,7 +90,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 	suite := &scaleSuite{namespace: scaleNamespace}
 
 	BeforeAll(func() {
-		Expect(e2e.ValidateScaleTopology(scaleControlPlaneNodes, scaleMaxKindNodes)).To(Succeed())
+		Expect(e2e.ValidateScaleTopology(scaleControlPlaneNodes, scaleWorkerNodes, scaleMaxKindNodes)).To(Succeed())
 		Expect(scaleServiceBatchSize).To(BeNumerically("<=", scaleMaxServices))
 		Expect(scaleChurnMaxServices).To(BeNumerically("<=", scaleMaxServices))
 		Expect(scalePollInterval).To(BeNumerically(">=", time.Second))

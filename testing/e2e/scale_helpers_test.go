@@ -14,12 +14,12 @@ import (
 )
 
 func TestValidateScaleTopology(t *testing.T) {
-	if err := ValidateScaleTopology(3, 3); err != nil {
+	if err := ValidateScaleTopology(3, 0, 3); err != nil {
 		t.Fatal(err)
 	}
-	for _, topology := range [][2]int{{1, 3}, {2, 3}, {3, 4}, {4, 3}} {
-		if err := ValidateScaleTopology(topology[0], topology[1]); err == nil {
-			t.Fatalf("ValidateScaleTopology(%d, %d) unexpectedly succeeded", topology[0], topology[1])
+	for _, topology := range [][3]int{{1, 0, 3}, {2, 0, 3}, {3, 1, 3}, {3, 0, 2}, {4, 0, 4}} {
+		if err := ValidateScaleTopology(topology[0], topology[1], topology[2]); err == nil {
+			t.Fatalf("ValidateScaleTopology(%d, %d, %d) unexpectedly succeeded", topology[0], topology[1], topology[2])
 		}
 	}
 }
@@ -183,6 +183,11 @@ func TestScaleServiceContenders(t *testing.T) {
 	delete(snapshot["control-plane2"], `kube_vip_service_election_attempts_total{name="service-01",namespace="scale"}`)
 	if _, err := scaleServiceContenders(snapshot, "scale", []string{"service-00", "service-01"}, 2); err == nil || !strings.Contains(err.Error(), "only 1 nodes") {
 		t.Fatalf("scaleServiceContenders() error = %v, want missing-attempt diagnostic", err)
+	}
+	snapshot["control-plane2"] = serviceMetrics("service-00", "service-01")
+	snapshot["control-plane2"][`kube_vip_service_election_attempts_total{name="service-01",namespace="scale"}`] = 0
+	if _, err := scaleServiceContenders(snapshot, "scale", []string{"service-00", "service-01"}, 2); err == nil || !strings.Contains(err.Error(), "only 1 nodes") {
+		t.Fatalf("scaleServiceContenders() error = %v, want zero-attempt diagnostic", err)
 	}
 }
 
