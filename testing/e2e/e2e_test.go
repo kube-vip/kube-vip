@@ -1507,6 +1507,26 @@ func removePod(ctx context.Context, name, namespace string, client kubernetes.In
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
 	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
 ) {
+	s := newTestService(name, namespace, target, lbAddress, ipfPolicy, ipFamiles, externalPolicy, leaseName, port, dhcpBroadcast, forceElection)
+
+	By(withTimestamp(fmt.Sprintf("creating service %s/%s", namespace, name)))
+
+	Eventually(func() error {
+		_, err := client.CoreV1().Services(namespace).Create(ctx, s, metav1.CreateOptions{})
+		return err
+	}, time.Second*60, time.Second).Should(Succeed())
+	By(withTimestamp(fmt.Sprintf("service %s/%s created", namespace, name)))
+
+	Eventually(func() error {
+		By(withTimestamp(fmt.Sprintf("getting service %s/%s\n", namespace, name)))
+		_, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+		return err
+	}, time.Second*60, time.Second).Should(Succeed())
+}
+
+func newTestService(name, namespace, target, lbAddress string, ipfPolicy corev1.IPFamilyPolicy,
+	ipFamilies []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
+) *corev1.Service {
 	svcAnnotations := make(map[string]string)
 	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
 	if leaseName != "" {
@@ -1523,9 +1543,7 @@ func createTestService(ctx context.Context, name, namespace, target, lbAddress s
 	labels := make(map[string]string)
 	labels["app"] = target
 
-	By(withTimestamp(fmt.Sprintf("creating service %s/%s", namespace, name)))
-
-	s := corev1.Service{
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   namespace,
@@ -1533,7 +1551,7 @@ func createTestService(ctx context.Context, name, namespace, target, lbAddress s
 			Annotations: svcAnnotations,
 		},
 		Spec: corev1.ServiceSpec{
-			IPFamilies:            ipFamiles,
+			IPFamilies:            ipFamilies,
 			IPFamilyPolicy:        &ipfPolicy,
 			Type:                  corev1.ServiceTypeLoadBalancer,
 			ExternalTrafficPolicy: externalPolicy,
@@ -1546,18 +1564,6 @@ func createTestService(ctx context.Context, name, namespace, target, lbAddress s
 			Selector: labels,
 		},
 	}
-
-	Eventually(func() error {
-		_, err := client.CoreV1().Services(namespace).Create(ctx, &s, metav1.CreateOptions{})
-		return err
-	}, time.Second*60, time.Second).Should(Succeed())
-	By(withTimestamp(fmt.Sprintf("service %s/%s created", namespace, name)))
-
-	Eventually(func() error {
-		By(withTimestamp(fmt.Sprintf("getting service %s/%s\n", namespace, name)))
-		_, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
-		return err
-	}, time.Second*60, time.Second).Should(Succeed())
 }
 
 func checkIPAddress(lbAddress, container string, expected bool) bool {

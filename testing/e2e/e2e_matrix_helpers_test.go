@@ -4,14 +4,20 @@ package e2e_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/yaml"
 
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/testing/e2e"
 	"github.com/kube-vip/kube-vip/testing/e2e/matrix"
 )
 
@@ -80,5 +86,60 @@ func TestMatrixBackendsReady(t *testing.T) {
 
 	if err := matrixBackendsReady(context.Background(), fake.NewSimpleClientset(), "default", "missing", matrix.ProviderSlices); err == nil {
 		t.Fatal("matrixBackendsReady() succeeded without EndpointSlices")
+	}
+}
+
+func TestMatrixDualStackServiceConfiguration(t *testing.T) {
+	t.Parallel()
+	service := newTestService("service", "default", "backend", "192.0.2.10,2001:db8::10",
+		corev1.IPFamilyPolicyPreferDualStack, matrixServiceFamilies(matrix.FamilyDual),
+		corev1.ServiceExternalTrafficPolicyCluster, "", 80, false, false)
+	if service.Spec.LoadBalancerIP != "" {
+		t.Fatalf("legacy loadBalancerIP = %q, want empty for dual-stack service", service.Spec.LoadBalancerIP)
+	}
+	if got := service.Annotations[kubevip.LoadbalancerIPAnnotation]; got != "192.0.2.10,2001:db8::10" {
+		t.Fatalf("load-balancer annotation = %q", got)
+	}
+	if service.Spec.IPFamilyPolicy == nil || *service.Spec.IPFamilyPolicy != corev1.IPFamilyPolicyPreferDualStack {
+		t.Fatalf("IPFamilyPolicy = %v, want PreferDualStack", service.Spec.IPFamilyPolicy)
+	}
+	if got := service.Spec.IPFamilies; len(got) != 2 || got[0] != corev1.IPv4Protocol || got[1] != corev1.IPv6Protocol {
+		t.Fatalf("IPFamilies = %v, want [IPv4 IPv6]", got)
+	}
+}
+
+func TestMatrixManifestConfiguresBothServiceMasks(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("kube-vip.yaml.tmpl")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestTemplate, err := template.New(filepath.Base(path)).Parse(string(contents))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"bgp", "arp"} {
+		var rendered strings.Builder
+		values := e2e.KubevipManifestValues{Mode: mode}
+		if mode == "bgp" {
+			values.BGPAS = 65501
+		}
+		if err := manifestTemplate.Execute(&rendered, values); err != nil {
+			t.Fatal(err)
+		}
+		var pod corev1.Pod
+		if err := yaml.Unmarshal([]byte(rendered.String()), &pod); err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		for _, env := range pod.Spec.Containers[0].Env {
+			if env.Name == "vip_subnet" {
+				got = env.Value
+			}
+		}
+		if got != "32,128" {
+			t.Errorf("%s vip_subnet = %q, want 32,128", mode, got)
+		}
 	}
 }
