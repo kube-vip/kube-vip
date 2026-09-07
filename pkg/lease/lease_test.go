@@ -34,6 +34,391 @@ func getSvcData(svc *v1.Service) (context.Context, ID) {
 
 const serviceLeaseAnnotation = kubevip.ServiceLease
 
+func TestServiceNameForMatchesServiceName(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		namespace     string
+		service       string
+		lease         string
+		wantNamespace string
+		wantName      string
+	}{
+		{name: "default lease", namespace: "default", service: "api", wantNamespace: "default", wantName: "kubevip-api"},
+		{name: "named lease", namespace: "default", service: "api", lease: "shared", wantNamespace: "default", wantName: "shared"},
+		{name: "cross-namespace lease", namespace: "default", service: "api", lease: "leases/shared", wantNamespace: "leases", wantName: "shared"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := createTestService(test.service, test.namespace, map[string]string{kubevip.ServiceLease: test.lease})
+			for name, serviceName := range map[string]func() (string, string){
+				"ServiceName":    func() (string, string) { return ServiceName(service) },
+				"ServiceNameFor": func() (string, string) { return ServiceNameFor(test.namespace, test.service, test.lease) },
+			} {
+				namespace, leaseName := serviceName()
+				if namespace != test.wantNamespace || leaseName != test.wantName {
+					t.Errorf("%s() = %s/%s, want %s/%s", name, namespace, leaseName, test.wantNamespace, test.wantName)
+				}
+			}
+		})
+	}
+}
+
+func electLease(t *testing.T, lease *Lease) {
+	t.Helper()
+	if !lease.BeginElection() {
+		t.Fatal("expected lease to admit an election candidate")
+	}
+	lease.ElectionStarted()
+}
+
+func TestManagerAcquireRegistersMembership(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	lease, first := manager.Acquire(context.Background(), id, objectName)
+	if !first {
+		t.Fatal("first acquire did not register the service")
+	}
+	if _, second := manager.Acquire(context.Background(), id, objectName); second {
+		t.Fatal("second acquire registered the same service twice")
+	}
+
+	manager.Delete(id, objectName, lease)
+	if manager.Get(id) != nil {
+		t.Fatal("lease remained after its only acquired member was deleted")
+	}
+}
+
+func TestElectionContextCancellationDoesNotCancelSharedLease(t *testing.T) {
+	manager := NewManager()
+	id := NewID("kubernetes", "default", "shared")
+	sharedLease, _ := manager.Acquire(context.Background(), id, "control-plane")
+	if claimed, _ := manager.Claim(id, "service"); claimed != sharedLease {
+		t.Fatal("second member did not join the shared lease")
+	}
+
+	electionCtx, cancelElection := sharedLease.NewElectionContext(context.Background())
+	cancelElection()
+	select {
+	case <-electionCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("election context was not cancelled")
+	}
+	if sharedLease.Ctx.Err() != nil || manager.Get(id) != sharedLease {
+		t.Fatal("cancelling one election runner cancelled the shared lease")
+	}
+
+	memberCtx, cancelMember := sharedLease.NewElectionContext(context.Background())
+	defer cancelMember()
+	if manager.Delete(id, "control-plane", sharedLease) {
+		t.Fatal("deleting one member retired a shared lease")
+	}
+	if !manager.Delete(id, "service", sharedLease) {
+		t.Fatal("deleting the final member did not retire the lease")
+	}
+	select {
+	case <-memberCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("retiring the shared lease did not cancel an election context")
+	}
+}
+
+func TestWaitForElectionEndObservesRapidRestart(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	serviceLease := manager.Add(context.Background(), getSvcID(service))
+	if !serviceLease.BeginElection() {
+		t.Fatal("first election did not start")
+	}
+	serviceLease.ElectionStarted()
+
+	initialEnded, elected := serviceLease.WaitForLeaderGeneration(context.Background())
+	if !elected {
+		t.Fatal("waiter did not observe the elected lease")
+	}
+	done := make(chan struct{})
+	go func() {
+		serviceLease.WaitForElectionEndAfter(context.Background(), initialEnded)
+		close(done)
+	}()
+	serviceLease.ElectionStopped()
+	if !serviceLease.BeginElection() {
+		t.Fatal("replacement election did not start")
+	}
+	serviceLease.ElectionStarted()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("waiter missed election end during rapid restart")
+	}
+}
+
+func TestManagerClaimDoesNotCreateRetiredLease(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	if lease, joined := manager.Claim(getSvcID(service), ServiceNamespacedName(service)); lease != nil || joined {
+		t.Fatal("claim created or joined a lease that does not exist")
+	}
+}
+
+func TestLeaseElectionStateCoordinatesCandidates(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+
+	if !lease.BeginElection() {
+		t.Fatal("first election candidate was not admitted")
+	}
+	if lease.BeginElection() {
+		t.Fatal("second election candidate was admitted while election was running")
+	}
+
+	joined := make(chan bool, 1)
+	go func() {
+		joined <- lease.WaitForLeader(context.Background())
+	}()
+	lease.ElectionStarted()
+	select {
+	case elected := <-joined:
+		if !elected {
+			t.Fatal("follower did not observe elected lease")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after election succeeded")
+	}
+
+	lease.ElectionStopped()
+	if !lease.BeginElection() {
+		t.Fatal("lease did not admit a new candidate after election stopped")
+	}
+}
+
+func TestLeaseWaitForLeaderReturnsWhenCandidateStops(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+	if !lease.BeginElection() {
+		t.Fatal("candidate was not admitted")
+	}
+
+	joined := make(chan bool, 1)
+	go func() {
+		joined <- lease.WaitForLeader(context.Background())
+	}()
+	lease.ElectionStopped()
+	select {
+	case elected := <-joined:
+		if elected {
+			t.Fatal("follower observed a leader after candidate stopped")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after candidate stopped")
+	}
+}
+
+// TestLeaseSupportsRetakingElectionAfterCandidateStops exercises the retry
+// StartCluster relies on for a shared control-plane/Services lease: once
+// WaitForLeader reports the campaign ended without ever electing a leader, a
+// waiter must be able to begin its own election immediately instead of being
+// left with no active runner.
+func TestLeaseSupportsRetakingElectionAfterCandidateStops(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+	if !lease.BeginElection() {
+		t.Fatal("candidate was not admitted")
+	}
+
+	retried := make(chan bool, 1)
+	go func() {
+		if lease.WaitForLeader(context.Background()) {
+			retried <- false
+			return
+		}
+		retried <- lease.BeginElection()
+	}()
+	lease.ElectionStopped()
+
+	select {
+	case tookOver := <-retried:
+		if !tookOver {
+			t.Fatal("waiter could not begin its own election after the shared campaign ended without a leader")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter remained blocked after candidate stopped")
+	}
+}
+
+func TestLeaseWaitForElectionEndReleasesFollowers(t *testing.T) {
+	leaseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lease := newLease(leaseCtx, cancel)
+	if !lease.BeginElection() {
+		t.Fatal("candidate was not admitted")
+	}
+	lease.ElectionStarted()
+
+	finished := make(chan struct{})
+	go func() {
+		lease.WaitForElectionEnd(context.Background())
+		close(finished)
+	}()
+	lease.ElectionStopped()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after leadership stopped")
+	}
+}
+
+func TestLeaseWaitForLeaderReturnsWhenContextCancelled(t *testing.T) {
+	for _, cancelWait := range []struct {
+		name   string
+		cancel func(context.CancelFunc, context.CancelFunc)
+	}{
+		{"caller context", func(cancelCaller, _ context.CancelFunc) { cancelCaller() }},
+		{"lease context", func(_, cancelLease context.CancelFunc) { cancelLease() }},
+	} {
+		t.Run(cancelWait.name, func(t *testing.T) {
+			leaseCtx, cancelLease := context.WithCancel(context.Background())
+			defer cancelLease()
+			lease := newLease(leaseCtx, cancelLease)
+			if !lease.BeginElection() {
+				t.Fatal("candidate was not admitted")
+			}
+
+			callerCtx, cancelCaller := context.WithCancel(context.Background())
+			defer cancelCaller()
+			result := make(chan bool, 1)
+			go func() {
+				result <- lease.WaitForLeader(callerCtx)
+			}()
+
+			cancelWait.cancel(cancelCaller, cancelLease)
+			select {
+			case elected := <-result:
+				if elected {
+					t.Fatal("waiter observed a leader after cancellation")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("waiter remained blocked after cancellation")
+			}
+		})
+	}
+}
+
+func TestLeaseWaitForElectionEndReturnsWhenContextCancelled(t *testing.T) {
+	for _, cancelWait := range []struct {
+		name   string
+		cancel func(context.CancelFunc, context.CancelFunc)
+	}{
+		{"caller context", func(cancelCaller, _ context.CancelFunc) { cancelCaller() }},
+		{"lease context", func(_, cancelLease context.CancelFunc) { cancelLease() }},
+	} {
+		t.Run(cancelWait.name, func(t *testing.T) {
+			leaseCtx, cancelLease := context.WithCancel(context.Background())
+			defer cancelLease()
+			lease := newLease(leaseCtx, cancelLease)
+			electLease(t, lease)
+
+			callerCtx, cancelCaller := context.WithCancel(context.Background())
+			defer cancelCaller()
+			finished := make(chan struct{})
+			go func() {
+				lease.WaitForElectionEnd(callerCtx)
+				close(finished)
+			}()
+
+			cancelWait.cancel(cancelCaller, cancelLease)
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("waiter remained blocked after cancellation")
+			}
+		})
+	}
+}
+
+func TestManagerAcquireRegistersConcurrentMemberOnce(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	type result struct {
+		lease *Lease
+		isNew bool
+	}
+	results := make(chan result, 64)
+	var wg sync.WaitGroup
+	for range cap(results) {
+		wg.Go(func() {
+			lease, isNew := manager.Acquire(context.Background(), id, objectName)
+			results <- result{lease, isNew}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	var lease *Lease
+	newMembers := 0
+	for result := range results {
+		if lease == nil {
+			lease = result.lease
+		} else if result.lease != lease {
+			t.Fatal("concurrent acquires returned different leases")
+		}
+		if result.isNew {
+			newMembers++
+		}
+	}
+	if newMembers != 1 {
+		t.Fatalf("new member registrations = %d, want 1", newMembers)
+	}
+
+	manager.Delete(id, objectName, lease)
+}
+
+func TestManagerClaimRegistersConcurrentMemberOnce(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+	lease := manager.Add(context.Background(), id)
+
+	type result struct {
+		lease *Lease
+		isNew bool
+	}
+	results := make(chan result, 64)
+	var wg sync.WaitGroup
+	for range cap(results) {
+		wg.Go(func() {
+			claimed, isNew := manager.Claim(id, objectName)
+			results <- result{claimed, isNew}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	newMembers := 0
+	for result := range results {
+		if result.lease != lease {
+			t.Fatal("concurrent claims returned a different lease")
+		}
+		if result.isNew {
+			newMembers++
+		}
+	}
+	if newMembers != 1 {
+		t.Fatalf("new member registrations = %d, want 1", newMembers)
+	}
+
+	manager.Delete(id, objectName, lease)
+}
+
 // TestManager_Add_NewLease tests adding a new service with a new lease
 func TestManager_Add_NewLease(t *testing.T) {
 	mgr := NewManager()
@@ -54,10 +439,6 @@ func TestManager_Add_NewLease(t *testing.T) {
 	if leaseID.Cancel == nil {
 		t.Error("expected lease cancel func to be non-nil")
 	}
-	if leaseID.Started == nil {
-		t.Error("expected lease Started channel to be non-nil")
-	}
-
 }
 
 // TestManager_Add_ExistingLease tests adding a service with an existing lease
@@ -254,33 +635,6 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestLease_StartedChannel tests the Started channel behavior
-func TestLease_StartedChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	lease := newLease(ctx, cancel)
-
-	// Started channel should be open initially
-	select {
-	case <-lease.Started:
-		t.Fatal("expected Started channel to be open initially")
-	default:
-		// Expected
-	}
-
-	// Close the channel
-	close(lease.Started)
-
-	// Now it should be closed
-	select {
-	case <-lease.Started:
-		// Expected
-	default:
-		t.Error("expected Started channel to be closed after close()")
-	}
-}
-
 // TestGetName_WithoutAnnotation tests with no annotation
 func TestGetName_WithoutAnnotation(t *testing.T) {
 	svc := createTestService("my-service", "my-namespace", nil)
@@ -423,8 +777,8 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired - close Started channel
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Simulate leadership lost - the leader election function should delete the lease
 	// This is the fix: delete the lease when RunOrDie returns
@@ -438,22 +792,17 @@ func TestManager_LeaderElectionRestartScenario_etcd(t *testing.T) {
 	// Simulate restartable service watcher calling StartServicesLeaderElection again
 	ctx2, leaseID2 := getSvcData(svc)
 	lease2 := mgr.Add(ctx2, leaseID2)
-	isNew2 := lease1.Add(objectName1)
+	isNew2 := lease2.Add(objectName1)
 	if !isNew2 {
 		t.Fatal("expected second add after delete to return isNew=true")
 	}
 
-	// Verify we got a new lease with a fresh Started channel
+	// Verify we got a new lease with no elected leader.
 	if lease1 == lease2 {
 		t.Error("expected new lease to be different from old lease")
 	}
-
-	// Verify the new Started channel is not closed
-	select {
-	case <-lease2.Started:
-		t.Error("expected new lease's Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected new lease to have no elected leader")
 	}
 }
 
@@ -479,8 +828,11 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 		t.Error("expected first add to return isNew=true")
 	}
 
-	// Simulate first service starting leadership
-	close(lease1.Started)
+	// Simulate first service starting leadership.
+	if !lease1.BeginElection() {
+		t.Fatal("expected first service to become election candidate")
+	}
+	lease1.ElectionStarted()
 
 	objectName2 := ServiceNamespacedName(svc2)
 
@@ -494,6 +846,9 @@ func TestManager_CommonLeaseScenario(t *testing.T) {
 	}
 	if lease1 != lease2 {
 		t.Error("expected same lease for services with same lease annotation")
+	}
+	if !lease2.WaitForLeader(context.Background()) {
+		t.Fatal("shared-lease follower did not observe the elected lease")
 	}
 
 	// Delete first service - lease should still exist
@@ -526,8 +881,8 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired - close Started channel
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Simulate a second goroutine calling Add BEFORE the first goroutine's defer deletes the lease
 	// This is the race condition scenario
@@ -542,12 +897,8 @@ func TestManager_RaceCondition_LeaseExistsBeforeDelete(t *testing.T) {
 		t.Error("expected same lease to be returned")
 	}
 
-	// The Started channel should be closed (from the first run)
-	select {
-	case <-lease2.Started:
-		// Expected - channel is closed
-	default:
-		t.Error("expected Started channel to be closed")
+	if !lease2.Elected.Load() {
+		t.Error("expected lease to remain elected")
 	}
 
 	// Now the first goroutine's defer deletes the lease
@@ -581,8 +932,8 @@ func TestManager_NonCommonLease_MultipleAdds(t *testing.T) {
 		t.Error("expected first add to return isNew=true")
 	}
 
-	// Close Started to simulate leadership acquired
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Second Add (simulating another goroutine or restart attempt)
 	ctx2, leaseID2 := getSvcData(svc)
@@ -649,12 +1000,8 @@ func TestManager_LeaseContextCancelledBeforeStarted(t *testing.T) {
 		t.Error("expected second add to return isNew=false")
 	}
 
-	// Verify Started is not closed yet
-	select {
-	case <-lease2.Started:
-		t.Error("expected Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected lease to have no elected leader")
 	}
 
 	// Cancel the lease context (simulating timeout or leadership loss before acquiring)
@@ -710,7 +1057,7 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 		t.Error("expected new lease after delete")
 	}
 
-	// Verify new lease has fresh context and Started channel
+	// Verify new lease has a fresh active context and no elected leader.
 	select {
 	case <-lease2.Ctx.Done():
 		t.Error("expected new lease context to be active")
@@ -718,11 +1065,8 @@ func TestManager_RestartAfterLeaseContextCancelled(t *testing.T) {
 		// Expected
 	}
 
-	select {
-	case <-lease2.Started:
-		t.Error("expected new lease Started channel to be open")
-	default:
-		// Expected
+	if lease2.Elected.Load() {
+		t.Error("expected new lease to have no elected leader")
 	}
 }
 
@@ -745,8 +1089,8 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	// Simulate leadership acquired
-	close(lease1.Started)
+	// Simulate leadership acquired.
+	electLease(t, lease1)
 
 	// Second Add - simulates another goroutine trying to start leader election
 	// This should return isNew=false
@@ -762,12 +1106,8 @@ func TestManager_NonCommonLease_WaitForLeaseContextDone(t *testing.T) {
 		t.Error("expected same lease to be returned")
 	}
 
-	// Verify Started channel is closed (leadership was acquired by first)
-	select {
-	case <-lease2.Started:
-		// Expected - channel is closed
-	default:
-		t.Error("expected Started channel to be closed")
+	if !lease2.Elected.Load() {
+		t.Error("expected lease to remain elected")
 	}
 
 	// In the actual code (leader.go), when isNew=false for non-common lease,
@@ -834,7 +1174,7 @@ func TestManager_NonCommonLease_SpinLoopPrevention(t *testing.T) {
 		t.Fatal("expected first add to return isNew=true")
 	}
 
-	close(lease1.Started)
+	electLease(t, lease1)
 
 	// Track how many times Add is called in a tight loop
 	// In the buggy code, this would spin forever
@@ -898,7 +1238,7 @@ func TestManager_NonCommonLease_ServiceContextCancellation(t *testing.T) {
 	ctx1, leaseID1 := getSvcData(svc)
 	lease1 := mgr.Add(ctx1, leaseID1)
 	_ = lease1.Add(objectName1)
-	close(lease1.Started)
+	electLease(t, lease1)
 
 	// Second Add - returns isNew=false
 	ctx2, leaseID2 := getSvcData(svc)
@@ -976,6 +1316,37 @@ func TestManager_Delete_DoesNotCancelRecreatedLease(t *testing.T) {
 	if got := mgr.Get(id); got == nil {
 		t.Error("cleanup for the torn down lease removed the recreated lease")
 	}
+}
+
+func TestManagerDeleteDoesNotCancelReplacementAfterDirectLeaseCancellation(t *testing.T) {
+	manager := NewManager()
+	service := createTestService("service", "default", nil)
+	id := getSvcID(service)
+	objectName := ServiceNamespacedName(service)
+
+	old, isNew := manager.Acquire(context.Background(), id, objectName)
+	if !isNew {
+		t.Fatal("initial acquire did not register the service")
+	}
+	old.Cancel()
+
+	fresh, isNew := manager.Acquire(context.Background(), id, objectName)
+	if !isNew {
+		t.Fatal("replacement acquire did not register the service")
+	}
+	if fresh == old {
+		t.Fatal("acquire reused a directly cancelled lease")
+	}
+
+	manager.Delete(id, objectName, old)
+	if fresh.Ctx.Err() != nil {
+		t.Fatal("late cleanup for a directly cancelled lease cancelled its replacement")
+	}
+	if manager.Get(id) != fresh {
+		t.Fatal("late cleanup for a directly cancelled lease removed its replacement")
+	}
+
+	manager.Delete(id, objectName, fresh)
 }
 
 // TestManager_Add_AfterCancelWithoutDelete_ReusesDoomedLease reproduces the

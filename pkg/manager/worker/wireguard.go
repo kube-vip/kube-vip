@@ -27,6 +27,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const controlPlaneTunnelOwner = "control-plane"
+
 type WireGuard struct {
 	Common
 	tunnelMgr           *wireguard.TunnelManager
@@ -94,7 +96,7 @@ func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *elec
 		log.Error("no WireGuard tunnel configuration found for control plane VIP", "vip", w.config.VIP)
 		return
 	}
-	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager)
+	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager, controlPlaneElectionVIPs(w.config))
 }
 
 func (w *WireGuard) ConfigureServices() {
@@ -121,10 +123,9 @@ func (w *WireGuard) Name() string {
 
 func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	// Bring up the WireGuard tunnel for control plane VIP
-	err := w.tunnelMgr.BringUpTunnelForVIP(w.config.VIP)
+	err := w.tunnelMgr.AcquireTunnelForVIP(w.config.VIP, controlPlaneTunnelOwner)
 	if err != nil {
 		log.Error("could not start wireguard tunnel for control plane", "vip", w.config.VIP, "err", err)
-		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
 		w.killFunc()
 		return
 	}
@@ -133,6 +134,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	wg := w.tunnelMgr.GetTunnelForVIP(w.config.VIP)
 	if wg == nil {
 		log.Error("failed to get wireguard tunnel after bringing up", "vip", w.config.VIP)
+		_ = w.tunnelMgr.ReleaseTunnelForVIP(w.config.VIP, controlPlaneTunnelOwner)
 		w.killFunc()
 		return
 	}
@@ -140,7 +142,7 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 	tunnelConfig := w.tunnelMgr.GetConfigForVIP(w.config.VIP)
 	if tunnelConfig == nil {
 		log.Error("failed to get tunnel configuration", "vip", w.config.VIP)
-		_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
+		_ = w.tunnelMgr.ReleaseTunnelForVIP(w.config.VIP, controlPlaneTunnelOwner)
 		w.killFunc()
 		return
 	}
@@ -277,6 +279,6 @@ func (w *WireGuard) OnNewLeader(identity string) {
 		return
 	}
 	// safety check - tear down tunnel if we're not the leader
-	_ = w.tunnelMgr.TearDownTunnelForVIP(w.config.VIP)
+	_ = w.tunnelMgr.ReleaseTunnelForVIP(w.config.VIP, controlPlaneTunnelOwner)
 	log.Info("new leader elected", "id", identity)
 }
