@@ -54,6 +54,42 @@ func TestValidateBindAddresses(t *testing.T) {
 	}
 }
 
+func TestRouteFamily(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		address string
+		want    api.Family_Afi
+	}{
+		{address: "192.0.2.1", want: api.Family_AFI_IP},
+		{address: "2001:db8::1", want: api.Family_AFI_IP6},
+	}
+	for _, test := range tests {
+		t.Run(test.address, func(t *testing.T) {
+			family := routeFamily(test.address)
+			if family.Afi != test.want || family.Safi != api.Family_SAFI_UNICAST {
+				t.Fatalf("routeFamily(%q) = %s/%s, want %s/%s", test.address, family.Afi, family.Safi, test.want, api.Family_SAFI_UNICAST)
+			}
+		})
+	}
+}
+
+func TestPeerRequestEnablesMultiprotocolFamilies(t *testing.T) {
+	t.Parallel()
+	for _, address := range []string{"192.0.2.2", "2001:db8::2"} {
+		t.Run(address, func(t *testing.T) {
+			peer := peerRequest(address, KubevipAS).GetPeer()
+			if peer.GetConf().GetNeighborAddress() != address || peer.GetConf().GetPeerAsn() != KubevipAS {
+				t.Fatalf("peer config = %+v", peer.GetConf())
+			}
+			families := peer.GetAfiSafis()
+			if len(families) != 2 || families[0].GetConfig().GetFamily().GetAfi() != api.Family_AFI_IP ||
+				families[1].GetConfig().GetFamily().GetAfi() != api.Family_AFI_IP6 {
+				t.Fatalf("peer families = %+v, want IPv4 and IPv6 unicast", families)
+			}
+		})
+	}
+}
+
 func TestWaitForGoBGPReady(t *testing.T) {
 	t.Parallel()
 
