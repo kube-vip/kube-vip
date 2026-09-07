@@ -1262,6 +1262,7 @@ func annotateNodes(ctx context.Context, pref string, client kubernetes.Interface
 		annotations[pref+"src-ip"] = addr
 		annotations[pref+"peer-asn"] = strconv.Itoa(int(peer.AS))
 		annotations[pref+"peer-ip"] = peer.IP
+		annotations[pref+"peer-port"] = strconv.Itoa(int(peer.Port))
 
 		patch, err := json.Marshal(map[string]any{
 			"metadata": map[string]any{
