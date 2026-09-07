@@ -4,11 +4,18 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 )
@@ -43,6 +50,45 @@ func TestCreateScaleServiceAndLeaseNames(t *testing.T) {
 	}
 	if len(leaseNames) != 1 || leaseNames[0] != "lease-00" {
 		t.Fatalf("ScaleServiceLeaseNames() = %v, want [lease-00]", leaseNames)
+	}
+}
+
+func TestScaleBackendRetriesConflict(t *testing.T) {
+	const namespace = "scale"
+	initialReplicas := int32(1)
+	client := fake.NewClientset(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: scaleBackendName, Namespace: namespace},
+		Spec:       appsv1.DeploymentSpec{Replicas: &initialReplicas},
+	})
+	gets := 0
+	client.PrependReactor("get", "deployments", func(ktesting.Action) (bool, runtime.Object, error) {
+		gets++
+		return false, nil, nil
+	})
+	updates := 0
+	client.PrependReactor("update", "deployments", func(ktesting.Action) (bool, runtime.Object, error) {
+		updates++
+		if updates == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "deployments"}, scaleBackendName, errors.New("conflict"))
+		}
+		return false, nil, nil
+	})
+
+	if err := ScaleBackend(context.Background(), client, namespace, 3); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 2 {
+		t.Fatalf("deployment updates = %d, want 2", updates)
+	}
+	if gets != 2 {
+		t.Fatalf("deployment gets = %d, want 2", gets)
+	}
+	deployment, err := client.AppsV1().Deployments(namespace).Get(context.Background(), scaleBackendName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deployment.Spec.Replicas == nil || *deployment.Spec.Replicas != 3 {
+		t.Fatalf("deployment replicas = %v, want 3", deployment.Spec.Replicas)
 	}
 }
 
