@@ -13,15 +13,17 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+const linkSubscriptionBuffer = 64
+
 type Manager struct {
-	instances sync.Map
+	mu        sync.Mutex
+	instances map[string]*Instance
 	config    *kubevip.Config
 }
 
 type Instance struct {
 	network vip.Network
 	ndp     *vip.NdpResponder
-	mu      sync.Mutex
 	counter int
 }
 
@@ -31,7 +33,8 @@ func NewManager(config *kubevip.Config) *Manager {
 		config.ArpBroadcastRate = 3000
 	}
 	return &Manager{
-		config: config,
+		instances: make(map[string]*Instance),
+		config:    config,
 	}
 }
 
@@ -48,19 +51,16 @@ func (i *Instance) Name() string {
 }
 
 func (m *Manager) Insert(instance *Instance) {
-	i, err := m.get(instance.Name())
-	if err != nil {
-		log.Error("[ARP manager] unable to insert instance", "err", err)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing := m.instances[instance.Name()]
+	if existing == nil {
+		m.instances[instance.Name()] = instance
+		log.Info("[ARP manager] inserting ARP/NDP instance", "name", instance.Name())
 		return
 	}
-	if i == nil {
-		log.Info("[ARP manager] inserting ARP/NDP instance", "name", instance.Name())
-		m.instances.Store(instance.Name(), instance)
-	} else {
-		i.mu.Lock()
-		defer i.mu.Unlock()
-		i.counter++
-	}
+	existing.counter++
 }
 
 func (m *Manager) Remove(instance *Instance) {
@@ -77,14 +77,11 @@ func (m *Manager) RemoveOnLeadershipLoss(instance *Instance) {
 }
 
 func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
-	i, err := m.get(instance.Name())
-	if err != nil {
-		log.Error("[ARP manager] unable to remove the instance", "err", err)
-		return
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	i := m.instances[instance.Name()]
 	if i != nil {
-		i.mu.Lock()
-		defer i.mu.Unlock()
 		i.counter--
 		if i.counter == 0 {
 			log.Info("[ARP manager] removing ARP/NDP instance", "name", instance.Name())
@@ -93,7 +90,7 @@ func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 					log.Error("failed to delete IP", "address", instance.network.IP(), "err", err)
 				}
 			}
-			m.instances.Delete(instance.Name())
+			delete(m.instances, instance.Name())
 		}
 	} else {
 		log.Warn("[ARP manager] unable to remove the instance - instance not found", "name", instance.Name())
@@ -101,14 +98,11 @@ func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 }
 
 func (m *Manager) Count(name string) int {
-	i, err := m.get(name)
-	if err != nil {
-		log.Error("[ARP manager] unable to count instance", "err", err)
-		return -1
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	i := m.instances[name]
 	if i != nil {
-		i.mu.Lock()
-		defer i.mu.Unlock()
 		return i.counter
 	}
 	return 0
@@ -158,35 +152,22 @@ func (m *Manager) StartAdvertisement(ctx context.Context, killFunc func()) {
 		case <-ctx.Done(): // if cancel() execute
 			return
 		case <-ticker.C: // send gratuitous ARP/NDP on each tick
-			m.instances.Range(func(_ any, instance any) bool {
-				if i, ok := instance.(*Instance); ok {
-					i.mu.Lock()
-					defer i.mu.Unlock()
-					if i.counter > 0 {
-						ensureIPAndSendGratuitous(i)
-					} else {
-						// this instance should not be advertised - delete the IP just in case...
-						if _, err := i.network.DeleteIP(); err != nil {
-							log.Error("[ARP manager] failed to delete IP", "address", i.network.IP(), "err", err)
-						}
-					}
-				}
-				return true
-			})
+			m.advertiseAll()
 		}
 	}
 }
 
-func (m *Manager) get(name string) (*Instance, error) {
-	i, exists := m.instances.Load(name)
-	if !exists {
-		return nil, nil
+func (m *Manager) advertiseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, instance := range m.instances {
+		if instance.counter > 0 {
+			ensureIPAndSendGratuitous(instance)
+		} else if _, err := instance.network.DeleteIP(); err != nil {
+			log.Error("[ARP manager] failed to delete IP", "address", instance.network.IP(), "err", err)
+		}
 	}
-	inst, ok := i.(*Instance)
-	if !ok {
-		return nil, fmt.Errorf("value for name %q is not of Instance pointer type", name)
-	}
-	return inst, nil
 }
 
 // ensureIPAndSendGratuitous - adds IP to the interface if missing, and send
@@ -255,13 +236,18 @@ func watch(ctx context.Context, interfaceName string, operStateHandler func(netl
 		return fmt.Errorf("interface %s is not physical, ignoring", interfaceName)
 	}
 
-	events := make(chan netlink.LinkUpdate)
+	// The subscription is buffered and drained on exit: netlink parks its reader
+	// goroutine on an unread send, which closing done alone does not release.
+	events := make(chan netlink.LinkUpdate, linkSubscriptionBuffer)
 	done := make(chan struct{})
 
 	if err := netlink.LinkSubscribe(events, done); err != nil {
 		return fmt.Errorf("failed to subscribe to the interface events: %w", err)
 	}
-	defer close(done)
+	defer func() {
+		close(done)
+		drainLinkUpdates(events)
+	}()
 
 	//  handle initial state
 	operStateHandler(ifname.Attrs().OperState)
@@ -289,4 +275,22 @@ func watch(ctx context.Context, interfaceName string, operStateHandler func(netl
 
 func isUp(operState netlink.LinkOperState) bool {
 	return operState == netlink.OperUp
+}
+
+// drainLinkUpdates releases a netlink sender that is parked on an unread update
+// so its goroutine can observe the closed subscription and exit.
+func drainLinkUpdates(events <-chan netlink.LinkUpdate) {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-timer.C:
+			return
+		}
+	}
 }
