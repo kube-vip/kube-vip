@@ -71,14 +71,15 @@ const (
 )
 
 type scaleSuite struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	cluster    *e2e.Cluster
-	client     kubernetes.Interface
-	nodeNames  []string
-	namespace  string
-	baseOffset uint
-	tempDir    string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cluster        *e2e.Cluster
+	client         kubernetes.Interface
+	nodeNames      []string
+	namespace      string
+	baseOffset     uint
+	tempDir        string
+	suppressedNode string
 }
 
 var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Serial, Ordered, func() {
@@ -160,6 +161,14 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		if suite.tempDir != "" && os.Getenv("E2E_KEEP_LOGS") != "true" {
 			Expect(os.RemoveAll(suite.tempDir)).To(Succeed())
 		}
+	})
+
+	AfterEach(func() {
+		if suite.suppressedNode == "" || suite.cluster == nil {
+			return
+		}
+		Expect(e2e.RestoreKubeVip(suite.cluster.Name, suite.suppressedNode)).To(Succeed())
+		suite.suppressedNode = ""
 	})
 
 	It("advertises 150 services in bounded batches with one shared backend", func() {
@@ -254,6 +263,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		defer suite.cleanupScenario(scaleScenarioElection)
 
 		services := make([]*corev1.Service, 0, scaleElectionServiceCount)
+		vips := make([]string, 0, scaleElectionServiceCount)
 		for index := 0; index < scaleElectionServiceCount; index++ {
 			name := fmt.Sprintf("%s-%02d", scaleElectionServicePrefix, index)
 			leaseName := fmt.Sprintf("%s-%02d", scaleElectionLeasePrefix, index)
@@ -262,6 +272,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 				corev1.ServiceExternalTrafficPolicyTypeCluster, true, leaseName)
 			Expect(err).NotTo(HaveOccurred())
 			services = append(services, service)
+			vips = append(vips, vip)
 		}
 		leaseNames, err := e2e.ScaleServiceLeaseNames(services, suite.namespace)
 		Expect(err).NotTo(HaveOccurred())
@@ -274,17 +285,44 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		Expect(err).NotTo(HaveOccurred())
 
 		for cycle := 0; cycle < scaleElectionCycles; cycle++ {
-			previous, err := e2e.ScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, leaseNames)
+			leaseName := leaseNames[cycle%len(leaseNames)]
+			previous, err := e2e.ScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, []string{leaseName})
 			Expect(err).NotTo(HaveOccurred())
-			victim := previous[leaseNames[cycle%len(leaseNames)]]
-			By(fmt.Sprintf("killing kube-vip leader %q for election cycle %d of %d", victim, cycle+1, scaleElectionCycles))
-			Expect(e2e.KillKubeVip(suite.cluster.Name, victim, false)).To(Succeed())
+			victim := previous[leaseName]
+			By(fmt.Sprintf("stopping kubelet and killing kube-vip leader %q for lease %q, cycle %d of %d", victim, leaseName, cycle+1, scaleElectionCycles))
+			pid, err := e2e.KillAndSuppressKubeVip(suite.cluster.Name, victim)
+			Expect(err).NotTo(HaveOccurred())
+			suite.suppressedNode = victim
 
+			replacement, err := e2e.WaitForScaleLeaseTransfer(suite.ctx, suite.client, suite.namespace, leaseName, victim,
+				suite.nodeNames, scaleClusterConvergenceLimit)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e2e.WaitForScaleVIPOwner(suite.ctx, suite.cluster.Name, suite.nodeNames, vips[cycle%len(vips)], replacement,
+				false, scaleClusterConvergenceLimit)).To(Succeed())
+			By(fmt.Sprintf("lease %q and VIP transferred from suppressed kube-vip PID %s on %q to %q", leaseName, pid, victim, replacement))
+
+			Expect(e2e.RestoreKubeVip(suite.cluster.Name, victim)).To(Succeed())
+			Eventually(func() (string, error) {
+				newPID, err := e2e.KubeVipPID(suite.cluster.Name, victim)
+				if err != nil {
+					return "", err
+				}
+				if newPID == pid {
+					return "", fmt.Errorf("kube-vip PID %s is still running on %q", pid, victim)
+				}
+				return newPID, nil
+			}, scaleClusterConvergenceLimit, scalePollInterval).ShouldNot(BeEmpty())
+			Eventually(func() error {
+				return e2e.WaitForKubeVipReady(suite.ctx, suite.client, suite.nodeNames)
+			}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
 			Eventually(func() error {
 				return e2e.WaitForScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
 			}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
-			Expect(e2e.WaitForScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, leaseNames, previous, victim,
+			Expect(e2e.WaitForScaleLeaseHolder(suite.ctx, suite.client, suite.namespace, leaseName, replacement,
 				scaleClusterConvergenceLimit)).To(Succeed())
+			Expect(e2e.WaitForScaleVIPOwner(suite.ctx, suite.cluster.Name, suite.nodeNames, vips[cycle%len(vips)], replacement,
+				true, scaleClusterConvergenceLimit)).To(Succeed())
+			suite.suppressedNode = ""
 		}
 
 		afterMetrics, err := e2e.SnapshotScaleMetrics(suite.ctx, suite.cluster.Name, suite.nodeNames)
