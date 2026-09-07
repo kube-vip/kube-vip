@@ -15,39 +15,17 @@ func TestReadinessResetConcurrentWithSignal(t *testing.T) {
 		<-start
 		for range 1000 {
 			ctx.SignalReadiness()
-			ctx.ResetReadiness()
+			resetReadiness(ctx)
 		}
 	})
 	wg.Go(func() {
 		<-start
 		for range 1000 {
-			ready := ctx.GetEndpointsReady()
+			_, ready, _, _ := ctx.ReadinessState()
 			select {
 			case <-ready:
 			default:
 			}
-		}
-	})
-
-	close(start)
-	wg.Wait()
-}
-
-func TestLeaderCancelConcurrentWithEndpointCleanup(t *testing.T) {
-	ctx := New(context.Background())
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
-		<-start
-		for range 1000 {
-			ctx.SetLeaderCancel(func() {})
-		}
-	})
-	wg.Go(func() {
-		<-start
-		for range 1000 {
-			ctx.CallLeaderCancel()
 		}
 	})
 

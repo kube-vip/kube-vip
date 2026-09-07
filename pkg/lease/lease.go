@@ -26,17 +26,37 @@ func NewManager() *Manager {
 	}
 }
 
-// Add adds lease to the manager.
-// It returns three values:
-// - lease for the object
-// - isNewObject, which reports if it is a new object that is being handled
-// - isSharedLease, which is true if object shares the lease with another object
-// If object is new but not shared, we should start leaderelection and sync it
-// If object is new and shared, we should only sync it as the leaderelection should be already handled
-// If object is not new we should do nothing
+// Add creates or retrieves the lease identified by id.
 func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	return m.addLocked(ctx, id)
+}
+
+// Acquire creates or retrieves a lease and atomically registers objectName as a
+// member. The returned bool reports whether this object was newly registered.
+func (m *Manager) Acquire(ctx context.Context, id ID, objectName string) (*Lease, bool) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	lease := m.addLocked(ctx, id)
+	return lease, lease.Add(objectName)
+}
+
+// Claim atomically registers objectName against an existing lease. It returns
+// nil when the lease was retired before the caller could join it.
+func (m *Manager) Claim(id ID, objectName string) (*Lease, bool) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	lease, exists := m.leases[id.NamespacedName()]
+	if !exists {
+		return nil, false
+	}
+	return lease, lease.Add(objectName)
+}
+
+func (m *Manager) addLocked(ctx context.Context, id ID) *Lease {
 
 	// A lease whose context is already cancelled cannot be handed out again:
 	// anything derived from it would be cancelled straight away. Replace it.
@@ -49,8 +69,8 @@ func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 }
 
 // Delete removes the object from the lease it was added to and cancels that lease
-// once its last object is gone. With a common lease, the siblings that still use
-// it keep it alive.
+// once its last object is gone. It reports whether the lease was retired. With a
+// common lease, the siblings that still use it keep it alive.
 //
 // The lease the caller was given has to be passed in, because cleanup is usually
 // deferred to a goroutine that runs long after the object went away. By then the
@@ -62,19 +82,21 @@ func (m *Manager) Add(ctx context.Context, id ID) *Lease {
 // deferred cleanup: until the lease is out of the map, Add hands the same
 // instance back, so a service that is rebuilt straight away gets parented to a
 // lease that the pending cleanup is about to cancel.
-func (m *Manager) Delete(id ID, objectName string, l *Lease) {
+func (m *Manager) Delete(id ID, objectName string, l *Lease) bool {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	current := m.currentFor(id, l)
 	if current == nil {
-		return
+		return false
 	}
 
 	current.delete(objectName)
 	if current.cnt.Load() < 1 {
 		m.retire(id, current)
+		return true
 	}
+	return false
 }
 
 // currentFor returns the registered lease for id, or nil when the caller is
@@ -110,19 +132,32 @@ func (m *Manager) Get(id ID) *Lease {
 type Lease struct {
 	Ctx      context.Context
 	Cancel   context.CancelFunc
-	Started  chan any
 	services sync.Map
 	cnt      atomic.Int64
 	Elected  atomic.Bool
-	Mtx      sync.Mutex
-	locked   bool
+	stateMu  sync.Mutex
+	running  bool
+	ended    uint64
+	changed  chan struct{}
 }
 
 func newLease(ctx context.Context, cancel context.CancelFunc) *Lease {
 	return &Lease{
 		Ctx:     ctx,
 		Cancel:  cancel,
-		Started: make(chan any),
+		changed: make(chan struct{}),
+	}
+}
+
+// NewElectionContext returns a context for one election runner. Cancelling it
+// stops only that runner; the Lease context remains live until its final member
+// is deleted from the Manager.
+func (l *Lease) NewElectionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(l.Ctx)
+	stopParent := context.AfterFunc(parent, cancel)
+	return ctx, func() {
+		stopParent()
+		cancel()
 	}
 }
 
@@ -136,35 +171,125 @@ func (l *Lease) Add(name string) bool {
 	return false
 }
 
-// delete removes the service from the lease and decrements the counter
+// delete removes the service from the lease and decrements the counter.
 func (l *Lease) delete(service string) {
-	if _, exists := l.services.Load(service); exists {
-		l.services.Delete(service)
+	if _, exists := l.services.LoadAndDelete(service); exists {
 		l.cnt.Add(-1)
 	}
 }
 
-func (l *Lease) Lock() {
-	l.Mtx.Lock()
-	l.locked = true
+func (l *Lease) BeginElection() bool {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if l.Elected.Load() || l.running {
+		return false
+	}
+	l.running = true
+	l.signalStateLocked()
+	return true
 }
 
-func (l *Lease) Unlock() {
-	if l.locked {
-		l.locked = false
-		l.Mtx.Unlock()
+func (l *Lease) ElectionStarted() {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if l.Elected.Load() {
+		return
 	}
+	l.Elected.Store(true)
+	l.running = false
+	l.signalStateLocked()
+}
+
+func (l *Lease) ElectionStopped() {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	if !l.Elected.Load() && !l.running {
+		return
+	}
+	l.Elected.Store(false)
+	l.running = false
+	l.ended++
+	l.signalStateLocked()
+}
+
+// WaitForLeader waits for an in-flight lease election to either elect a leader
+// or finish without one. It never holds the lease state mutex while waiting.
+func (l *Lease) WaitForLeader(ctx context.Context) bool {
+	_, elected := l.WaitForLeaderGeneration(ctx)
+	return elected
+}
+
+// WaitForLeaderGeneration waits for leadership and returns the election-end
+// generation observed atomically with the elected state.
+func (l *Lease) WaitForLeaderGeneration(ctx context.Context) (uint64, bool) {
+	for {
+		elected, running, changed, ended := l.state()
+		if elected {
+			return ended, true
+		}
+		if !running {
+			return 0, false
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, false
+		case <-l.Ctx.Done():
+			return 0, false
+		case <-changed:
+		}
+	}
+}
+
+// WaitForElectionEnd waits until an elected lease loses its leader. It never
+// holds the lease state mutex while waiting.
+func (l *Lease) WaitForElectionEnd(ctx context.Context) {
+	_, _, _, initialEnded := l.state()
+	l.WaitForElectionEndAfter(ctx, initialEnded)
+}
+
+// WaitForElectionEndAfter waits until the leadership generation returned by
+// WaitForLeaderGeneration ends, even if a replacement election starts first.
+func (l *Lease) WaitForElectionEndAfter(ctx context.Context, initialEnded uint64) {
+	for {
+		elected, _, changed, ended := l.state()
+		if !elected || ended != initialEnded {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-l.Ctx.Done():
+			return
+		case <-changed:
+		}
+	}
+}
+
+func (l *Lease) state() (bool, bool, <-chan struct{}, uint64) {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	return l.Elected.Load(), l.running, l.changed, l.ended
+}
+
+func (l *Lease) signalStateLocked() {
+	close(l.changed)
+	l.changed = make(chan struct{})
 }
 
 // ServiceName gets lease name and id for the service.
 func ServiceName(service *v1.Service) (string, string) {
-	name, exists := service.Annotations[kubevip.ServiceLease]
-	if !exists || name == "" {
-		name = fmt.Sprintf("kubevip-%s", service.Name)
+	return ServiceNameFor(service.Namespace, service.Name, service.Annotations[kubevip.ServiceLease])
+}
+
+func ServiceNameFor(namespace, serviceName, leaseName string) (string, string) {
+	name := leaseName
+	if name == "" {
+		name = fmt.Sprintf("kubevip-%s", serviceName)
 	}
 
 	serviceLeaseParts := strings.Split(name, "/")
-	namespace := service.Namespace
 
 	if len(serviceLeaseParts) > 1 {
 		namespace = serviceLeaseParts[0]
