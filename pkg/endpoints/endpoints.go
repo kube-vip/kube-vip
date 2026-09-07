@@ -93,6 +93,10 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 
 		svcCtx.SignalReadiness()
 
+		if p.serviceElectionManaged(service) {
+			return false, nil
+		}
+
 		if p.shouldProcessInstance() {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
@@ -105,6 +109,10 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 				return true, err
 			}
 			svcCtx.SignalReadiness()
+
+			if p.serviceElectionManaged(service) {
+				return false, nil
+			}
 
 			if p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service); err != nil {
@@ -145,6 +153,11 @@ func (p *Processor) applyEvent(svcCtx *servicecontext.Context, event watch.Event
 // WireGuard always reprograms, because its DNAT rules are per-endpoint.
 func (p *Processor) shouldProcessInstance() bool {
 	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+}
+
+func (p *Processor) serviceElectionManaged(service *v1.Service) bool {
+	return p.config.EnableServicesElection ||
+		p.config.PerServiceElectionOnDemand && service.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 // handleNoEndpoints tears down everything backing a service that no longer has
@@ -278,7 +291,10 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) error {
-	if p.config.EnableServicesElection {
+	if p.serviceElectionManaged(service) {
+		if !p.config.EnableServicesElection {
+			return nil
+		}
 		// startLeaderElection restarts itself until the service context is cancelled,
 		// so start it only once instead of on every endpoint event.
 		svcCtx.StartLeaderElectionOnce(func() {
