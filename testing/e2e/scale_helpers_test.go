@@ -13,6 +13,17 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 )
 
+func TestValidateScaleTopology(t *testing.T) {
+	if err := ValidateScaleTopology(3, 3); err != nil {
+		t.Fatal(err)
+	}
+	for _, topology := range [][2]int{{1, 3}, {2, 3}, {3, 4}, {4, 3}} {
+		if err := ValidateScaleTopology(topology[0], topology[1]); err == nil {
+			t.Fatalf("ValidateScaleTopology(%d, %d) unexpectedly succeeded", topology[0], topology[1])
+		}
+	}
+}
+
 func TestCreateScaleServiceAndLeaseNames(t *testing.T) {
 	client := fake.NewClientset()
 	created, err := CreateScaleService(context.Background(), client, "scale", "election", "service-00", "192.0.2.10",
@@ -143,20 +154,52 @@ func TestScaleTransitionDeltaReportsMetricPresence(t *testing.T) {
 	}
 }
 
+func TestScaleServiceContenders(t *testing.T) {
+	serviceMetrics := func(services ...string) map[string]float64 {
+		metrics := make(map[string]float64)
+		for _, service := range services {
+			labels := `{name="` + service + `",namespace="scale"}`
+			metrics["kube_vip_service_election_loops"+labels] = 1
+			metrics["kube_vip_service_election_attempts_total"+labels] = 1
+		}
+		return metrics
+	}
+	snapshot := ScaleMetricSnapshot{
+		"control-plane":  serviceMetrics("service-00", "service-01"),
+		"control-plane2": serviceMetrics("service-00", "service-01"),
+		"control-plane3": serviceMetrics("service-00"),
+	}
+
+	contenders, err := scaleServiceContenders(snapshot, "scale", []string{"service-00", "service-01"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(contenders, ","), "control-plane,control-plane2"; got != want {
+		t.Fatalf("scaleServiceContenders() = %q, want %q", got, want)
+	}
+	if _, err := scaleServiceContenders(snapshot, "scale", []string{"service-00", "service-01"}, 3); err == nil || !strings.Contains(err.Error(), "only 2 nodes") {
+		t.Fatalf("scaleServiceContenders() error = %v, want insufficient contender diagnostic", err)
+	}
+	delete(snapshot["control-plane2"], `kube_vip_service_election_attempts_total{name="service-01",namespace="scale"}`)
+	if _, err := scaleServiceContenders(snapshot, "scale", []string{"service-00", "service-01"}, 2); err == nil || !strings.Contains(err.Error(), "only 1 nodes") {
+		t.Fatalf("scaleServiceContenders() error = %v, want missing-attempt diagnostic", err)
+	}
+}
+
 func TestValidateScaleLeaseTransfer(t *testing.T) {
 	tests := []struct {
 		name          string
 		currentHolder string
 		wantError     string
 	}{
-		{name: "different eligible holder", currentHolder: "worker"},
+		{name: "different eligible holder", currentHolder: "control-plane2"},
 		{name: "same holder", currentHolder: "control-plane", wantError: "still held by suppressed node"},
 		{name: "unknown holder", currentHolder: "other", wantError: "ineligible holder"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateScaleLeaseTransfer("lease-00", "control-plane", test.currentHolder, []string{"control-plane", "worker"})
+			err := validateScaleLeaseTransfer("lease-00", "control-plane", test.currentHolder, []string{"control-plane", "control-plane2"})
 			if test.wantError == "" && err != nil {
 				t.Fatal(err)
 			}
@@ -174,15 +217,15 @@ func TestValidateScaleVIPOwners(t *testing.T) {
 		requireSole bool
 		wantError   string
 	}{
-		{name: "replacement advertises during abrupt failure", owners: []string{"control-plane", "worker"}},
-		{name: "replacement is sole owner after restore", owners: []string{"worker"}, requireSole: true},
-		{name: "stale owner remains after restore", owners: []string{"control-plane", "worker"}, requireSole: true, wantError: "want sole owner"},
+		{name: "replacement advertises during abrupt failure", owners: []string{"control-plane", "control-plane2"}},
+		{name: "replacement is sole owner after restore", owners: []string{"control-plane2"}, requireSole: true},
+		{name: "stale owner remains after restore", owners: []string{"control-plane", "control-plane2"}, requireSole: true, wantError: "want sole owner"},
 		{name: "replacement does not advertise", owners: []string{"control-plane"}, wantError: "want owner"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateScaleVIPOwners("192.0.2.10", "worker", test.owners, test.requireSole)
+			err := validateScaleVIPOwners("192.0.2.10", "control-plane2", test.owners, test.requireSole)
 			if test.wantError == "" && err != nil {
 				t.Fatal(err)
 			}
