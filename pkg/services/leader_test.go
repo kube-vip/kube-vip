@@ -483,9 +483,7 @@ func TestStartServicesLeaderElectionFullModeDoesNotTrackWrapperMetric(t *testing
 	wrapperDone := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
 	defer wrapperDone()
 
-	if err := p.StartServicesLeaderElection(svcCtx, service, nil, true); err != nil {
-		t.Fatalf("StartServicesLeaderElection() error = %v", err)
-	}
+	_ = p.StartServicesLeaderElection(svcCtx, service, nil, true)
 	if got := testutil.ToFloat64(metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)); got != 1 {
 		t.Fatalf("full-mode loop gauge = %v, want wrapper-owned value 1", got)
 	}

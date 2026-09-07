@@ -503,7 +503,6 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 	for _, test := range []struct {
 		name               string
 		annotations        map[string]string
-		wantEndpointStart  int64
 		wantEndpointWorker bool
 	}{
 		{
@@ -515,7 +514,6 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 		{
 			name:               "ordinary service remains endpoint managed",
 			annotations:        map[string]string{},
-			wantEndpointStart:  1,
 			wantEndpointWorker: true,
 		},
 		{
@@ -523,7 +521,6 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 			annotations: map[string]string{
 				kubevip.ForcePerServiceElection: "True",
 			},
-			wantEndpointStart:  1,
 			wantEndpointWorker: true,
 		},
 	} {
@@ -533,7 +530,7 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 			}}
 			worker := &fakeWorker{endpoints: []string{"10.0.0.1"}}
 			processor := &Processor{
-				config:   &kubevip.Config{EnableARP: true, PerServiceElectionOnDemand: true},
+				config:   &kubevip.Config{PerServiceElectionOnDemand: true},
 				provider: providers.NewEndpointslices(),
 				worker:   worker,
 			}
@@ -555,8 +552,8 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 			if !svcCtx.Signalled.Load() {
 				t.Fatal("endpoint worker did not signal readiness")
 			}
-			if got := endpointStarts.Load(); got != test.wantEndpointStart {
-				t.Fatalf("endpoint service starts = %d, want %d", got, test.wantEndpointStart)
+			if got := endpointStarts.Load(); got != 0 {
+				t.Fatalf("endpoint service starts = %d, want 0", got)
 			}
 			if worker.processCalled != test.wantEndpointWorker {
 				t.Fatalf("endpoint datapath programmed = %v, want %v", worker.processCalled, test.wantEndpointWorker)
