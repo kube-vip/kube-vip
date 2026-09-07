@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -46,13 +47,13 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 			p := &Processor{
 				config:           &kubevip.Config{},
 				leaseMgr:         lease.NewManager(),
-				ServiceInstances: []*instance.Instance{{ServiceSnapshot: tracked}},
+				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
 			}
 			svcCtx := servicecontext.New(context.Background())
 			p.svcMap.Store(uid, svcCtx)
 
-			if err := p.AddOrModify(context.Background(), watch.Event{Type: watch.Modified, Object: modified}, nil, false, nil, nil); err != nil {
-				t.Fatalf("AddOrModify returned error: %v", err)
+			if err := p.Reconcile(context.Background(), watch.Event{Type: watch.Modified, Object: modified}, nil, false, nil, nil); err != nil {
+				t.Fatalf("Reconcile returned error: %v", err)
 			}
 
 			if svcCtx.Ctx.Err() == nil {
@@ -90,6 +91,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 	}
 
 	uid := types.UID("service-uid")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
 
 	t.Run("cancelled context is dropped and removed from svcMap", func(t *testing.T) {
 		p := newProcessor()
@@ -97,13 +99,21 @@ func TestDropCancelledServiceContext(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		svcCtx := servicecontext.New(ctx)
 		p.svcMap.Store(uid, svcCtx)
+		serviceInstance := &instance.Instance{ServiceUID: uid, ServiceSnapshot: service, AddCalled: true}
+		p.ServiceInstances = []*instance.Instance{serviceInstance}
 		cancel()
 
-		if got := p.dropCancelledServiceContext(uid, svcCtx); got != nil {
+		if got := p.dropCancelledServiceContext(service, svcCtx); got != nil {
 			t.Fatalf("expected a cancelled service context to be dropped, got %v", got)
 		}
 		if _, ok := p.svcMap.Load(uid); ok {
 			t.Fatal("expected the cancelled service context to be removed from svcMap")
+		}
+		if serviceInstance.AddCalled {
+			t.Fatal("cancelled context left the Service marked as configured")
+		}
+		if action := p.getServiceInstanceAction(service); action != ActionAdd {
+			t.Fatalf("action after dropping cancelled context = %q, want %q", action, ActionAdd)
 		}
 	})
 
@@ -115,7 +125,7 @@ func TestDropCancelledServiceContext(t *testing.T) {
 		svcCtx := servicecontext.New(ctx)
 		p.svcMap.Store(uid, svcCtx)
 
-		if got := p.dropCancelledServiceContext(uid, svcCtx); got != svcCtx {
+		if got := p.dropCancelledServiceContext(service, svcCtx); got != svcCtx {
 			t.Fatalf("expected a live service context to be kept, got %v", got)
 		}
 		if _, ok := p.svcMap.Load(uid); !ok {
@@ -125,10 +135,51 @@ func TestDropCancelledServiceContext(t *testing.T) {
 
 	t.Run("nil context is a no-op", func(t *testing.T) {
 		p := newProcessor()
-		if got := p.dropCancelledServiceContext(uid, nil); got != nil {
+		if got := p.dropCancelledServiceContext(service, nil); got != nil {
 			t.Fatalf("expected nil to be returned for a nil service context, got %v", got)
 		}
 	})
+}
+
+func TestEnsureServiceContextWaitsForOldWatcherCleanup(t *testing.T) {
+	p := &Processor{config: &kubevip.Config{}}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", UID: "service"}}
+	oldContext := servicecontext.New(context.Background())
+	if !oldContext.StartWatching() {
+		t.Fatal("old watcher ownership was not acquired")
+	}
+	p.svcMap.Store(service.UID, oldContext)
+	oldContext.Cancel()
+
+	result := make(chan *servicecontext.Context, 1)
+	errs := make(chan error, 1)
+	go func() {
+		current, err := p.ensureServiceContext(context.Background(), service)
+		if err != nil {
+			errs <- err
+			return
+		}
+		result <- current
+	}()
+	select {
+	case <-result:
+		t.Fatal("replacement context was created before old watcher cleanup")
+	case err := <-errs:
+		t.Fatalf("ensureServiceContext() error = %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	oldContext.StopWatching()
+	select {
+	case current := <-result:
+		if current == oldContext || current.Ctx.Err() != nil {
+			t.Fatal("ensureServiceContext did not create a live replacement")
+		}
+	case err := <-errs:
+		t.Fatalf("ensureServiceContext() error = %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("replacement context was not created after old watcher cleanup")
+	}
 }
 
 // TestDropCancelledServiceContextAllowsLeaseRecreation shows the consequence of the fix: once the
@@ -162,7 +213,7 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 		t.Fatal("precondition failed: the lease manager should not hold a lease yet")
 	}
 
-	if got := p.dropCancelledServiceContext(svc.UID, svcCtx); got != nil {
+	if got := p.dropCancelledServiceContext(svc, svcCtx); got != nil {
 		t.Fatalf("expected the stale service context to be dropped, got %v", got)
 	}
 
@@ -191,14 +242,15 @@ func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
 	oldCtx := servicecontext.New(context.Background())
 	replacementCtx := servicecontext.New(context.Background())
 	p.svcMap.Store(service.UID, replacementCtx)
-	replacementInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+	replacementInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service.DeepCopy()}
 	p.ServiceInstances = []*instance.Instance{replacementInstance}
 
 	leaseNamespace, serviceLease := lease.ServiceName(service)
 	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease))
+	member := &serviceElectionMember{service: service, serviceContext: oldCtx}
 
-	if err := p.onStoppedLeading(oldCtx, svcLease, service); err != nil {
-		t.Fatalf("onStoppedLeading returned an error: %v", err)
+	if err := p.onStoppedLeadingMember(member, svcLease); err != nil {
+		t.Fatalf("onStoppedLeadingMember returned an error: %v", err)
 	}
 	if got, err := p.getServiceContext(service.UID); err != nil || got != replacementCtx {
 		t.Fatalf("replacement context was changed: got %v, err %v", got, err)
