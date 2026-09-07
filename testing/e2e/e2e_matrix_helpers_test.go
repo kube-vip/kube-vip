@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"text/template"
@@ -56,6 +57,37 @@ func TestMatrixKubeadmPatches(t *testing.T) {
 	patches := matrixKubeadmPatches("fd00::10", true)
 	if len(patches) != 1 || !strings.Contains(patches[0].Patch, `value: "fd00::10"`) {
 		t.Fatalf("matrixKubeadmPatches() = %#v, want IPv6 certificate SAN", patches)
+	}
+}
+
+func TestAnnotateNodesIncludesPeerPort(t *testing.T) {
+	t.Parallel()
+
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-1", Annotations: map[string]string{"existing": "value"}},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+			{Type: corev1.NodeInternalIP, Address: "192.0.2.10"},
+		}},
+	})
+	peer := e2e.BGPPeerValues{IP: "192.0.2.20", AS: 65500, Port: 1179}
+
+	if err := annotateNodes(context.Background(), "test", client, peer, 65501); err != nil {
+		t.Fatalf("annotateNodes() error = %v", err)
+	}
+	node, err := client.CoreV1().Nodes().Get(context.Background(), "node-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("getting patched node: %v", err)
+	}
+	want := map[string]string{
+		"existing":                   "value",
+		"test/bgp-peers-0-node-asn":  "65501",
+		"test/bgp-peers-0-src-ip":    "192.0.2.10",
+		"test/bgp-peers-0-peer-asn":  "65500",
+		"test/bgp-peers-0-peer-ip":   "192.0.2.20",
+		"test/bgp-peers-0-peer-port": "1179",
+	}
+	if !reflect.DeepEqual(node.Annotations, want) {
+		t.Fatalf("node annotations = %#v, want %#v", node.Annotations, want)
 	}
 }
 
