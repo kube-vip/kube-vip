@@ -186,7 +186,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
 	var err error
-	if !p.withActiveService(svcCtx, func() {
+	if !p.withActiveService(service.UID, svcCtx, func() {
 		err = p.SyncServices(svcCtx, service, wg, true)
 	}) {
 		return nil
