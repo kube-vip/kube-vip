@@ -12,13 +12,11 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
-	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
 
 type RoutingTable struct {
 	generic
-	mtx      sync.Mutex
 	routeMgr *route.Manager
 }
 
@@ -29,19 +27,18 @@ func newRoutingTable(generic generic, routeMgr *route.Manager) endpointWorker {
 	}
 }
 
-func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
-	inst := instance.FindServiceInstance(service, *rt.instances)
+func (rt *RoutingTable) processInstance(_ context.Context, configuredNetworks *sync.Map, service *v1.Service, inst *instance.Instance) error {
 	if inst != nil {
 		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
-				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) && cluster.Network[i].HasEndpoints() {
+				if _, configured := configuredNetworks.Load(cluster.Network[i].IP()); !configured && cluster.Network[i].HasEndpoints() {
 					if err := rt.routeMgr.Add(lease.ServiceNamespacedName(service), cluster.Network[i], false, true); err != nil {
 						return fmt.Errorf("[%s] error adding route: %s", rt.provider.GetLabel(), err.Error())
 					} else {
 						log.Info("added route", "provider",
 							rt.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace",
 							service.Namespace, "interface", cluster.Network[i].Interface(), "tableID", rt.config.RoutingTableID)
-						svcCtx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
+						configuredNetworks.Store(cluster.Network[i].IP(), true)
 					}
 				}
 			}
@@ -51,12 +48,10 @@ func (rt *RoutingTable) processInstance(svcCtx *servicecontext.Context, service 
 	return nil
 }
 
-func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
-	rt.mtx.Lock()
-	defer rt.mtx.Unlock()
+func (rt *RoutingTable) clear(_ context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
 	if !rt.config.EnableServicesElection {
-		if errs := ClearRoutes(service, rt.instances, rt.routeMgr); len(errs) == 0 {
-			svcCtx.ConfiguredNetworks.Clear()
+		if errs := ClearRoutesByInstance(service, inst, nil, rt.routeMgr); len(errs) == 0 {
+			configuredNetworks.Clear()
 		} else {
 			for _, err := range errs {
 				log.Error("error while clearing routes", "err", err)
@@ -65,8 +60,6 @@ func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpo
 	}
 
 	rt.clearEgress(lastKnownGoodEndpoint, service)
-
-	svcCtx.CallLeaderCancel()
 }
 
 func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, error) {
@@ -80,8 +73,7 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 	}
 }
 
-func (rt *RoutingTable) setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error {
-	inst := instance.FindServiceInstance(service, *rt.instances)
+func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, inst *instance.Instance, endpoints []string) error {
 	if inst == nil {
 		log.Error("failed to find the instance", "namespace", service.Namespace, "name", service.Name, "uid", service.UID, "provider", rt.provider.GetLabel())
 	} else {

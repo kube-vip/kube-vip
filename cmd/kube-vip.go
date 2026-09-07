@@ -331,8 +331,8 @@ var kubeVipManager = &cobra.Command{
 		defer wg.Wait()
 
 		// create main manager context
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
+		ctx, cancel := context.WithCancelCause(cmd.Context())
+		defer cancel(nil)
 
 		metrics.RegisterPrometheusMetrics()
 
@@ -438,9 +438,8 @@ var kubeVipManager = &cobra.Command{
 
 				wg.Go(func() {
 					if err := vip.MonitorDefaultInterface(ctx, defaultIF); err != nil {
-
 						log.Error("interface monitor", "err", err)
-						return
+						cancel(err)
 					}
 				})
 			}

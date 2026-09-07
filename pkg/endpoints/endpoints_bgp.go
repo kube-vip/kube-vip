@@ -3,11 +3,11 @@ package endpoints
 import (
 	"context"
 	log "log/slog"
+	"sync"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/lease"
-	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -23,19 +23,19 @@ func newBGP(generic generic, bgpServer *bgp.Server) endpointWorker {
 	}
 }
 
-func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Service) error {
-	if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
-		for _, cluster := range instance.Clusters {
+func (b *BGP) processInstance(ctx context.Context, configuredNetworks *sync.Map, service *v1.Service, inst *instance.Instance) error {
+	if inst != nil {
+		for _, cluster := range inst.Clusters {
 			for i := range cluster.Network {
-				if !svcCtx.IsNetworkConfigured(cluster.Network[i].IP()) {
+				if _, configured := configuredNetworks.Load(cluster.Network[i].IP()); !configured {
 					log.Debug("attempting to advertise BGP service", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP())
-					err := b.bgpServer.AddHost(svcCtx.Ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
+					err := b.bgpServer.AddHost(ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
 					if err != nil {
 						log.Error("error adding BGP host", "provider", b.provider.GetLabel(), "err", err)
 					} else {
 						log.Info("added BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].CIDR(), "service name", service.Name, "namespace", service.Namespace)
-						svcCtx.ConfiguredNetworks.Store(cluster.Network[i].IP(), true)
+						configuredNetworks.Store(cluster.Network[i].IP(), true)
 					}
 				}
 			}
@@ -44,19 +44,19 @@ func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Servic
 	return nil
 }
 
-func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
+func (b *BGP) clear(ctx context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
 	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
 		// If BGP mode is enabled - routes should be deleted
-		if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
-			for _, cluster := range instance.Clusters {
+		if inst != nil {
+			for _, cluster := range inst.Clusters {
 				for i := range cluster.Network {
-					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
+					err := b.bgpServer.DelHost(ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
 					if err != nil {
 						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
 						log.Info("deleted BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace)
-						svcCtx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
+						configuredNetworks.Delete(cluster.Network[i].IP())
 					}
 				}
 			}
@@ -65,15 +65,13 @@ func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *strin
 	}
 
 	b.clearEgress(lastKnownGoodEndpoint, service)
-
-	svcCtx.CallLeaderCancel()
 }
 
 func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {
 	return b.getAllEndpoints(service, id)
 }
 
-func (b *BGP) setInstanceEndpointsStatus(_ context.Context, _ *v1.Service, _ []string) error {
+func (b *BGP) setInstanceEndpointsStatus(_ *v1.Service, _ *instance.Instance, _ []string) error {
 	return nil
 }
 
