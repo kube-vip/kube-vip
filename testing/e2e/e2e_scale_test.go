@@ -112,7 +112,7 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 				ControlPlaneVIP:            controlPlaneVIP,
 				ControlPlaneEnable:         "true",
 				SvcEnable:                  "true",
-				SvcElectionEnable:          "true",
+				SvcElectionEnable:          "false",
 				EnableEndpoints:            "true",
 				EnableNodeLabeling:         "false",
 				EnableServiceSecurity:      "true",
@@ -176,8 +176,9 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 			for index := batchStart; index < batchEnd; index++ {
 				name := fmt.Sprintf("%s-%03d", scaleBulkServicePrefix, index)
 				vip := e2e.GenerateVIP(utils.IPv4Family, suite.baseOffset+uint(index+1), defaultNetwork)
-				Expect(e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioBulk, name, vip,
-					corev1.ServiceExternalTrafficPolicyTypeCluster, false, "")).To(Succeed())
+				_, err := e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioBulk, name, vip,
+					corev1.ServiceExternalTrafficPolicyTypeCluster, false, "")
+				Expect(err).NotTo(HaveOccurred())
 				serviceNames = append(serviceNames, name)
 				vips = append(vips, vip)
 			}
@@ -252,15 +253,18 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 	It("reacquires every per-service lease after killing leaders ten times", func() {
 		defer suite.cleanupScenario(scaleScenarioElection)
 
-		leaseNames := make([]string, 0, scaleElectionServiceCount)
+		services := make([]*corev1.Service, 0, scaleElectionServiceCount)
 		for index := 0; index < scaleElectionServiceCount; index++ {
 			name := fmt.Sprintf("%s-%02d", scaleElectionServicePrefix, index)
 			leaseName := fmt.Sprintf("%s-%02d", scaleElectionLeasePrefix, index)
 			vip := e2e.GenerateVIP(utils.IPv4Family, suite.baseOffset+uint(scaleMaxServices+index+1), defaultNetwork)
-			Expect(e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioElection, name, vip,
-				corev1.ServiceExternalTrafficPolicyTypeCluster, true, leaseName)).To(Succeed())
-			leaseNames = append(leaseNames, leaseName)
+			service, err := e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioElection, name, vip,
+				corev1.ServiceExternalTrafficPolicyTypeCluster, true, leaseName)
+			Expect(err).NotTo(HaveOccurred())
+			services = append(services, service)
 		}
+		leaseNames, err := e2e.ScaleServiceLeaseNames(services, suite.namespace)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
 			_, err := e2e.ScaleLeaseHolders(suite.ctx, suite.client, suite.namespace, leaseNames)
@@ -306,8 +310,9 @@ var _ = Describe("kube-vip controller behavior scale suite", Label("scale"), Ser
 		}, scaleClusterConvergenceLimit, scalePollInterval).Should(Succeed())
 
 		vip := e2e.GenerateVIP(utils.IPv4Family, suite.baseOffset+uint(scaleMaxServices+scaleElectionServiceCount+1), defaultNetwork)
-		Expect(e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioEndpoint, scaleEndpointServiceName, vip,
-			corev1.ServiceExternalTrafficPolicyTypeLocal, true, "scale-endpoint-lease")).To(Succeed())
+		_, err := e2e.CreateScaleService(suite.ctx, suite.client, suite.namespace, scaleScenarioEndpoint, scaleEndpointServiceName, vip,
+			corev1.ServiceExternalTrafficPolicyTypeLocal, true, "")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(e2e.WaitForScaleLocalAdvertisement(suite.ctx, suite.cluster.Name, suite.nodeNames, suite.client,
 			suite.namespace, vip, scaleClusterConvergenceLimit)).To(Succeed())
 
@@ -351,7 +356,7 @@ func (s *scaleSuite) runChurnOperation(active map[string]struct{}, nextOrdinal *
 	if step%3 == 0 && len(active) < scaleChurnMaxServices || len(active) == 0 {
 		name := fmt.Sprintf("%s-%04d", scaleChurnServicePrefix, *nextOrdinal)
 		vip := e2e.GenerateVIP(utils.IPv4Family, s.baseOffset+uint(2*scaleMaxServices+*nextOrdinal+1), defaultNetwork)
-		if err := e2e.CreateScaleService(s.ctx, s.client, s.namespace, scaleScenarioChurn, name, vip,
+		if _, err := e2e.CreateScaleService(s.ctx, s.client, s.namespace, scaleScenarioChurn, name, vip,
 			corev1.ServiceExternalTrafficPolicyTypeCluster, false, ""); err != nil {
 			return err
 		}

@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/lease"
 )
 
 const (
@@ -196,7 +197,18 @@ func scaleBackendReadyNodes(ctx context.Context, client kubernetes.Interface, na
 
 func CreateScaleService(ctx context.Context, client kubernetes.Interface, namespace, scenario, name, vip string,
 	trafficPolicy corev1.ServiceExternalTrafficPolicy, forcePerServiceElection bool, leaseName string,
-) error {
+) (*corev1.Service, error) {
+	service := NewScaleService(namespace, scenario, name, vip, trafficPolicy, forcePerServiceElection, leaseName)
+	created, err := client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create service %s/%s: %w", namespace, name, err)
+	}
+	return created, nil
+}
+
+func NewScaleService(namespace, scenario, name, vip string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
+	forcePerServiceElection bool, leaseName string,
+) *corev1.Service {
 	annotations := map[string]string{
 		kubevip.LoadbalancerIPAnnotation: vip,
 	}
@@ -212,7 +224,7 @@ func CreateScaleService(ctx context.Context, client kubernetes.Interface, namesp
 		scaleScenarioLabel: scenario,
 	}
 	policy := corev1.IPFamilyPolicySingleStack
-	_, err := client.CoreV1().Services(namespace).Create(ctx, &corev1.Service{
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   namespace,
@@ -228,11 +240,24 @@ func CreateScaleService(ctx context.Context, client kubernetes.Interface, namesp
 			Selector:                      scaleBackendLabels(),
 			AllocateLoadBalancerNodePorts: boolPtr(true),
 		},
-	}, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("create service %s/%s: %w", namespace, name, err)
 	}
-	return nil
+}
+
+func ScaleServiceLeaseNames(services []*corev1.Service, namespace string) ([]string, error) {
+	names := make([]string, 0, len(services))
+	seen := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		leaseNamespace, leaseName := lease.ServiceName(service)
+		if leaseNamespace != namespace {
+			return nil, fmt.Errorf("service %s/%s uses lease namespace %q, want %q", service.Namespace, service.Name, leaseNamespace, namespace)
+		}
+		if _, exists := seen[leaseName]; exists {
+			return nil, fmt.Errorf("service %s/%s reuses lease %s/%s", service.Namespace, service.Name, namespace, leaseName)
+		}
+		seen[leaseName] = struct{}{}
+		names = append(names, leaseName)
+	}
+	return names, nil
 }
 
 func boolPtr(value bool) *bool {
