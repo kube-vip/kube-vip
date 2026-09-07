@@ -37,7 +37,9 @@ func TestRenderKubeVipControlPlaneManifest(t *testing.T) {
 	for _, want := range []string{
 		`- --prometheusHTTPServer`,
 		`- ":2112"`,
+		`mountPath: /etc/kubernetes/admin.conf`,
 		`path: "/etc/kubernetes/admin.conf"`,
+		"hostnames:\n      - kubernetes\n      ip: 127.0.0.1",
 		`hostNetwork: true`,
 		"- name: svc_election\n      value: \"false\"",
 		"- name: per_service_election_on_demand\n      value: \"true\"",
@@ -46,7 +48,7 @@ func TestRenderKubeVipControlPlaneManifest(t *testing.T) {
 			t.Errorf("rendered control-plane manifest does not contain %q", want)
 		}
 	}
-	for _, obsolete := range []string{"kubelet.conf", "kubelet-pki", "/var/lib/kubelet/pki"} {
+	for _, obsolete := range []string{"kubelet.conf", "kubelet-pki", "/var/lib/kubelet/pki", "kubernetes.default.svc"} {
 		if strings.Contains(string(manifest), obsolete) {
 			t.Errorf("rendered control-plane manifest contains obsolete worker credential %q", obsolete)
 		}
