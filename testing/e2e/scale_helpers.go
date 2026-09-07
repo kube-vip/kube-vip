@@ -150,12 +150,16 @@ func scaleControlPlaneTolerations() []corev1.Toleration {
 }
 
 func ScaleBackend(ctx context.Context, client kubernetes.Interface, namespace string, replicas int32) error {
-	deployment, err := client.AppsV1().Deployments(namespace).Get(ctx, scaleBackendName, metav1.GetOptions{})
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		deployment, err := client.AppsV1().Deployments(namespace).Get(ctx, scaleBackendName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		deployment.Spec.Replicas = &replicas
+		_, err = client.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("get shared backend deployment: %w", err)
-	}
-	deployment.Spec.Replicas = &replicas
-	if _, err := client.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("scale shared backend deployment to %d: %w", replicas, err)
 	}
 	return nil
