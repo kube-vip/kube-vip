@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
+	"net"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,7 +27,9 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	"github.com/prometheus/client_golang/prometheus"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
@@ -41,6 +45,8 @@ type Processor struct {
 	svcMap        sync.Map
 	servicesMu    sync.Mutex
 	services      map[types.NamespacedName]types.UID
+	recoveryMu    sync.Mutex
+	recovered     bool
 
 	// Keeps track of all running instances
 	ServiceInstances []*instance.Instance
@@ -306,6 +312,243 @@ func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Se
 			}
 		}
 	}
+}
+
+// RecoverAddresses removes tagged addresses that are no longer owned by this node.
+func (p *Processor) RecoverAddresses(ctx context.Context) error {
+	p.recoveryMu.Lock()
+	defer p.recoveryMu.Unlock()
+	if p.recovered || p.clientSet == nil || p.config.RoutingProtocol < 4 {
+		return nil
+	}
+
+	services, err := p.clientSet.CoreV1().Services(p.config.ServiceNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list Services for address recovery: %w", err)
+	}
+	holders := make(map[string]string)
+	retainedVIPs := make(map[string]struct{})
+	if p.config.LeaderElectionType != "etcd" {
+		if err := p.retainAnnotatedLeaseVIPs(ctx, holders, retainedVIPs); err != nil {
+			return err
+		}
+	}
+	for index := range services.Items {
+		service := &services.Items[index]
+		if !p.serviceOwnsRecoverableVIP(service) {
+			continue
+		}
+		retain, err := p.serviceAddressRetained(ctx, service, holders)
+		if err != nil {
+			return err
+		}
+		if retain {
+			for _, address := range serviceVIPAddresses(service) {
+				retainedVIPs[address] = struct{}{}
+			}
+		}
+	}
+	canClean, err := p.retainControlPlaneVIPs(ctx, holders, retainedVIPs)
+	if err != nil {
+		return err
+	}
+	if !canClean {
+		return nil
+	}
+	retained, err := vip.RetainedKubeVIPAddressKeys(p.config.RoutingProtocol, retainedVIPs)
+	if err != nil {
+		return fmt.Errorf("find retained kube-vip addresses: %w", err)
+	}
+	if _, err := vip.CleanupKubeVIPAddresses(p.config.RoutingProtocol, retained); err != nil {
+		return fmt.Errorf("remove orphaned kube-vip addresses: %w", err)
+	}
+	p.recovered = true
+	return nil
+}
+
+func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[string]string,
+	retainedVIPs map[string]struct{}) error {
+	namespace := v1.NamespaceAll
+	if p.config.ServiceNamespace != "" {
+		namespace = p.config.ServiceNamespace
+	}
+	leaseList, err := p.clientSet.CoordinationV1().Leases(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list Leases for address recovery: %w", err)
+	}
+	for index := range leaseList.Items {
+		resource := &leaseList.Items[index]
+		holder := ""
+		if resource.Spec.HolderIdentity != nil {
+			holder = *resource.Spec.HolderIdentity
+		}
+		holders[resource.Namespace+"/"+resource.Name] = holder
+		encoded := resource.Annotations[kubevip.LeaseVIPs]
+		if encoded == "" || holder != p.config.NodeName || !leaseOwnershipCurrent(resource, time.Now()) {
+			continue
+		}
+		metadata, err := kubevip.ParseLeaseVIPs(encoded)
+		if err != nil {
+			return fmt.Errorf("parse Lease %s/%s VIP ownership: %w", resource.Namespace, resource.Name, err)
+		}
+		if metadata.IFAProto != p.config.RoutingProtocol {
+			continue
+		}
+		for _, claimedVIP := range metadata.VIPs {
+			retainedVIPs[claimedVIP.Value] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func leaseOwnershipCurrent(resource *coordinationv1.Lease, now time.Time) bool {
+	if resource.Spec.RenewTime == nil || resource.Spec.LeaseDurationSeconds == nil {
+		return true
+	}
+	return now.Before(resource.Spec.RenewTime.Add(time.Duration(*resource.Spec.LeaseDurationSeconds) * time.Second))
+}
+
+func (p *Processor) serviceOwnsRecoverableVIP(service *v1.Service) bool {
+	classFilter := p.lbClassFilter
+	if classFilter == nil {
+		classFilter = lbClassFilter
+	}
+	return service != nil && service.Spec.Type == v1.ServiceTypeLoadBalancer &&
+		service.Annotations[kubevip.LoadbalancerIgnore] != "true" &&
+		!classFilter(service, p.config)
+}
+
+func (p *Processor) serviceAddressRetained(ctx context.Context, service *v1.Service, holders map[string]string) (bool, error) {
+	if p.config.LeaderElectionType == "etcd" {
+		return true, nil
+	}
+	forced := p.config.PerServiceElectionOnDemand && service.Annotations[kubevip.ForcePerServiceElection] == "true"
+	usesGlobal := p.config.EnableARP || p.config.EnableWireguard ||
+		((p.config.EnableBGP || p.config.EnableRoutingTable) && p.config.EnableLeaderElection)
+	if !p.config.EnableServicesElection && !forced && !usesGlobal {
+		return true, nil
+	}
+	namespace, name := p.serviceRecoveryLease(service)
+	id := lease.NewID(p.config.LeaderElectionType, namespace, name)
+	local, err := p.isLocalLeaseHolder(ctx, id, holders)
+	if err != nil {
+		return false, fmt.Errorf("get Service lease %q for address recovery: %w", id.NamespacedName(), err)
+	}
+	return local, nil
+}
+
+func (p *Processor) serviceRecoveryLease(service *v1.Service) (string, string) {
+	if p.config.EnableServicesElection ||
+		p.config.PerServiceElectionOnDemand && service.Annotations[kubevip.ForcePerServiceElection] == "true" {
+		return lease.ServiceName(service)
+	}
+	return lease.NamespaceName(p.config.ServicesLeaseName, p.config)
+}
+
+func (p *Processor) retainControlPlaneVIPs(ctx context.Context, holders map[string]string, retainedVIPs map[string]struct{}) (bool, error) {
+	if !p.config.EnableControlPlane {
+		return true, nil
+	}
+	addresses, known := configuredVIPAddresses(p.config)
+	if !known {
+		log.Warn("skipping address recovery for hostname-backed control-plane VIP")
+		return false, nil
+	}
+	if p.config.LeaderElectionType == "etcd" || !p.config.EnableLeaderElection {
+		for _, address := range addresses {
+			retainedVIPs[address] = struct{}{}
+		}
+		return true, nil
+	}
+	namespace, name := lease.NamespaceName(p.config.LeaseName, p.config)
+	id := lease.NewID(p.config.LeaderElectionType, namespace, name)
+	local, err := p.isLocalLeaseHolder(ctx, id, holders)
+	if err != nil {
+		return false, fmt.Errorf("get control-plane lease for address recovery: %w", err)
+	}
+	if local {
+		for _, address := range addresses {
+			retainedVIPs[address] = struct{}{}
+		}
+	}
+	return true, nil
+}
+
+func configuredVIPAddresses(config *kubevip.Config) ([]string, bool) {
+	configured := config.VIP
+	if config.Address != "" {
+		configured = config.Address
+	}
+	addresses := make([]string, 0)
+	for _, value := range vip.Split(configured) {
+		address := net.ParseIP(utils.StripCIDR(value))
+		if address == nil {
+			return nil, false
+		}
+		addresses = append(addresses, address.String())
+	}
+	return addresses, true
+}
+
+func (p *Processor) isLocalLeaseHolder(ctx context.Context, id lease.ID, holders map[string]string) (bool, error) {
+	holder, err := p.kubernetesLeaseHolder(ctx, id, holders)
+	if err != nil {
+		return false, err
+	}
+	return holder == p.config.NodeName, nil
+}
+
+func (p *Processor) kubernetesLeaseHolder(ctx context.Context, id lease.ID, holders map[string]string) (string, error) {
+	key := id.NamespacedName()
+	if holder, found := holders[key]; found {
+		return holder, nil
+	}
+	resource, err := p.clientSet.CoordinationV1().Leases(id.Namespace()).Get(ctx, id.Name(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		holders[key] = ""
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	holder := ""
+	if resource.Spec.HolderIdentity != nil {
+		holder = *resource.Spec.HolderIdentity
+	}
+	holders[key] = holder
+	return holder, nil
+}
+
+func serviceVIPAddresses(service *v1.Service) []string {
+	addresses, _ := instance.FetchServiceAddresses(service)
+	ingress, _ := instance.FetchLoadBalancerIngress(service)
+	return append(addresses, ingress...)
+}
+
+// ElectionVIPs returns configured Service VIPs in stable Service creation order.
+func (p *Processor) ElectionVIPs(ctx context.Context) ([]string, error) {
+	if p == nil || p.clientSet == nil {
+		return nil, nil
+	}
+	serviceList, err := p.clientSet.CoreV1().Services(p.config.ServiceNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list Services for election VIP metadata: %w", err)
+	}
+	services := make([]*v1.Service, 0, len(serviceList.Items))
+	for index := range serviceList.Items {
+		service := &serviceList.Items[index]
+		if p.serviceOwnsRecoverableVIP(service) {
+			services = append(services, service)
+		}
+	}
+	slices.SortFunc(services, func(first, second *v1.Service) int {
+		return first.CreationTimestamp.Time.Compare(second.CreationTimestamp.Time)
+	})
+	vips := make([]string, 0)
+	for _, service := range services {
+		vips = append(vips, serviceVIPAddresses(service)...)
+	}
+	return vips, nil
 }
 
 func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
