@@ -87,7 +87,9 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			var err error
 			if !p.withActiveService(service.UID, svcCtx, func() {
 				restart, err = epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
-					p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
+					func(svcCtx *servicecontext.Context, service *v1.Service, _ *sync.WaitGroup, _ bool) error {
+						return p.startServicesLeaderElection(svcCtx, service)
+					}, &wg, p.clientSet, p.updateEgressConfiguration)
 			}) {
 				return nil
 			}
