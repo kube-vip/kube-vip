@@ -142,3 +142,53 @@ func TestScaleTransitionDeltaReportsMetricPresence(t *testing.T) {
 		t.Fatalf("ScaleTransitionDelta() for missing series = (%v, %t), want (0, false)", delta, found)
 	}
 }
+
+func TestValidateScaleLeaseTransfer(t *testing.T) {
+	tests := []struct {
+		name          string
+		currentHolder string
+		wantError     string
+	}{
+		{name: "different eligible holder", currentHolder: "worker"},
+		{name: "same holder", currentHolder: "control-plane", wantError: "still held by suppressed node"},
+		{name: "unknown holder", currentHolder: "other", wantError: "ineligible holder"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateScaleLeaseTransfer("lease-00", "control-plane", test.currentHolder, []string{"control-plane", "worker"})
+			if test.wantError == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("validateScaleLeaseTransfer() error = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateScaleVIPOwners(t *testing.T) {
+	tests := []struct {
+		name        string
+		owners      []string
+		requireSole bool
+		wantError   string
+	}{
+		{name: "replacement advertises during abrupt failure", owners: []string{"control-plane", "worker"}},
+		{name: "replacement is sole owner after restore", owners: []string{"worker"}, requireSole: true},
+		{name: "stale owner remains after restore", owners: []string{"control-plane", "worker"}, requireSole: true, wantError: "want sole owner"},
+		{name: "replacement does not advertise", owners: []string{"control-plane"}, wantError: "want owner"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateScaleVIPOwners("192.0.2.10", "worker", test.owners, test.requireSole)
+			if test.wantError == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("validateScaleVIPOwners() error = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}

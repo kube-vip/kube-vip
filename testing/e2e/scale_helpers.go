@@ -402,6 +402,46 @@ func WaitForScaleVIPs(ctx context.Context, clusterName string, nodes []string, v
 	}
 }
 
+func WaitForScaleVIPOwner(ctx context.Context, clusterName string, nodes []string, vip, expectedOwner string,
+	requireSoleOwner bool, timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	var lastError error
+	for {
+		owners := make([]string, 0, len(nodes))
+		for _, node := range nodes {
+			if CheckIPAddressPresence(vip, node, true) {
+				owners = append(owners, node)
+			}
+		}
+		if err := validateScaleVIPOwners(vip, expectedOwner, owners, requireSoleOwner); err == nil {
+			return nil
+		} else {
+			lastError = err
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("VIP ownership did not converge: %w", lastError)
+		}
+		if err := waitForScalePoll(ctx, deadline); err != nil {
+			return err
+		}
+	}
+}
+
+func validateScaleVIPOwners(vip, expectedOwner string, owners []string, requireSoleOwner bool) error {
+	for _, owner := range owners {
+		if owner != expectedOwner {
+			continue
+		}
+		if !requireSoleOwner || len(owners) == 1 {
+			return nil
+		}
+		return fmt.Errorf("VIP %q is advertised by %v, want sole owner %q", vip, owners, expectedOwner)
+	}
+	return fmt.Errorf("VIP %q is advertised by %v, want owner %q", vip, owners, expectedOwner)
+}
+
 func WaitForScaleLocalAdvertisement(ctx context.Context, clusterName string, nodes []string,
 	client kubernetes.Interface, namespace, vip string, timeout time.Duration,
 ) error {
@@ -549,32 +589,62 @@ func ScaleLeaseHolders(ctx context.Context, client kubernetes.Interface, namespa
 	return holders, nil
 }
 
-func WaitForScaleLeaseHolders(ctx context.Context, client kubernetes.Interface, namespace string,
-	leaseNames []string, previous map[string]string, killedNode string, timeout time.Duration,
-) error {
+func WaitForScaleLeaseTransfer(ctx context.Context, client kubernetes.Interface, namespace, leaseName, previousHolder string,
+	eligibleNodes []string, timeout time.Duration,
+) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var lastError error
 	for {
-		holders, err := ScaleLeaseHolders(ctx, client, namespace, leaseNames)
+		holders, err := ScaleLeaseHolders(ctx, client, namespace, []string{leaseName})
 		if err == nil {
-			allReady := true
-			for _, leaseName := range leaseNames {
-				holder := holders[leaseName]
-				if previous[leaseName] == killedNode && holder == killedNode {
-					allReady = false
-					lastError = fmt.Errorf("service lease %s/%s is still held by killed node %q", namespace, leaseName, killedNode)
-					break
-				}
-			}
-			if allReady {
-				return nil
+			if err := validateScaleLeaseTransfer(leaseName, previousHolder, holders[leaseName], eligibleNodes); err == nil {
+				return holders[leaseName], nil
+			} else {
+				lastError = err
 			}
 		} else {
 			lastError = err
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("service leases did not reacquire: %w", lastError)
+			return "", fmt.Errorf("service lease did not transfer: %w", lastError)
+		}
+		if err := waitForScalePoll(ctx, deadline); err != nil {
+			return "", err
+		}
+	}
+}
+
+func validateScaleLeaseTransfer(leaseName, previousHolder, currentHolder string, eligibleNodes []string) error {
+	if currentHolder == previousHolder {
+		return fmt.Errorf("service lease %q is still held by suppressed node %q", leaseName, previousHolder)
+	}
+	for _, node := range eligibleNodes {
+		if currentHolder == node {
+			return nil
+		}
+	}
+	return fmt.Errorf("service lease %q transferred to ineligible holder %q; eligible nodes are %v", leaseName, currentHolder, eligibleNodes)
+}
+
+func WaitForScaleLeaseHolder(ctx context.Context, client kubernetes.Interface, namespace, leaseName, expectedHolder string,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	var lastError error
+	for {
+		holders, err := ScaleLeaseHolders(ctx, client, namespace, []string{leaseName})
+		if err == nil && holders[leaseName] == expectedHolder {
+			return nil
+		}
+		if err != nil {
+			lastError = err
+		} else {
+			lastError = fmt.Errorf("service lease %s/%s is held by %q, want %q", namespace, leaseName, holders[leaseName], expectedHolder)
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("service lease holder did not stabilize: %w", lastError)
 		}
 		if err := waitForScalePoll(ctx, deadline); err != nil {
 			return err
