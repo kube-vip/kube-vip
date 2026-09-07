@@ -22,9 +22,11 @@ func TestRenderKubeVipWorkerManifest(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "worker.yaml")
 	values := KubevipManifestValues{
-		ConfigPath:           "/etc/kubernetes/kubelet.conf",
-		KubeletPKIPath:       "/var/lib/kubelet/pki",
-		PrometheusHTTPServer: ":2112",
+		ConfigPath:                 "/etc/kubernetes/kubelet.conf",
+		KubeletPKIPath:             "/var/lib/kubelet/pki",
+		PrometheusHTTPServer:       ":2112",
+		SvcElectionEnable:          "false",
+		PerServiceElectionOnDemand: "true",
 	}
 	if err := renderKubeVipManifest(tmpl, path, values); err != nil {
 		t.Fatal(err)
@@ -40,6 +42,8 @@ func TestRenderKubeVipWorkerManifest(t *testing.T) {
 		`mountPath: /var/lib/kubelet/pki`,
 		`path: /var/lib/kubelet/pki`,
 		`hostNetwork: true`,
+		"- name: svc_election\n      value: \"false\"",
+		"- name: per_service_election_on_demand\n      value: \"true\"",
 	} {
 		if !strings.Contains(string(manifest), want) {
 			t.Errorf("rendered worker manifest does not contain %q", want)
