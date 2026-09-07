@@ -6,7 +6,9 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -37,6 +39,16 @@ const (
 )
 
 type ScaleMetricSnapshot map[string]map[string]float64
+
+func ValidateScaleTopology(controlPlaneNodes, maxNodes int) error {
+	if controlPlaneNodes != maxNodes {
+		return fmt.Errorf("scale topology has %d control-plane nodes, want the bounded maximum of %d", controlPlaneNodes, maxNodes)
+	}
+	if controlPlaneNodes < 3 {
+		return fmt.Errorf("scale topology needs at least three control-plane nodes, got %d", controlPlaneNodes)
+	}
+	return nil
+}
 
 func BuildScaleClient(config *rest.Config, qps float32, burst int) (kubernetes.Interface, error) {
 	if config == nil {
@@ -324,6 +336,81 @@ func WaitForScaleMetrics(ctx context.Context, clusterName string, nodes []string
 	for _, node := range nodes {
 		if _, err := ScrapeMetrics(ctx, clusterName, node); err != nil {
 			return fmt.Errorf("scrape metrics from node %q: %w", node, err)
+		}
+	}
+	return nil
+}
+
+func WaitForScaleServiceContenders(ctx context.Context, clusterName string, nodes []string, namespace string,
+	serviceNames []string, minimum int, timeout time.Duration,
+) ([]string, error) {
+	deadline := time.Now().Add(timeout)
+	var lastError error
+	for {
+		snapshot, err := SnapshotScaleMetrics(ctx, clusterName, nodes)
+		if err == nil {
+			contenders, validationErr := scaleServiceContenders(snapshot, namespace, serviceNames, minimum)
+			if validationErr == nil {
+				return contenders, nil
+			}
+			lastError = validationErr
+		} else {
+			lastError = err
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("service contenders did not become ready: %w", lastError)
+		}
+		if err := waitForScalePoll(ctx, deadline); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func scaleServiceContenders(snapshot ScaleMetricSnapshot, namespace string, serviceNames []string, minimum int) ([]string, error) {
+	if minimum < 1 {
+		return nil, fmt.Errorf("minimum contender count must be positive")
+	}
+	contenders := make([]string, 0, len(snapshot))
+	for node, nodeMetrics := range snapshot {
+		ready := true
+		for _, serviceName := range serviceNames {
+			labelsForService := map[string]string{"namespace": namespace, "name": serviceName}
+			loops, loopMatches := MetricValue(nodeMetrics, "kube_vip_service_election_loops", labelsForService)
+			_, attemptMatches := MetricValue(nodeMetrics, "kube_vip_service_election_attempts_total", labelsForService)
+			if loopMatches != 1 || loops != 1 || attemptMatches != 1 {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			contenders = append(contenders, node)
+		}
+	}
+	sort.Strings(contenders)
+	if len(contenders) < minimum {
+		return nil, fmt.Errorf("only %d nodes have live election loops and attempts for services %v, want at least %d", len(contenders), serviceNames, minimum)
+	}
+	return contenders, nil
+}
+
+func ScaleControlPlaneAvailable(ctx context.Context, client kubernetes.Interface, namespace, leaseName string) error {
+	if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+		return fmt.Errorf("read namespace while control-plane kubelet is stopped: %w", err)
+	}
+	if _, err := client.CoordinationV1().Leases(namespace).Get(ctx, leaseName, metav1.GetOptions{}); err != nil {
+		return fmt.Errorf("read service lease while control-plane kubelet is stopped: %w", err)
+	}
+	return nil
+}
+
+func ScaleControlPlaneComponentsRunning(clusterName, node string) error {
+	for _, component := range []string{"kube-apiserver", "etcd"} {
+		output, err := runDockerOutput(clusterName, "exec", node, "crictl", "ps", "--state", "Running", "--name", component, "-q")
+		if err != nil {
+			return fmt.Errorf("inspect %s on node %q: %w", component, node, err)
+		}
+		if strings.TrimSpace(output) == "" {
+			return fmt.Errorf("%s is not running on node %q while kubelet is stopped", component, node)
 		}
 	}
 	return nil

@@ -29,8 +29,7 @@ import (
 // ClusterSpec describes a Kind cluster with kube-vip.
 type ClusterSpec struct {
 	Name           string
-	Nodes          int // control-plane node count
-	WorkerNodes    int
+	Nodes          int
 	Networking     kindconfigv1alpha4.Networking
 	KubeVip        KubevipManifestValues
 	Logger         TestLogger
@@ -101,14 +100,6 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	Expect(err).NotTo(HaveOccurred())
 	manifestPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s.yaml", spec.Name))
 	Expect(renderKubeVipManifest(tmpl, manifestPath, spec.KubeVip)).To(Succeed())
-	workerManifestPath := manifestPath
-	if spec.WorkerNodes > 0 {
-		workerManifestPath = filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-worker.yaml", spec.Name))
-		workerValues := spec.KubeVip
-		workerValues.ConfigPath = "/etc/kubernetes/kubelet.conf"
-		workerValues.KubeletPKIPath = "/var/lib/kubelet/pki"
-		Expect(renderKubeVipManifest(tmpl, workerManifestPath, workerValues)).To(Succeed())
-	}
 
 	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
@@ -126,9 +117,9 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		Networking:                   spec.Networking,
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
-	appendNode := func(role kindconfigv1alpha4.NodeRole, manifest string) {
+	appendNode := func(manifest string) {
 		node := kindconfigv1alpha4.Node{
-			Role: role,
+			Role: kindconfigv1alpha4.ControlPlaneRole,
 			ExtraMounts: []kindconfigv1alpha4.Mount{{
 				HostPath:      manifest,
 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
@@ -144,10 +135,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		if i == 0 && v129 {
 			mPath = firstNodeManifestPath
 		}
-		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
-	}
-	for i := 0; i < spec.WorkerNodes; i++ {
-		appendNode(kindconfigv1alpha4.WorkerRole, workerManifestPath)
+		appendNode(mPath)
 	}
 
 	// Create cluster
@@ -174,7 +162,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	// Discover nodes
 	c.Nodes, err = c.Provider.ListInternalNodes(c.Name)
 	Expect(err).ToNot(HaveOccurred())
-	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes+spec.WorkerNodes))
+	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes))
 
 	// Load kube-vip image
 	c.LoadImage(spec.KubeVip.ImagePath)
@@ -292,10 +280,10 @@ func (c *Cluster) saveKubeVipNodeDiagnostics(ctx context.Context, dir string) er
 	const script = `set +e
 echo '--- static pod manifest'
 cat /etc/kubernetes/manifests/kube-vip.yaml
-echo '--- kubelet kubeconfig references'
-grep -E 'server:|client-certificate:|client-key:' /etc/kubernetes/kubelet.conf
-echo '--- kubelet client credentials'
-ls -la /var/lib/kubelet/pki
+echo '--- admin kubeconfig endpoint'
+grep -E 'server:' /etc/kubernetes/admin.conf
+echo '--- control-plane static pods'
+crictl ps -a --name 'kube-apiserver|etcd'
 echo '--- kube-vip pod sandboxes'
 crictl pods --name kube-vip
 echo '--- kube-vip containers'
