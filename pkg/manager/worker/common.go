@@ -212,6 +212,14 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 	wg := sync.WaitGroup{}
 	defer electionSession.Stopped()
 	defer wg.Wait()
+	var electionVIPs []string
+	if config.EnableServices && leaseName == config.ServicesLeaseName {
+		var err error
+		electionVIPs, err = c.svcProcessor.ElectionVIPs(ctx)
+		if err != nil {
+			log.Warn("unable to list Service VIPs for lease ownership", "err", err)
+		}
+	}
 
 	run := &election.RunConfig{
 		Config:           config,
