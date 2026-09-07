@@ -29,7 +29,11 @@ func TestSyncServicesOnDemandWinnerProgramsForcedService(t *testing.T) {
 	}
 	serviceInstance := &instance.Instance{ServiceSnapshot: service}
 	processor := &Processor{
-		config:           &kubevip.Config{EnableARP: true, PerServiceElectionOnDemand: true},
+		config: &kubevip.Config{
+			DisableServiceUpdates:      true,
+			EnableARP:                  true,
+			PerServiceElectionOnDemand: true,
+		},
 		ServiceInstances: []*instance.Instance{serviceInstance},
 		nodeLabelManager: noop.NewManager(),
 	}
