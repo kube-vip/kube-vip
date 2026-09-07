@@ -35,8 +35,10 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	if service == nil {
 		return fmt.Errorf("no service for leader election")
 	}
-	done := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
-	defer done()
+	if !p.config.EnableServicesElection && p.config.PerServiceElectionOnDemand {
+		done := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
+		defer done()
+	}
 
 	return p.startServicesLeaderElection(svcCtx, service)
 }
