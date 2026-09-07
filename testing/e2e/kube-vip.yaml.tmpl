@@ -26,8 +26,8 @@ spec:
       value: "false"
     - name: port
       value: "6443"
-    - name: vip_cidr
-      value: "32"
+    - name: vip_subnet
+      value: "32,128"
     - name: vip_leaderelection
       value: "{{ if .VipElectionEnable }}{{ .VipElectionEnable }}{{ else }}false{{ end }}"
     - name: vip_interface
@@ -57,6 +57,8 @@ spec:
 {{- else }}
     - name: vip_arp
       value: "true"
+    - name: vip_subnet
+      value: "32,128"
     - name: vip_interface
       value: eth0
     - name: vip_leaderelection
