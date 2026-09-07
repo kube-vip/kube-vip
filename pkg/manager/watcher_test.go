@@ -121,6 +121,49 @@ func TestParseNewBgpAnnotations(t *testing.T) {
 	assert.EqualValues(t, 5, bgpConfig.KeepaliveInterval, "base bgpConfig.KeepaliveInterval should not be overwritten")
 }
 
+func TestParseBgpAnnotationPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		port     string
+		wantPort uint16
+		wantErr  bool
+	}{
+		{name: "present", port: "1179", wantPort: 1179},
+		{name: "default"},
+		{name: "invalid", port: "invalid", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			annotations := map[string]string{
+				"bgp/bgp-peers-0-node-asn": "65000",
+				"bgp/bgp-peers-0-peer-asn": "64000",
+				"bgp/bgp-peers-0-peer-ip":  "10.0.0.1",
+				"bgp/bgp-peers-0-src-ip":   "10.0.0.254",
+			}
+			if test.port != "" {
+				annotations["bgp/bgp-peers-0-peer-port"] = test.port
+			}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test", Annotations: annotations}}
+
+			config, _, err := parseBgpAnnotations(kubevip.BGPConfig{}, node, "bgp")
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("parseBgpAnnotations() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseBgpAnnotations() error = %v", err)
+			}
+			if got := config.Peers[0].Port; got != test.wantPort {
+				t.Fatalf("peer port = %d, want %d", got, test.wantPort)
+			}
+		})
+	}
+}
+
 func Test_parseBgpAnnotations(t *testing.T) {
 	type args struct {
 		node   *corev1.Node
