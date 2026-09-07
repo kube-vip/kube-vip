@@ -165,6 +165,7 @@ func (p *Processor) startServicesLeaderElection(svcCtx *servicecontext.Context, 
 		LeaseID:          id,
 		Mgr:              p.electionMgr,
 		LeaseAnnotations: map[string]string{},
+		VIPs:             serviceVIPAddresses(service),
 
 		OnStartedLeading: func(_ context.Context) {
 			svcLease.Elected.Store(true)
