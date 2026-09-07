@@ -15,15 +15,14 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestRenderKubeVipWorkerManifest(t *testing.T) {
+func TestRenderKubeVipControlPlaneManifest(t *testing.T) {
 	tmpl, err := template.ParseFiles("kube-vip.yaml.tmpl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "worker.yaml")
+	path := filepath.Join(t.TempDir(), "control-plane.yaml")
 	values := KubevipManifestValues{
-		ConfigPath:                 "/etc/kubernetes/kubelet.conf",
-		KubeletPKIPath:             "/var/lib/kubelet/pki",
+		ConfigPath:                 "/etc/kubernetes/admin.conf",
 		PrometheusHTTPServer:       ":2112",
 		SvcElectionEnable:          "false",
 		PerServiceElectionOnDemand: "true",
@@ -38,23 +37,26 @@ func TestRenderKubeVipWorkerManifest(t *testing.T) {
 	for _, want := range []string{
 		`- --prometheusHTTPServer`,
 		`- ":2112"`,
-		`path: "/etc/kubernetes/kubelet.conf"`,
-		`mountPath: /var/lib/kubelet/pki`,
-		`path: /var/lib/kubelet/pki`,
+		`path: "/etc/kubernetes/admin.conf"`,
 		`hostNetwork: true`,
 		"- name: svc_election\n      value: \"false\"",
 		"- name: per_service_election_on_demand\n      value: \"true\"",
 	} {
 		if !strings.Contains(string(manifest), want) {
-			t.Errorf("rendered worker manifest does not contain %q", want)
+			t.Errorf("rendered control-plane manifest does not contain %q", want)
+		}
+	}
+	for _, obsolete := range []string{"kubelet.conf", "kubelet-pki", "/var/lib/kubelet/pki"} {
+		if strings.Contains(string(manifest), obsolete) {
+			t.Errorf("rendered control-plane manifest contains obsolete worker credential %q", obsolete)
 		}
 	}
 }
 
 func TestWaitForKubeVipReady(t *testing.T) {
 	readyPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-worker", Namespace: "kube-system", Labels: map[string]string{"app": "kube-vip"}},
-		Spec:       corev1.PodSpec{NodeName: "worker"},
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip-control-plane", Namespace: "kube-system", Labels: map[string]string{"app": "kube-vip"}},
+		Spec:       corev1.PodSpec{NodeName: "control-plane"},
 		Status: corev1.PodStatus{
 			Phase:      corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
@@ -64,10 +66,10 @@ func TestWaitForKubeVipReady(t *testing.T) {
 		},
 	}
 	client := fake.NewClientset(readyPod)
-	if err := WaitForKubeVipReady(context.Background(), client, []string{"worker"}); err != nil {
+	if err := WaitForKubeVipReady(context.Background(), client, []string{"control-plane"}); err != nil {
 		t.Fatalf("WaitForKubeVipReady() error = %v", err)
 	}
-	if err := WaitForKubeVipReady(context.Background(), client, []string{"worker", "worker2"}); err == nil || !strings.Contains(err.Error(), "worker2") {
-		t.Fatalf("WaitForKubeVipReady() error = %v, want missing worker2 diagnostic", err)
+	if err := WaitForKubeVipReady(context.Background(), client, []string{"control-plane", "control-plane2"}); err == nil || !strings.Contains(err.Error(), "control-plane2") {
+		t.Fatalf("WaitForKubeVipReady() error = %v, want missing control-plane2 diagnostic", err)
 	}
 }
