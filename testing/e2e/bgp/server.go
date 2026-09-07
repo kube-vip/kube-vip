@@ -176,23 +176,22 @@ func (s *Server) AddClusterPeers(ctx context.Context, clusterNodes []nodes.Node,
 	// Register peers with GoBGP
 	for _, p := range peers {
 		Eventually(func() error {
-			_, err := s.Client.AddPeer(ctx, &api.AddPeerRequest{
-				Peer: &api.Peer{
-					Conf: &api.PeerConf{
-						NeighborAddress: p.IP,
-						PeerAsn:         p.AS,
-					},
-					AfiSafis: []*api.AfiSafi{
-						{Config: &api.AfiSafiConfig{Enabled: true, Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}}},
-						{Config: &api.AfiSafiConfig{Enabled: true, Family: &api.Family{Afi: api.Family_AFI_IP6, Safi: api.Family_SAFI_UNICAST}}},
-					},
-				},
-			})
+			_, err := s.Client.AddPeer(ctx, peerRequest(p.IP, p.AS))
 			return err
 		}, "120s", "100ms").Should(Succeed())
 	}
 
 	return peers
+}
+
+func peerRequest(address string, asn uint32) *api.AddPeerRequest {
+	return &api.AddPeerRequest{Peer: &api.Peer{
+		Conf: &api.PeerConf{NeighborAddress: address, PeerAsn: asn},
+		AfiSafis: []*api.AfiSafi{
+			{Config: &api.AfiSafiConfig{Enabled: true, Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}}},
+			{Config: &api.AfiSafiConfig{Enabled: true, Family: &api.Family{Afi: api.Family_AFI_IP6, Safi: api.Family_SAFI_UNICAST}}},
+		},
+	}}
 }
 
 // WaitForEstablished waits until every requested neighbor is established.
@@ -264,7 +263,7 @@ func (s *Server) RemovePeers(ctx context.Context, peers []*e2e.BGPPeerValues) {
 // ResolveVIP queries GoBGP for the current next-hops announcing the given VIP.
 // Returns the node IPs that a real BGP router would forward traffic to.
 func ResolveVIP(ctx context.Context, c api.GoBgpServiceClient, vip string) []string {
-	family := &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST}
+	family := routeFamily(vip)
 	dests, err := ListPaths(ctx, c, family, []*api.TableLookupPrefix{{Prefix: vip}})
 	Expect(err).ToNot(HaveOccurred())
 
@@ -277,6 +276,14 @@ func ResolveVIP(ctx context.Context, c api.GoBgpServiceClient, vip string) []str
 		}
 	}
 	return nexthops
+}
+
+func routeFamily(address string) *api.Family {
+	afi := api.Family_AFI_IP
+	if ip := net.ParseIP(address); ip != nil && ip.To4() == nil {
+		afi = api.Family_AFI_IP6
+	}
+	return &api.Family{Afi: afi, Safi: api.Family_SAFI_UNICAST}
 }
 
 // ---------------------------------------------------------------------------
