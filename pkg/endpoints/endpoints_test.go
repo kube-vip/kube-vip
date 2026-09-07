@@ -102,7 +102,7 @@ func TestUpdateAnnotationsZeroEndpointsThenSameEndpoint(t *testing.T) {
 				service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 					Name: "test-service", Namespace: "default", UID: "test-uid", Annotations: annotations,
 				}}
-				serviceInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+				serviceInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service.DeepCopy()}
 				instances := []*instance.Instance{serviceInstance}
 				recorder := &recordingProvider{Provider: provider}
 				processor := &Processor{
@@ -167,7 +167,7 @@ func TestUpdateAnnotationsEndpointSlicesClearsConfiguredFamily(t *testing.T) {
 			service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 				Name: "test-service", Namespace: "default", UID: "test-uid", Annotations: annotations,
 			}}
-			instances := []*instance.Instance{{ServiceSnapshot: service.DeepCopy()}}
+			instances := []*instance.Instance{{ServiceUID: service.UID, ServiceSnapshot: service.DeepCopy()}}
 			recorder := &recordingProvider{Provider: providers.NewEndpointslices()}
 			processor := &Processor{
 				config:    &kubevip.Config{EnableEndpoints: false},
