@@ -40,12 +40,15 @@ const (
 
 type ScaleMetricSnapshot map[string]map[string]float64
 
-func ValidateScaleTopology(controlPlaneNodes, maxNodes int) error {
-	if controlPlaneNodes != maxNodes {
-		return fmt.Errorf("scale topology has %d control-plane nodes, want the bounded maximum of %d", controlPlaneNodes, maxNodes)
+func ValidateScaleTopology(controlPlaneNodes, workerNodes, maxNodes int) error {
+	if controlPlaneNodes != 3 {
+		return fmt.Errorf("scale topology has %d control-plane nodes, want 3", controlPlaneNodes)
 	}
-	if controlPlaneNodes < 3 {
-		return fmt.Errorf("scale topology needs at least three control-plane nodes, got %d", controlPlaneNodes)
+	if workerNodes != 0 {
+		return fmt.Errorf("scale topology has %d worker nodes, want 0", workerNodes)
+	}
+	if controlPlaneNodes+workerNodes > maxNodes {
+		return fmt.Errorf("scale topology has %d nodes, exceeds bounded maximum of %d", controlPlaneNodes+workerNodes, maxNodes)
 	}
 	return nil
 }
@@ -367,8 +370,8 @@ func WaitForScaleServiceContenders(ctx context.Context, clusterName string, node
 }
 
 func scaleServiceContenders(snapshot ScaleMetricSnapshot, namespace string, serviceNames []string, minimum int) ([]string, error) {
-	if minimum < 1 {
-		return nil, fmt.Errorf("minimum contender count must be positive")
+	if minimum < 2 {
+		return nil, fmt.Errorf("minimum contender count must be at least 2")
 	}
 	contenders := make([]string, 0, len(snapshot))
 	for node, nodeMetrics := range snapshot {
@@ -376,8 +379,8 @@ func scaleServiceContenders(snapshot ScaleMetricSnapshot, namespace string, serv
 		for _, serviceName := range serviceNames {
 			labelsForService := map[string]string{"namespace": namespace, "name": serviceName}
 			loops, loopMatches := MetricValue(nodeMetrics, "kube_vip_service_election_loops", labelsForService)
-			_, attemptMatches := MetricValue(nodeMetrics, "kube_vip_service_election_attempts_total", labelsForService)
-			if loopMatches != 1 || loops != 1 || attemptMatches != 1 {
+			attempts, attemptMatches := MetricValue(nodeMetrics, "kube_vip_service_election_attempts_total", labelsForService)
+			if loopMatches != 1 || loops != 1 || attemptMatches != 1 || attempts <= 0 {
 				ready = false
 				break
 			}
