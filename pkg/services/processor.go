@@ -371,8 +371,6 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
 		p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
-		// Drop the per-service election series so a recreated service starts clean.
-		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 	}
 	p.untrackService(svc)
