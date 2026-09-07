@@ -533,6 +533,9 @@ func TestReconcileServicesElectionDoesNotStartElectionLoop(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-svc", Namespace: "default", UID: "test-uid"},
 		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
 	}
+	metrics.ServiceElectionLoops.DeleteLabelValues(service.Namespace, service.Name)
+	metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
+	defer metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -584,4 +587,10 @@ func TestReconcileServicesElectionDoesNotStartElectionLoop(t *testing.T) {
 		t.Fatal("endpoint reconciliation unexpectedly reset readiness")
 	default:
 	}
+	if got := testutil.ToFloat64(metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)); got != 0 {
+		t.Errorf("wrapper election attempts is %v, want 0", got)
+	}
+
+	svcCtx.Cancel()
+	wg.Wait()
 }
