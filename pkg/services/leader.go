@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -120,25 +119,15 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			log.Error("error on started leading", "error", err)
 		}
 
-		// A follower must return when the current leader loses the lease so the
-		// restart loop can campaign for the same shared lease. Waiting only for
-		// the service context leaves the follower blocked forever after takeover.
-	wait:
-		for svcLease.Elected.Load() {
-			timer := time.NewTimer(200 * time.Millisecond)
-			select {
-			case <-svcCtx.Ctx.Done():
-				timer.Stop()
-				break wait
-			case <-svcLease.Ctx.Done():
-				timer.Stop()
-				break wait
-			case <-timer.C:
-			}
-		}
+		// Block until service context is cancelled
+		<-svcCtx.Ctx.Done()
+
 		if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 			log.Error("error on stopped leading", "error", err)
 		}
+
+		// wait for leaderelection to be finished
+		<-svcLease.Ctx.Done()
 
 		return nil
 	}
@@ -196,10 +185,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	if !p.serviceContextCurrent(service.UID, svcCtx) {
+	var err error
+	if !p.withActiveService(service.UID, svcCtx, func() {
+		err = p.SyncServices(svcCtx, service, wg, true)
+	}) {
 		return nil
 	}
-	err := p.SyncServices(svcCtx, service, wg, true)
 	if err != nil {
 		log.Error("service sync", "uid", service.UID, "err", err)
 		return err
@@ -208,14 +199,11 @@ func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1
 }
 
 func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *lease.Lease, service *v1.Service) error {
-	unlockService := p.lockService(service.UID)
-	defer unlockService()
-
 	currentSvcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
 		return err
 	}
-	if currentSvcCtx != svcCtx {
+	if currentSvcCtx != nil && currentSvcCtx != svcCtx {
 		log.Debug("skipping cleanup from superseded service context", "service", service.Name, "uid", service.UID)
 		return nil
 	}
