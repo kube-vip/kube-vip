@@ -11,8 +11,6 @@ import (
 
 func TestTrackServiceElectionLoopLifecycle(t *testing.T) {
 	const namespace, name = "metrics-test", "service"
-	ServiceElectionLoops.DeleteLabelValues(namespace, name)
-
 	firstDone := TrackServiceElectionLoop(namespace, name)
 	secondDone := TrackServiceElectionLoop(namespace, name)
 	if got := testutil.ToFloat64(ServiceElectionLoops.WithLabelValues(namespace, name)); got != 2 {
@@ -24,20 +22,18 @@ func TestTrackServiceElectionLoopLifecycle(t *testing.T) {
 	if got := testutil.ToFloat64(ServiceElectionLoops.WithLabelValues(namespace, name)); got != 1 {
 		t.Fatalf("active loops after first exit = %v, want 1", got)
 	}
-	if !hasElectionLoopSeries(t, namespace, name) {
+	if !hasElectionLoopSeries(t, name) {
 		t.Fatal("first exit removed the overlapping loop's series")
 	}
 
 	secondDone()
-	if hasElectionLoopSeries(t, namespace, name) {
+	if hasElectionLoopSeries(t, name) {
 		t.Fatal("final exit did not remove the loop series")
 	}
 }
 
 func TestTrackServiceElectionLoopConcurrentCleanup(t *testing.T) {
 	const namespace, name = "metrics-test", "concurrent"
-	ServiceElectionLoops.DeleteLabelValues(namespace, name)
-
 	const loops = 64
 	done := make([]func(), loops)
 	for i := range done {
@@ -49,13 +45,44 @@ func TestTrackServiceElectionLoopConcurrentCleanup(t *testing.T) {
 	}
 	wg.Wait()
 
-	if hasElectionLoopSeries(t, namespace, name) {
+	if hasElectionLoopSeries(t, name) {
 		t.Fatal("concurrent cleanup left a loop series")
 	}
 }
 
-func hasElectionLoopSeries(t *testing.T, namespace, name string) bool {
+func TestTrackServiceElectionLoopSameNameReplacementDuringCleanup(t *testing.T) {
+	const namespace, name = "metrics-test", "replacement"
+
+	for range 100 {
+		oldDone := TrackServiceElectionLoop(namespace, name)
+		start := make(chan struct{})
+		cleaned := make(chan struct{})
+		go func() {
+			<-start
+			oldDone()
+			close(cleaned)
+		}()
+
+		close(start)
+		newDone := TrackServiceElectionLoop(namespace, name)
+		<-cleaned
+		if got := testutil.ToFloat64(ServiceElectionLoops.WithLabelValues(namespace, name)); got != 1 {
+			t.Fatalf("replacement loop count = %v, want 1", got)
+		}
+		if !hasElectionLoopSeries(t, name) {
+			t.Fatal("old cleanup removed replacement loop series")
+		}
+		newDone()
+	}
+
+	if hasElectionLoopSeries(t, name) {
+		t.Fatal("replacement cleanup left a loop series")
+	}
+}
+
+func hasElectionLoopSeries(t *testing.T, name string) bool {
 	t.Helper()
+	const namespace = "metrics-test"
 	registry := prometheus.NewPedanticRegistry()
 	registry.MustRegister(ServiceElectionLoops)
 	families, err := registry.Gather()

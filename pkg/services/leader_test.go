@@ -426,15 +426,13 @@ func TestSharedLeaseOwnerCancellationStopsCampaignBeforeWatcherWait(t *testing.T
 }
 func TestStartServicesLeaderElectionMetricsLifecycleAndRetries(t *testing.T) {
 	p := &Processor{
-		config:   &kubevip.Config{LeaderElectionType: "test"},
+		config:   &kubevip.Config{LeaderElectionType: "test", PerServiceElectionOnDemand: true},
 		leaseMgr: lease.NewManager(),
 	}
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		Name: "metrics", Namespace: "on-demand", UID: types.UID("metrics"),
 	}}
-	metrics.ServiceElectionLoops.DeleteLabelValues(service.Namespace, service.Name)
 	metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
-	defer metrics.ServiceElectionLoops.DeleteLabelValues(service.Namespace, service.Name)
 	defer metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
 
 	namespace, name := lease.ServiceName(service)
@@ -466,6 +464,30 @@ func TestStartServicesLeaderElectionMetricsLifecycleAndRetries(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)); got != 2 {
 		t.Fatalf("attempts after retry = %v, want 2", got)
+	}
+	svcCtx.Cancel()
+}
+
+func TestStartServicesLeaderElectionFullModeDoesNotTrackWrapperMetric(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{EnableServicesElection: true, LeaderElectionType: "test"},
+		leaseMgr: lease.NewManager(),
+	}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "full-mode", Namespace: "metrics", UID: types.UID("full-mode"),
+	}}
+	namespace, name := lease.ServiceName(service)
+	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, namespace, name))
+	svcLease.Cancel()
+	svcCtx := servicecontext.New(context.Background())
+	wrapperDone := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
+	defer wrapperDone()
+
+	if err := p.StartServicesLeaderElection(svcCtx, service, nil, true); err != nil {
+		t.Fatalf("StartServicesLeaderElection() error = %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)); got != 1 {
+		t.Fatalf("full-mode loop gauge = %v, want wrapper-owned value 1", got)
 	}
 	svcCtx.Cancel()
 }
