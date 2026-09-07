@@ -93,11 +93,7 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 
 		svcCtx.SignalReadiness()
 
-		if p.serviceElectionManaged(service) {
-			return false, nil
-		}
-
-		if p.shouldProcessInstance() {
+		if !p.serviceElectionManaged(service) && p.shouldProcessInstance() {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -110,11 +106,7 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 			}
 			svcCtx.SignalReadiness()
 
-			if p.serviceElectionManaged(service) {
-				return false, nil
-			}
-
-			if p.shouldProcessInstance() {
+			if !p.serviceElectionManaged(service) && p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service); err != nil {
 					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
 				}

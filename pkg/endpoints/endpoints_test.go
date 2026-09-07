@@ -570,3 +570,73 @@ func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
 		})
 	}
 }
+
+func TestReconcile_OnDemandElectionRunsCommonEgressTail(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		endpoints    []string
+		annotations  map[string]string
+		lastEndpoint string
+		wantEndpoint string
+	}{
+		{
+			name:      "endpoint",
+			endpoints: []string{"10.0.0.1"},
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection: "true",
+				kubevip.Egress:                  "true",
+			},
+			wantEndpoint: "10.0.0.1",
+		},
+		{
+			name: "endpointless",
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection:        "true",
+				kubevip.AllowReconcileWithoutEndpoints: "true",
+				kubevip.Egress:                         "true",
+				kubevip.ActiveEndpoint:                 "10.0.0.1",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "forced", Namespace: "default", UID: "forced", Annotations: test.annotations},
+				Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster},
+			}
+			worker := &fakeWorker{endpoints: test.endpoints}
+			recorder := &recordingProvider{Provider: providers.NewEndpointslices()}
+			processor := &Processor{
+				config:   &kubevip.Config{PerServiceElectionOnDemand: true},
+				provider: recorder,
+				worker:   worker,
+			}
+			svcCtx := servicecontext.New(context.Background())
+			defer svcCtx.Cancel()
+			lastEndpoint := test.lastEndpoint
+			egressUpdates := 0
+
+			if _, err := processor.Reconcile(svcCtx,
+				watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+				&lastEndpoint, service, "node-1",
+				func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error { return nil },
+				&sync.WaitGroup{}, nil, func(context.Context, *v1.Service) error {
+					egressUpdates++
+					return nil
+				}); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if !svcCtx.Signalled.Load() {
+				t.Fatal("endpoint readiness was not signalled")
+			}
+			if worker.processCalled {
+				t.Fatal("election-managed service programmed endpoint datapath")
+			}
+			if lastEndpoint != test.wantEndpoint {
+				t.Fatalf("last endpoint = %q, want %q", lastEndpoint, test.wantEndpoint)
+			}
+			if egressUpdates != 1 {
+				t.Fatalf("egress updates = %d, want 1", egressUpdates)
+			}
+		})
+	}
+}
