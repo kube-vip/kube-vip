@@ -26,7 +26,7 @@ func TestNewInstanceUsesEffectiveServiceElection(t *testing.T) {
 	}{
 		{name: "global IP", config: &kubevip.Config{EnableServicesElection: true}, address: "192.0.2.10", want: true},
 		{name: "forced on-demand BGP IP", config: &kubevip.Config{PerServiceElectionOnDemand: true}, annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}, address: "192.0.2.10", bgp: true, want: true},
-		{name: "forced on-demand routing-table hostname", config: &kubevip.Config{PerServiceElectionOnDemand: true}, annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}, address: "vip.example.test", routing: true, want: true},
+		{name: "forced on-demand routing-table hostname", config: &kubevip.Config{PerServiceElectionOnDemand: true}, annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}, address: "localhost", routing: true, want: true},
 		{name: "ordinary mixed-mode service", config: &kubevip.Config{PerServiceElectionOnDemand: true}, address: "192.0.2.10"},
 		{name: "annotation value is exact", config: &kubevip.Config{PerServiceElectionOnDemand: true}, annotations: map[string]string{kubevip.ForcePerServiceElection: "True"}, address: "192.0.2.10"},
 	} {
