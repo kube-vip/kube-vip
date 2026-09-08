@@ -5,6 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
 var (
 	serviceElectionLoopsMu sync.Mutex
 	serviceElectionLoops   = make(map[string]int)
