@@ -1991,19 +1991,21 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		}
 
 		Eventually(func() error {
-			_, err := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
-			if err == nil {
-				return fmt.Errorf("common lease %s/%s still exists", leaseNamespace, lease)
+			currentLease, err := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
+			if err := e2e.CheckCommonLeaseRetired(currentLease, err); err != nil {
+				return fmt.Errorf("common lease %s/%s is not retired: %w", leaseNamespace, lease, err)
 			}
-			if !errors.IsNotFound(err) {
-				return fmt.Errorf("common lease %s/%s still exists: %w", leaseNamespace, lease, err)
-			}
+
+			var presentAddresses []string
 			for _, node := range nodeNames {
 				for _, addr := range lbAddresses {
 					if e2e.CheckIPAddressPresence(addr, node, false) == false {
-						return fmt.Errorf("address %q is still present on node %q", addr, node)
+						presentAddresses = append(presentAddresses, fmt.Sprintf("%q on %q", addr, node))
 					}
 				}
+			}
+			if len(presentAddresses) > 0 {
+				return fmt.Errorf("addresses are still present: %s", strings.Join(presentAddresses, ", "))
 			}
 			return nil
 		}, "120s", "1s").Should(Succeed())
