@@ -126,9 +126,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			log.Error("error on stopped leading", "error", err)
 		}
 
-		// wait for leaderelection to be finished
-		<-svcLease.Ctx.Done()
-
 		return nil
 	}
 
