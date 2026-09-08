@@ -119,10 +119,7 @@ func TestSharedLeaseMemberCancellationDoesNotWaitForLeaseRetirement(t *testing.T
 	}()
 
 	deadline := time.After(time.Second)
-	for {
-		if svcLease.Has(lease.ServiceNamespacedName(follower)) {
-			break
-		}
+	for !svcLease.Has(lease.ServiceNamespacedName(follower)) {
 		select {
 		case <-deadline:
 			t.Fatal("follower did not join the shared lease")
@@ -130,14 +127,18 @@ func TestSharedLeaseMemberCancellationDoesNotWaitForLeaseRetirement(t *testing.T
 			time.Sleep(time.Millisecond)
 		}
 	}
-	joined := make(chan struct{})
+	joined := make(chan bool, 1)
 	go func() {
 		svcLease.Lock()
+		isMember := svcLease.Has(lease.ServiceNamespacedName(follower))
 		svcLease.Unlock()
-		close(joined)
+		joined <- isMember
 	}()
 	select {
-	case <-joined:
+	case isMember := <-joined:
+		if !isMember {
+			t.Fatal("follower membership disappeared during campaign setup")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("follower did not finish joining the active campaign")
 	}
