@@ -8,6 +8,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -205,5 +206,77 @@ func TestSharedLeaseMemberCancellationDoesNotWaitForLeaseRetirement(t *testing.T
 	}
 	if _, ok := p.svcMap.Load(leader.UID); ok {
 		t.Fatal("final service context remained registered")
+	}
+}
+
+func TestSharedLeaseFollowerWithdrawsBeforeTakeover(t *testing.T) {
+	p := &Processor{
+		config:           &kubevip.Config{DisableServiceUpdates: true},
+		leaseMgr:         lease.NewManager(),
+		nodeLabelManager: noop.NewManager(),
+	}
+	newService := func(name string) *v1.Service {
+		return &v1.Service{ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "default", UID: types.UID(name + "-uid"),
+			Annotations: map[string]string{kubevip.ServiceLease: "shared"},
+		}}
+	}
+	leader := newService("leader")
+	follower := newService("follower")
+	followerCtx := servicecontext.New(context.Background())
+	t.Cleanup(followerCtx.Cancel)
+	p.svcMap.Store(follower.UID, followerCtx)
+	followerInstance := &instance.Instance{ServiceSnapshot: follower.DeepCopy()}
+	p.ServiceInstances = []*instance.Instance{
+		{ServiceSnapshot: leader.DeepCopy(), AddCalled: true},
+		followerInstance,
+	}
+
+	namespace, name := lease.ServiceName(follower)
+	id := lease.NewID(p.config.LeaderElectionType, namespace, name)
+	svcLease := p.leaseMgr.Add(context.Background(), id)
+	svcLease.Add(lease.ServiceNamespacedName(leader))
+	svcLease.Elected.Store(true)
+	close(svcLease.Started)
+	followerCtx.SignalReadiness()
+
+	done := make(chan error, 1)
+	go func() { done <- p.StartServicesLeaderElection(followerCtx, follower, nil, true) }()
+
+	deadline := time.After(time.Second)
+	for {
+		unlock := p.lockService(follower.UID)
+		started := followerInstance.AddCalled
+		unlock()
+		if started {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("follower did not enter the active shared lease campaign")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	// Local leadership loss must withdraw the follower before the restart loop
+	// campaigns again; the old implementation waited for service deletion.
+	svcLease.Elected.Store(false)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("follower did not return after leader loss: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower remained blocked after shared lease leadership was lost")
+	}
+
+	if len(p.ServiceInstances) != 1 || p.ServiceInstances[0].ServiceSnapshot.UID != leader.UID {
+		t.Fatal("follower cleanup removed the sibling service")
+	}
+	if !svcLease.Has(lease.ServiceNamespacedName(leader)) || !svcLease.Has(lease.ServiceNamespacedName(follower)) {
+		t.Fatal("follower cleanup changed shared lease membership")
+	}
+	if svcLease.Ctx.Err() != nil {
+		t.Fatal("follower cleanup retired the shared lease while sibling remained")
 	}
 }
