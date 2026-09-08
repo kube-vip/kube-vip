@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	log "log/slog"
 
@@ -119,11 +120,18 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			log.Error("error on started leading", "error", err)
 		}
 
-		// Block until service context is cancelled
-		<-svcCtx.Ctx.Done()
-
-		if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
-			log.Error("error on stopped leading", "error", err)
+		// A follower must return when the current leader loses the lease so the
+		// restart loop can campaign for the same shared lease. Waiting only for
+		// the service context leaves the follower blocked forever after takeover.
+		for svcLease.Elected.Load() {
+			select {
+			case <-svcCtx.Ctx.Done():
+				if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
+					log.Error("error on stopped leading", "error", err)
+				}
+				return nil
+			case <-time.After(200 * time.Millisecond):
+			}
 		}
 
 		return nil
