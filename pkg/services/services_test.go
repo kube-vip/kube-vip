@@ -37,11 +37,13 @@ func TestSyncServicesOnDemandWinnerProgramsForcedService(t *testing.T) {
 		ServiceInstances: []*instance.Instance{serviceInstance},
 		nodeLabelManager: noop.NewManager(),
 	}
+	svcCtx := servicecontext.New(context.Background())
+	processor.svcMap.Store(service.UID, svcCtx)
 
 	if serviceInstance.AddCalled {
 		t.Fatal("forced service was programmed before election winner sync")
 	}
-	if err := processor.SyncServices(servicecontext.New(context.Background()), service, &sync.WaitGroup{}, true); err != nil {
+	if err := processor.SyncServices(svcCtx, service, &sync.WaitGroup{}, true); err != nil {
 		t.Fatalf("SyncServices() error = %v", err)
 	}
 	if !serviceInstance.AddCalled {
