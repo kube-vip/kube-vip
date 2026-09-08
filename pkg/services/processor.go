@@ -330,6 +330,7 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		}
 		if svcCtx != nil {
 			svcCtx.Cancel()
+			svcCtx.CallLeaderCancel()
 			if err := svcCtx.WaitForWatchingStopped(context.Background()); err != nil {
 				return fmt.Errorf("wait for service watcher: %w", err)
 			}
