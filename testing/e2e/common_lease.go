@@ -1,6 +1,11 @@
 package e2e
 
-import "fmt"
+import (
+	"fmt"
+
+	coordinationv1 "k8s.io/api/coordination/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+)
 
 // CheckCommonLeaseOwnership verifies a stable lease holder and its exclusive datapath ownership.
 func CheckCommonLeaseOwnership(getHolder func() (string, error), nodes, addresses []string, hasAddress func(string, string) bool) (string, error) {
@@ -30,4 +35,19 @@ func CheckCommonLeaseOwnership(getHolder func() (string, error), nodes, addresse
 	}
 
 	return holder, nil
+}
+
+// CheckCommonLeaseRetired accepts a deleted lease or one without a holder.
+func CheckCommonLeaseRetired(lease *coordinationv1.Lease, err error) error {
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get common lease: %w", err)
+	}
+	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
+		return fmt.Errorf("common lease is still held by %q", *lease.Spec.HolderIdentity)
+	}
+
+	return nil
 }
