@@ -30,7 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/keymutex"
 )
+
+const concurrentServiceLocks = 128
 
 type Processor struct {
 	config        *kubevip.Config
@@ -40,9 +43,10 @@ type Processor struct {
 	// Keeps track of all running instances
 	ServiceInstances []*instance.Instance
 
-	mutex          sync.Mutex
-	lifecycleMutex sync.Mutex
-	bgpServer      *bgp.Server
+	mutex            sync.Mutex
+	serviceLocks     keymutex.KeyMutex
+	serviceLocksOnce sync.Once
+	bgpServer        *bgp.Server
 
 	clientSet   *kubernetes.Clientset
 	rwClientSet *kubernetes.Clientset
@@ -78,6 +82,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
 		ServiceInstances: []*instance.Instance{},
+		serviceLocks:     keymutex.NewHashed(concurrentServiceLocks),
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
@@ -142,8 +147,8 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		svc = s
 	}
 
-	p.lifecycleMutex.Lock()
-	defer p.lifecycleMutex.Unlock()
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
 
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
 
@@ -240,13 +245,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// start if service is not already watched/handled
 				// signal endpoints goroutine we are ready to start and run service handling function
 				log.Info("(svcs) service function starting", "uid", svc.UID)
-				if serviceFunc.UsesLeaderElection {
-					err = serviceFunc.Run(svcCtx, svc, wg)
-				} else {
-					p.withActiveService(svc.UID, svcCtx, func() {
-						err = serviceFunc.Run(svcCtx, svc, wg)
-					})
-				}
+				err = serviceFunc.Run(svcCtx, svc, wg)
 				if err != nil {
 					log.Error(err.Error())
 					if utils.IsPanicError(err) {
@@ -336,18 +335,18 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 			}
 		}
 
-		p.lifecycleMutex.Lock()
+		unlockService := p.lockService(svc.UID)
 		currentCtx, err := p.getServiceContext(svc.UID)
 		if err != nil {
-			p.lifecycleMutex.Unlock()
+			unlockService()
 			return fmt.Errorf("(svcs) unable to get context: %w", err)
 		}
 		if currentCtx == svcCtx {
+			defer unlockService()
 			break
 		}
-		p.lifecycleMutex.Unlock()
+		unlockService()
 	}
-	defer p.lifecycleMutex.Unlock()
 
 	if svcCtx != nil {
 		// If no leader election is enabled, delete routes here
@@ -381,8 +380,8 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 }
 
 func (p *Processor) withActiveService(uid types.UID, svcCtx *servicecontext.Context, reconcile func()) bool {
-	p.lifecycleMutex.Lock()
-	defer p.lifecycleMutex.Unlock()
+	unlockService := p.lockService(uid)
+	defer unlockService()
 	if svcCtx.Ctx.Err() != nil {
 		return false
 	}
@@ -392,6 +391,31 @@ func (p *Processor) withActiveService(uid types.UID, svcCtx *servicecontext.Cont
 	}
 	reconcile()
 	return true
+}
+
+func (p *Processor) serviceContextCurrent(uid types.UID, svcCtx *servicecontext.Context) bool {
+	unlockService := p.lockService(uid)
+	defer unlockService()
+	if svcCtx == nil || svcCtx.Ctx.Err() != nil {
+		return false
+	}
+	current, err := p.getServiceContext(uid)
+	return err == nil && current == svcCtx
+}
+
+func (p *Processor) lockService(uid types.UID) func() {
+	p.serviceLocksOnce.Do(func() {
+		if p.serviceLocks == nil {
+			p.serviceLocks = keymutex.NewHashed(concurrentServiceLocks)
+		}
+	})
+	key := string(uid)
+	p.serviceLocks.LockKey(key)
+	return func() {
+		if err := p.serviceLocks.UnlockKey(key); err != nil {
+			log.Error("failed to unlock service lifecycle", "uid", uid, "err", err)
+		}
+	}
 }
 
 func (p *Processor) Stop() {
