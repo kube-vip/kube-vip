@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -278,5 +279,145 @@ func TestSharedLeaseFollowerWithdrawsBeforeTakeover(t *testing.T) {
 	}
 	if svcLease.Ctx.Err() != nil {
 		t.Fatal("follower cleanup retired the shared lease while sibling remained")
+	}
+}
+
+func TestSharedLeaseOwnerCancellationStopsCampaignBeforeWatcherWait(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+	newService := func(name string) *v1.Service {
+		return &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+				UID:       types.UID(name + "-uid"),
+				Annotations: map[string]string{
+					kubevip.ServiceLease: "shared",
+				},
+			},
+		}
+	}
+
+	owner := newService("owner")
+	sibling := newService("sibling")
+	ownerCtx := servicecontext.New(context.Background())
+	siblingCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(owner.UID, ownerCtx)
+	p.svcMap.Store(sibling.UID, siblingCtx)
+	p.ServiceInstances = []*instance.Instance{
+		{ServiceSnapshot: owner.DeepCopy(), AddCalled: true},
+		{ServiceSnapshot: sibling.DeepCopy(), AddCalled: true},
+	}
+
+	namespace, name := lease.ServiceName(owner)
+	id := lease.NewID(p.config.LeaderElectionType, namespace, name)
+	svcLease := p.leaseMgr.Add(context.Background(), id)
+	ownerName := lease.ServiceNamespacedName(owner)
+	siblingName := lease.ServiceNamespacedName(sibling)
+	svcLease.Add(ownerName)
+	svcLease.Add(siblingName)
+	svcLease.Elected.Store(true)
+	close(svcLease.Started)
+
+	if !ownerCtx.StartWatching() {
+		t.Fatal("failed to start owner watcher")
+	}
+	campaignStopped := make(chan struct{})
+	var stopCampaign sync.Once
+	ownerCtx.SetLeaderCancel(func() {
+		stopCampaign.Do(func() {
+			svcLease.Elected.Store(false)
+			svcLease.Started = make(chan any)
+			close(campaignStopped)
+		})
+	})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		<-ownerCtx.Ctx.Done()
+		<-campaignStopped
+		ownerCtx.StopWatching()
+	}()
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- p.Delete(watch.Event{Type: watch.Deleted, Object: owner}, false)
+	}()
+	select {
+	case err := <-deleteDone:
+		if err != nil {
+			t.Fatalf("deleting campaign owner returned an error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("deleting campaign owner waited for its watcher")
+	}
+	<-watcherDone
+	select {
+	case <-campaignStopped:
+	default:
+		t.Fatal("owner campaign was not cancelled before the watcher wait completed")
+	}
+
+	if got := p.leaseMgr.Get(id); got != svcLease {
+		t.Fatal("shared lease was replaced while its sibling remained")
+	}
+	if svcLease.Ctx.Err() != nil {
+		t.Fatal("shared lease was cancelled while its sibling remained")
+	}
+	if svcLease.Has(ownerName) {
+		t.Fatal("campaign owner remained a lease member")
+	}
+	if !svcLease.Has(siblingName) {
+		t.Fatal("sibling membership disappeared with the campaign owner")
+	}
+	if _, ok := p.svcMap.Load(owner.UID); ok {
+		t.Fatal("campaign owner context remained registered")
+	}
+	if len(p.ServiceInstances) != 1 || p.ServiceInstances[0].ServiceSnapshot.UID != sibling.UID {
+		t.Fatal("campaign owner cleanup disturbed its sibling instance")
+	}
+
+	campaigned := make(chan struct{})
+	go func() {
+		svcLease.Lock()
+		if !svcLease.Elected.Load() && svcLease.Has(siblingName) {
+			svcLease.Elected.Store(true)
+			close(svcLease.Started)
+		}
+		svcLease.Unlock()
+		close(campaigned)
+	}()
+	select {
+	case <-campaigned:
+	case <-time.After(time.Second):
+		t.Fatal("sibling could not campaign on the shared lease")
+	}
+	if !svcLease.Elected.Load() {
+		t.Fatal("sibling did not take over the shared lease")
+	}
+
+	if err := p.Delete(watch.Event{Type: watch.Deleted, Object: sibling}, false); err != nil {
+		t.Fatalf("deleting final member returned an error: %v", err)
+	}
+	if p.leaseMgr.Get(id) != nil || svcLease.Ctx.Err() == nil {
+		t.Fatal("final member did not retire the shared lease")
+	}
+	if len(p.ServiceInstances) != 0 {
+		t.Fatalf("service instances remained after final cleanup: %d", len(p.ServiceInstances))
+	}
+	if _, ok := p.svcMap.Load(sibling.UID); ok {
+		t.Fatal("final service context remained registered")
+	}
+
+	replacement := p.leaseMgr.Add(context.Background(), id)
+	replacement.Add(siblingName)
+	if err := p.Delete(watch.Event{Type: watch.Deleted, Object: sibling}, false); err != nil {
+		t.Fatalf("repeating final member deletion returned an error: %v", err)
+	}
+	p.leaseMgr.Delete(id, siblingName, svcLease)
+	if p.leaseMgr.Get(id) != replacement || replacement.Ctx.Err() != nil {
+		t.Fatal("stale final cleanup retired the replacement lease")
 	}
 }
