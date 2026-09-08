@@ -123,15 +123,21 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		// A follower must return when the current leader loses the lease so the
 		// restart loop can campaign for the same shared lease. Waiting only for
 		// the service context leaves the follower blocked forever after takeover.
+	wait:
 		for svcLease.Elected.Load() {
+			timer := time.NewTimer(200 * time.Millisecond)
 			select {
 			case <-svcCtx.Ctx.Done():
-				if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
-					log.Error("error on stopped leading", "error", err)
-				}
-				return nil
-			case <-time.After(200 * time.Millisecond):
+				timer.Stop()
+				break wait
+			case <-svcLease.Ctx.Done():
+				timer.Stop()
+				break wait
+			case <-timer.C:
 			}
+		}
+		if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
+			log.Error("error on stopped leading", "error", err)
 		}
 
 		return nil
