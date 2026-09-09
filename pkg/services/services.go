@@ -239,7 +239,6 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 				}
 				log.Debug("IPv4 update channel closed, stopping")
 			}
-
 		})
 	}
 
@@ -256,7 +255,7 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv6")
 			} else {
-				for ip := range inst.DHCPv4Client.IPChannel() {
+				for ip := range inst.DHCPv6Client.IPChannel() {
 					log.Debug("IP changed", "ip", ip)
 					inst.VIPConfigs[index].VIP = ip
 					inst.DHCPInterfaceIPv6 = ip

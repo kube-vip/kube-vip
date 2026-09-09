@@ -93,33 +93,41 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	}
 
 	// Used for tracking an active endpoint / pod
+EventLoop:
 	for event := range ch {
 		metrics.CountServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
-
-		// We need to inspect the event and get ResourceVersion out of it
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
-				if utils.IsPanicError(err) {
-					return fmt.Errorf("add/modify service error: %w", err)
-				}
-				log.Error("service watcher event failed", "type", event.Type, "error", err)
-			}
-		case watch.Deleted:
-			if err := p.Delete(event, forcedOnly); err != nil {
-				if utils.IsPanicError(err) {
-					return fmt.Errorf("delete service error: %w", err)
-				}
-				log.Error("service watcher event failed", "type", event.Type, "error", err)
-			}
-		case watch.Bookmark:
-			// Un-used
-		case watch.Error:
-			log.Error("Error attempting to watch Kubernetes services")
-			watchErr := utils.WatchError(event.Object)
-			log.Error("services", "err", watchErr)
-			return utils.WrapPanicError(watchErr, "service watch failed")
+		select {
+		case <-ctx.Done():
+			log.Info("global context done")
+		case <-watcherCtx.Done():
+			log.Info("WatcheConotext done")
+			break EventLoop
 		default:
+			// We need to inspect the event and get ResourceVersion out of it
+			switch event.Type {
+			case watch.Added, watch.Modified:
+				if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
+					if utils.IsPanicError(err) {
+						return fmt.Errorf("add/modify service error: %w", err)
+					}
+					log.Error("service watcher event failed", "type", event.Type, "error", err)
+				}
+			case watch.Deleted:
+				if err := p.Delete(event, forcedOnly); err != nil {
+					if utils.IsPanicError(err) {
+						return fmt.Errorf("delete service error: %w", err)
+					}
+					log.Error("service watcher event failed", "type", event.Type, "error", err)
+				}
+			case watch.Bookmark:
+				// Un-used
+			case watch.Error:
+				log.Error("Error attempting to watch Kubernetes services")
+				watchErr := utils.WatchError(event.Object)
+				log.Error("services", "err", watchErr)
+				return utils.WrapPanicError(watchErr, "service watch failed")
+			default:
+			}
 		}
 	}
 
