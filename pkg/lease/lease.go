@@ -136,6 +136,12 @@ func (l *Lease) Add(name string) bool {
 	return false
 }
 
+// Has reports whether an object is a member of the lease.
+func (l *Lease) Has(name string) bool {
+	_, exists := l.services.Load(name)
+	return exists
+}
+
 // delete removes the service from the lease and decrements the counter
 func (l *Lease) delete(service string) {
 	if _, exists := l.services.Load(service); exists {
