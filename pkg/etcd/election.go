@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -73,10 +74,12 @@ func RunElectionOrDie(ctx context.Context, config *LeaderElectionConfig) error {
 	return nil
 }
 
-// RunElection starts a client with the provided config or panics.
-// RunElection blocks until leader election loop is
-// stopped by ctx or it has stopped holding the leader lease.
-func RunElection(ctx context.Context, config *LeaderElectionConfig) error {
+// RunElection starts a client with the provided config.
+// RunElection blocks until the leader election loop is stopped. Cancellation of
+// ctx is a clean shutdown and returns nil. If the etcd session ends independently
+// of ctx, RunElection returns "election session ended" because the caller must
+// start a new election with a new session.
+func RunElection(ctx context.Context, config *LeaderElectionConfig) (runErr error) {
 	var memberID uint64
 	if config.MemberUniqueID != nil {
 		memberID = *config.MemberUniqueID
@@ -103,61 +106,147 @@ func RunElection(ctx context.Context, config *LeaderElectionConfig) error {
 		config.EtcdConfig.Client,
 		concurrency.WithTTL(int(lease.TTL)),
 		concurrency.WithLease(leaseID),
+		concurrency.WithContext(ctx),
 	)
 	if err != nil {
+		_ = revokeLease(config.EtcdConfig.Client, leaseID, lease.TTL)
 		return err
 	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			if revokeErr := revokeLease(config.EtcdConfig.Client, leaseID, lease.TTL); revokeErr != nil && runErr == nil && ctx.Err() == nil {
+				runErr = errors.Wrap(revokeErr, "revoking election lease")
+			}
+		}
+	}()
 
 	election := concurrency.NewElection(s, config.Name)
 
 	m := &member{
-		client:         config.EtcdConfig.Client,
-		election:       election,
-		callbacks:      config.Callbacks,
-		memberID:       config.MemberID,
-		weAreTheLeader: make(chan struct{}, 1),
-		leaseTTL:       lease.TTL,
+		election:    election,
+		callbacks:   config.Callbacks,
+		memberID:    config.MemberID,
+		leaderDelay: time.Second * time.Duration(lease.TTL),
 	}
+	return m.run(ctx, s.Done())
+}
 
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
-
-	wg.Go(func() {
-		m.tryToBeLeader(ctx, &wg)
-	})
-	m.watchLeaderChanges(ctx)
-
-	return nil
+type election interface {
+	Campaign(context.Context, string) error
+	Key() string
+	Observe(context.Context) <-chan *clientv3.GetResponse
 }
 
 type member struct {
-	key              string
-	client           *clientv3.Client
-	election         *concurrency.Election
-	isLeader         bool
-	currentLeaderKey string
-	callbacks        LeaderCallbacks
-	memberID         string
-	weAreTheLeader   chan struct{}
-	leaseTTL         int64
+	election    election
+	callbacks   LeaderCallbacks
+	memberID    string
+	leaderDelay time.Duration
+	state       atomic.Int32
 }
 
-func (m *member) watchLeaderChanges(ctx context.Context) {
-	observeCtx, observeCancel := context.WithCancel(ctx)
-	defer observeCancel()
-	changes := m.election.Observe(observeCtx)
+type campaignResult struct {
+	key string
+	ack chan struct{}
+}
 
-watcher:
+func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	elected := make(chan campaignResult, 1)
+	campaignDone := make(chan error, 1)
+	observerDone := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Go(func() { campaignDone <- m.campaign(runCtx, elected, sessionDone) })
+	wg.Go(func() { observerDone <- m.watchLeaderChanges(runCtx, elected) })
+
+	var result error
+	for campaignDone != nil && observerDone != nil {
+		select {
+		case <-ctx.Done():
+			m.stop()
+			cancel()
+			wg.Wait()
+			return nil
+		case <-sessionDone:
+			m.stop()
+			if ctx.Err() != nil {
+				cancel()
+				wg.Wait()
+				return nil
+			}
+			result = errors.New("election session ended")
+			cancel()
+			wg.Wait()
+			return result
+		case err := <-campaignDone:
+			campaignDone = nil
+			if err != nil {
+				if ctx.Err() != nil {
+					m.stop()
+					cancel()
+					wg.Wait()
+					return nil
+				}
+				result = errors.Wrap(err, "campaigning for leadership")
+				m.stop()
+				cancel()
+				wg.Wait()
+				return result
+			}
+		case err := <-observerDone:
+			observerDone = nil
+			if err != nil {
+				if ctx.Err() != nil {
+					m.stop()
+					cancel()
+					wg.Wait()
+					return nil
+				}
+				result = errors.Wrap(err, "observing leader changes")
+				m.stop()
+				cancel()
+				wg.Wait()
+				return result
+			}
+		}
+	}
+
+	m.stop()
+	cancel()
+	wg.Wait()
+	return result
+}
+
+func (m *member) watchLeaderChanges(ctx context.Context, elected <-chan campaignResult) error {
+	changes := m.election.Observe(ctx)
+	var key, currentLeaderKey string
+	var isLeader bool
+	defer func() {
+		if isLeader {
+			m.callbacks.OnStoppedLeading()
+		}
+		log.Debug("Exiting watcher", "id", m.memberID)
+	}()
+	defer m.stop()
+
 	for {
 		select {
 		case <-ctx.Done():
-			break watcher
-		case <-m.weAreTheLeader:
-
-			m.isLeader = true
-			m.key = m.election.Key() // by this time, this should already be set, since Campaign has already returned
-			log.Debug("Marking self as leader with key", "id", m.memberID, "key", m.key)
-		case response := <-changes:
+			return nil
+		case result := <-elected:
+			isLeader = true
+			key = result.key
+			close(result.ack)
+			log.Debug("Marking self as leader with key", "id", m.memberID, "key", key)
+		case response, ok := <-changes:
+			if !ok {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return errors.New("leader observation ended")
+			}
 			log.Debug("Leader Changes", "id", m.memberID, "response", response)
 			if len(response.Kvs) == 0 {
 				// There is a race condition where just after we stop being the leader
@@ -167,71 +256,82 @@ watcher:
 				continue
 			}
 			newLeaderKey := response.Kvs[0].Key
-			if m.isLeader && m.key != string(newLeaderKey) {
+			if isLeader && key != string(newLeaderKey) {
 				// We stopped being leaders
 
 				// exit the loop, so we cancel the observe context so we stop watching
 				// for new leaders. That will close the channel and make this function exit,
 				// which also makes the routine to finish and RunElection returns
-				break watcher
+				return errors.New("leadership lost")
 			}
 
-			if m.currentLeaderKey != string(newLeaderKey) {
+			if currentLeaderKey != string(newLeaderKey) {
 				// we observed a leader, this could be us or someone else
-				m.currentLeaderKey = string(newLeaderKey)
+				currentLeaderKey = string(newLeaderKey)
 				m.callbacks.OnNewLeader(string(response.Kvs[0].Value))
 			}
 		}
 	}
-
-	// If we are here, either we have stopped being leaders or we lost the watcher
-	// Make sure we call OnStoppedLeading if we were the leader.
-	if m.isLeader {
-		m.callbacks.OnStoppedLeading()
-	}
-
-	log.Debug("Exiting watcher", "id", m.memberID)
 }
 
-func (m *member) tryToBeLeader(ctx context.Context, wg *sync.WaitGroup) {
+func (m *member) campaign(ctx context.Context, elected chan<- campaignResult, sessionDone <-chan struct{}) error {
 	if err := m.election.Campaign(ctx, m.memberID); err != nil {
-		log.Error("Failed trying to become the leader", "err", err)
-		// Resign just in case we acquired leadership just before failing
-		if err := m.election.Resign(m.client.Ctx()); err != nil {
-			log.Warn("Failed to resign after we failed becoming the leader, this might not be a problem if we were never the leader", "err", err)
-		}
-		return
-		// TODO: what to do here?
-		// We probably want watchLeaderChanges to exit as well, since Run
-		// is expecting us to try to become the leader, but if we are here,
-		// we won't. So if we don't panic, we need to signal it somehow
+		return err
 	}
 
-	// Inform the observer that we are the leader as soon as possible,
-	// so it can detect if we stop being it
-	m.weAreTheLeader <- struct{}{}
-
-	// Once we are the leader, start the routine to resign if context is canceled
-	wg.Go(func() {
-		m.resignOnCancel(ctx)
-	})
+	result := campaignResult{key: m.election.Key(), ack: make(chan struct{})}
+	select {
+	case elected <- result:
+	case <-ctx.Done():
+		return nil
+	case <-sessionDone:
+		return errors.New("election session ended")
+	}
+	select {
+	case <-result.ack:
+	case <-ctx.Done():
+		return nil
+	case <-sessionDone:
+		return errors.New("election session ended")
+	}
 
 	// After becoming the leader, we wait for at least a lease TTL to wait for
 	// the previous leader to detect the new leadership (if there was one) and
 	// stop its processes
-	// TODO: is this too cautious?
-	log.Debug("timeout before OnStartedLeading", "id", m.memberID, "timeout", m.leaseTTL)
-	time.Sleep(time.Second * time.Duration(m.leaseTTL))
+	log.Debug("timeout before OnStartedLeading", "id", m.memberID, "timeout", m.leaderDelay)
+	timer := time.NewTimer(m.leaderDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-sessionDone:
+		return errors.New("election session ended")
+	case <-timer.C:
+	}
 
-	// We are the leader, execute our code
+	if ctx.Err() != nil || !m.state.CompareAndSwap(0, 1) {
+		return nil
+	}
+	select {
+	case <-sessionDone:
+		return errors.New("election session ended")
+	default:
+	}
 	m.callbacks.OnStartedLeading(ctx)
-
-	// Here the routine dies if OnStartedLeading doesn't block, there is nothing else to do
+	return nil
 }
 
-func (m *member) resignOnCancel(ctx context.Context) {
-	<-ctx.Done()
-	if err := m.election.Resign(m.client.Ctx()); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("Failed to resign after the context was canceled", "err", err)
+func (m *member) stop() {
+	m.state.CompareAndSwap(0, 2)
+}
+
+func revokeLease(client *clientv3.Client, leaseID clientv3.LeaseID, ttl int64) error {
+	timeout := time.Second * time.Duration(ttl)
+	if timeout <= 0 {
+		timeout = time.Second
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := client.Revoke(ctx, leaseID)
+	return err
 }
