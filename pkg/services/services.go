@@ -45,6 +45,26 @@ const (
 )
 
 func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
+	if ctx.Ctx.Err() != nil {
+		return nil
+	}
+	if !usesLeaderElection {
+		select {
+		case <-ctx.Ctx.Done():
+			return nil
+		case <-ctx.GetEndpointsReady():
+		}
+	}
+
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
+	current, err := p.getServiceContext(svc.UID)
+	if err != nil {
+		return err
+	}
+	if current != ctx || ctx.Ctx.Err() != nil {
+		return nil
+	}
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -59,14 +79,6 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if instance != nil {
 			instance.AddCalled = true
-		}
-
-		if !usesLeaderElection {
-			select {
-			case <-ctx.Ctx.Done():
-				return nil
-			case <-ctx.GetEndpointsReady():
-			}
 		}
 
 		if err := p.addService(ctx.Ctx, instance, svc, wg); err != nil {
@@ -170,6 +182,9 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 	// protect against addService while reading
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	startTime := time.Now()
 
@@ -203,7 +218,9 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 
 func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
 	// is not a global leader election mode
-	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
+	if p.config.EnableServicesElection ||
+		p.config.PerServiceElectionOnDemand && svc.Annotations[kubevip.ForcePerServiceElection] == "true" ||
+		(!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		for x := range inst.VIPConfigs {
 			log.Debug("[service] starting loadbalancer for service", "name", svc.Name, "namespace", svc.Namespace, "uid", svc.UID)
 			if err := inst.Clusters[x].StartLoadBalancerService(ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(svc), wg); err != nil {

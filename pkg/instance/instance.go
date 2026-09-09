@@ -76,6 +76,8 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup) (*Instance, error) {
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
+	serviceElection := config.EnableServicesElection ||
+		config.PerServiceElectionOnDemand && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
 	var newVips []*kubevip.Config
@@ -216,7 +218,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			DHCPMode:                    config.DHCPMode,
 			DHCPBackoffAttempts:         config.DHCPBackoffAttempts,
 			DisableServiceUpdates:       config.DisableServiceUpdates,
-			EnableServicesElection:      config.EnableServicesElection,
+			EnableServicesElection:      serviceElection,
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
@@ -282,7 +284,7 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 			DNSMode:                config.DNSMode,
 			DHCPMode:               config.DHCPMode,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: serviceElection,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
