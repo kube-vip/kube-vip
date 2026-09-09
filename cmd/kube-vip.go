@@ -474,7 +474,7 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		metrics.RegisterPrometheusMetrics()
-		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName)
+		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName).Set(1)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)

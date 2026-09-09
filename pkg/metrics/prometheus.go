@@ -1,6 +1,15 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	serviceElectionLoopsMu   sync.Mutex
+	serviceElectionLoopCount = map[string]int{}
+)
 
 var (
 	// Service / VIP Lifecycle
@@ -34,6 +43,14 @@ var (
 	IsLeader = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_is_leader", Help: "1 if this node currently holds the lease"},
 		[]string{"node", "lease_name"},
+	)
+	WatcherLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_watcher_loops", Help: "Live watcher loops by kind"},
+		[]string{"kind"},
+	)
+	ElectionLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_election_loops", Help: "Live leader election loops by type"},
+		[]string{"type"},
 	)
 	ServiceElectionLoops = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_service_election_loops",
@@ -76,6 +93,8 @@ func RegisterPrometheusMetrics() {
 		ServiceReconcileDuration,
 		LeaderTransitionsTotal,
 		IsLeader,
+		WatcherLoops,
+		ElectionLoops,
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
@@ -83,4 +102,28 @@ func RegisterPrometheusMetrics() {
 		BuildInfo,
 		CountServiceWatchEvent,
 	)
+}
+
+// TrackServiceElectionLoop increments the loop gauge and returns a function
+// that decrements it and removes the series after the final loop exits.
+func TrackServiceElectionLoop(namespace, name string) func() {
+	key := namespace + "\x00" + name
+	serviceElectionLoopsMu.Lock()
+	serviceElectionLoopCount[key]++
+	ServiceElectionLoops.WithLabelValues(namespace, name).Inc()
+	serviceElectionLoopsMu.Unlock()
+
+	return func() {
+		serviceElectionLoopsMu.Lock()
+		defer serviceElectionLoopsMu.Unlock()
+
+		count := serviceElectionLoopCount[key]
+		if count <= 1 {
+			delete(serviceElectionLoopCount, key)
+			ServiceElectionLoops.DeleteLabelValues(namespace, name)
+			return
+		}
+		serviceElectionLoopCount[key] = count - 1
+		ServiceElectionLoops.WithLabelValues(namespace, name).Dec()
+	}
 }

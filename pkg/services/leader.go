@@ -185,7 +185,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	err := p.SyncServices(svcCtx, service, wg, true)
+	var err error
+	if !p.withActiveService(svcCtx, func() {
+		err = p.SyncServices(svcCtx, service, wg, true)
+	}) {
+		return nil
+	}
 	if err != nil {
 		log.Error("service sync", "uid", service.UID, "err", err)
 		return err
