@@ -27,12 +27,24 @@ type DHCPv4Client struct {
 	initRebootFlag  bool
 	requestedIP     net.IP
 	broadcastFlag   bool
-	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
-	releasedChan    chan struct{} // indicate that the IP has been released
+	stopChan        chan struct{} // is used by external clients to stop DHCP
 	errorChan       chan error    // indicates there was an error on the IP request
 	ipChan          chan string
 	backoffAttempts uint
-	stop            sync.Once
+	stopOnce        sync.Once
+	mtx             sync.RWMutex
+}
+
+func (c *DHCPv4Client) storeLease(lease *nclient4.Lease) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.lease = lease
+}
+
+func (c *DHCPv4Client) loadLease() *nclient4.Lease {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	return c.lease
 }
 
 // NewDHCPv4Client returns a new DHCP Client.
@@ -40,7 +52,6 @@ func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP stri
 	return &DHCPv4Client{
 		iface:           iface,
 		stopChan:        make(chan struct{}),
-		releasedChan:    make(chan struct{}),
 		errorChan:       make(chan error),
 		initRebootFlag:  initRebootFlag,
 		requestedIP:     net.ParseIP(requestedIP),
@@ -57,11 +68,14 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
-	c.stop.Do(func() {
+	c.close()
+}
+
+func (c *DHCPv4Client) close() {
+	c.stopOnce.Do(func() {
 		close(c.ipChan)
 		close(c.stopChan)
 	})
-	<-c.releasedChan
 }
 
 // Gets the IPChannel for consumption
@@ -129,78 +143,91 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
-	dhcpCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	lease, err := c.requestWithBackoff(dhcpCtx)
+	lease, err := c.requestWithBackoff(ctx)
 	if err != nil {
 		return fmt.Errorf("DHCPv4 client failed: %w", err)
 	}
 
 	c.initRebootFlag = false
-	c.lease = lease
 
-	// Set up two ticker to renew/rebind regularly
-	t1Timeout := c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 2
-	t2Timeout := (c.lease.ACK.IPAddressLeaseTime(defaultDHCPRenew) / 8) * 7
+	c.storeLease(lease)
+
+	// Set up two timers to renew/rebind regularly
+	t1Timeout, t2Timeout := getLeaseTimeouts(lease)
 	log.Debug("[DHCPv4] timeouts", "timeout1", t1Timeout, "timeout2", t2Timeout)
-	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
+	t1, t2 := time.NewTimer(t1Timeout), time.NewTimer(t2Timeout)
 
 	for {
 		select {
+		case <-c.stopChan:
+			return c.killProcessing(t1, t2)
+		case <-ctx.Done():
+			c.close()
+			return c.killProcessing(t1, t2)
 		case <-t1.C:
 			// renew is a unicast request of the IP renewal
 			// A point on renew is: the library does not return the right message (NAK)
 			// on renew error due to IP Change, but instead it returns a different error
 			// This way there's not much to do other than log and continue, as the renew error
 			// may be an offline server, or may be an incorrect package match
-			lease, err := c.renew(dhcpCtx)
+			lease, err := c.renew(ctx)
 			if err == nil {
-				c.lease = lease
+				c.storeLease(lease)
+				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 				log.Info("[DHCPv4] renew", "lease", lease)
 				t2.Reset(t2Timeout)
 			} else {
 				log.Error("[DHCPv4] renew failed", "err", err)
 			}
+			t1.Reset(t1Timeout)
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
-			lease, err := c.request(dhcpCtx, true)
+			lease, err := c.request(ctx, true)
 			if err == nil {
-				c.lease = lease
+				c.storeLease(lease)
+				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 				log.Info("[DHCPv4] rebind", "lease", lease)
 			} else {
 				if _, ok := err.(*nclient4.ErrNak); !ok {
-					t1.Stop()
-					t2.Stop()
 					log.Error("[DHCPv4] rebind failed", "err", err)
 				}
-				log.Warn("[DHCPv4] ip may have changed", "ip", c.lease.ACK.YourIPAddr, "err", err)
+				lease = c.loadLease()
+				log.Warn("[DHCPv4] ip may have changed", "ip", lease.ACK.YourIPAddr, "err", err)
 				c.initRebootFlag = false
-				lease, backoffErr := c.requestWithBackoff(dhcpCtx)
+				lease, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv4] failed to reacquire lease", "err", backoffErr)
 					continue
 				}
-				c.lease = lease
+				c.storeLease(lease)
+				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 			}
 			t1.Reset(t1Timeout)
 			t2.Reset(t2Timeout)
-
-		case <-c.stopChan:
-			// release is a unicast request of the IP release.
-			var err error
-			if err = c.release(); err != nil {
-				log.Error("[DHCPv4] release lease failed", "lease", lease, "err", err)
-			} else {
-				log.Info("[DHCPv4] release", "lease", lease)
-			}
-			t1.Stop()
-			t2.Stop()
-
-			close(c.releasedChan)
-			return err
 		}
 	}
+}
+
+func getLeaseTimeouts(lease *nclient4.Lease) (time.Duration, time.Duration) {
+	t1Timeout, t2Timeout := lease.ACK.IPAddressLeaseTime(defaultDHCPRenew)/2, (lease.ACK.IPAddressLeaseTime(defaultDHCPRenew)/8)*7
+	log.Debug("[DHCPv4] timeouts", "address", lease.ACK.YourIPAddr.String(), "T1", t1Timeout, "T2", t2Timeout)
+	return t1Timeout, t2Timeout
+}
+
+func (c *DHCPv4Client) killProcessing(t1, t2 *time.Timer) error {
+	// release is a unicast request of the IP release.
+	var err error
+	lease := c.loadLease()
+	if lease != nil {
+		if err = c.release(); err != nil {
+			log.Error("[DHCPv4] release lease failed", "lease", lease, "err", err)
+		} else {
+			log.Info("[DHCPv4] release", "lease", lease)
+		}
+	}
+	t1.Stop()
+	t2.Stop()
+	return err
 }
 
 // --------------------------------------------------------
@@ -225,27 +252,38 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 
 	log.Debug("[DHCPv4]", "attempts", c.backoffAttempts)
 
+RequestLoop:
 	for {
-		log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
-		lease, err = c.request(ctx, false)
-		if err != nil {
-			dur := backoff.Duration()
-			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
-				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
-				log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
-				c.errorChan <- errMsg
-				return nil, errMsg
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("[DHCPv4] context error: %w", ctx.Err())
+		default:
+			log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
+			lease, err = c.request(ctx, false)
+			if err != nil {
+				dur := backoff.Duration()
+
+				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
+					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
+					log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
+					c.errorChan <- errMsg
+					return nil, errMsg
+				}
+				log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
+				t := time.NewTimer(dur)
+				select {
+				case <-t.C:
+					t.Stop()
+				case <-ctx.Done():
+				}
+				continue RequestLoop
 			}
-			log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
-			time.Sleep(dur)
-			continue
+			backoff.Reset()
+			break RequestLoop
 		}
-		backoff.Reset()
-		break
 	}
 
 	if c.ipChan != nil {
-		log.Debug("[DHCPv4] using channel")
 		c.ipChan <- lease.ACK.YourIPAddr.String()
 	}
 
@@ -296,7 +334,12 @@ func (c *DHCPv4Client) release() error {
 	defer dhclient.Close()
 
 	// TODO modify lease
-	return dhclient.Release(c.lease)
+	err = dhclient.Release(c.lease)
+	if err != nil {
+		return fmt.Errorf("DHCPv4 release failed: %w", err)
+	}
+
+	return nil
 }
 
 func (c *DHCPv4Client) renew(ctx context.Context) (*nclient4.Lease, error) {

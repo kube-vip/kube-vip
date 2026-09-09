@@ -95,13 +95,25 @@ type DHCPv6Client struct {
 	initRebootFlag  bool
 	requestedIP     net.IP
 	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
-	releasedChan    chan struct{} // indicate that the IP has been released
 	errorChan       chan error    // indicates there was an error on the IP request
 	ipChan          chan string
 	ic              *DHCPv6InternalClient
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
 	stop            sync.Once
+	mtx             sync.RWMutex
+}
+
+func (c *DHCPv6Client) storeAddr(addr *dhcpv6.OptIAAddress) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.addr = addr
+}
+
+func (c *DHCPv6Client) loadAddr() *dhcpv6.OptIAAddress {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	return c.addr
 }
 
 // NewDHCPv6Client returns a new DHCP6 Client.
@@ -120,7 +132,6 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 		iface:           iface,
 		managerKey:      name,
 		stopChan:        make(chan struct{}),
-		releasedChan:    make(chan struct{}),
 		errorChan:       make(chan error),
 		initRebootFlag:  initRebootFlag,
 		requestedIP:     net.ParseIP(requestedIP),
@@ -137,11 +148,15 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
+	c.close()
+}
+
+// Close dhcp client channels
+func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
 		close(c.ipChan)
 		close(c.stopChan)
 	})
-	<-c.releasedChan
 	dhcpv6ClientManager.Delete(c.managerKey)
 }
 
@@ -156,27 +171,27 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
-	dhcpCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	addr, err := c.requestWithBackoff(dhcpCtx)
+	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
 		return fmt.Errorf("DHCPv6 client failed: %w", err)
 	}
 
-	c.addr = addr
-
 	c.initRebootFlag = false
 
+	c.storeAddr(addr)
+
 	// Set up two ticker to renew/rebind regularly
-	t1Timeout := c.addr.PreferredLifetime / 2
-	t2Timeout := (c.addr.ValidLifetime / 8) * 7
-	log.Debug("[DHCPv6] timeouts", "timeout1", t1Timeout, "timeout2", t2Timeout)
-	t1, t2 := time.NewTicker(t1Timeout), time.NewTicker(t2Timeout)
+	t1Timeout, t2Timeout := getAddrTimeouts(addr)
+	t1, t2 := time.NewTimer(t1Timeout), time.NewTimer(t2Timeout)
 
 	for {
 		select {
+		case <-c.stopChan:
+			return c.killProcessing(t1, t2)
+		case <-ctx.Done():
+			c.close()
+			return c.killProcessing(t1, t2)
 		case <-t1.C:
 			// renew is a unicast request of the IP renewal
 			// A point on renew is: the library does not return the right message (NAK)
@@ -184,47 +199,63 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 			// This way there's not much to do other than log and continue, as the renew error
 			// may be an offline server, or may be an incorrect package match
 
-			addr, err := c.renew(dhcpCtx)
+			addr, err := c.renew(ctx)
 			if err == nil {
-				c.addr = addr
+				c.storeAddr(addr)
 				log.Info("[DHCPv6] renew", "addr", addr.IPv6Addr.String())
+				t1Timeout, t2Timeout = getAddrTimeouts(addr)
 				t2.Reset(t2Timeout)
 			} else {
 				log.Error("[DHCPv6] renew failed", "err", err)
 			}
+			t1.Reset(t1Timeout)
 		case <-t2.C:
 			// rebind is just like a request, but forcing to provide a new IP address
-			addr, err := c.request(dhcpCtx, true)
+			addr, err := c.request(ctx, true)
 			if err == nil {
-				c.addr = addr
+				c.storeAddr(addr)
 				log.Info("[DHCPv6] rebind", "lease", addr)
+				t1Timeout, t2Timeout = getAddrTimeouts(addr)
 			} else {
+				addr = c.loadAddr()
 				log.Warn("[DHCPv6] ip may have changed", "ip", addr.IPv6Addr.String(), "err", err)
 				c.initRebootFlag = false
-				c.addr, err = c.requestWithBackoff(dhcpCtx)
-				log.Error("[DHCPv6] rebind failed", "err", err)
+				addr, backoffErr := c.requestWithBackoff(ctx)
+				if backoffErr != nil {
+					log.Error("[DHCPv6] failed to reacquire lease", "err", backoffErr)
+					continue
+				}
+				c.storeAddr(addr)
+				t1Timeout, t2Timeout = getAddrTimeouts(addr)
 			}
 			t1.Reset(t1Timeout)
 			t2.Reset(t2Timeout)
-
-		case <-c.stopChan:
-			// create new context for DHCP cleanup (independent)
-			dhcpStopCtx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			// IP address release.
-			var err error
-			if err = c.release(dhcpStopCtx); err != nil {
-				log.Error("[DHCPv6] release failed", "err", err)
-			} else {
-				log.Info("[DHCPv6] released", "address", c.addr.String())
-			}
-			t1.Stop()
-			t2.Stop()
-
-			close(c.releasedChan)
-			return err
 		}
 	}
+}
+
+func getAddrTimeouts(addr *dhcpv6.OptIAAddress) (time.Duration, time.Duration) {
+	t1Timeout, t2Timeout := addr.PreferredLifetime/2, (addr.ValidLifetime/8)*7
+	log.Debug("[DHCPv6] timeouts", "address", addr.IPv6Addr.String(), "T1", t1Timeout, "T2", t2Timeout)
+	return t1Timeout, t2Timeout
+}
+
+func (c *DHCPv6Client) killProcessing(t1, t2 *time.Timer) error {
+	// create new context for DHCP cleanup (independent)
+	dhcpStopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// IP address release.
+	var err error
+	if c.loadAddr() != nil {
+		if err = c.release(dhcpStopCtx); err != nil {
+			log.Error("[DHCPv6] release failed", "err", err)
+		} else {
+			log.Info("[DHCPv6] released", "address", c.addr.String())
+		}
+	}
+	t1.Stop()
+	t2.Stop()
+	return err
 }
 
 func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAddress, error) {
@@ -235,32 +266,44 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 		Max:    1 * time.Minute,
 	}
 
-	var err error
 	var addr *dhcpv6.OptIAAddress
+	var err error
 
+	log.Debug("[DHCPv6]", "attempts", c.backoffAttempts)
+
+RequestLoop:
 	for {
-		log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt()+1)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("[DHCPv6] context error: %w", ctx.Err())
+		default:
+			log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt()+1)
 
-		addr, err = c.request(ctx, false)
+			addr, err = c.request(ctx, false)
 
-		if err != nil {
-			dur := backoff.Duration()
-			if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
-				errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
-				log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
-				c.errorChan <- errMsg
-				return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
+			if err != nil {
+				dur := backoff.Duration()
+				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
+					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
+					log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
+					c.errorChan <- errMsg
+					return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
+				}
+				log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
+				t := time.NewTimer(dur)
+				select {
+				case <-t.C:
+					t.Stop()
+				case <-ctx.Done():
+				}
+				continue RequestLoop
 			}
-			log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
-			time.Sleep(dur)
-			continue
+			backoff.Reset()
+			break RequestLoop
 		}
-		backoff.Reset()
-		break
 	}
 
 	if c.ipChan != nil {
-		log.Debug("[DHCPv6] using channel")
 		c.ipChan <- addr.IPv6Addr.String()
 	}
 
