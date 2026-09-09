@@ -93,7 +93,7 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 
 		svcCtx.SignalReadiness()
 
-		if p.shouldProcessInstance() {
+		if !p.serviceElectionManaged(service) && p.shouldProcessInstance() {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -106,7 +106,7 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 			}
 			svcCtx.SignalReadiness()
 
-			if p.shouldProcessInstance() {
+			if !p.serviceElectionManaged(service) && p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service); err != nil {
 					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
 				}
@@ -145,6 +145,11 @@ func (p *Processor) applyEvent(svcCtx *servicecontext.Context, event watch.Event
 // WireGuard always reprograms, because its DNAT rules are per-endpoint.
 func (p *Processor) shouldProcessInstance() bool {
 	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+}
+
+func (p *Processor) serviceElectionManaged(service *v1.Service) bool {
+	return p.config.EnableServicesElection ||
+		p.config.PerServiceElectionOnDemand && service.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 // handleNoEndpoints tears down everything backing a service that no longer has
@@ -278,7 +283,10 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) error {
-	if p.config.EnableServicesElection {
+	if p.serviceElectionManaged(service) {
+		if !p.config.EnableServicesElection {
+			return nil
+		}
 		// startLeaderElection restarts itself until the service context is cancelled,
 		// so start it only once instead of on every endpoint event.
 		svcCtx.StartLeaderElectionOnce(func() {
@@ -310,11 +318,8 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
 	// Track this loop for the lifetime of the goroutine. There has to be at most
 	// one per service, so a value above 1 means loops leaked.
-	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
-	loops.Inc()
-	defer loops.Dec()
-
-	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
+	done := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
+	defer done()
 
 	// This is a blocking function, that will restart (in the event of failure)
 	for {
@@ -334,7 +339,6 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 
 			if !l.Elected.Load() {
 				l.Unlock()
-				attempts.Inc()
 				err := serviceFunc(svcCtx, service, wg, true)
 				if err != nil {
 					log.Error(err.Error())
