@@ -7,7 +7,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -28,7 +31,8 @@ import (
 // ClusterSpec describes a Kind cluster with kube-vip.
 type ClusterSpec struct {
 	Name           string
-	Nodes          int
+	Nodes          int // control-plane node count
+	WorkerNodes    int
 	Networking     kindconfigv1alpha4.Networking
 	KubeVip        KubevipManifestValues
 	Logger         TestLogger
@@ -101,22 +105,24 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	tmpDir, err := os.MkdirTemp("", "kube-vip-manifest")
 	Expect(err).NotTo(HaveOccurred())
 	manifestPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s.yaml", spec.Name))
-	manifestFile, err := os.Create(manifestPath)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(tmpl.Execute(manifestFile, spec.KubeVip)).To(Succeed())
-	manifestFile.Close()
+	Expect(renderKubeVipManifest(tmpl, manifestPath, spec.KubeVip)).To(Succeed())
+	workerManifestPath := manifestPath
+	if spec.WorkerNodes > 0 {
+		workerManifestPath = filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-worker.yaml", spec.Name))
+		workerValues := spec.KubeVip
+		workerValues.ConfigPath = "/etc/kubernetes/kubelet.conf"
+		workerValues.KubeletPKIPath = "/var/lib/kubelet/pki"
+		Expect(renderKubeVipManifest(tmpl, workerManifestPath, workerValues)).To(Succeed())
+	}
 
 	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
 	firstNodeManifestPath := manifestPath
 	if v129 {
 		firstNodeManifestPath = filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-first.yaml", spec.Name))
-		firstManifest, err := os.Create(firstNodeManifestPath)
-		Expect(err).NotTo(HaveOccurred())
 		firstNodeValues := spec.KubeVip
 		firstNodeValues.ConfigPath = "/etc/kubernetes/super-admin.conf"
-		Expect(tmpl.Execute(firstManifest, firstNodeValues)).To(Succeed())
-		firstManifest.Close()
+		Expect(renderKubeVipManifest(tmpl, firstNodeManifestPath, firstNodeValues)).To(Succeed())
 	}
 
 	// Build Kind cluster config
@@ -125,17 +131,13 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		Networking:                   spec.Networking,
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
-	for i := range spec.Nodes {
+	appendNode := func(role kindconfigv1alpha4.NodeRole, manifest string) {
 		node := kindconfigv1alpha4.Node{
-			Role: kindconfigv1alpha4.ControlPlaneRole,
+			Role: role,
 		}
 		if !spec.UseDaemonSet {
-			mPath := manifestPath
-			if i == 0 && v129 {
-				mPath = firstNodeManifestPath
-			}
 			node.ExtraMounts = []kindconfigv1alpha4.Mount{{
-				HostPath:      mPath,
+				HostPath:      manifest,
 				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
 			}}
 		}
@@ -143,6 +145,16 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 			node.Image = k8sImage
 		}
 		clusterConfig.Nodes = append(clusterConfig.Nodes, node)
+	}
+	for i := 0; i < spec.Nodes; i++ {
+		mPath := manifestPath
+		if i == 0 && v129 {
+			mPath = firstNodeManifestPath
+		}
+		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
+	}
+	for i := 0; i < spec.WorkerNodes; i++ {
+		appendNode(kindconfigv1alpha4.WorkerRole, workerManifestPath)
 	}
 
 	// Create cluster
@@ -169,7 +181,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 	// Discover nodes
 	c.Nodes, err = c.Provider.ListInternalNodes(c.Name)
 	Expect(err).ToNot(HaveOccurred())
-	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes))
+	Expect(len(c.Nodes)).To(BeNumerically(">=", spec.Nodes+spec.WorkerNodes))
 
 	// Load kube-vip image
 	c.LoadImage(spec.KubeVip.ImagePath)
@@ -177,7 +189,7 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		deployDaemonSet(ctx, c, manifestPath)
 	}
 	Eventually(func() error {
-		return kubeVipPodsReady(ctx, c.Client, spec.Nodes)
+		return kubeVipPodsReady(ctx, c.Client, spec.Nodes+spec.WorkerNodes)
 	}, "120s", "2s").Should(Succeed())
 
 	return c
@@ -205,6 +217,22 @@ func kubeVipPodsReady(ctx context.Context, client kubernetes.Interface, expected
 	}
 	if ready < expected {
 		return fmt.Errorf("kube-vip pods are not ready: %d/%d; states: %v", ready, expected, states)
+	}
+	return nil
+}
+
+func renderKubeVipManifest(tmpl *template.Template, path string, values KubevipManifestValues) (err error) {
+	manifest, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create kube-vip manifest %q: %w", path, err)
+	}
+	defer func() {
+		if closeErr := manifest.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close kube-vip manifest %q: %w", path, closeErr)
+		}
+	}()
+	if err := tmpl.Execute(manifest, values); err != nil {
+		return fmt.Errorf("render kube-vip manifest %q: %w", path, err)
 	}
 	return nil
 }
@@ -259,6 +287,58 @@ func deployDaemonSet(ctx context.Context, c *Cluster, manifestPath string) {
 	}, "120s", "2s").Should(Succeed())
 }
 
+// WaitForKubeVipReady verifies that every requested node has a running and
+// ready kube-vip static pod and container before callers access its endpoints.
+func WaitForKubeVipReady(ctx context.Context, client kubernetes.Interface, nodeNames []string) error {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
+	if err != nil {
+		return fmt.Errorf("list kube-vip static pods: %w", err)
+	}
+
+	wanted := make(map[string]struct{}, len(nodeNames))
+	for _, nodeName := range nodeNames {
+		wanted[nodeName] = struct{}{}
+	}
+	ready := make(map[string]struct{}, len(nodeNames))
+	status := make([]string, 0, len(pods.Items))
+	for _, pod := range pods.Items {
+		if _, ok := wanted[pod.Spec.NodeName]; !ok {
+			continue
+		}
+		containerReady := false
+		for _, container := range pod.Status.ContainerStatuses {
+			if container.Name == "kube-vip" && container.Ready && container.State.Running != nil {
+				containerReady = true
+				break
+			}
+		}
+		podReady := false
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+				podReady = true
+				break
+			}
+		}
+		status = append(status, fmt.Sprintf("%s=%s/podReady:%t/containerReady:%t", pod.Spec.NodeName, pod.Status.Phase, podReady, containerReady))
+		if pod.Status.Phase == corev1.PodRunning && podReady && containerReady {
+			ready[pod.Spec.NodeName] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0)
+	for nodeName := range wanted {
+		if _, ok := ready[nodeName]; !ok {
+			missing = append(missing, nodeName)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		sort.Strings(status)
+		return fmt.Errorf("kube-vip static pods not ready on nodes %v (observed: %s)", missing, strings.Join(status, ", "))
+	}
+	return nil
+}
+
 // LoadImage loads a Docker image into the Kind cluster.
 func (c *Cluster) LoadImage(image string) {
 	if err := LoadDockerImageToKind(c.Logger, image, c.Name); err != nil {
@@ -287,4 +367,42 @@ func (c *Cluster) Delete() {
 func (c *Cluster) SaveLogs(ctx context.Context, dir string) {
 	By(fmt.Sprintf("saving logs to %q", dir))
 	_ = GetLogs(ctx, c.Client, dir, c.Name)
+	_ = c.saveKubeVipNodeDiagnostics(ctx, dir)
+}
+
+func (c *Cluster) saveKubeVipNodeDiagnostics(ctx context.Context, dir string) error {
+	if os.Getenv("E2E_KEEP_LOGS") != "true" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create diagnostics directory: %w", err)
+	}
+
+	const script = `set +e
+echo '--- static pod manifest'
+cat /etc/kubernetes/manifests/kube-vip.yaml
+	echo '--- kubelet kubeconfig references'
+	grep -E 'server:|client-certificate:|client-key:' /etc/kubernetes/kubelet.conf
+	echo '--- kubelet client credentials'
+	ls -la /var/lib/kubelet/pki
+echo '--- kube-vip pod sandboxes'
+crictl pods --name kube-vip
+echo '--- kube-vip containers'
+crictl ps -a --name kube-vip
+echo '--- listening sockets'
+ss -lntp
+echo '--- recent kubelet log'
+journalctl -u kubelet --no-pager -n 200`
+	for _, node := range c.Nodes {
+		cmd := exec.CommandContext(ctx, "docker", "exec", node.String(), "sh", "-c", script) //nolint:gosec
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			output = append(output, []byte(fmt.Sprintf("\ndiagnostic command failed: %v\n", err))...)
+		}
+		path := filepath.Join(dir, fmt.Sprintf("%s-diagnostics.log", node.String()))
+		if err := os.WriteFile(path, output, 0o600); err != nil {
+			return fmt.Errorf("write node diagnostics %q: %w", path, err)
+		}
+	}
+	return nil
 }
