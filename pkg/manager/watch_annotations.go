@@ -209,11 +209,21 @@ func parseBgpAnnotations(bgpConfig kubevip.BGPConfig, node *v1.Node, prefix stri
 	bgpConfig.Peers = make([]kubevip.BGPPeer, 0, len(peerIPs))
 	regexPass := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?bgp-pass$", prefix))
 	regexMultiHop := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-multi-hop$", prefix))
+	regexPort := regexp.MustCompile(fmt.Sprintf("^%s/(bgp-peers-0-)?peer-port$", prefix))
 	for _, peerIP := range peerIPs {
 		ipAddr := strings.TrimSpace(peerIP)
 
 		if ipAddr != "" {
 			bgpPeer.Address = ipAddr
+			for k, v := range node.Annotations {
+				if regexPort.MatchString(k) {
+					port, err := strconv.ParseUint(v, 10, 16)
+					if err != nil || port == 0 {
+						return bgpConfig, bgpPeer, fmt.Errorf("invalid %q annotation value: %q", k, v)
+					}
+					bgpPeer.Port = uint16(port)
+				}
+			}
 			// Check if we're also expecting a password for this peer
 			base64BGPPassword := ""
 			for k, v := range node.Annotations {
