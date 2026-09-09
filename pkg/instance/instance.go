@@ -52,7 +52,8 @@ type Instance struct {
 	VLANInterface string
 
 	// External Gateway IP the service is forwarded from
-	UPNPGatewayIPs []string
+	UPNPGatewayIPs   []string
+	UPNPMappingCount int
 
 	// Kubernetes service mapping
 	ServiceSnapshot *v1.Service

@@ -59,28 +59,26 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 			return
 		}
 
-		ipaddr := p.Peer.State.NeighborAddress.String()
-
-		port := 179
-		peerDescription := net.JoinHostPort(ipaddr, strconv.Itoa(port))
-
-		for stateName, stateValue := range api.PeerState_SessionState_value {
-			metricValue := 0.0
-			if int(p.Peer.State.SessionState) == int(stateValue)-1 {
-
-				metricValue = 1
-			}
-
-			metrics.BGPSessionInfoGauge.With(prometheus.Labels{
-				"state": stateName,
-				"peer":  peerDescription,
-			}).Set(metricValue)
-		}
+		observeBGPPeerState(p)
 	}); err != nil {
 		return fmt.Errorf("starting BGP server: %w", err)
 	}
 
 	return nil
+}
+
+func observeBGPPeerState(p *apiutil.WatchEventMessage_PeerEvent) {
+	peerDescription := net.JoinHostPort(p.Peer.State.NeighborAddress.String(), strconv.FormatUint(uint64(p.Peer.Transport.RemotePort), 10))
+	for stateName, stateValue := range api.PeerState_SessionState_value {
+		metricValue := 0.0
+		if int(p.Peer.State.SessionState) == int(stateValue)-1 {
+			metricValue = 1
+		}
+		metrics.BGPSessionInfoGauge.With(prometheus.Labels{
+			"state": stateName,
+			"peer":  peerDescription,
+		}).Set(metricValue)
+	}
 }
 
 func (b *BGP) Cleanup() {
