@@ -136,6 +136,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -151,7 +152,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			It(clusterName+" provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client, func() {
+					assertExactlyOneLeaderMetric(ctx, clusterName, client)
+				})
 			})
 		})
 
@@ -181,6 +184,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -200,7 +204,11 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			DescribeTable("configures an IPv4 VIP address for service",
 				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, currentOffset, defaultNetwork)
-					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber, func(node string) {
+						e2e.EventuallyMetric(ctx, clusterName, node, "kube_vip_active_services", map[string]string{
+							"namespace": dsNamespace,
+						}, BeNumerically(">=", float64(1)), 60*time.Second, 2*time.Second)
+					})
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1235,6 +1243,35 @@ func assertControlPlaneIsRoutable(controlPlaneVIP string, transportTimeout, even
 	assertConnection("https", controlPlaneVIP, "6443", "livez", transportTimeout, eventuallyTimeout)
 }
 
+func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, client kubernetes.Interface, skipNodes ...string) {
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(nodes.Items).NotTo(BeEmpty())
+
+	const leaseName = "plndr-cp-lock"
+	labels := map[string]string{"lease_name": leaseName}
+	skipped := make(map[string]struct{}, len(skipNodes))
+	for _, node := range skipNodes {
+		skipped[node] = struct{}{}
+	}
+
+	Eventually(func() (float64, error) {
+		var total float64
+		for _, node := range nodes.Items {
+			if _, ok := skipped[node.Name]; ok {
+				continue
+			}
+
+			metrics, err := e2e.ScrapeMetrics(ctx, clusterName, node.Name)
+			if err != nil {
+				return 0, err
+			}
+			total += e2e.SumMetric(metrics, "kube_vip_is_leader", labels)
+		}
+		return total, nil
+	}, 60*time.Second, 2*time.Second).Should(Equal(float64(1)))
+}
+
 // Assume connection to the provided address is possible
 func assertConnection(protocol, ip, port, suffix string, transportTimeout, eventuallyTimeout time.Duration) {
 	if strings.Contains(ip, ":") {
@@ -1694,12 +1731,12 @@ func cleanupCluster(clusterName, network string, configMtx *sync.Mutex, logger l
 	}
 }
 
-func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface) {
-	testControlPlaneVIPsWithTimeout(ctx, cpVIPs, clusterName, client, time.Duration(0), 20*time.Second)
+func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface, afterVIPConfirmed ...func()) {
+	testControlPlaneVIPsWithTimeout(ctx, cpVIPs, clusterName, client, time.Duration(0), 20*time.Second, afterVIPConfirmed...)
 }
 
 func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface,
-	transportTimeout, eventuallyTimeout time.Duration) {
+	transportTimeout, eventuallyTimeout time.Duration, afterVIPConfirmed ...func()) {
 	Expect(cpVIPs).ToNot(BeEmpty())
 
 	By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned VIP"))
@@ -1708,6 +1745,9 @@ func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clust
 	for _, cpVIP := range cpVIPs {
 		By(withTimestamp(fmt.Sprintf("testing connection to VIP: %s", cpVIP)))
 		assertControlPlaneIsRoutable(cpVIP, transportTimeout, eventuallyTimeout)
+	}
+	if len(afterVIPConfirmed) > 0 && afterVIPConfirmed[0] != nil {
+		afterVIPConfirmed[0]()
 	}
 
 	var leaderName string
@@ -1731,6 +1771,7 @@ func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clust
 
 func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int, deleteDS bool, dsNumber int,
+	afterVIPConfirmed ...func(string),
 ) {
 	lbAddresses := vip.Split(lbAddress)
 
@@ -1758,6 +1799,9 @@ func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamesp
 	}
 
 	container := e2e.GetLeaseHolder(ctx, leases[0], leaseNamespace, client)
+	if len(afterVIPConfirmed) > 0 && afterVIPConfirmed[0] != nil {
+		afterVIPConfirmed[0](container)
+	}
 
 	if deleteDS {
 		removeTestDS(ctx, client, dsNamespace, dsName, dsNumber)

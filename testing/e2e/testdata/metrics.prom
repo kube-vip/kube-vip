@@ -1,0 +1,12 @@
+# HELP kube_vip_is_leader Whether this process holds a lease.
+# TYPE kube_vip_is_leader gauge
+kube_vip_is_leader{lease_name="plndr-cp-lock",node="control-plane"} 1
+kube_vip_is_leader{node="control-plane2",lease_name="plndr-cp-lock"} 0
+# HELP kube_vip_election_errors_total Election errors.
+# TYPE kube_vip_election_errors_total counter
+kube_vip_election_errors_total{reason="api\nserver",node="control-plane"} 3
+# TYPE kube_vip_reconcile_seconds histogram
+kube_vip_reconcile_seconds_bucket{le="0.1"} 2
+kube_vip_reconcile_seconds_bucket{le="+Inf"} 4
+kube_vip_reconcile_seconds_sum 0.5
+kube_vip_reconcile_seconds_count 4
