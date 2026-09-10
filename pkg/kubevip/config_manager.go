@@ -74,3 +74,9 @@ func isValidInterface(iface string) error {
 
 	return nil
 }
+
+// IsOnGlobalLeaderElection returns true if kube-vip is relying on a single global leader election lock
+// rather than per-service leader election.
+func (c *Config) IsOnGlobalLeaderElection() bool {
+	return !c.EnableServicesElection && !c.PerServiceElectionOnDemand
+}
