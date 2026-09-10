@@ -1288,7 +1288,8 @@ func killLeader(leaderName string) {
 
 	session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(session, "5s").Should(gexec.Exit(0))
+	// Every parallel kind cluster shares one Docker daemon, so the kill can be acknowledged slowly.
+	Eventually(session, "30s").Should(gexec.Exit(0))
 }
 
 func findLeader(leaderIPAddr string, clusterName string) string {
