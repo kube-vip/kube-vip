@@ -21,14 +21,13 @@ func TestDHCPv6StopReleasesManagerReferenceForParentInterface(t *testing.T) {
 	}
 
 	client := &DHCPv6Client{
-		iface:        &net.Interface{Name: "vlan-child"},
-		managerKey:   "parent0",
-		ipChan:       make(chan string),
-		stopChan:     make(chan struct{}),
-		releasedChan: make(chan struct{}),
-		ic:           shared,
+		iface:      &net.Interface{Name: "vlan-child"},
+		managerKey: "parent0",
+		ipChan:     make(chan string),
+		stopChan:   make(chan struct{}),
+		ic:         shared,
+		addr:       &dhcpv6.OptIAAddress{},
 	}
-	close(client.releasedChan)
 
 	client.Stop()
 

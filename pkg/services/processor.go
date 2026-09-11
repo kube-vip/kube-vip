@@ -213,7 +213,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	}
 
 	if svcInstance == nil {
-		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+		svcInstance, err = instance.NewInstance(svcCtx.Ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
 		if err != nil {
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
 			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)

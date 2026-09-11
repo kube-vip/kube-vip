@@ -343,6 +343,9 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 				return nil, err
 			}
 			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("context error while starting DHCPv4 for %s/%s: error: %w",
+					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, ctx.Err())
 			case err := <-instance.DHCPv4Client.ErrorChannel():
 				return nil, fmt.Errorf("error starting DHCPv4 for %s/%s: error: %s",
 					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
@@ -358,6 +361,9 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 				return nil, err
 			}
 			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("context error while starting DHCPv6 for %s/%s: error: %w",
+					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, ctx.Err())
 			case err := <-instance.DHCPv6Client.ErrorChannel():
 				return nil, fmt.Errorf("error starting DHCPv6 for %s/%s: error: %s",
 					instance.ServiceSnapshot.Namespace, instance.ServiceSnapshot.Name, err)
@@ -654,7 +660,8 @@ func (i *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uin
 
 	wg.Go(func() {
 		if err := client.Start(ctx); err != nil {
-			log.Error("[instance] DHCP client error: %w")
+			log.Error("[instance] DHCP client", "error", err)
+			client.Stop()
 		}
 	})
 
