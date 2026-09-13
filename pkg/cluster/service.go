@@ -29,8 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager,
-	bgpServer *bgp.Server, killFunc func()) error {
+func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager, bgpServer bgp.BGPManager, killFunc func()) error {
 
 	var err error
 
@@ -302,7 +301,7 @@ func (cluster *Cluster) bgpHealthCheck(ctx context.Context, c *kubevip.Config) (
 	return healthy, nil
 }
 
-func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer *bgp.Server, vipCIDR string) {
+func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer bgp.BGPManager, vipCIDR string) {
 	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
 
 	consecutiveFailures := 0
@@ -394,7 +393,7 @@ func getNodeIPs(ctx context.Context, nodename string, client *kubernetes.Clients
 }
 
 // StartLoadBalancerService will start a VIP instance and leave it for kube-proxy to handle
-func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp *bgp.Server, name string, wg *sync.WaitGroup) error {
+func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip.Config, bgp bgp.BGPManager, name string, wg *sync.WaitGroup) error {
 	// use a Go context so we can tell the arp loop code when we
 	// want to step down
 	//nolint

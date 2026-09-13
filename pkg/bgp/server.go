@@ -15,6 +15,11 @@ import (
 	gobgp "github.com/osrg/gobgp/v4/pkg/server"
 )
 
+type BGPManager interface {
+	AddHost(ctx context.Context, addr string, object string) error
+	DelHost(ctx context.Context, addr string, object string) error
+}
+
 // Server manages a server object
 type Server struct {
 	s       *gobgp.BgpServer
