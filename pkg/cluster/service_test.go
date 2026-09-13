@@ -122,7 +122,7 @@ func TestBGPHealthCheckLoop_RetriesAddHostOnFailure(t *testing.T) {
 
 	bgpManager := newMockBGPRouteManager()
 	bgpManager.setAddErr(errTestAddHost)
-	startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath))
+	startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
 
 	expectConsistently(t, func() bool { return !bgpManager.isAnnounced() },
 		2*time.Second, "route should not be announced while AddHost errors")
@@ -226,7 +226,7 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpServer bgp.BGPManager
 func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *mockNetwork) {
 	t.Helper()
 
-	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil, nil)
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
 	}
@@ -236,7 +236,7 @@ func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *moc
 	done := make(chan struct{})
 
 	go func() {
-		_ = c.StartVipService(ctx, cfg, nil, func() {})
+		_ = c.StartVipService(ctx, cfg, nil, nil, func() {})
 		close(done)
 	}()
 
