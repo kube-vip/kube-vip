@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/route"
@@ -28,7 +29,7 @@ func TestBGPHealthCheckLoop_AnnouncesOnHealthy(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
+	startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
 
 	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
 		"route should be announced")
@@ -40,7 +41,7 @@ func TestBGPHealthCheckLoop_NoAnnouncementUntilHealthy(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
+	startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
 
 	expectConsistently(t, func() bool { return !bgpManager.isAnnounced() },
 		2*time.Second, "route should not be announced while unhealthy")
@@ -56,7 +57,7 @@ func TestBGPHealthCheckLoop_WithdrawsAfterThreshold(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	cfg := newTestConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg := newBGPConfig(healthcheck.server.URL, healthcheck.caPath)
 	cfg.ControlPlaneHealthCheck.FailureThreshold = 3
 	startVipService(t, cfg, bgpManager)
 
@@ -78,7 +79,7 @@ func TestBGPHealthCheckLoop_ReAnnouncesOnRecovery(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	cfg := newTestConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg := newBGPConfig(healthcheck.server.URL, healthcheck.caPath)
 	cfg.ControlPlaneHealthCheck.FailureThreshold = 1
 	startVipService(t, cfg, bgpManager)
 
@@ -100,7 +101,7 @@ func TestBGPHealthCheckLoop_StopsOnContextCancel(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	cancelContext, vipServiceDone := startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
+	cancelContext, vipServiceDone := startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
 
 	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
 		"route should be announced")
@@ -121,7 +122,7 @@ func TestBGPHealthCheckLoop_RetriesAddHostOnFailure(t *testing.T) {
 
 	bgpManager := newMockBGPRouteManager()
 	bgpManager.setAddErr(errTestAddHost)
-	startVipService(t, newTestConfig(healthcheck.server.URL, healthcheck.caPath), bgpManager)
+	startVipService(t, newBGPConfig(healthcheck.server.URL, healthcheck.caPath))
 
 	expectConsistently(t, func() bool { return !bgpManager.isAnnounced() },
 		2*time.Second, "route should not be announced while AddHost errors")
@@ -137,7 +138,7 @@ func TestBGPHealthCheckLoop_RetriesDelHostOnFailure(t *testing.T) {
 	t.Cleanup(healthcheck.server.Close)
 
 	bgpManager := newMockBGPRouteManager()
-	cfg := newTestConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg := newBGPConfig(healthcheck.server.URL, healthcheck.caPath)
 	cfg.ControlPlaneHealthCheck.FailureThreshold = 1
 	startVipService(t, cfg, bgpManager)
 
@@ -195,9 +196,8 @@ func (e *testError) Error() string { return e.msg }
 // startVipService launches vipService in a goroutine with a mock network and
 // registers a cleanup to cancel the context and wait for it to finish.
 // Uses InitCluster so the real code parses certs for the BGP health check client.
-func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRouteManager) (context.CancelFunc, <-chan struct{}) {
+func startVipService(t *testing.T, cfg *kubevip.Config, bgpServer bgp.BGPManager) (context.CancelFunc, <-chan struct{}) {
 	t.Helper()
-
 	c, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
@@ -208,7 +208,7 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRoute
 	done := make(chan struct{})
 
 	go func() {
-		_ = c.StartVipService(ctx, cfg, nil, bgpManager, func() {})
+		_ = c.StartVipService(ctx, cfg, nil, bgpServer, func() {})
 		close(done)
 	}()
 
@@ -226,7 +226,7 @@ func startVipService(t *testing.T, cfg *kubevip.Config, bgpManager *mockBGPRoute
 func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *mockNetwork) {
 	t.Helper()
 
-	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil)
+	c, err := cluster.InitCluster(cfg, true, nil, nil, route.NewManager(), nil, nil)
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
 	}
@@ -236,7 +236,7 @@ func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *moc
 	done := make(chan struct{})
 
 	go func() {
-		_ = c.StartVipService(ctx, cfg, nil, nil, func() {})
+		_ = c.StartVipService(ctx, cfg, nil, func() {})
 		close(done)
 	}()
 
@@ -247,14 +247,14 @@ func startRoutingTableVipService(t *testing.T, cfg *kubevip.Config, network *moc
 }
 
 func newRoutingTableConfig(url, caPath string) *kubevip.Config {
-	cfg := newTestConfig(url, caPath)
+	cfg := newBGPConfig(url, caPath)
 	cfg.EnableBGP = false
 	cfg.EnableRoutingTable = true
 	cfg.BackendHealthCheckInterval = 1
 	return cfg
 }
 
-func newTestConfig(url, caPath string) *kubevip.Config {
+func newBGPConfig(url, caPath string) *kubevip.Config {
 	return &kubevip.Config{
 		EnableBGP: true,
 		ControlPlaneHealthCheck: kubevip.HealthCheck{
