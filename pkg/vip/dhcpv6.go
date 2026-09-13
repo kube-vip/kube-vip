@@ -284,7 +284,7 @@ RequestLoop:
 			if err != nil {
 				dur := backoff.Duration()
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
-					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
+					errMsg := fmt.Errorf("failed to get an IPv6 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
 					c.errorChan <- errMsg
 					return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
