@@ -32,7 +32,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -56,10 +55,6 @@ type Manager struct {
 	sigint sync.Once
 
 	svcProcessor *services.Processor
-
-	// This is a prometheus counter used to count the number of events received
-	// from the service watcher
-	countServiceWatchEvent *prometheus.CounterVec
 
 	// This mutex is to protect calls from various goroutines
 	mutex sync.Mutex
@@ -259,16 +254,10 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr)
 
 	return &Manager{
-		clientSet:   clientset,
-		rwClientSet: rwClientSet,
-		configMap:   configMap,
-		config:      config,
-		countServiceWatchEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "kube_vip",
-			Subsystem: "manager",
-			Name:      "all_services_events",
-			Help:      "Count all events fired by the service watcher categorised by event type",
-		}, []string{"type"}),
+		clientSet:        clientset,
+		rwClientSet:      rwClientSet,
+		configMap:        configMap,
+		config:           config,
 		signalChan:       signalChan,
 		svcProcessor:     svcProcessor,
 		intfMgr:          intfMgr,
