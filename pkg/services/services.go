@@ -45,6 +45,26 @@ const (
 )
 
 func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
+	if ctx.Ctx.Err() != nil {
+		return nil
+	}
+	if !usesLeaderElection {
+		select {
+		case <-ctx.Ctx.Done():
+			return nil
+		case <-ctx.GetEndpointsReady():
+		}
+	}
+
+	unlockService := p.lockService(svc.UID)
+	defer unlockService()
+	current, err := p.getServiceContext(svc.UID)
+	if err != nil {
+		return err
+	}
+	if current != ctx || ctx.Ctx.Err() != nil {
+		return nil
+	}
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -59,14 +79,6 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		if instance != nil {
 			instance.AddCalled = true
-		}
-
-		if !usesLeaderElection {
-			select {
-			case <-ctx.Ctx.Done():
-				return nil
-			case <-ctx.GetEndpointsReady():
-			}
 		}
 
 		if err := p.addService(ctx.Ctx, instance, svc, wg); err != nil {
@@ -170,6 +182,9 @@ func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc
 	// protect against addService while reading
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	startTime := time.Now()
 
