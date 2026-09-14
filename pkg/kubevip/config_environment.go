@@ -322,7 +322,7 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.ArpBroadcastRate = i64
-	} else {
+	} else if c.ArpBroadcastRate == 0 {
 		// default to three seconds
 		c.ArpBroadcastRate = 3000
 	}
@@ -426,7 +426,7 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(dhcpMode)
 	if env != "" {
 		c.DHCPMode = env
-	} else {
+	} else if c.DHCPMode == "" {
 		if c.DNSMode != "first" {
 			c.DHCPMode = c.DNSMode
 		} else {
