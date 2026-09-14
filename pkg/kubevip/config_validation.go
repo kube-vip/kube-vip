@@ -28,7 +28,18 @@ func (c *Config) Validate() error {
 	if err := validateRoutingProtocol(c.RoutingProtocol); err != nil {
 		return err
 	}
+	if err := validatePprof(c.EnablePprof, c.PprofHTTPServer); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// validatePprof rejects profiling being enabled with nowhere to serve it.
+func validatePprof(enabled bool, addr string) error {
+	if enabled && addr == "" {
+		return fmt.Errorf("pprof is enabled but no pprof server address is set")
+	}
 	return nil
 }
 

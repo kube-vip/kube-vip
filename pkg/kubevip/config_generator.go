@@ -629,6 +629,19 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 	}
 	newEnvironment = append(newEnvironment, prometheus...)
 
+	if c.EnablePprof {
+		newEnvironment = append(newEnvironment,
+			corev1.EnvVar{
+				Name:  enablePprof,
+				Value: strconv.FormatBool(c.EnablePprof),
+			},
+			corev1.EnvVar{
+				Name:  pprofServer,
+				Value: c.PprofHTTPServer,
+			},
+		)
+	}
+
 	if c.EnableEndpoints {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{
 			Name:  enableEndpoints,

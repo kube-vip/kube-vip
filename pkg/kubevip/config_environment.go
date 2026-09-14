@@ -698,6 +698,21 @@ func ParseEnvironment(c *Config) error {
 		c.PrometheusHTTPServer = env
 	}
 
+	// Find pprof configuration.
+	env = os.Getenv(enablePprof)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnablePprof = b
+	}
+
+	env = os.Getenv(pprofServer)
+	if env != "" {
+		c.PprofHTTPServer = env
+	}
+
 	// Set Egress configuration(s)
 	env = os.Getenv(egressPodCidr)
 	if env != "" {

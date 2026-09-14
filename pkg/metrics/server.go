@@ -18,26 +18,32 @@ import (
 // finish once the context is cancelled.
 const shutdownTimeout = 5 * time.Second
 
-// ServerConfig defines the Prometheus server configuration.
+// ServerConfig defines an observability HTTP server configuration.
 type ServerConfig struct {
-	// Addr sets the http server address used to expose the metric endpoint
+	// Addr sets the http server address used to expose the endpoints
 	Addr string
 }
 
 // Serve exposes the Prometheus metrics endpoint on the configured address.
 func Serve(ctx context.Context, config ServerConfig) error {
-	ln, err := net.Listen("tcp", config.Addr)
-	if err != nil {
-		return fmt.Errorf("listening on %q: %w", config.Addr, err)
-	}
-
-	return serve(ctx, ln)
+	return listenAndServe(ctx, config, newMetricsMux(), "prometheus")
 }
 
-// serve starts the metrics endpoint on the provided listener
-func serve(ctx context.Context, ln net.Listener) error {
+// listenAndServe binds config.Addr and serves handler on it until the context
+// is cancelled. name identifies the server in log messages and errors.
+func listenAndServe(ctx context.Context, config ServerConfig, handler http.Handler, name string) error {
+	ln, err := net.Listen("tcp", config.Addr)
+	if err != nil {
+		return fmt.Errorf("listening on %q for the %s HTTP server: %w", config.Addr, name, err)
+	}
+
+	return serve(ctx, ln, handler, name)
+}
+
+// serve starts handler on the provided listener
+func serve(ctx context.Context, ln net.Listener, handler http.Handler, name string) error {
 	srv := &http.Server{
-		Handler:           newServeMux(),
+		Handler:           handler,
 		ReadHeaderTimeout: 2 * time.Second,
 	}
 
@@ -53,31 +59,34 @@ func serve(ctx context.Context, ln net.Listener) error {
 		serveErr <- err
 	})
 
-	log.Info("prometheus HTTP server started", "addr", ln.Addr().String())
+	log.Info(name+" HTTP server started", "addr", ln.Addr().String())
 
 	select {
 	case err := <-serveErr:
 		if err != nil {
-			return fmt.Errorf("serving prometheus metrics: %w", err)
+			return fmt.Errorf("serving %s HTTP server: %w", name, err)
 		}
 		return nil
 	case <-ctx.Done():
 	}
 
-	// create prometheus shutdown context (independent of other contexts)
+	// shut down on an independent context, the caller's is already cancelled
 	ctxShutDown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(ctxShutDown); err != nil {
-		return fmt.Errorf("shutting down prometheus HTTP server: %w", err)
+		return fmt.Errorf("shutting down %s HTTP server: %w", name, err)
 	}
 
-	log.Info("prometheus HTTP server stopped")
+	log.Info(name + " HTTP server stopped")
 
 	return nil
 }
 
-func newServeMux() *http.ServeMux {
+// newMetricsMux builds the handler served on the metrics address. It never
+// carries the profiling endpoints; those live on their own server, see
+// ServePprof.
+func newMetricsMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
