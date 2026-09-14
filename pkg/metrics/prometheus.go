@@ -1,6 +1,18 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	serviceElectionLoopsMu   sync.Mutex
+	serviceElectionLoopCount = map[string]int{}
+	vipAddressesMu           sync.Mutex
+	vipAddressReferences     = map[string]int{}
+	vipAddressLabelCounts    = map[string]int{}
+)
 
 var (
 	// Service / VIP Lifecycle
@@ -15,6 +27,33 @@ var (
 	ServiceReconcileDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{Name: "kube_vip_service_reconcile_duration_seconds", Help: "How long AddOrModify takes end-to-end"},
 		[]string{"namespace"},
+	)
+	VIPAddresses = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_vip_addresses", Help: "VIP addresses currently held by interface and address family"},
+		[]string{"interface", "family"},
+	)
+	VIPOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_vip_operations_total", Help: "VIP address operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	ARPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_arp_advertisements_total", Help: "Gratuitous ARP advertisements by result"},
+		[]string{"result"},
+	)
+	NDPAdvertisementsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_ndp_advertisements_total", Help: "Gratuitous NDP advertisements by result"},
+		[]string{"result"},
+	)
+	RouteOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_route_operations_total", Help: "Routing table operations by operation and result"},
+		[]string{"op", "result"},
+	)
+	DNSResolutionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "kube_vip_dns_resolutions_total", Help: "DNS resolutions by result"},
+		[]string{"result"},
+	)
+	DNSIPChangesTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{Name: "kube_vip_dns_ip_changes_total", Help: "DNS-driven VIP IP changes"},
 	)
 
 	// This is a prometheus counter used to count the number of events received
@@ -34,6 +73,14 @@ var (
 	IsLeader = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_is_leader", Help: "1 if this node currently holds the lease"},
 		[]string{"node", "lease_name"},
+	)
+	WatcherLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_watcher_loops", Help: "Live watcher loops by kind"},
+		[]string{"kind"},
+	)
+	ElectionLoops = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "kube_vip_election_loops", Help: "Live leader election loops by type"},
+		[]string{"type"},
 	)
 	ServiceElectionLoops = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_service_election_loops",
@@ -74,8 +121,17 @@ func RegisterPrometheusMetrics() {
 		ActiveServices,
 		ServiceReconcileErrorsTotal,
 		ServiceReconcileDuration,
+		VIPAddresses,
+		VIPOperationsTotal,
+		ARPAdvertisementsTotal,
+		NDPAdvertisementsTotal,
+		RouteOperationsTotal,
+		DNSResolutionsTotal,
+		DNSIPChangesTotal,
 		LeaderTransitionsTotal,
 		IsLeader,
+		WatcherLoops,
+		ElectionLoops,
 		ServiceElectionLoops,
 		ServiceElectionAttemptsTotal,
 		ServiceElectionErrorsTotal,
@@ -83,4 +139,73 @@ func RegisterPrometheusMetrics() {
 		BuildInfo,
 		CountServiceWatchEvent,
 	)
+}
+
+// TrackVIPAddress adds a reference to an address and increments the aggregate
+// gauge only when that address gains its first owner in this process.
+func TrackVIPAddress(iface, family, address string) {
+	addressKey := iface + "\x00" + family + "\x00" + address
+	labelKey := iface + "\x00" + family
+
+	vipAddressesMu.Lock()
+	defer vipAddressesMu.Unlock()
+
+	if vipAddressReferences[addressKey] == 0 {
+		vipAddressLabelCounts[labelKey]++
+		VIPAddresses.WithLabelValues(iface, family).Inc()
+	}
+	vipAddressReferences[addressKey]++
+}
+
+// UntrackVIPAddress removes an address reference and deletes the aggregate
+// series when no tracked addresses remain for its interface and family.
+func UntrackVIPAddress(iface, family, address string) {
+	addressKey := iface + "\x00" + family + "\x00" + address
+	labelKey := iface + "\x00" + family
+
+	vipAddressesMu.Lock()
+	defer vipAddressesMu.Unlock()
+
+	references := vipAddressReferences[addressKey]
+	if references == 0 {
+		return
+	}
+	if references > 1 {
+		vipAddressReferences[addressKey] = references - 1
+		return
+	}
+
+	delete(vipAddressReferences, addressKey)
+	remaining := vipAddressLabelCounts[labelKey] - 1
+	if remaining == 0 {
+		delete(vipAddressLabelCounts, labelKey)
+		VIPAddresses.DeleteLabelValues(iface, family)
+		return
+	}
+	vipAddressLabelCounts[labelKey] = remaining
+	VIPAddresses.WithLabelValues(iface, family).Dec()
+}
+
+// TrackServiceElectionLoop increments the loop gauge and returns a function
+// that decrements it and removes the series after the final loop exits.
+func TrackServiceElectionLoop(namespace, name string) func() {
+	key := namespace + "\x00" + name
+	serviceElectionLoopsMu.Lock()
+	serviceElectionLoopCount[key]++
+	ServiceElectionLoops.WithLabelValues(namespace, name).Inc()
+	serviceElectionLoopsMu.Unlock()
+
+	return func() {
+		serviceElectionLoopsMu.Lock()
+		defer serviceElectionLoopsMu.Unlock()
+
+		count := serviceElectionLoopCount[key]
+		if count <= 1 {
+			delete(serviceElectionLoopCount, key)
+			ServiceElectionLoops.DeleteLabelValues(namespace, name)
+			return
+		}
+		serviceElectionLoopCount[key] = count - 1
+		ServiceElectionLoops.WithLabelValues(namespace, name).Dec()
+	}
 }

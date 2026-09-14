@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
@@ -238,7 +239,10 @@ func ensureIPAndSendGratuitous(instance *Instance) {
 		// Gratuitous ARP, will broadcast to new MAC <-> IPv4 address
 		err := vip.ARPSendGratuitous(ipString, iface)
 		if err != nil {
+			metrics.ARPAdvertisementsTotal.WithLabelValues("error").Inc()
 			log.Warn(err.Error())
+		} else {
+			metrics.ARPAdvertisementsTotal.WithLabelValues("ok").Inc()
 		}
 	}
 }
