@@ -320,15 +320,32 @@ func ruleEqual(a, b *nftables.Rule) bool {
 	if !bytes.Equal(a.UserData, b.UserData) {
 		return false
 	}
+	if len(a.Exprs) != len(b.Exprs) {
+		return false
+	}
 
 	for i := range a.Exprs {
-		switch a.Exprs[i].(type) {
+		switch aExpr := a.Exprs[i].(type) {
 		case *expr.Meta:
 			if !exprEqual(&expr.Meta{}, a.Exprs[i], b.Exprs[i]) {
 				return false
 			}
 		case *expr.Lookup:
-			if !exprEqual(&expr.Lookup{}, a.Exprs[i], b.Exprs[i]) {
+			bExpr, ok := b.Exprs[i].(*expr.Lookup)
+			if !ok || (aExpr == nil) != (bExpr == nil) {
+				return false
+			}
+			if aExpr == nil {
+				continue
+			}
+			aLookup, bLookup := *aExpr, *bExpr
+			aLookup.SetID = 0
+			bLookup.SetID = 0
+			if !reflect.DeepEqual(aLookup, bLookup) {
+				return false
+			}
+		case *expr.Counter:
+			if _, ok := b.Exprs[i].(*expr.Counter); !ok {
 				return false
 			}
 		case *expr.Verdict:
@@ -349,6 +366,10 @@ func ruleEqual(a, b *nftables.Rule) bool {
 			}
 		case *expr.Bitwise:
 			if !exprEqual(&expr.Bitwise{}, a.Exprs[i], b.Exprs[i]) {
+				return false
+			}
+		default:
+			if !reflect.DeepEqual(a.Exprs[i], b.Exprs[i]) {
 				return false
 			}
 		}
