@@ -156,6 +156,11 @@ func init() {
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
 
+	// pprof HTTP Server
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnablePprof, "enablePprof", false, "Expose the pprof profiling endpoints (debug only, they are unauthenticated)")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PprofHTTPServer, "pprofHTTPServer", metrics.DefaultPprofHTTPServer,
+		"Host and port used to expose the pprof endpoints, only used with --enablePprof")
+
 	// Etcd
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.CAFile, "etcdCACert", "", "Verify certificates of TLS-enabled secure servers using this CA bundle file")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.ClientCertFile, "etcdCert", "", "Identify secure client using this TLS certificate file")
@@ -357,6 +362,18 @@ var kubeVipManager = &cobra.Command{
 				}); err != nil {
 					// Continue even if metrics server fails
 					log.Error("prometheus HTTP server", "err", err)
+				}
+			})
+		}
+
+		// start pprof server
+		if initConfig.EnablePprof {
+			wg.Go(func() {
+				if err := metrics.ServePprof(ctx, metrics.ServerConfig{
+					Addr: initConfig.PprofHTTPServer,
+				}); err != nil {
+					// Continue even if pprof server fails
+					log.Error("pprof HTTP server", "err", err)
 				}
 			})
 		}

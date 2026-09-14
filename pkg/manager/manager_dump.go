@@ -214,6 +214,10 @@ func (sm *Manager) dumpRuntimeSection() {
 		fmt.Printf("Load Balancers Configured: %d\n", len(sm.config.LoadBalancers))
 	}
 	fmt.Printf("Prometheus HTTP Server: %s\n", sm.config.PrometheusHTTPServer)
+	fmt.Printf("pprof Enabled: %t\n", sm.config.EnablePprof)
+	if sm.config.EnablePprof {
+		fmt.Printf("pprof HTTP Server: %s\n", sm.config.PprofHTTPServer)
+	}
 	fmt.Printf("Health Check Port: %d\n", sm.config.HealthCheckPort)
 	fmt.Printf("UPNP Enabled: %t\n", sm.config.EnableUPNP)
 	fmt.Printf("Egress Clean Enabled: %t\n", sm.config.EgressClean)

@@ -87,6 +87,40 @@ ip_vs_rr
 Preloading only the required modules is preferred to enabling the SELinux
 `domain_kernel_load_modules` boolean for containers.
 
+### Metrics and profiling
+
+kube-vip runs two independent observability HTTP servers. Metrics are on by
+default and profiling is off.
+
+#### Metrics endpoint
+
+Metrics are exposed on `:2112` by default, configurable with
+`--prometheusHTTPServer` or `prometheus_server`. An empty value disables the
+server.
+
+Exposed metrics cover service reconciliation events and errors, leader election
+transitions, BGP session state and build info (version, build, node).
+
+#### pprof endpoints (debug only)
+
+Profiling can be enabled with `--enablePprof` CLI flag or `enable_pprof` env variable, and listens on
+`127.0.0.1:6060` by default. The addrees can be configured with `--pprofHTTPServer` or
+`pprof_server`.
+
+```yaml
+# Kubernetes manifest
+containers:
+  - name: kube-vip
+    env:
+      - name: enable_pprof
+        value: "true"
+      - name: pprof_server
+        value: "127.0.0.1:1234"
+```
+
+Profiles available under `/debug/pprof/`: `profile` (CPU), `heap`, `allocs`,
+`goroutine`, `threadcreate`, `trace`, `cmdline` and `symbol`. 
+
 ### Gateway API `LoadBalancer` services with no endpoints
 
 Some Gateway API controllers create `LoadBalancer` services that intentionally have no Endpoints/EndpointSlices backends.

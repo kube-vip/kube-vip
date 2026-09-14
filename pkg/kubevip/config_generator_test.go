@@ -1,11 +1,13 @@
 package kubevip
 
 import (
+	"maps"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
 )
 
@@ -142,6 +144,51 @@ func TestGeneratePodSpecInstanceName(t *testing.T) {
 			}
 			if found && value != tt.instanceName {
 				t.Fatalf("instance_name = %q, want %q", value, tt.instanceName)
+			}
+		})
+	}
+}
+
+func TestGeneratePodSpecPprof(t *testing.T) {
+	tests := []struct {
+		name        string
+		enablePprof bool
+		addr        string
+		wantEnv     map[string]string
+	}{
+		{
+			name:        "enabled emits both variables",
+			enablePprof: true,
+			addr:        metrics.DefaultPprofHTTPServer,
+			wantEnv:     map[string]string{enablePprof: "true", pprofServer: metrics.DefaultPprofHTTPServer},
+		},
+		{
+			name:        "disabled emits neither",
+			enablePprof: false,
+			addr:        metrics.DefaultPprofHTTPServer,
+			wantEnv:     map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&Config{
+				EnablePprof:     tt.enablePprof,
+				PprofHTTPServer: tt.addr,
+			}, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if env.Name == enablePprof || env.Name == pprofServer {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("pprof pod environment = %v, want %v", got, tt.wantEnv)
 			}
 		})
 	}
