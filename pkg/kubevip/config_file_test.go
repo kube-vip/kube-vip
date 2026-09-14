@@ -39,6 +39,18 @@ prometheusHTTPServer: ""
 			},
 		},
 		{
+			name: "pprof configuration",
+			ext:  ".yaml",
+			content: `enablePprof: true
+pprofHTTPServer: "127.0.0.1:6060"
+`,
+			check: func(t *testing.T, config *Config) {
+				if !config.EnablePprof || config.PprofHTTPServer != "127.0.0.1:6060" {
+					t.Fatalf("pprof configuration not decoded: %#v", config)
+				}
+			},
+		},
+		{
 			name:    "JSON external names",
 			ext:     ".json",
 			content: `{"enableBGP":true,"dnsDualStackMode":"dual","bgpConfig":{"routerID":"192.0.2.1","as":65000}}`,
