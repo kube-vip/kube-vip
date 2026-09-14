@@ -1,6 +1,10 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 var (
 	// Service / VIP Lifecycle
@@ -68,19 +72,25 @@ var (
 	)
 )
 
+var registerOnce sync.Once
+
+// RegisterPrometheusMetrics registers all kube-vip metrics with the default
+// Prometheus registry.
 func RegisterPrometheusMetrics() {
-	// Register all metrics with Prometheus
-	prometheus.MustRegister(
-		ActiveServices,
-		ServiceReconcileErrorsTotal,
-		ServiceReconcileDuration,
-		LeaderTransitionsTotal,
-		IsLeader,
-		ServiceElectionLoops,
-		ServiceElectionAttemptsTotal,
-		ServiceElectionErrorsTotal,
-		BGPSessionInfoGauge,
-		BuildInfo,
-		CountServiceWatchEvent,
-	)
+	registerOnce.Do(func() {
+		// Register all metrics with Prometheus
+		prometheus.MustRegister(
+			ActiveServices,
+			ServiceReconcileErrorsTotal,
+			ServiceReconcileDuration,
+			LeaderTransitionsTotal,
+			IsLeader,
+			ServiceElectionLoops,
+			ServiceElectionAttemptsTotal,
+			ServiceElectionErrorsTotal,
+			BGPSessionInfoGauge,
+			BuildInfo,
+			CountServiceWatchEvent,
+		)
+	})
 }
