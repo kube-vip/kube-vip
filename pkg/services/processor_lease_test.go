@@ -46,7 +46,7 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 			p := &Processor{
 				config:           &kubevip.Config{},
 				leaseMgr:         lease.NewManager(),
-				ServiceInstances: []*instance.Instance{{ServiceSnapshot: tracked}},
+				ServiceInstances: []*instance.Instance{{ServiceUID: uid, ServiceSnapshot: tracked}},
 			}
 			svcCtx := servicecontext.New(context.Background())
 			p.svcMap.Store(uid, svcCtx)
@@ -191,7 +191,7 @@ func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
 	oldCtx := servicecontext.New(context.Background())
 	replacementCtx := servicecontext.New(context.Background())
 	p.svcMap.Store(service.UID, replacementCtx)
-	replacementInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+	replacementInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service.DeepCopy()}
 	p.ServiceInstances = []*instance.Instance{replacementInstance}
 
 	leaseNamespace, serviceLease := lease.ServiceName(service)
