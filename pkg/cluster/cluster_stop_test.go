@@ -7,7 +7,7 @@ import (
 )
 
 func TestStopConcurrentDoesNotRaceOrPanic(t *testing.T) {
-	c := &Cluster{stop: make(chan bool)}
+	c := &Cluster{stop: make(chan struct{})}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	var panics atomic.Int64
