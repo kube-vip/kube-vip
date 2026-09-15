@@ -23,6 +23,13 @@ type Provider interface {
 	// For named ports, it looks up the port number from the endpoint.
 	// For numeric ports, it returns the port as-is.
 	ResolvePort(servicePort v1.ServicePort) int32
+	GetBackends(servicePort v1.ServicePort, nodeName string, local bool) ([]Backend, error)
+}
+
+// Backend identifies an endpoint and the target port exposed by its backing object.
+type Backend struct {
+	Address string
+	Port    int32
 }
 
 // ResolvePortWithLookup is a helper that resolves a service port using a lookup function
