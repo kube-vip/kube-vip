@@ -4,17 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	log "log/slog"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -158,6 +155,11 @@ func init() {
 
 	// Prometheus HTTP Server
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PrometheusHTTPServer, "prometheusHTTPServer", ":2112", "Host and port used to expose Prometheus metrics via an HTTP server")
+
+	// pprof HTTP Server
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EnablePprof, "enablePprof", false, "Expose the pprof profiling endpoints (debug only, they are unauthenticated)")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.PprofHTTPServer, "pprofHTTPServer", metrics.DefaultPprofHTTPServer,
+		"Host and port used to expose the pprof endpoints, only used with --enablePprof")
 
 	// Etcd
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Etcd.CAFile, "etcdCACert", "", "Verify certificates of TLS-enabled secure servers using this CA bundle file")
@@ -350,12 +352,29 @@ var kubeVipManager = &cobra.Command{
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
+		metrics.RegisterPrometheusMetrics()
+
 		// start prometheus server
 		if initConfig.PrometheusHTTPServer != "" {
 			wg.Go(func() {
-				servePrometheusHTTPServer(ctx, PrometheusHTTPServerConfig{
+				if err := metrics.Serve(ctx, metrics.ServerConfig{
 					Addr: initConfig.PrometheusHTTPServer,
-				})
+				}); err != nil {
+					// Continue even if metrics server fails
+					log.Error("prometheus HTTP server", "err", err)
+				}
+			})
+		}
+
+		// start pprof server
+		if initConfig.EnablePprof {
+			wg.Go(func() {
+				if err := metrics.ServePprof(ctx, metrics.ServerConfig{
+					Addr: initConfig.PprofHTTPServer,
+				}); err != nil {
+					// Continue even if pprof server fails
+					log.Error("pprof HTTP server", "err", err)
+				}
 			})
 		}
 
@@ -473,7 +492,8 @@ var kubeVipManager = &cobra.Command{
 			return fmt.Errorf("new manager: %w", err)
 		}
 
-		metrics.RegisterPrometheusMetrics()
+		// Label metrics after the call to manager.New, as it may modify the node name
+		// if it was not set in the configuration.
 		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
@@ -483,65 +503,6 @@ var kubeVipManager = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-// PrometheusHTTPServerConfig defines the Prometheus server configuration.
-type PrometheusHTTPServerConfig struct {
-	// Addr sets the http server address used to expose the metric endpoint
-	Addr string
-}
-
-func servePrometheusHTTPServer(ctx context.Context, config PrometheusHTTPServerConfig) {
-	var err error
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { //nolint TODO
-		_, _ = w.Write([]byte(`<html>
-			<head><title>kube-vip</title></head>
-			<body>
-			<h1>kube-vip Metrics</h1>
-			<p><a href="` + "/metrics" + `">Metrics</a></p>
-			</body>
-			</html>`))
-	})
-
-	srv := &http.Server{
-		Addr:              config.Addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 2 * time.Second,
-	}
-
-	wg := sync.WaitGroup{}
-
-	wg.Go(func() {
-		if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("prometheus HTTP server", "err", err)
-			return
-		}
-	})
-
-	log.Info("prometheus HTTP server started")
-
-	<-ctx.Done()
-
-	// create prometheus shutdown context (independent of other contexts)
-	ctxShutDown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer func() {
-		cancel()
-	}()
-
-	if err = srv.Shutdown(ctxShutDown); err != nil {
-		log.Error("shutting down prometheus HTTP server", "err", err)
-		return
-	}
-
-	if err == http.ErrServerClosed {
-		err = nil
-	}
-
-	log.Info("prometheus HTTP server stopped")
-
-	wg.Wait()
 }
 
 func GenerateCidrRange(address string, dnsMode string) (string, error) {
