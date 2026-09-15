@@ -227,17 +227,22 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv4")
 			} else {
-				for ip := range inst.DHCPv4Client.IPChannel() {
-					log.Debug("IP changed", "ip", ip)
-					inst.VIPConfigs[index].VIP = ip
-					inst.DHCPInterfaceIPv4 = ip
-					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, inst); err != nil {
-							log.Warn("updating svc", "err", err)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Debug("IPv4 update watcher stopping")
+						return
+					case ip := <-inst.DHCPv4Client.IPChannel():
+						log.Debug("IP changed", "ip", ip)
+						inst.VIPConfigs[index].VIP = ip
+						inst.DHCPInterfaceIPv4 = ip
+						if !p.config.DisableServiceUpdates {
+							if err := p.updateStatus(ctx, inst); err != nil {
+								log.Warn("updating svc", "err", err)
+							}
 						}
 					}
 				}
-				log.Debug("IPv4 update channel closed, stopping")
 			}
 		})
 	}
@@ -255,17 +260,22 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv6")
 			} else {
-				for ip := range inst.DHCPv6Client.IPChannel() {
-					log.Debug("IP changed", "ip", ip)
-					inst.VIPConfigs[index].VIP = ip
-					inst.DHCPInterfaceIPv6 = ip
-					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, inst); err != nil {
-							log.Warn("updating svc", "err", err)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Debug("IPv6 update watcher stopping")
+						return
+					case ip := <-inst.DHCPv6Client.IPChannel():
+						log.Debug("IP changed", "ip", ip)
+						inst.VIPConfigs[index].VIP = ip
+						inst.DHCPInterfaceIPv6 = ip
+						if !p.config.DisableServiceUpdates {
+							if err := p.updateStatus(ctx, inst); err != nil {
+								log.Warn("updating svc", "err", err)
+							}
 						}
 					}
 				}
-				log.Debug("IPv6 update channel closed, stopping")
 			}
 		})
 	}

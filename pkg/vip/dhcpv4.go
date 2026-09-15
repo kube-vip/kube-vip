@@ -73,7 +73,6 @@ func (c *DHCPv4Client) Stop() {
 
 func (c *DHCPv4Client) close() {
 	c.stopOnce.Do(func() {
-		close(c.ipChan)
 		close(c.stopChan)
 	})
 }
@@ -284,7 +283,12 @@ RequestLoop:
 	}
 
 	if c.ipChan != nil {
-		c.ipChan <- lease.ACK.YourIPAddr.String()
+		// Nothing closes ipChan, so never block on a consumer that already stopped.
+		select {
+		case c.ipChan <- lease.ACK.YourIPAddr.String():
+		case <-c.stopChan:
+		case <-ctx.Done():
+		}
 	}
 
 	return lease, nil
