@@ -23,6 +23,9 @@ func init() {
 }
 
 type DHCPv6ClientManager struct {
+	// mu guards clients and the reference counts of its entries together, so a
+	// concurrent Add cannot join a client that Delete is already retiring.
+	mu      sync.Mutex
 	clients map[string]*DHCPv6InternalClient
 }
 
@@ -33,17 +36,17 @@ func NewDHCPv6ClientManager() *DHCPv6ClientManager {
 }
 
 func (m *DHCPv6ClientManager) Get(iface string) *DHCPv6InternalClient {
-	c, exists := m.clients[iface]
-	if !exists {
-		return nil
-	}
-	return c
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.clients[iface]
 }
 
 func (m *DHCPv6ClientManager) Add(iface string) (*DHCPv6InternalClient, error) {
-	c := m.Get(iface)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if c != nil {
+	if c := m.clients[iface]; c != nil {
 		c.references.Add(1)
 		return c, nil
 	}
@@ -57,15 +60,16 @@ func (m *DHCPv6ClientManager) Add(iface string) (*DHCPv6InternalClient, error) {
 }
 
 func (m *DHCPv6ClientManager) Delete(iface string) {
-	c := m.Get(iface)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if c != nil {
-		c.references.Add(-1)
-		ref := c.references.Load()
-		if ref < 1 {
-			c.client.Close()
-			delete(m.clients, iface)
-		}
+	c := m.clients[iface]
+	if c == nil {
+		return
+	}
+	if c.references.Add(-1) < 1 {
+		c.client.Close()
+		delete(m.clients, iface)
 	}
 }
 
@@ -154,7 +158,6 @@ func (c *DHCPv6Client) Stop() {
 // Close dhcp client channels
 func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
-		close(c.ipChan)
 		close(c.stopChan)
 	})
 	dhcpv6ClientManager.Delete(c.managerKey)
@@ -304,7 +307,12 @@ RequestLoop:
 	}
 
 	if c.ipChan != nil {
-		c.ipChan <- addr.IPv6Addr.String()
+		// Nothing closes ipChan, so never block on a consumer that already stopped.
+		select {
+		case c.ipChan <- addr.IPv6Addr.String():
+		case <-c.stopChan:
+		case <-ctx.Done():
+		}
 	}
 
 	return addr, nil
