@@ -353,7 +353,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-
+		sm.Kill()
 		wg.Wait()
 		w.Cleanup()
 		cancel()
