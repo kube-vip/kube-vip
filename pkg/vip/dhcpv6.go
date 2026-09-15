@@ -307,7 +307,12 @@ RequestLoop:
 	}
 
 	if c.ipChan != nil {
-		c.ipChan <- addr.IPv6Addr.String()
+		// Nothing closes ipChan, so never block on a consumer that already stopped.
+		select {
+		case c.ipChan <- addr.IPv6Addr.String():
+		case <-c.stopChan:
+		case <-ctx.Done():
+		}
 	}
 
 	return addr, nil
