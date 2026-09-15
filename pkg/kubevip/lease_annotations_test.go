@@ -25,9 +25,43 @@ func TestWithLeaseVIPsEncodesVersionedInstanceOwnership(t *testing.T) {
 		t.Fatalf("Lease VIP metadata = %+v", value)
 	}
 	if len(value.VIPs) != 2 ||
-		value.VIPs[0] != (LeaseVIP{Index: 0, Value: "2001:db8::10"}) ||
-		value.VIPs[1] != (LeaseVIP{Index: 1, Value: "192.0.2.10"}) {
-		t.Fatalf("Lease VIPs = %v, want indexed VIPs in configuration order", value.VIPs)
+		value.VIPs[0] != (LeaseVIP{Index: 0, Value: "192.0.2.10"}) ||
+		value.VIPs[1] != (LeaseVIP{Index: 1, Value: "2001:db8::10"}) {
+		t.Fatalf("Lease VIPs = %v, want indexed VIPs in canonical address order", value.VIPs)
+	}
+}
+
+// The annotation is rewritten whenever a node starts campaigning, so the encoding
+// has to be stable even when callers collect the same VIPs in a different order.
+func TestWithLeaseVIPsIsIndependentOfInputOrder(t *testing.T) {
+	first, err := WithLeaseVIPs(nil, "release_a", 248, []string{
+		"2001:db8::10", "192.0.2.10", "10.0.0.2", "10.0.0.10",
+	})
+	if err != nil {
+		t.Fatalf("WithLeaseVIPs() error = %v", err)
+	}
+	second, err := WithLeaseVIPs(nil, "release_a", 248, []string{
+		"10.0.0.10", "192.0.2.10", "2001:db8::10", "10.0.0.2",
+	})
+	if err != nil {
+		t.Fatalf("WithLeaseVIPs() error = %v", err)
+	}
+	if first[LeaseVIPs] != second[LeaseVIPs] {
+		t.Fatalf("annotation changed with input order:\n%s\n%s", first[LeaseVIPs], second[LeaseVIPs])
+	}
+
+	value, err := ParseLeaseVIPs(first[LeaseVIPs])
+	if err != nil {
+		t.Fatalf("ParseLeaseVIPs() error = %v", err)
+	}
+	want := []string{"10.0.0.2", "10.0.0.10", "192.0.2.10", "2001:db8::10"}
+	if len(value.VIPs) != len(want) {
+		t.Fatalf("Lease VIPs = %v, want %v", value.VIPs, want)
+	}
+	for index, address := range want {
+		if value.VIPs[index] != (LeaseVIP{Index: index, Value: address}) {
+			t.Fatalf("Lease VIPs = %v, want %v", value.VIPs, want)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -56,14 +57,14 @@ func ParseLeaseVIPs(value string) (LeaseVIPsValue, error) {
 		if err != nil {
 			return LeaseVIPsValue{}, fmt.Errorf("invalid %s VIP at index %d: %w", LeaseVIPs, vip.Index, err)
 		}
-		parsed.VIPs[index].Value = address
+		parsed.VIPs[index].Value = address.String()
 	}
 	return parsed, nil
 }
 
 func normalizeLeaseVIPs(values []string) []LeaseVIP {
-	unique := make(map[string]struct{})
-	result := make([]LeaseVIP, 0, len(values))
+	unique := make(map[netip.Addr]struct{})
+	addresses := make([]netip.Addr, 0, len(values))
 	for _, value := range values {
 		for candidate := range strings.SplitSeq(value, ",") {
 			candidate = strings.TrimSpace(candidate)
@@ -75,20 +76,27 @@ func normalizeLeaseVIPs(values []string) []LeaseVIP {
 				continue
 			}
 			unique[address] = struct{}{}
-			result = append(result, LeaseVIP{Index: len(result), Value: address})
+			addresses = append(addresses, address)
 		}
+	}
+	// Sorting keeps the annotation byte-identical however callers happen to order VIPs.
+	slices.SortFunc(addresses, netip.Addr.Compare)
+
+	result := make([]LeaseVIP, 0, len(addresses))
+	for _, address := range addresses {
+		result = append(result, LeaseVIP{Index: len(result), Value: address.String()})
 	}
 	return result
 }
 
-func parseLeaseVIP(value string) (string, error) {
+func parseLeaseVIP(value string) (netip.Addr, error) {
 	address, err := netip.ParseAddr(value)
 	if err == nil {
-		return address.Unmap().String(), nil
+		return address.Unmap(), nil
 	}
 	prefix, prefixErr := netip.ParsePrefix(value)
 	if prefixErr != nil {
-		return "", fmt.Errorf("parse address %q: %w", value, err)
+		return netip.Addr{}, fmt.Errorf("parse address %q: %w", value, err)
 	}
-	return prefix.Addr().Unmap().String(), nil
+	return prefix.Addr().Unmap(), nil
 }
