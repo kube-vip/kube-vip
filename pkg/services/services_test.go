@@ -26,7 +26,8 @@ type testDHCPClient struct {
 }
 
 func newTestDHCPClient() *testDHCPClient {
-	return &testDHCPClient{ips: make(chan string, 1), errors: make(chan error)}
+	// Unbuffered so a send only completes once the watcher has taken the address.
+	return &testDHCPClient{ips: make(chan string), errors: make(chan error)}
 }
 
 func (c *testDHCPClient) ErrorChannel() chan error { return c.errors }
@@ -209,13 +210,15 @@ func TestConfigureServiceWatchesBothDHCPFamilies(t *testing.T) {
 	}
 	wg := &sync.WaitGroup{}
 
-	if err := processor.configureService(context.Background(), serviceInstance, service, wg); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := processor.configureService(ctx, serviceInstance, service, wg); err != nil {
 		t.Fatalf("configureService() error = %v", err)
 	}
 	dhcpv4.ips <- "192.0.2.10"
 	dhcpv6.ips <- "2001:db8::10"
-	close(dhcpv4.ips)
-	close(dhcpv6.ips)
+	cancel()
 	wg.Wait()
 
 	if got := serviceInstance.DHCPInterfaceIPv4; got != "192.0.2.10" {
