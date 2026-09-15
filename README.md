@@ -20,6 +20,23 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 For upgrading an existing install in place (static Pod or DaemonSet), see the [upgrade guide](https://kube-vip.io/docs/upgrade/).
 
+### Runtime configuration files
+
+The `manager` and `service` commands accept strict YAML or JSON configuration
+with `--config-file PATH` or the `config_file` environment variable. Values are
+resolved in this order: explicitly supplied CLI flags, environment variables,
+configuration file, then command defaults. An explicitly supplied `false`, `0`,
+or empty string overrides lower-priority sources; an omitted value does not.
+`--config-file` takes precedence over `config_file` when both are set.
+
+Configuration keys use the documented external names (for example `enableARP`,
+`dnsDualStackMode`, and `bgpConfig.routerID`). Unknown keys are rejected. Runtime-
+derived `isDualStack` and `requireDualStack`, the bootstrap `configFile` key, and
+generator-only `loadBalancers`, `bgpPeers`, `singleNode`, `startAsLeader`, and
+`addPeersAsBackends` keys are intentionally not accepted in runtime files.
+Use `bgpConfig.peers` for BGP peers; the legacy single `bgpPeerConfig` form is
+also accepted and normalized into the runtime peer list.
+
 ## Features
 
 Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, over time it has evolved to incorporate that same functionality into Kubernetes service type [load-balancers](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).

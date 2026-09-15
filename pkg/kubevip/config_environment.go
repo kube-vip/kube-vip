@@ -10,10 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kube-vip/kube-vip/pkg/debouncer"
 	"github.com/kube-vip/kube-vip/pkg/detector"
-	"github.com/kube-vip/kube-vip/pkg/utils"
-	"sigs.k8s.io/yaml"
+	"gopkg.in/yaml.v3"
 )
 
 // ParseEnvironment - will popultate the configuration from environment variables
@@ -212,7 +210,8 @@ func ParseEnvironment(c *Config) error {
 		c.KubernetesAddr = env
 	}
 
-	// Find Services toggle
+	// Find Services toggle. Related settings are independent: an environment
+	// override remains valid when EnableServices came from the config file.
 	env = os.Getenv(svcEnable)
 	if env != "" {
 		b, err := strconv.ParseBool(env)
@@ -220,54 +219,54 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.EnableServices = b
+	}
 
-		// Find Services leader Election
-		env = os.Getenv(svcElection)
-		if env != "" {
-			b, err := strconv.ParseBool(env)
-			if err != nil {
-				return err
-			}
-			c.EnableServicesElection = b
+	// Find Services leader Election
+	env = os.Getenv(svcElection)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
 		}
+		c.EnableServicesElection = b
+	}
 
-		// Find load-balancer class only
-		env = os.Getenv(lbClassOnly)
-		if env != "" {
-			b, err := strconv.ParseBool(env)
-			if err != nil {
-				return err
-			}
-			c.LoadBalancerClassOnly = b
+	// Find load-balancer class only
+	env = os.Getenv(lbClassOnly)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
 		}
+		c.LoadBalancerClassOnly = b
+	}
 
-		// Load-balancer class name
-		env, exists := os.LookupEnv(lbClassName)
-		if exists {
-			c.LoadBalancerClassName = env
-		}
+	// Load-balancer class name
+	env, exists := os.LookupEnv(lbClassName)
+	if exists {
+		c.LoadBalancerClassName = env
+	}
 
-		// Load-balancer class legacy handling
-		env = os.Getenv(lbClassLegacyHandling)
-		if env != "" {
-			b, err := strconv.ParseBool(env)
-			if err != nil {
-				return err
-			}
-			c.LoadBalancerClassLegacyHandling = b
+	// Load-balancer class legacy handling
+	env = os.Getenv(lbClassLegacyHandling)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
 		}
+		c.LoadBalancerClassLegacyHandling = b
+	}
 
-		// Find the namespace that the control plane should use (for leaderElection lock)
-		env = os.Getenv(svcNamespace)
-		if env != "" {
-			c.ServiceNamespace = env
-		}
+	// Find the namespace that the control plane should use (for leaderElection lock)
+	env = os.Getenv(svcNamespace)
+	if env != "" {
+		c.ServiceNamespace = env
+	}
 
-		// Gets the leaseName for services in arp mode
-		env = os.Getenv(svcLeaseName)
-		if env != "" {
-			c.ServicesLeaseName = env
-		}
+	// Gets the leaseName for services in arp mode
+	env = os.Getenv(svcLeaseName)
+	if env != "" {
+		c.ServicesLeaseName = env
 	}
 
 	// Find vip address subnet
@@ -322,9 +321,6 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.ArpBroadcastRate = i64
-	} else {
-		// default to three seconds
-		c.ArpBroadcastRate = 3000
 	}
 
 	// Determine if VIP should be preserved on leadership loss
@@ -426,12 +422,6 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(dhcpMode)
 	if env != "" {
 		c.DHCPMode = env
-	} else {
-		if c.DNSMode != "first" {
-			c.DHCPMode = c.DNSMode
-		} else {
-			c.DHCPMode = strings.ToLower(utils.IPv4Family)
-		}
 	}
 
 	// DHCP backoff attempts
@@ -519,6 +509,8 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.BGPConfig.Peers = peers
+	} else if _, ok := os.LookupEnv(bgpPeers); ok {
+		c.BGPConfig.Peers = nil
 	}
 
 	// MPBGP mode
@@ -818,326 +810,79 @@ func ParseEnvironment(c *Config) error {
 		c.ConfigFile = env
 	}
 
+	// Explicitly empty string variables clear lower-priority file values.
+	stringEnvironment := map[string]*string{
+		vipInterface: &c.Interface, vipServicesInterface: &c.ServicesInterface,
+		vipLeaseName: &c.LeaseName, nodeName: &c.NodeName, vipAddress: &c.VIP, address: &c.Address,
+		cpNamespace: &c.Namespace, kubernetesAddr: &c.KubernetesAddr, svcNamespace: &c.ServiceNamespace,
+		svcLeaseName: &c.ServicesLeaseName, lbClassName: &c.LoadBalancerClassName, vipSubnet: &c.VIPSubnet,
+		annotations: &c.Annotations, dnsMode: &c.DNSMode, dhcpMode: &c.DHCPMode,
+		bgpRouterID: &c.BGPConfig.RouterID, mpbgpNexthop: &c.BGPConfig.MpbgpNexthop,
+		mpbgpIPv4: &c.BGPConfig.MpbgpIPv4, mpbgpIPv6: &c.BGPConfig.MpbgpIPv6,
+		bgpPeerPassword: &c.BGPPeerConfig.Password, bgpSourceIF: &c.BGPConfig.SourceIF,
+		bgpSourceIP: &c.BGPConfig.SourceIP, controlPlaneHealthCheckAddress: &c.ControlPlaneHealthCheck.Address,
+		controlPlaneHealthCheckCAPath: &c.ControlPlaneHealthCheck.CAPath, zebraURL: &c.BGPConfig.Zebra.URL,
+		zebraSoftwareName: &c.BGPConfig.Zebra.SoftwareName, lbForwardingMethod: &c.LoadBalancerForwardingMethod,
+		prometheusServer: &c.PrometheusHTTPServer, egressPodCidr: &c.EgressPodCidr,
+		egressServiceCidr: &c.EgressServiceCidr, k8sConfigFile: &c.K8sConfigFile,
+		mirrorDestInterface: &c.MirrorDestInterface, iptablesBackend: &c.IptablesBackend,
+		configFile: &c.ConfigFile, debounceTime: &c.DebounceTime,
+	}
+	for name, destination := range stringEnvironment {
+		if value, ok := os.LookupEnv(name); ok {
+			*destination = value
+		}
+	}
+	if value, ok := os.LookupEnv(instanceName); ok && value != "" {
+		c.InstanceName = value
+	} else if value, ok := os.LookupEnv(strings.ToUpper(instanceName)); ok {
+		c.InstanceName = value
+	}
+
 	return nil
 }
 
-// LoadConfigFromFile loads configuration from a JSON or YAML file
+// LoadConfigFromFile loads runtime configuration from a JSON or YAML file.
 func LoadConfigFromFile(configFilePath string) (*Config, error) {
+	config := &Config{}
+	if err := MergeConfigFromFile(config, configFilePath); err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// MergeConfigFromFile overlays fields present in a JSON or YAML file. Decoding
+// into the destination preserves defaults for omitted fields and preserves
+// explicit false, zero, empty string, and empty collection values.
+func MergeConfigFromFile(config *Config, configFilePath string) error {
 	if configFilePath == "" {
-		return nil, fmt.Errorf("config file path is empty")
+		return fmt.Errorf("config file path is empty")
 	}
-
-	// Check if file exists
-	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("config file does not exist: %s", configFilePath)
-	}
-
-	// Read file content
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file %s: %v", configFilePath, err)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("config file does not exist: %s", configFilePath)
+		}
+		return fmt.Errorf("failed to read config file %s: %w", configFilePath, err)
 	}
 
-	var config Config
 	ext := strings.ToLower(filepath.Ext(configFilePath))
-
-	switch ext {
-	case ".json":
-		err = json.Unmarshal(data, &config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse JSON config file %s: %v", configFilePath, err)
-		}
-	case ".yaml", ".yml":
-		err = yaml.Unmarshal(data, &config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse YAML config file %s: %v", configFilePath, err)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported config file format %s. Supported formats: .json, .yaml, .yml", ext)
+	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		return fmt.Errorf("unsupported config file format %s; supported formats: .json, .yaml, .yml", ext)
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(config); err != nil {
+		format := strings.TrimPrefix(strings.ToUpper(ext), ".")
+		return fmt.Errorf("failed to parse %s config file %s: %w", format, configFilePath, err)
 	}
 
-	return &config, nil
-}
-
-// MergeConfigFromFile merges configuration loaded from file with existing config
-// Priority: command line flags > environment variables > config file
-func MergeConfigFromFile(c *Config, configFilePath string) error {
-	if configFilePath == "" {
-		return nil // No config file specified, nothing to merge
+	// Runtime BGP consumes BGPConfig.Peers. BGPPeerConfig is retained for CLI
+	// and environment compatibility and normalized when supplied by a file.
+	if config.BGPPeerConfig.Address != "" {
+		config.BGPConfig.Peers = append(config.BGPConfig.Peers, config.BGPPeerConfig)
+		config.BGPPeerConfig = BGPPeer{}
 	}
-
-	fileConfig, err := LoadConfigFromFile(configFilePath)
-	if err != nil {
-		return err
-	}
-
-	// Merge file config with existing config
-	// Only set values from file if they haven't been set by flags or env vars
-	mergeConfigValues(c, fileConfig)
-
+	config.ConfigFile = configFilePath
 	return nil
-}
-
-// mergeConfigValues merges values from fileConfig into baseConfig
-// Only overwrites zero values in baseConfig
-func mergeConfigValues(baseConfig, fileConfig *Config) {
-	// Basic configuration
-	if baseConfig.Logging == 0 && fileConfig.Logging != 0 {
-		baseConfig.Logging = fileConfig.Logging
-	}
-
-	// Network configuration
-	if baseConfig.Interface == "" && fileConfig.Interface != "" {
-		baseConfig.Interface = fileConfig.Interface
-	}
-	if baseConfig.ServicesInterface == "" && fileConfig.ServicesInterface != "" {
-		baseConfig.ServicesInterface = fileConfig.ServicesInterface
-	}
-	if baseConfig.VIP == "" && fileConfig.VIP != "" {
-		baseConfig.VIP = fileConfig.VIP
-	}
-	if baseConfig.VIPSubnet == "" && fileConfig.VIPSubnet != "" {
-		baseConfig.VIPSubnet = fileConfig.VIPSubnet
-	}
-	if baseConfig.Address == "" && fileConfig.Address != "" {
-		baseConfig.Address = fileConfig.Address
-	}
-	if baseConfig.Port == 0 && fileConfig.Port != 0 {
-		baseConfig.Port = fileConfig.Port
-	}
-	if baseConfig.NodeName == "" && fileConfig.NodeName != "" {
-		baseConfig.NodeName = fileConfig.NodeName
-	}
-
-	// Boolean flags - only merge if not explicitly set
-	if !baseConfig.EnableARP && fileConfig.EnableARP {
-		baseConfig.EnableARP = fileConfig.EnableARP
-	}
-	if !baseConfig.EnableBGP && fileConfig.EnableBGP {
-		baseConfig.EnableBGP = fileConfig.EnableBGP
-	}
-	if !baseConfig.BGPAttachIPToInterface && fileConfig.BGPAttachIPToInterface {
-		baseConfig.BGPAttachIPToInterface = fileConfig.BGPAttachIPToInterface
-	}
-	if !baseConfig.EnableWireguard && fileConfig.EnableWireguard {
-		baseConfig.EnableWireguard = fileConfig.EnableWireguard
-	}
-	if !baseConfig.EnableRoutingTable && fileConfig.EnableRoutingTable {
-		baseConfig.EnableRoutingTable = fileConfig.EnableRoutingTable
-	}
-	if !baseConfig.EnableControlPlane && fileConfig.EnableControlPlane {
-		baseConfig.EnableControlPlane = fileConfig.EnableControlPlane
-	}
-	if !baseConfig.DetectControlPlane && fileConfig.DetectControlPlane {
-		baseConfig.DetectControlPlane = fileConfig.DetectControlPlane
-	}
-	if !baseConfig.EnableServices && fileConfig.EnableServices {
-		baseConfig.EnableServices = fileConfig.EnableServices
-	}
-	if !baseConfig.EnableServicesElection && fileConfig.EnableServicesElection {
-		baseConfig.EnableServicesElection = fileConfig.EnableServicesElection
-	}
-	if !baseConfig.EnableNodeLabeling && fileConfig.EnableNodeLabeling {
-		baseConfig.EnableNodeLabeling = fileConfig.EnableNodeLabeling
-	}
-	if !baseConfig.EnableLoadBalancer && fileConfig.EnableLoadBalancer {
-		baseConfig.EnableLoadBalancer = fileConfig.EnableLoadBalancer
-	}
-	if !baseConfig.DDNS && fileConfig.DDNS {
-		baseConfig.DDNS = fileConfig.DDNS
-	}
-	if !baseConfig.SingleNode && fileConfig.SingleNode {
-		baseConfig.SingleNode = fileConfig.SingleNode
-	}
-	if !baseConfig.StartAsLeader && fileConfig.StartAsLeader {
-		baseConfig.StartAsLeader = fileConfig.StartAsLeader
-	}
-	if !baseConfig.PreserveVIPOnLeadershipLoss && fileConfig.PreserveVIPOnLeadershipLoss {
-		baseConfig.PreserveVIPOnLeadershipLoss = fileConfig.PreserveVIPOnLeadershipLoss
-	}
-
-	// Service configuration
-	if baseConfig.Namespace == "" && fileConfig.Namespace != "" {
-		baseConfig.Namespace = fileConfig.Namespace
-	}
-	if baseConfig.ServiceNamespace == "" && fileConfig.ServiceNamespace != "" {
-		baseConfig.ServiceNamespace = fileConfig.ServiceNamespace
-	}
-	if baseConfig.ServicesLeaseName == "" && fileConfig.ServicesLeaseName != "" {
-		baseConfig.ServicesLeaseName = fileConfig.ServicesLeaseName
-	}
-	// LoadBalancer configuration
-	if baseConfig.LoadBalancerPort == 0 && fileConfig.LoadBalancerPort != 0 {
-		baseConfig.LoadBalancerPort = fileConfig.LoadBalancerPort
-	}
-	if baseConfig.LoadBalancerForwardingMethod == "" && fileConfig.LoadBalancerForwardingMethod != "" {
-		baseConfig.LoadBalancerForwardingMethod = fileConfig.LoadBalancerForwardingMethod
-	}
-	if baseConfig.LoadBalancerClassName == "" && fileConfig.LoadBalancerClassName != "" {
-		baseConfig.LoadBalancerClassName = fileConfig.LoadBalancerClassName
-	}
-
-	// Routing Table configuration
-	if baseConfig.RoutingTableID == 0 && fileConfig.RoutingTableID != 0 {
-		baseConfig.RoutingTableID = fileConfig.RoutingTableID
-	}
-	if baseConfig.RoutingTableType == 0 && fileConfig.RoutingTableType != 0 {
-		baseConfig.RoutingTableType = fileConfig.RoutingTableType
-	}
-	if baseConfig.RoutingProtocol == 0 && fileConfig.RoutingProtocol != 0 {
-		baseConfig.RoutingProtocol = fileConfig.RoutingProtocol
-	}
-
-	// BGP configuration
-	mergeBGPConfig(&baseConfig.BGPConfig, &fileConfig.BGPConfig)
-
-	// Kubernetes configuration
-	if baseConfig.K8sConfigFile == "" && fileConfig.K8sConfigFile != "" {
-		baseConfig.K8sConfigFile = fileConfig.K8sConfigFile
-	}
-
-	// Leader Election configuration
-	mergeLeaderElectionConfig(&baseConfig.KubernetesLeaderElection, &fileConfig.KubernetesLeaderElection)
-
-	// BGP health check configuration
-	mergeHealthCheck(&baseConfig.ControlPlaneHealthCheck, &fileConfig.ControlPlaneHealthCheck)
-
-	// Prometheus configuration
-	if baseConfig.PrometheusHTTPServer == "" && fileConfig.PrometheusHTTPServer != "" {
-		baseConfig.PrometheusHTTPServer = fileConfig.PrometheusHTTPServer
-	}
-
-	// DNS configuration
-	if baseConfig.DNSMode == "" && fileConfig.DNSMode != "" {
-		baseConfig.DNSMode = fileConfig.DNSMode
-	}
-
-	// DHCP configuration - mode
-	if baseConfig.DHCPMode == "" && fileConfig.DHCPMode != "" {
-		baseConfig.DHCPMode = fileConfig.DHCPMode
-	}
-
-	// DHCP configuration - backoff attempts
-	if baseConfig.DHCPBackoffAttempts == DefaultDHCPBackoffAttempts && fileConfig.DHCPBackoffAttempts != DefaultDHCPBackoffAttempts {
-		baseConfig.DHCPBackoffAttempts = fileConfig.DHCPBackoffAttempts
-	}
-
-	// Health check configuration (HTTP listener for kube-vip readiness)
-	if baseConfig.HealthCheckPort == 0 && fileConfig.HealthCheckPort != 0 {
-		baseConfig.HealthCheckPort = fileConfig.HealthCheckPort
-	}
-
-	// Instance configuration
-	if baseConfig.InstanceName == "" && fileConfig.InstanceName != "" {
-		baseConfig.InstanceName = fileConfig.InstanceName
-	}
-
-	// Egress configuration
-	if baseConfig.EgressPodCidr == "" && fileConfig.EgressPodCidr != "" {
-		baseConfig.EgressPodCidr = fileConfig.EgressPodCidr
-	}
-	if baseConfig.EgressServiceCidr == "" && fileConfig.EgressServiceCidr != "" {
-		baseConfig.EgressServiceCidr = fileConfig.EgressServiceCidr
-	}
-	// Mirror configuration
-	if baseConfig.MirrorDestInterface == "" && fileConfig.MirrorDestInterface != "" {
-		baseConfig.MirrorDestInterface = fileConfig.MirrorDestInterface
-	}
-
-	// Iptables configuration
-	if baseConfig.IptablesBackend == "" && fileConfig.IptablesBackend != "" {
-		baseConfig.IptablesBackend = fileConfig.IptablesBackend
-	}
-
-	// Backend health check interval
-	if baseConfig.BackendHealthCheckInterval == 0 && fileConfig.BackendHealthCheckInterval != 0 {
-		baseConfig.BackendHealthCheckInterval = fileConfig.BackendHealthCheckInterval
-	}
-
-	// ARP broadcast rate
-	if baseConfig.ArpBroadcastRate == 0 && fileConfig.ArpBroadcastRate != 0 {
-		baseConfig.ArpBroadcastRate = fileConfig.ArpBroadcastRate
-	}
-
-	// Annotations
-	if baseConfig.Annotations == "" && fileConfig.Annotations != "" {
-		baseConfig.Annotations = fileConfig.Annotations
-	}
-
-	// Load balancers slice
-	if len(baseConfig.LoadBalancers) == 0 && len(fileConfig.LoadBalancers) > 0 {
-		baseConfig.LoadBalancers = fileConfig.LoadBalancers
-	}
-
-	// Debounce time for watch events
-	if baseConfig.DebounceTime == debouncer.DefaultTime && fileConfig.DebounceTime != debouncer.DefaultTime {
-		baseConfig.DebounceTime = fileConfig.DebounceTime
-	}
-
-	if baseConfig.LoseLeadershipTimeoutSeconds == 0 && fileConfig.LoseLeadershipTimeoutSeconds != 0 {
-		baseConfig.LoseLeadershipTimeoutSeconds = fileConfig.LoseLeadershipTimeoutSeconds
-	}
-}
-
-// mergeBGPConfig merges BGP configuration
-func mergeBGPConfig(base, file *BGPConfig) {
-	if base.RouterID == "" && file.RouterID != "" {
-		base.RouterID = file.RouterID
-	}
-	if base.AS == 0 && file.AS != 0 {
-		base.AS = file.AS
-	}
-	if base.SourceIF == "" && file.SourceIF != "" {
-		base.SourceIF = file.SourceIF
-	}
-	if base.SourceIP == "" && file.SourceIP != "" {
-		base.SourceIP = file.SourceIP
-	}
-	if base.HoldTime == 0 && file.HoldTime != 0 {
-		base.HoldTime = file.HoldTime
-	}
-	if base.KeepaliveInterval == 0 && file.KeepaliveInterval != 0 {
-		base.KeepaliveInterval = file.KeepaliveInterval
-	}
-	if len(base.Peers) == 0 && len(file.Peers) > 0 {
-		base.Peers = file.Peers
-	}
-}
-
-// mergeLeaderElectionConfig merges leader election configuration
-func mergeLeaderElectionConfig(base, file *KubernetesLeaderElection) {
-	if base.LeaseName == "" && file.LeaseName != "" {
-		base.LeaseName = file.LeaseName
-	}
-	if base.LeaseDuration == 0 && file.LeaseDuration != 0 {
-		base.LeaseDuration = file.LeaseDuration
-	}
-	if base.RenewDeadline == 0 && file.RenewDeadline != 0 {
-		base.RenewDeadline = file.RenewDeadline
-	}
-	if base.RetryPeriod == 0 && file.RetryPeriod != 0 {
-		base.RetryPeriod = file.RetryPeriod
-	}
-	if len(base.LeaseAnnotations) == 0 && len(file.LeaseAnnotations) > 0 {
-		base.LeaseAnnotations = file.LeaseAnnotations
-	}
-}
-
-// mergeHealthCheck merges HTTP health check configuration for BGP route advertisement.
-func mergeHealthCheck(base, file *HealthCheck) {
-	if base.Address == "" && file.Address != "" {
-		base.Address = file.Address
-	}
-	if base.PeriodSeconds == 0 && file.PeriodSeconds != 0 {
-		base.PeriodSeconds = file.PeriodSeconds
-	}
-	if base.TimeoutSeconds == 0 && file.TimeoutSeconds != 0 {
-		base.TimeoutSeconds = file.TimeoutSeconds
-	}
-	if base.FailureThreshold == 0 && file.FailureThreshold != 0 {
-		base.FailureThreshold = file.FailureThreshold
-	}
-	if base.CAPath == "" && file.CAPath != "" {
-		base.CAPath = file.CAPath
-	}
 }
