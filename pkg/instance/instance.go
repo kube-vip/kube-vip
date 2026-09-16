@@ -274,8 +274,6 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DHCPBackoffAttempts:    config.DHCPBackoffAttempts,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
 			EnableServicesElection: config.EnableServicesElection,
-			// cleanupVIPs reads this from the per-VIP config, so Service VIPs need it too.
-			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
