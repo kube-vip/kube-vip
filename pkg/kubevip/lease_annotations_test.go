@@ -1,6 +1,9 @@
 package kubevip
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestWithLeaseVIPsEncodesVersionedInstanceOwnership(t *testing.T) {
 	base := map[string]string{"example.test/preserved": "true", LeaseVIPs: "stale"}
@@ -24,10 +27,15 @@ func TestWithLeaseVIPsEncodesVersionedInstanceOwnership(t *testing.T) {
 	if value.Version != LeaseVIPsVersion || value.InstanceName != "release_a" || value.IFAProto != 248 {
 		t.Fatalf("Lease VIP metadata = %+v", value)
 	}
-	if len(value.VIPs) != 2 ||
-		value.VIPs[0] != (LeaseVIP{Index: 0, Value: "192.0.2.10"}) ||
-		value.VIPs[1] != (LeaseVIP{Index: 1, Value: "2001:db8::10"}) {
-		t.Fatalf("Lease VIPs = %v, want indexed VIPs in canonical address order", value.VIPs)
+	// Values are stored verbatim so DNS records survive alongside addresses.
+	want := []LeaseVIP{
+		{Index: 0, Value: "192.0.2.10", Kind: LeaseVIPKindAddress},
+		{Index: 1, Value: "192.0.2.10/32", Kind: LeaseVIPKindAddress},
+		{Index: 2, Value: "2001:db8::10/128", Kind: LeaseVIPKindAddress},
+		{Index: 3, Value: "api.example.test", Kind: LeaseVIPKindName},
+	}
+	if !slices.Equal(value.VIPs, want) {
+		t.Fatalf("Lease VIPs = %v, want %v", value.VIPs, want)
 	}
 }
 
@@ -59,7 +67,7 @@ func TestWithLeaseVIPsIsIndependentOfInputOrder(t *testing.T) {
 		t.Fatalf("Lease VIPs = %v, want %v", value.VIPs, want)
 	}
 	for index, address := range want {
-		if value.VIPs[index] != (LeaseVIP{Index: index, Value: address}) {
+		if value.VIPs[index] != (LeaseVIP{Index: index, Value: address, Kind: LeaseVIPKindAddress}) {
 			t.Fatalf("Lease VIPs = %v, want %v", value.VIPs, want)
 		}
 	}
@@ -68,6 +76,14 @@ func TestWithLeaseVIPsIsIndependentOfInputOrder(t *testing.T) {
 func TestParseLeaseVIPsRejectsUnknownVersion(t *testing.T) {
 	if _, err := ParseLeaseVIPs(`{"version":"v2","instance_name":"release_a","ifa_proto":248,"vips":[]}`); err == nil {
 		t.Fatal("ParseLeaseVIPs() accepted an unknown version")
+	}
+}
+
+func TestParseLeaseVIPsRejectsUnknownKind(t *testing.T) {
+	if _, err := ParseLeaseVIPs(
+		`{"version":"v1","instance_name":"release_a","ifa_proto":248,"vips":[{"index":0,"value":"192.0.2.10","kind":"cidr"}]}`,
+	); err == nil {
+		t.Fatal("ParseLeaseVIPs() accepted an unknown VIP kind")
 	}
 }
 

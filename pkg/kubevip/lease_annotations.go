@@ -10,6 +10,14 @@ import (
 
 const LeaseVIPsVersion = "v1"
 
+// LeaseVIPKind distinguishes literal addresses from names that resolve to one.
+type LeaseVIPKind string
+
+const (
+	LeaseVIPKindAddress LeaseVIPKind = "address"
+	LeaseVIPKindName    LeaseVIPKind = "name"
+)
+
 type LeaseVIPsValue struct {
 	Version      string     `json:"version"`
 	InstanceName string     `json:"instance_name"`
@@ -18,8 +26,9 @@ type LeaseVIPsValue struct {
 }
 
 type LeaseVIP struct {
-	Index int    `json:"index"`
-	Value string `json:"value"`
+	Index int          `json:"index"`
+	Value string       `json:"value"`
+	Kind  LeaseVIPKind `json:"kind"`
 }
 
 func WithLeaseVIPs(annotations map[string]string, instanceName string, ifaProto int, vips []string) (map[string]string, error) {
@@ -53,50 +62,73 @@ func ParseLeaseVIPs(value string) (LeaseVIPsValue, error) {
 		if vip.Index != index {
 			return LeaseVIPsValue{}, fmt.Errorf("invalid %s VIP index %d at position %d", LeaseVIPs, vip.Index, index)
 		}
-		address, err := parseLeaseVIP(vip.Value)
-		if err != nil {
-			return LeaseVIPsValue{}, fmt.Errorf("invalid %s VIP at index %d: %w", LeaseVIPs, vip.Index, err)
+		switch vip.Kind {
+		case LeaseVIPKindAddress, LeaseVIPKindName:
+		default:
+			return LeaseVIPsValue{}, fmt.Errorf("invalid %s VIP kind %q at index %d", LeaseVIPs, vip.Kind, vip.Index)
 		}
-		parsed.VIPs[index].Value = address.String()
 	}
 	return parsed, nil
 }
 
 func normalizeLeaseVIPs(values []string) []LeaseVIP {
-	unique := make(map[netip.Addr]struct{})
-	addresses := make([]netip.Addr, 0, len(values))
+	unique := make(map[string]struct{}, len(values))
+	addresses := make([]string, 0, len(values))
 	for _, value := range values {
 		for candidate := range strings.SplitSeq(value, ",") {
 			candidate = strings.TrimSpace(candidate)
-			address, err := parseLeaseVIP(candidate)
-			if err != nil {
+			if candidate == "" {
 				continue
 			}
-			if _, exists := unique[address]; exists {
+			if _, exists := unique[candidate]; exists {
 				continue
 			}
-			unique[address] = struct{}{}
-			addresses = append(addresses, address)
+			unique[candidate] = struct{}{}
+			addresses = append(addresses, candidate)
 		}
 	}
 	// Sorting keeps the annotation byte-identical however callers happen to order VIPs.
-	slices.SortFunc(addresses, netip.Addr.Compare)
+	slices.SortFunc(addresses, compareLeaseVIPs)
 
 	result := make([]LeaseVIP, 0, len(addresses))
 	for _, address := range addresses {
-		result = append(result, LeaseVIP{Index: len(result), Value: address.String()})
+		kind := LeaseVIPKindName
+		if _, isAddress := leaseVIPAddress(address); isAddress {
+			kind = LeaseVIPKindAddress
+		}
+		result = append(result, LeaseVIP{Index: len(result), Value: address, Kind: kind})
 	}
 	return result
 }
 
-func parseLeaseVIP(value string) (netip.Addr, error) {
-	address, err := netip.ParseAddr(value)
-	if err == nil {
-		return address.Unmap(), nil
+// compareLeaseVIPs orders addresses numerically and ahead of names, which keeps VIPs like
+// 10.0.0.2 and 10.0.0.10 in the order an operator expects. Values that are not addresses,
+// such as DNS records, are kept and ordered lexically.
+func compareLeaseVIPs(a, b string) int {
+	addressA, isAddressA := leaseVIPAddress(a)
+	addressB, isAddressB := leaseVIPAddress(b)
+	switch {
+	case isAddressA && isAddressB:
+		if order := addressA.Compare(addressB); order != 0 {
+			return order
+		}
+		// Distinct spellings of one address still need a stable order.
+		return strings.Compare(a, b)
+	case isAddressA:
+		return -1
+	case isAddressB:
+		return 1
+	default:
+		return strings.Compare(a, b)
 	}
-	prefix, prefixErr := netip.ParsePrefix(value)
-	if prefixErr != nil {
-		return netip.Addr{}, fmt.Errorf("parse address %q: %w", value, err)
+}
+
+func leaseVIPAddress(value string) (netip.Addr, bool) {
+	if address, err := netip.ParseAddr(value); err == nil {
+		return address.Unmap(), true
 	}
-	return prefix.Addr().Unmap(), nil
+	if prefix, err := netip.ParsePrefix(value); err == nil {
+		return prefix.Addr().Unmap(), true
+	}
+	return netip.Addr{}, false
 }

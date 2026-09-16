@@ -2,11 +2,14 @@ package election
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
@@ -43,11 +46,46 @@ func TestAnnotatedLeaseLockPersistsAnnotationsOnCreateAndUpdate(t *testing.T) {
 		t.Fatalf("ParseLeaseVIPs() error = %v", err)
 	}
 	if value.InstanceName != "release_a" || value.IFAProto != 248 || len(value.VIPs) != 1 ||
-		value.VIPs[0] != (kubevip.LeaseVIP{Index: 0, Value: "192.0.2.10"}) {
+		value.VIPs[0] != (kubevip.LeaseVIP{Index: 0, Value: "192.0.2.10", Kind: kubevip.LeaseVIPKindAddress}) {
 		t.Fatalf("Lease VIP metadata = %+v", value)
 	}
 	if resource.Annotations["example.test/preserved"] != "true" {
 		t.Fatal("Lease update dropped a configured annotation")
+	}
+}
+
+// A failed annotation write must not be reported to the leader elector: the lease itself
+// was already written, and an error makes the elector stand down while it still holds it.
+func TestAnnotatedLeaseLockAnnotationFailureDoesNotSurfaceToElector(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	base := &resourcelock.LeaseLock{
+		LeaseMeta:  metav1.ObjectMeta{Name: "lease", Namespace: "default"},
+		Client:     client.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{Identity: "node-a"},
+	}
+
+	failing := fake.NewSimpleClientset()
+	failing.PrependReactor("get", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("annotation backend unavailable")
+	})
+
+	annotations, err := kubevip.WithLeaseVIPs(nil, "release_a", 248, []string{"192.0.2.10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := newAnnotatedLeaseLock(base, failing.CoordinationV1().Leases("default"), "lease", annotations)
+	record := resourcelock.LeaderElectionRecord{HolderIdentity: "node-a"}
+
+	if err := lock.Create(context.Background(), record); err != nil {
+		t.Fatalf("Create() error = %v, want nil so the elector keeps the lease", err)
+	}
+	if err := lock.Update(context.Background(), record); err != nil {
+		t.Fatalf("Update() error = %v, want nil so the elector keeps the lease", err)
+	}
+
+	if _, err := client.CoordinationV1().Leases("default").Get(context.Background(), "lease",
+		metav1.GetOptions{}); err != nil {
+		t.Fatalf("wrapped lock did not write the lease: %v", err)
 	}
 }
 
