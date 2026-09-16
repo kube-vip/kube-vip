@@ -1,7 +1,9 @@
 package route
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -182,6 +184,47 @@ func Test_MultipleRoutesAddDel(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAddFailureDoesNotTrackRoute(t *testing.T) {
+	m := NewManager()
+	r := &mockRoute{hash: "failed-route", addErr: errors.New("add failed")}
+
+	if err := m.Add("service", r, false, false); err == nil {
+		t.Fatal("Add error = nil, want route failure")
+	}
+	if m.Check(r.RouteHash()) {
+		t.Fatal("failed route was tracked")
+	}
+
+	r.addErr = nil
+	if err := m.Add("service", r, false, false); err != nil {
+		t.Fatalf("retry Add error = %v", err)
+	}
+	if !m.Check(r.RouteHash()) {
+		t.Fatal("successful retry was not tracked")
+	}
+}
+
+func TestClearAndCheckAreSafeWithRouteUpdates(t *testing.T) {
+	manager := NewManager()
+	route := &mockRoute{hash: "concurrent-route", added: true}
+	if err := manager.Add("service", route, false, false); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			manager.Check(route.RouteHash())
+		})
+	}
+	wg.Go(manager.Clear)
+	wg.Wait()
+
+	if manager.Check(route.RouteHash()) {
+		t.Fatal("route remained tracked after concurrent Clear")
+	}
 }
 
 type mockRoute struct {
