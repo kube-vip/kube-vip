@@ -279,6 +279,10 @@ type HealthCheck struct {
 	FailureThreshold int `yaml:"failureThreshold"`
 	// CAPath is the CA certificate path used for TLS verification when Address is an HTTPS URL.
 	CAPath string `yaml:"caPath"`
+	// ClientCertPath is an optional PEM-encoded client certificate used to authenticate HTTPS health checks.
+	ClientCertPath string `yaml:"clientCertPath"`
+	// ClientKeyPath is the PEM-encoded private key paired with ClientCertPath.
+	ClientKeyPath string `yaml:"clientKeyPath"`
 }
 
 // LoadBalancer contains the configuration of a load balancing instance

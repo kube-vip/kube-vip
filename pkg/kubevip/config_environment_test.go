@@ -39,3 +39,19 @@ func TestParseEnvironmentSkipDAD(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEnvironmentControlPlaneHealthCheckClientCertificate(t *testing.T) {
+	t.Setenv(controlPlaneHealthCheckClientCertPath, "/tls/client.crt")
+	t.Setenv(controlPlaneHealthCheckClientKeyPath, "/tls/client.key")
+
+	config := &Config{}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	if config.ControlPlaneHealthCheck.ClientCertPath != "/tls/client.crt" {
+		t.Fatalf("ClientCertPath = %q", config.ControlPlaneHealthCheck.ClientCertPath)
+	}
+	if config.ControlPlaneHealthCheck.ClientKeyPath != "/tls/client.key" {
+		t.Fatalf("ClientKeyPath = %q", config.ControlPlaneHealthCheck.ClientKeyPath)
+	}
+}
