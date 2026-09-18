@@ -7,12 +7,15 @@ import (
 	"net"
 	"strings"
 	"syscall"
+	"time"
 
 	log "log/slog"
 
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
+
+var errDefaultInterfaceSubscriptionClosed = errors.New("default interface subscription closed")
 
 // getHostName return the hostname from the fqdn
 func getHostName(dnsName string) string {
@@ -75,22 +78,119 @@ func getDefaultRoute(family int) (*net.Interface, error) {
 	return nil, errors.New("default route not found")
 }
 
-// MonitorDefaultInterface monitor the default interface and catch the event of the default route
+// MonitorDefaultInterface monitors the default interface for route removal or link loss.
 func MonitorDefaultInterface(ctx context.Context, defaultIF *net.Interface) error {
-	routeCh := make(chan netlink.RouteUpdate)
+	return monitorDefaultInterfaceWithRetry(ctx, defaultIF, subscribeDefaultInterface, GetDefaultGatewayInterface, 100*time.Millisecond)
+}
+
+func monitorDefaultInterfaceWithRetry(ctx context.Context, defaultIF *net.Interface,
+	subscribe func(context.Context) (chan netlink.RouteUpdate, chan netlink.LinkUpdate, error),
+	lookup func() (*net.Interface, error), retryDelay time.Duration) error {
+	for {
+		monitorCtx, cancel := context.WithCancel(ctx)
+		routeCh, linkCh, err := subscribe(monitorCtx)
+		if err == nil {
+			err = monitorDefaultInterface(monitorCtx, defaultIF, routeCh, linkCh)
+		}
+		cancel()
+		drainDefaultInterfaceSubscriptions(routeCh, linkCh)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil && !errors.Is(err, errDefaultInterfaceSubscriptionClosed) {
+			log.Warn("default interface subscription failed, retrying", "err", err)
+		} else if err == nil {
+			return nil
+		}
+		if refreshed, lookupErr := lookup(); lookupErr == nil {
+			defaultIF = refreshed
+		} else {
+			log.Warn("failed to refresh default interface while resubscribing", "err", lookupErr)
+		}
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+}
+
+func subscribeDefaultInterface(ctx context.Context) (chan netlink.RouteUpdate, chan netlink.LinkUpdate, error) {
+	const subscriptionBuffer = 64
+	routeCh := make(chan netlink.RouteUpdate, subscriptionBuffer)
 	if err := netlink.RouteSubscribe(routeCh, ctx.Done()); err != nil {
-		return fmt.Errorf("subscribe route failed, error: %w", err)
+		return nil, nil, fmt.Errorf("subscribe route failed, error: %w", err)
+	}
+	linkCh := make(chan netlink.LinkUpdate, subscriptionBuffer)
+	if err := netlink.LinkSubscribe(linkCh, ctx.Done()); err != nil {
+		return routeCh, nil, fmt.Errorf("subscribe link failed, error: %w", err)
 	}
 
+	return routeCh, linkCh, nil
+}
+
+func monitorDefaultInterface(ctx context.Context, defaultIF *net.Interface, routeCh <-chan netlink.RouteUpdate, linkCh <-chan netlink.LinkUpdate) error {
 	for {
 		select {
-		case r := <-routeCh:
+		case r, ok := <-routeCh:
+			if !ok {
+				return subscriptionClosed(ctx, "route")
+			}
 			log.Debug(fmt.Sprintf("type: %d, route: %+v", r.Type, r.Route))
-			if r.Type == syscall.RTM_DELROUTE && (r.Dst == nil || r.Dst.String() == "0.0.0.0/0") && r.LinkIndex == defaultIF.Index {
+			if r.Type == syscall.RTM_DELROUTE && isDefaultRoute(r.Dst) && r.LinkIndex == defaultIF.Index {
 				return fmt.Errorf("default route deleted and the default interface may be invalid")
+			}
+		case update, ok := <-linkCh:
+			if !ok {
+				return subscriptionClosed(ctx, "link")
+			}
+			if update.Link == nil {
+				continue
+			}
+			attrs := update.Attrs()
+			if attrs != nil && attrs.Index == defaultIF.Index && attrs.Flags&net.FlagUp == 0 {
+				return fmt.Errorf("default interface %q is down", defaultIF.Name)
 			}
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+func subscriptionClosed(ctx context.Context, subscription string) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s subscription closed", errDefaultInterfaceSubscriptionClosed, subscription)
+}
+
+// isDefaultRoute accepts both families, matching the selection made by
+// GetDefaultGatewayInterface.
+func isDefaultRoute(dst *net.IPNet) bool {
+	if dst == nil {
+		return true
+	}
+	return dst.String() == "0.0.0.0/0" || dst.String() == "::/0"
+}
+
+func drainDefaultInterfaceSubscriptions(routeCh <-chan netlink.RouteUpdate, linkCh <-chan netlink.LinkUpdate) {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+
+	for routeCh != nil || linkCh != nil {
+		select {
+		case _, ok := <-routeCh:
+			if !ok {
+				routeCh = nil
+			}
+		case _, ok := <-linkCh:
+			if !ok {
+				linkCh = nil
+			}
+		case <-timer.C:
+			return
 		}
 	}
 }

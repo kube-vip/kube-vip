@@ -1,19 +1,19 @@
 package networkinterface
 
 import (
-	log "log/slog"
 	"sync"
 
 	"github.com/vishvananda/netlink"
 )
 
 type Manager struct {
+	lock       sync.Mutex
 	interfaces map[string]*Link
 }
 
 type Link struct {
-	Lock sync.Mutex
-	Intf netlink.Link
+	mu   sync.Mutex
+	intf netlink.Link
 }
 
 func NewManager() *Manager {
@@ -23,19 +23,37 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) Get(intf netlink.Link) *Link {
-	if l, ok := m.interfaces[intf.Attrs().Name]; ok {
-		updated, err := netlink.LinkByName(l.Intf.Attrs().Name)
-		if err != nil {
-			log.Error("failed to get interface %q: %w", l.Intf.Attrs().Name, err)
-			return nil
-		}
-		l.Intf = updated
-		return l
+	if intf == nil || intf.Attrs() == nil {
+		return nil
 	}
-	result := &Link{
-		Intf: intf,
+	attrs := intf.Attrs()
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	if link, ok := m.interfaces[attrs.Name]; ok {
+		link.replace(intf)
+		return link
 	}
 
-	m.interfaces[intf.Attrs().Name] = result
-	return result
+	link := &Link{intf: intf}
+	m.interfaces[attrs.Name] = link
+	return link
+}
+
+func (l *Link) WithInterface(run func(netlink.Link) error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return run(l.intf)
+}
+
+func (l *Link) replace(intf netlink.Link) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.intf = intf
+}
+
+func (m *Manager) Len() int {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return len(m.interfaces)
 }
