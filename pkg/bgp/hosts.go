@@ -16,29 +16,33 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 
 	objects, exists := b.tracker[addr]
 
-	if !exists {
-		b.tracker[addr] = make(map[string]bool)
-		objects = b.tracker[addr]
+	ip, _, err := net.ParseCIDR(addr)
+	if err != nil {
+		return err
+	}
 
-		ip, _, err := net.ParseCIDR(addr)
-		if err != nil {
-			return err
-		}
+	p := b.getPath(ip)
+	if p == nil {
+		return fmt.Errorf("failed to get path for %v", ip)
+	}
 
-		p := b.getPath(ip)
-		if p == nil {
-			return fmt.Errorf("failed to get path for %v", ip)
-		}
-
+	if !exists || objects[object] {
+		// Without Add-Path, GoBGP replaces an identical path. Re-add an existing
+		// reference so reconciliation can recover after a failed withdrawal.
 		if _, err := b.s.AddPath(apiutil.AddPathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
 			return err
 		}
-		log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects)+1, "object", object)
+	}
+
+	if !exists {
+		objects = make(map[string]bool)
+		b.tracker[addr] = objects
 	}
 
 	objects[object] = true
+	log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects), "object", object)
 
 	return nil
 }
@@ -59,9 +63,12 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		return err
 	}
 
-	delete(objects, object)
+	remaining := len(objects)
+	if _, ok := objects[object]; ok {
+		remaining--
+	}
 
-	if len(objects) == 0 {
+	if remaining == 0 {
 		p := b.getPath(ip)
 		if p == nil {
 			return nil
@@ -73,8 +80,9 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 			return err
 		}
 		delete(b.tracker, addr)
-		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects), "object", object)
+		log.Debug("[BGP] deleted host", "addr", addr, "cnt", remaining, "object", object)
 	} else {
+		delete(objects, object)
 		log.Debug("[BGP] deleting from tracker only", "addr", addr, "object", object)
 	}
 
