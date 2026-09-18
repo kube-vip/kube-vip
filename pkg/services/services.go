@@ -13,7 +13,6 @@ import (
 	log "log/slog"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -227,17 +226,22 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv4")
 			} else {
-				for ip := range inst.DHCPv4Client.IPChannel() {
-					log.Debug("IP changed", "ip", ip)
-					inst.VIPConfigs[index].VIP = ip
-					inst.DHCPInterfaceIPv4 = ip
-					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, inst); err != nil {
-							log.Warn("updating svc", "err", err)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Debug("IPv4 update watcher stopping")
+						return
+					case ip := <-inst.DHCPv4Client.IPChannel():
+						log.Debug("IP changed", "ip", ip)
+						inst.VIPConfigs[index].VIP = ip
+						inst.DHCPInterfaceIPv4 = ip
+						if !p.config.DisableServiceUpdates {
+							if err := p.updateStatus(ctx, inst); err != nil {
+								log.Warn("updating svc", "err", err)
+							}
 						}
 					}
 				}
-				log.Debug("IPv4 update channel closed, stopping")
 			}
 		})
 	}
@@ -255,17 +259,22 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 			if index == -1 {
 				log.Error("unable to find proper VIPConfig for the DHCPv6")
 			} else {
-				for ip := range inst.DHCPv6Client.IPChannel() {
-					log.Debug("IP changed", "ip", ip)
-					inst.VIPConfigs[index].VIP = ip
-					inst.DHCPInterfaceIPv6 = ip
-					if !p.config.DisableServiceUpdates {
-						if err := p.updateStatus(ctx, inst); err != nil {
-							log.Warn("updating svc", "err", err)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Debug("IPv6 update watcher stopping")
+						return
+					case ip := <-inst.DHCPv6Client.IPChannel():
+						log.Debug("IP changed", "ip", ip)
+						inst.VIPConfigs[index].VIP = ip
+						inst.DHCPInterfaceIPv6 = ip
+						if !p.config.DisableServiceUpdates {
+							if err := p.updateStatus(ctx, inst); err != nil {
+								log.Warn("updating svc", "err", err)
+							}
 						}
 					}
 				}
-				log.Debug("IPv6 update channel closed, stopping")
 			}
 		})
 	}
@@ -472,36 +481,8 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 			serviceInstance.Clusters[x].Stop()
 		}
 
-		if serviceInstance.IsVLAN {
-			vlan, err := netlink.LinkByName(serviceInstance.VLANInterface)
-			if err != nil {
-				return fmt.Errorf("[service] error finding VLAN Interface: %v", err)
-			}
-
-			err = netlink.LinkDel(vlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting VLAN interface : %v", err)
-			}
-		}
-
-		if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
-			if serviceInstance.IsDHCPv4 {
-				serviceInstance.DHCPv4Client.Stop()
-			}
-
-			if serviceInstance.IsDHCPv6 {
-				serviceInstance.DHCPv6Client.Stop()
-			}
-
-			macvlan, err := netlink.LinkByName(serviceInstance.DHCPInterface)
-			if err != nil {
-				return fmt.Errorf("[service] error finding VIP Interface: %v", err)
-			}
-
-			err = netlink.LinkDel(macvlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting DHCP Link : %v", err)
-			}
+		if err := serviceInstance.CleanupLinkAttachments(updatedInstances...); err != nil {
+			return fmt.Errorf("[service] error cleaning up link attachments: %w", err)
 		}
 
 		// We will need to tear down the egress
