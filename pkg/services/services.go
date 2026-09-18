@@ -13,7 +13,6 @@ import (
 	log "log/slog"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -482,36 +481,8 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 			serviceInstance.Clusters[x].Stop()
 		}
 
-		if serviceInstance.IsVLAN {
-			vlan, err := netlink.LinkByName(serviceInstance.VLANInterface)
-			if err != nil {
-				return fmt.Errorf("[service] error finding VLAN Interface: %v", err)
-			}
-
-			err = netlink.LinkDel(vlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting VLAN interface : %v", err)
-			}
-		}
-
-		if serviceInstance.IsDHCPv4 || serviceInstance.IsDHCPv6 {
-			if serviceInstance.IsDHCPv4 {
-				serviceInstance.DHCPv4Client.Stop()
-			}
-
-			if serviceInstance.IsDHCPv6 {
-				serviceInstance.DHCPv6Client.Stop()
-			}
-
-			macvlan, err := netlink.LinkByName(serviceInstance.DHCPInterface)
-			if err != nil {
-				return fmt.Errorf("[service] error finding VIP Interface: %v", err)
-			}
-
-			err = netlink.LinkDel(macvlan)
-			if err != nil {
-				return fmt.Errorf("[service] error deleting DHCP Link : %v", err)
-			}
+		if err := serviceInstance.CleanupLinkAttachments(updatedInstances...); err != nil {
+			return fmt.Errorf("[service] error cleaning up link attachments: %w", err)
 		}
 
 		// We will need to tear down the egress

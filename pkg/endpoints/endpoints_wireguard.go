@@ -78,9 +78,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 		return fmt.Errorf("failed to get service IPs: %w", err)
 	}
 
-	// Create service identifier
-	serviceID := utils.SanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
-
 	log.Info("[wireguard] updating DNAT rules for endpoint change",
 		"service", service.Name,
 		"namespace", service.Namespace,
@@ -123,7 +120,7 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 			}
 			wgInterface := tunnelConfig.InterfaceName
 
-			portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
+			portServiceID, _ := wireguard.ServicePortIDs(service.Namespace, service.Name, port)
 
 			log.Info("[wireguard] applying DNAT rule with load balancing",
 				"service", service.Name,
@@ -170,8 +167,6 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	log.Info("[wireguard] clearing DNAT rules (no endpoints)", "service", service.Name, "namespace", service.Namespace)
 
-	serviceID := utils.SanitizeServiceID(fmt.Sprintf("%s_%s", service.Namespace, service.Name))
-
 	// Get service IPs to determine IPv4 vs IPv6
 	serviceIPs, _ := utils.FetchServiceIPs(service)
 
@@ -180,8 +175,6 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 		if port.Protocol != v1.ProtocolTCP && port.Protocol != v1.ProtocolUDP {
 			continue
 		}
-
-		portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
 
 		// Determine if we have IPv4 or IPv6
 		hasIPv4, hasIPv6 := false, false
@@ -193,21 +186,25 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 			}
 		}
 
-		if hasIPv4 {
-			if err := nftables.DeleteIngressChains(false, portServiceID); err != nil {
-				log.Warn("[wireguard] failed to delete IPv4 DNAT chains",
-					"service", service.Name,
-					"port", port.Port,
-					"err", err)
+		for _, portServiceID := range wireguard.ServicePortIDSet(service.Namespace, service.Name, port) {
+			if hasIPv4 {
+				if err := nftables.DeleteIngressChains(false, portServiceID); err != nil {
+					log.Warn("[wireguard] failed to delete IPv4 DNAT chains",
+						"service", service.Name,
+						"port", port.Port,
+						"id", portServiceID,
+						"err", err)
+				}
 			}
-		}
 
-		if hasIPv6 {
-			if err := nftables.DeleteIngressChains(true, portServiceID); err != nil {
-				log.Warn("[wireguard] failed to delete IPv6 DNAT chains",
-					"service", service.Name,
-					"port", port.Port,
-					"err", err)
+			if hasIPv6 {
+				if err := nftables.DeleteIngressChains(true, portServiceID); err != nil {
+					log.Warn("[wireguard] failed to delete IPv6 DNAT chains",
+						"service", service.Name,
+						"port", port.Port,
+						"id", portServiceID,
+						"err", err)
+				}
 			}
 		}
 	}
