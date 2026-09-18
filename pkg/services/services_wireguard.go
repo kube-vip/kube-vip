@@ -8,6 +8,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/utils"
+	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -108,44 +109,49 @@ func (p *Processor) deleteServiceWireguard(_ context.Context, svc *v1.Service) {
 			continue
 		}
 
-		portServiceID := fmt.Sprintf("%s_p%d", serviceID, port.Port)
-
-		// Try to delete for both IPv4 and IPv6 if we have mixed IPs
-		hasIPv4 := false
-		hasIPv6 := false
-		for _, vip := range serviceIPs {
-			// Strip CIDR notation before checking IP version
-			addr := utils.StripCIDR(vip)
-			if utils.IsIPv6(addr) {
-				hasIPv6 = true
-			} else {
-				hasIPv4 = true
+		portServiceIDs := wireguard.ServicePortIDSet(svc.Namespace, svc.Name, port)
+		for _, portServiceID := range portServiceIDs {
+			// Try to delete for both IPv4 and IPv6 if we have mixed IPs
+			hasIPv4 := false
+			hasIPv6 := false
+			for _, vip := range serviceIPs {
+				// Strip CIDR notation before checking IP version
+				addr := utils.StripCIDR(vip)
+				if utils.IsIPv6(addr) {
+					hasIPv6 = true
+				} else {
+					hasIPv4 = true
+				}
 			}
-		}
 
-		if hasIPv4 {
-			if err := nftables.DeleteIngressChains(false, portServiceID); err != nil {
-				log.Error("[wireguard] failed to delete IPv4 DNAT chains",
-					"service", svc.Name,
-					"port", port.Port,
-					"err", err)
-			} else {
-				log.Debug("[wireguard] deleted IPv4 DNAT chains",
-					"service", svc.Name,
-					"port", port.Port)
+			if hasIPv4 {
+				if err := nftables.DeleteIngressChains(false, portServiceID); err != nil {
+					log.Error("[wireguard] failed to delete IPv4 DNAT chains",
+						"service", svc.Name,
+						"port", port.Port,
+						"id", portServiceID,
+						"err", err)
+				} else {
+					log.Debug("[wireguard] deleted IPv4 DNAT chains",
+						"service", svc.Name,
+						"port", port.Port,
+						"id", portServiceID)
+				}
 			}
-		}
 
-		if hasIPv6 {
-			if err := nftables.DeleteIngressChains(true, portServiceID); err != nil {
-				log.Error("[wireguard] failed to delete IPv6 DNAT chains",
-					"service", svc.Name,
-					"port", port.Port,
-					"err", err)
-			} else {
-				log.Debug("[wireguard] deleted IPv6 DNAT chains",
-					"service", svc.Name,
-					"port", port.Port)
+			if hasIPv6 {
+				if err := nftables.DeleteIngressChains(true, portServiceID); err != nil {
+					log.Error("[wireguard] failed to delete IPv6 DNAT chains",
+						"service", svc.Name,
+						"port", port.Port,
+						"id", portServiceID,
+						"err", err)
+				} else {
+					log.Debug("[wireguard] deleted IPv6 DNAT chains",
+						"service", svc.Name,
+						"port", port.Port,
+						"id", portServiceID)
+				}
 			}
 		}
 	}

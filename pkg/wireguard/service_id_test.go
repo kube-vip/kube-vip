@@ -31,3 +31,14 @@ func TestServicePortIDsKeepProtocolAndLongNamesDistinct(t *testing.T) {
 		t.Fatalf("distinct Services received the same rule ID %q", hyphenatedNamespace)
 	}
 }
+
+func TestServicePortIDSetIncludesLegacyCleanupID(t *testing.T) {
+	udp := v1.ServicePort{Port: 53, Protocol: v1.ProtocolUDP}
+	ids := ServicePortIDSet("default", "dns", udp)
+	if len(ids) != 2 {
+		t.Fatalf("ServicePortIDSet() length = %d, want 2", len(ids))
+	}
+	if ids[0] != "default_dns_p53_udp" || ids[1] != "default_dns_p53" {
+		t.Fatalf("ServicePortIDSet() = %q, want [%q %q]", ids, "default_dns_p53_udp", "default_dns_p53")
+	}
+}
