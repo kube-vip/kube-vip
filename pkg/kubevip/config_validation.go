@@ -24,6 +24,19 @@ func (c *Config) Validate() error {
 	if err := validateInstanceName(c.InstanceName); err != nil {
 		return err
 	}
+	if err := validatePprof(c.EnablePprof, c.PprofHTTPServer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validatePprof rejects profiling being enabled with nowhere to serve it, which
+// would otherwise start kube-vip with pprof silently unreachable.
+func validatePprof(enabled bool, addr string) error {
+	if enabled && addr == "" {
+		return fmt.Errorf("pprof is enabled but no pprof server address is set")
+	}
 
 	return nil
 }

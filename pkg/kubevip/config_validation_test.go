@@ -3,6 +3,8 @@ package kubevip
 import (
 	"strings"
 	"testing"
+
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 )
 
 func TestValidate_HealthCheckAddress(t *testing.T) {
@@ -54,6 +56,31 @@ func TestValidate_InstanceName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{InstanceName: tt.instanceName}
+			err := config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidate_Pprof(t *testing.T) {
+	tests := []struct {
+		name        string
+		enablePprof bool
+		addr        string
+		wantErr     bool
+	}{
+		{name: "disabled without address", enablePprof: false, addr: "", wantErr: false},
+		{name: "disabled with address", enablePprof: false, addr: "127.0.0.1:6060", wantErr: false},
+		{name: "enabled with address", enablePprof: true, addr: "127.0.0.1:6060", wantErr: false},
+		{name: "enabled with default address", enablePprof: true, addr: metrics.DefaultPprofHTTPServer, wantErr: false},
+		{name: "enabled without address", enablePprof: true, addr: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{EnablePprof: tt.enablePprof, PprofHTTPServer: tt.addr}
 			err := config.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)

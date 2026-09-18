@@ -458,6 +458,20 @@ func TestMergeConfigValues(t *testing.T) {
 			},
 		},
 		{
+			name: "Merge pprof configuration",
+			baseConfig: &Config{
+				PprofHTTPServer: "127.0.0.1:6060", // Should not be overridden
+			},
+			fileConfig: &Config{
+				EnablePprof:     true,           // Should be set
+				PprofHTTPServer: "0.0.0.0:7070", // Should not override
+			},
+			expectedBase: &Config{
+				EnablePprof:     true,             // From file
+				PprofHTTPServer: "127.0.0.1:6060", // From base (non-empty)
+			},
+		},
+		{
 			name: "Merge BGP configuration",
 			baseConfig: &Config{
 				BGPConfig: BGPConfig{
@@ -540,6 +554,12 @@ func TestMergeConfigValues(t *testing.T) {
 			}
 			if tt.baseConfig.KubernetesLeaderElection.LeaseName != tt.expectedBase.KubernetesLeaderElection.LeaseName {
 				t.Errorf("KubernetesLeaderElection.LeaseName = %v, expected %v", tt.baseConfig.KubernetesLeaderElection.LeaseName, tt.expectedBase.KubernetesLeaderElection.LeaseName)
+			}
+			if tt.baseConfig.EnablePprof != tt.expectedBase.EnablePprof {
+				t.Errorf("EnablePprof = %v, expected %v", tt.baseConfig.EnablePprof, tt.expectedBase.EnablePprof)
+			}
+			if tt.baseConfig.PprofHTTPServer != tt.expectedBase.PprofHTTPServer {
+				t.Errorf("PprofHTTPServer = %v, expected %v", tt.baseConfig.PprofHTTPServer, tt.expectedBase.PprofHTTPServer)
 			}
 		})
 	}
