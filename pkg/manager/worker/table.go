@@ -57,12 +57,16 @@ func (t *Table) Configure(ctx context.Context, wg *sync.WaitGroup) error {
 }
 
 func (t *Table) StartControlPlane(ctx context.Context, electionManager *election.Manager) {
-	if err := t.cpCluster.StartVipService(ctx, t.config, electionManager, nil, t.killFunc); err != nil {
+	var err error
+	if t.config.EnableLeaderElection {
+		err = t.cpCluster.StartCluster(ctx, t.config, electionManager, nil, t.leaseMgr, t.killFunc)
+	} else {
+		err = t.cpCluster.StartVipService(ctx, t.config, electionManager, nil, t.killFunc)
+	}
+	if err != nil {
 		log.Error("Control Plane", "err", err)
 		// Trigger the shutdown of this manager instance
 		t.killFunc()
-	} else {
-		log.Debug("start VipServer for cluster manager successful")
 	}
 }
 
