@@ -626,6 +626,14 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		c.ControlPlaneHealthCheck.CAPath = env
 	}
+	env = os.Getenv(controlPlaneHealthCheckClientCertPath)
+	if env != "" {
+		c.ControlPlaneHealthCheck.ClientCertPath = env
+	}
+	env = os.Getenv(controlPlaneHealthCheckClientKeyPath)
+	if env != "" {
+		c.ControlPlaneHealthCheck.ClientKeyPath = env
+	}
 
 	env = os.Getenv(zebraEnable)
 	if env != "" {
@@ -1139,5 +1147,11 @@ func mergeHealthCheck(base, file *HealthCheck) {
 	}
 	if base.CAPath == "" && file.CAPath != "" {
 		base.CAPath = file.CAPath
+	}
+	if base.ClientCertPath == "" && file.ClientCertPath != "" {
+		base.ClientCertPath = file.ClientCertPath
+	}
+	if base.ClientKeyPath == "" && file.ClientKeyPath != "" {
+		base.ClientKeyPath = file.ClientKeyPath
 	}
 }

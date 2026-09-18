@@ -113,6 +113,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.ControlPlaneHealthCheck.TimeoutSeconds, "controlPlaneHealthCheckTimeoutSeconds", 3, "Timeout for each control-plane health check request")
 	kubeVipCmd.PersistentFlags().IntVar(&initConfig.ControlPlaneHealthCheck.FailureThreshold, "controlPlaneHealthCheckFailureThreshold", 3, "Consecutive control-plane health check failures before withdrawing the BGP route")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ControlPlaneHealthCheck.CAPath, "controlPlaneHealthCheckCAPath", "", "Path to CA certificate for TLS verification when the control-plane health check URL is HTTPS")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ControlPlaneHealthCheck.ClientCertPath, "controlPlaneHealthCheckClientCertPath", "", "Path to client certificate for HTTPS control-plane health check authentication")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ControlPlaneHealthCheck.ClientKeyPath, "controlPlaneHealthCheckClientKeyPath", "", "Path to client private key for HTTPS control-plane health check authentication")
 
 	// Namespace for kube-vip
 	kubeVipCmd.PersistentFlags().StringVarP(&initConfig.Namespace, "namespace", "n", "kube-system", "The namespace for the configmap defined within the cluster")

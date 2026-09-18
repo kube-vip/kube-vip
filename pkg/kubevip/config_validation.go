@@ -21,10 +21,20 @@ func (c *Config) Validate() error {
 	if err := validateHealthCheckAddress(c.ControlPlaneHealthCheck.Address); err != nil {
 		return err
 	}
+	if err := validateHealthCheckClientCertificate(c.ControlPlaneHealthCheck); err != nil {
+		return err
+	}
 	if err := validateInstanceName(c.InstanceName); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func validateHealthCheckClientCertificate(healthCheck HealthCheck) error {
+	if (healthCheck.ClientCertPath == "") != (healthCheck.ClientKeyPath == "") {
+		return fmt.Errorf("control-plane health check client certificate and key paths must be configured together")
+	}
 	return nil
 }
 
