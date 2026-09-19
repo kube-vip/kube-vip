@@ -142,6 +142,8 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup, instanceAddresses, instanceHostnames []string) error {
+	serviceElection := config.EnableServicesElection ||
+		config.PerServiceElectionOnDemand && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 	var newVips []*kubevip.Config
 	var link netlink.Link
 	var err error
@@ -273,7 +275,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DHCPMode:               config.DHCPMode,
 			DHCPBackoffAttempts:    config.DHCPBackoffAttempts,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: serviceElection,
 			// cleanupVIPs reads this from the per-VIP config, so Service VIPs need it too.
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
@@ -340,7 +342,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DNSMode:                config.DNSMode,
 			DHCPMode:               config.DHCPMode,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: serviceElection,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
