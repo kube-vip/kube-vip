@@ -484,7 +484,7 @@ func (configurator *network) accountVIPAddressAdd() {
 		configurator.accountVIPAddressDelete()
 	}
 
-	metrics.TrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(configurator.address), key)
+	metrics.TrackVIPAddress(configurator.Interface(), addressFamily(configurator.address), key)
 	configurator.trackedVIPAddress = key
 }
 
@@ -495,7 +495,7 @@ func (configurator *network) accountVIPAddressDelete() {
 
 	tracked, err := netlink.ParseAddr(configurator.trackedVIPAddress)
 	if err == nil {
-		metrics.UntrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(tracked), configurator.trackedVIPAddress)
+		metrics.UntrackVIPAddress(configurator.Interface(), addressFamily(tracked), configurator.trackedVIPAddress)
 	}
 	configurator.trackedVIPAddress = ""
 }

@@ -66,9 +66,7 @@ func TestVIPAddressGaugeRenewalDoesNotDrift(t *testing.T) {
 	}
 	n := &network{
 		address: address,
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0"}},
-		},
+		link:    networkinterface.NewManager().Get(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0"}}),
 	}
 	gauge := metrics.VIPAddresses.WithLabelValues("eth0", "IPv4")
 
@@ -105,9 +103,7 @@ func TestVIPAddressGaugeTransfersAcrossDNSChanges(t *testing.T) {
 		address:         address,
 		possibleSubnets: "32",
 		dnsName:         "vip.example.com",
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dns0"}},
-		},
+		link:            networkinterface.NewManager().Get(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dns0"}}),
 	}
 	gauge := metrics.VIPAddresses.WithLabelValues("dns0", "IPv4")
 
@@ -145,9 +141,7 @@ func TestVIPAddressGaugeCountsExistingAddressOnReclaim(t *testing.T) {
 	}
 	n := &network{
 		address: address,
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "reclaim0"}},
-		},
+		link:    networkinterface.NewManager().Get(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "reclaim0"}}),
 	}
 
 	n.accountVIPAddressAdd()
