@@ -17,6 +17,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -24,6 +25,7 @@ import (
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
+	"sigs.k8s.io/yaml"
 )
 
 // ClusterSpec describes a Kind cluster with kube-vip.
@@ -39,6 +41,8 @@ type ClusterSpec struct {
 	// TemplateName is the kube-vip manifest template filename relative to the
 	// e2e test directory. Defaults to "kube-vip.yaml.tmpl".
 	TemplateName string
+	// UseDaemonSet deploys kube-vip through a DaemonSet instead of static pods.
+	UseDaemonSet bool
 }
 
 // Cluster holds a running Kind cluster with kube-vip.
@@ -178,6 +182,12 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	// Load kube-vip image
 	c.LoadImage(spec.KubeVip.ImagePath)
+	if spec.UseDaemonSet {
+		deployDaemonSet(ctx, c, manifestPath)
+	}
+	Eventually(func() error {
+		return kubeVipPodsReady(ctx, c.Client, spec.Nodes)
+	}, "120s", "2s").Should(Succeed())
 
 	return c
 }
@@ -196,6 +206,64 @@ func renderKubeVipManifest(tmpl *template.Template, path string, values KubevipM
 		return fmt.Errorf("render kube-vip manifest %q: %w", path, err)
 	}
 	return nil
+}
+
+func kubeVipPodsReady(ctx context.Context, client kubernetes.Interface, expected int) error {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
+	if err != nil {
+		return err
+	}
+	ready := 0
+	states := make([]string, 0, len(pods.Items))
+	for _, pod := range pods.Items {
+		isReady := false
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+				isReady = true
+				break
+			}
+		}
+		if isReady {
+			ready++
+		}
+		states = append(states, fmt.Sprintf("%s=%s ready=%t", pod.Name, pod.Status.Phase, isReady))
+	}
+	if ready < expected {
+		return fmt.Errorf("kube-vip pods are not ready: %d/%d; states: %v", ready, expected, states)
+	}
+	return nil
+}
+
+func deployDaemonSet(ctx context.Context, c *Cluster, manifestPath string) {
+	payload, err := os.ReadFile(manifestPath)
+	Expect(err).NotTo(HaveOccurred())
+	var pod corev1.Pod
+	Expect(yaml.Unmarshal(payload, &pod)).To(Succeed())
+	labels := map[string]string{"app": "kube-vip"}
+	pod.Spec.RestartPolicy = corev1.RestartPolicyAlways
+	pod.Spec.Tolerations = append(pod.Spec.Tolerations,
+		corev1.Toleration{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+		corev1.Toleration{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+	)
+	daemonSet := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-vip", Namespace: "kube-system", Labels: labels},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: pod.Spec},
+		},
+	}
+	_, err = c.Client.AppsV1().DaemonSets("kube-system").Create(ctx, daemonSet, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(func() error {
+		current, getErr := c.Client.AppsV1().DaemonSets("kube-system").Get(ctx, daemonSet.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		if current.Status.NumberReady != current.Status.DesiredNumberScheduled {
+			return fmt.Errorf("kube-vip daemonset is not ready: %d/%d", current.Status.NumberReady, current.Status.DesiredNumberScheduled)
+		}
+		return nil
+	}, "120s", "2s").Should(Succeed())
 }
 
 // WaitForKubeVipReady verifies that every requested node has a running and
