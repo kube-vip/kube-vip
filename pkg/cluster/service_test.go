@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
-	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/route"
