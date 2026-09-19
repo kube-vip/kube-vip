@@ -20,5 +20,8 @@ func NewCallback(f func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, b
 }
 
 func (c *Callback) Run(svcCtx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+	if svcCtx.Ctx.Err() != nil {
+		return nil
+	}
 	return c.Function(svcCtx, svc, wg, c.UsesLeaderElection)
 }

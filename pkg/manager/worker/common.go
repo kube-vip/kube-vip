@@ -242,9 +242,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 				objLease.Elected.Store(true)
 				objLease.Unlock()
 				close(objLease.Started)
-				a.OnStartedLeading(ctx)
-				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
-				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
+				onStartedLeading(ctx, a, config.NodeName, leaseID.Name())
 			})
 		},
 		OnStoppedLeading: func() {
@@ -258,4 +256,10 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	if err := election.RunOrDie(ctx, run, config); err != nil {
 		log.Error("leaderelection failed", "err", err, "id", config.NodeName, "name", leaseID.Name())
 	}
+}
+
+func onStartedLeading(ctx context.Context, actions election.Actions, nodeName, leaseName string) {
+	metrics.LeaderTransitionsTotal.WithLabelValues(leaseName).Inc()
+	metrics.IsLeader.WithLabelValues(nodeName, leaseName).Set(1)
+	actions.OnStartedLeading(ctx)
 }
