@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- Prometheus metrics for build information, service activity, reconciliation,
+  leader election, and watcher-loop liveness, with a metrics reference guide.
 - Configurable control-plane health check for BGP mode without leader election
   - Polls a configurable HTTP(S) endpoint (e.g. `https://localhost:6443/livez`) to verify the exposed service is healthy (usually the local kube-apiserver)
   - Withdraws the BGP route after a configurable number of consecutive failures, removing the unhealthy node from the ECMP set
