@@ -124,8 +124,6 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup) (*Instance, error) {
 	instanceAddresses, instanceHostnames := FetchServiceAddresses(svc)
-	serviceElection := config.EnableServicesElection ||
-		config.PerServiceElectionOnDemand && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 	log.Info("new instance", "namespace", svc.Namespace, "service", svc.Name, "addresses", instanceAddresses, "hostnames", instanceHostnames)
 
 	cleanupInfo := serviceCleanupInfo(svc)
@@ -144,6 +142,8 @@ func NewInstance(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, config *kubevip.Config,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup, instanceAddresses, instanceHostnames []string) error {
+	serviceElection := config.EnableServicesElection ||
+		config.PerServiceElectionOnDemand && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 	var newVips []*kubevip.Config
 	var link netlink.Link
 	var err error
