@@ -477,7 +477,7 @@ var kubeVipManager = &cobra.Command{
 
 		// Label metrics after the call to manager.New, as it may modify the node name
 		// if it was not set in the configuration.
-		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName)
+		metrics.BuildInfo.WithLabelValues(Release.Version, Release.Build, initConfig.NodeName).Set(1)
 
 		// Start the service manager, this will watch the config Map and construct kube-vip services for it
 		err = mgr.Start(ctx)
