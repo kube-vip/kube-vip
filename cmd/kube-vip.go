@@ -497,6 +497,11 @@ func loadRuntimeConfig(cmd *cobra.Command) error {
 		configPath = value
 	}
 	if configPath != "" {
+		if _, flagSet := changed["dhcpMode"]; !flagSet {
+			if _, envSet := os.LookupEnv("vip_dhcp_mode"); !envSet {
+				initConfig.DHCPMode = ""
+			}
+		}
 		if err := kubevip.MergeConfigFromFile(&initConfig, configPath); err != nil {
 			return fmt.Errorf("loading config file: %w", err)
 		}

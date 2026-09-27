@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/detector"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -842,7 +843,7 @@ func ParseEnvironment(c *Config) error {
 			*destination = value
 		}
 	}
-	if value, ok := os.LookupEnv(instanceName); ok && value != "" {
+	if value, ok := os.LookupEnv(instanceName); ok {
 		c.InstanceName = value
 	} else if value, ok := os.LookupEnv(strings.ToUpper(instanceName)); ok {
 		c.InstanceName = value
