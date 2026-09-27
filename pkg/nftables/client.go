@@ -345,7 +345,8 @@ func ruleEqual(a, b *nftables.Rule) bool {
 				return false
 			}
 		case *expr.Counter:
-			if _, ok := b.Exprs[i].(*expr.Counter); !ok {
+			bExpr, ok := b.Exprs[i].(*expr.Counter)
+			if !ok || (aExpr == nil) != (bExpr == nil) {
 				return false
 			}
 		case *expr.Verdict:
