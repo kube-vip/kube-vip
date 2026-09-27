@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -97,6 +96,9 @@ func RunElection(ctx context.Context, config *LeaderElectionConfig) (runErr erro
 		config.EtcdConfig.Client,
 	).LeaseGrant(ctx, r)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return errors.Wrap(err, "creating lease")
 	}
 
@@ -142,7 +144,9 @@ type member struct {
 	callbacks   LeaderCallbacks
 	memberID    string
 	leaderDelay time.Duration
-	state       atomic.Int32
+	stateMu     sync.Mutex
+	stopped     bool
+	started     bool
 }
 
 type campaignResult struct {
@@ -224,7 +228,7 @@ func (m *member) watchLeaderChanges(ctx context.Context, elected <-chan campaign
 	var key, currentLeaderKey string
 	var isLeader bool
 	defer func() {
-		if isLeader {
+		if isLeader && m.wasStarted() {
 			m.callbacks.OnStoppedLeading()
 		}
 		log.Debug("Exiting watcher", "id", m.memberID)
@@ -309,20 +313,35 @@ func (m *member) campaign(ctx context.Context, elected chan<- campaignResult, se
 	case <-timer.C:
 	}
 
-	if ctx.Err() != nil || !m.state.CompareAndSwap(0, 1) {
+	m.stateMu.Lock()
+	if ctx.Err() != nil || m.stopped {
+		m.stateMu.Unlock()
 		return nil
 	}
 	select {
 	case <-sessionDone:
+		m.stateMu.Unlock()
 		return errors.New("election session ended")
 	default:
 	}
+	m.started = true
+	// Keep shutdown from overtaking callback admission. stop waits for this
+	// lock, so OnStoppedLeading cannot run before OnStartedLeading returns.
 	m.callbacks.OnStartedLeading(ctx)
+	m.stateMu.Unlock()
 	return nil
 }
 
 func (m *member) stop() {
-	m.state.CompareAndSwap(0, 2)
+	m.stateMu.Lock()
+	m.stopped = true
+	m.stateMu.Unlock()
+}
+
+func (m *member) wasStarted() bool {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	return m.started
 }
 
 func revokeLease(client *clientv3.Client, leaseID clientv3.LeaseID, ttl int64) error {
