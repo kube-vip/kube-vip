@@ -244,8 +244,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 				addr, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv6] failed to reacquire lease", "err", backoffErr)
-					t1.Reset(t1Timeout)
-					t2.Reset(t2Timeout)
+					resetLeaseTimers(t1, t2, t1Timeout, t2Timeout)
 					continue
 				}
 				c.storeAddr(addr)
