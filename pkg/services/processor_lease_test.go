@@ -52,6 +52,28 @@ func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
 	}
 }
 
+func TestOnStoppedLeadingWaitsForLifecycleLock(t *testing.T) {
+	p := &Processor{}
+	oldCtx := servicecontext.New(context.Background())
+	replacementCtx := servicecontext.New(context.Background())
+	uid := types.UID("service-uid")
+	p.svcMap.Store(uid, replacementCtx)
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid, Name: "example"}}
+
+	p.lifecycleMutex.Lock()
+	done := make(chan error, 1)
+	go func() { done <- p.onStoppedLeading(oldCtx, nil, service) }()
+	select {
+	case <-done:
+		t.Fatal("lost-leader cleanup bypassed the lifecycle lock")
+	case <-time.After(20 * time.Millisecond):
+	}
+	p.lifecycleMutex.Unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("onStoppedLeading returned error: %v", err)
+	}
+}
+
 func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 	for _, ignored := range []bool{false, true} {
 		name := "normal"
