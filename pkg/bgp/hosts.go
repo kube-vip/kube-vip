@@ -84,7 +84,7 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest) error {
 	result := make(chan error, 1)
 	go func() {
-		_, err := b.s.DeletePath(req)
+		err := b.s.DeletePath(req)
 		result <- err
 	}()
 	select {
