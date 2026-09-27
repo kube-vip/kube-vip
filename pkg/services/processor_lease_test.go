@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -48,6 +49,28 @@ func TestDeletedSharedVIPServiceRejectsRacingEndpointUpdate(t *testing.T) {
 	}
 	if !references[vip]["local-b"] || second.Ctx.Err() != nil {
 		t.Fatal("deleting one Local Service disturbed the other shared VIP owner")
+	}
+}
+
+func TestOnStoppedLeadingWaitsForLifecycleLock(t *testing.T) {
+	p := &Processor{}
+	oldCtx := servicecontext.New(context.Background())
+	replacementCtx := servicecontext.New(context.Background())
+	uid := types.UID("service-uid")
+	p.svcMap.Store(uid, replacementCtx)
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid, Name: "example"}}
+
+	p.lifecycleMutex.Lock()
+	done := make(chan error, 1)
+	go func() { done <- p.onStoppedLeading(oldCtx, nil, service) }()
+	select {
+	case <-done:
+		t.Fatal("lost-leader cleanup bypassed the lifecycle lock")
+	case <-time.After(20 * time.Millisecond):
+	}
+	p.lifecycleMutex.Unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("onStoppedLeading returned error: %v", err)
 	}
 }
 
