@@ -34,9 +34,9 @@ func TestParseEnvironmentPreservesConfiguredARPAndDHCPValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(vipArpRate, "")
-			t.Setenv(dhcpMode, "")
-			t.Setenv(dnsMode, "")
+			unsetEnv(t, vipArpRate)
+			unsetEnv(t, dhcpMode)
+			unsetEnv(t, dnsMode)
 
 			config := tt.cfg
 			if err := ParseEnvironment(&config); err != nil {
@@ -51,9 +51,9 @@ func TestParseEnvironmentPreservesConfiguredARPAndDHCPValues(t *testing.T) {
 }
 
 func TestParseEnvironmentDefaultsARPAndDHCPValues(t *testing.T) {
-	t.Setenv(vipArpRate, "")
-	t.Setenv(dhcpMode, "")
-	t.Setenv(dnsMode, "")
+	unsetEnv(t, vipArpRate)
+	unsetEnv(t, dhcpMode)
+	unsetEnv(t, dnsMode)
 
 	config := Config{DNSMode: "first"}
 	if err := ParseEnvironment(&config); err != nil {
@@ -86,7 +86,7 @@ func TestParseEnvironmentOverridesConfiguredARPAndDHCPValues(t *testing.T) {
 }
 
 func TestParseEnvironmentPreservesConfigFileARPRate(t *testing.T) {
-	t.Setenv(vipArpRate, "")
+	unsetEnv(t, vipArpRate)
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("arpBroadcastRate: 1234\n"), 0o600); err != nil {
@@ -126,8 +126,8 @@ func TestLoadConfigFromFileDHCPAndDNSModes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(dhcpMode, "")
-			t.Setenv(dnsMode, "")
+			unsetEnv(t, dhcpMode)
+			unsetEnv(t, dnsMode)
 
 			path := filepath.Join(t.TempDir(), "config"+tt.ext)
 			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
@@ -149,4 +149,19 @@ func TestLoadConfigFromFileDHCPAndDNSModes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func unsetEnv(t *testing.T, name string) {
+	t.Helper()
+	value, present := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if present {
+			_ = os.Setenv(name, value)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }
