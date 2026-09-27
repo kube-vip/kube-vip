@@ -42,6 +42,11 @@ func TestRuleEqualExpressions(t *testing.T) {
 			b:    rule(&expr.Meta{}),
 		},
 		{
+			name: "typed nil counter mismatch",
+			a:    rule((*expr.Counter)(nil)),
+			b:    rule(&expr.Counter{}),
+		},
+		{
 			name:  "lookup transient set ID is ignored",
 			a:     rule(&expr.Lookup{SourceRegister: 1, DestRegister: 2, IsDestRegSet: true, SetID: 10, SetName: "service-map", Invert: true}),
 			b:     rule(&expr.Lookup{SourceRegister: 1, DestRegister: 2, IsDestRegSet: true, SetID: 20, SetName: "service-map", Invert: true}),
