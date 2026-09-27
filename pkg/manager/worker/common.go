@@ -225,6 +225,7 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 		LeaseAnnotations: map[string]string{},
 		VIPsProvider:     objLease.OwnedVIPs,
 		Mgr:              electionManager,
+		VIPs:             []string{config.VIP},
 		OnStartedLeading: func(ctx context.Context) {
 			if !electionSession.Started() {
 				return
