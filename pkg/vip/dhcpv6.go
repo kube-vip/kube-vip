@@ -105,6 +105,9 @@ type DHCPv6Client struct {
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
 	stop            sync.Once
+	startOnce       sync.Once
+	started         chan struct{}
+	done            chan struct{}
 	mtx             sync.RWMutex
 }
 
@@ -142,6 +145,8 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 		ipChan:          make(chan string),
 		ic:              client,
 		backoffAttempts: backoffAttempts,
+		started:         make(chan struct{}),
+		done:            make(chan struct{}),
 	}, nil
 }
 
@@ -153,6 +158,11 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
 	c.close()
+	select {
+	case <-c.started:
+		<-c.done
+	default:
+	}
 }
 
 // Close dhcp client channels
@@ -160,7 +170,6 @@ func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
 		close(c.stopChan)
 	})
-	dhcpv6ClientManager.Delete(c.managerKey)
 }
 
 // Gets the IPChannel for consumption
@@ -174,6 +183,9 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
+	c.startOnce.Do(func() { close(c.started) })
+	defer close(c.done)
+	defer dhcpv6ClientManager.Delete(c.managerKey)
 	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
