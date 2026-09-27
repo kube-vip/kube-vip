@@ -132,6 +132,7 @@ func getEtcdHealth(ctx context.Context, c *http.Client, node nodes.Node) (*etcdH
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("etcd member not ready, returned HTTP status %d", resp.StatusCode)
@@ -141,8 +142,6 @@ func getEtcdHealth(ctx context.Context, c *http.Client, node nodes.Node) (*etcdH
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
 	health, err := parseEtcdHealthResponse(body)
 	if err != nil {
 		return nil, err
