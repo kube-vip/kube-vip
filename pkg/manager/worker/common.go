@@ -243,6 +243,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
 		Mgr:              electionManager,
+		VIPs:             []string{config.VIP},
 		OnStartedLeading: func(ctx context.Context) {
 			wg.Go(func() {
 				objLease.Elected.Store(true)
