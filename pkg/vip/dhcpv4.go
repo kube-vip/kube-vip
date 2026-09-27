@@ -208,8 +208,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 				lease, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv4] failed to reacquire lease", "err", backoffErr)
-					t1.Reset(t1Timeout)
-					t2.Reset(t2Timeout)
+					resetLeaseTimers(t1, t2, t1Timeout, t2Timeout)
 					continue
 				}
 				c.storeLease(lease)
@@ -219,6 +218,11 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			t2.Reset(t2Timeout)
 		}
 	}
+}
+
+func resetLeaseTimers(t1, t2 *time.Timer, t1Timeout, t2Timeout time.Duration) {
+	t1.Reset(t1Timeout)
+	t2.Reset(t2Timeout)
 }
 
 func getLeaseTimeouts(lease *nclient4.Lease) (time.Duration, time.Duration) {
