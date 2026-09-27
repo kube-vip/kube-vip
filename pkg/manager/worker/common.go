@@ -23,7 +23,7 @@ import (
 
 type controlPlaneCluster interface {
 	StartCluster(context.Context, *kubevip.Config, *election.Manager, *bgp.Server, *lease.Manager, func()) error
-	StartVipService(context.Context, *kubevip.Config, *election.Manager, cluster.BGPRouteManager, func()) error
+	StartVipService(context.Context, *kubevip.Config, *election.Manager, bgp.BGPManager, func()) error
 }
 
 type Common struct {

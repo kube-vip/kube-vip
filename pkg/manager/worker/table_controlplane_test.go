@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
-	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -21,7 +20,7 @@ func (s *controlPlaneClusterSpy) StartCluster(context.Context, *kubevip.Config, 
 	return nil
 }
 
-func (s *controlPlaneClusterSpy) StartVipService(context.Context, *kubevip.Config, *election.Manager, cluster.BGPRouteManager, func()) error {
+func (s *controlPlaneClusterSpy) StartVipService(context.Context, *kubevip.Config, *election.Manager, bgp.BGPManager, func()) error {
 	s.startVipServiceCalls++
 	return nil
 }
