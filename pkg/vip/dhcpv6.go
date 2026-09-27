@@ -106,6 +106,7 @@ type DHCPv6Client struct {
 	backoffAttempts uint
 	stop            sync.Once
 	startOnce       sync.Once
+	deleteOnce      sync.Once
 	started         chan struct{}
 	done            chan struct{}
 	mtx             sync.RWMutex
@@ -162,6 +163,7 @@ func (c *DHCPv6Client) Stop() {
 	case <-c.started:
 		<-c.done
 	default:
+		c.releaseManager()
 	}
 }
 
@@ -170,6 +172,10 @@ func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
 		close(c.stopChan)
 	})
+}
+
+func (c *DHCPv6Client) releaseManager() {
+	c.deleteOnce.Do(func() { dhcpv6ClientManager.Delete(c.managerKey) })
 }
 
 // Gets the IPChannel for consumption
@@ -185,7 +191,7 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 func (c *DHCPv6Client) Start(ctx context.Context) error {
 	c.startOnce.Do(func() { close(c.started) })
 	defer close(c.done)
-	defer dhcpv6ClientManager.Delete(c.managerKey)
+	defer c.releaseManager()
 	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
