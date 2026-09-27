@@ -68,7 +68,7 @@ func (lock *annotatedLeaseLock) ensureAnnotations(ctx context.Context) (bool, er
 		if err != nil {
 			return err
 		}
-		if resource.Spec.HolderIdentity != lock.Identity() {
+		if resource.Spec.HolderIdentity == nil || *resource.Spec.HolderIdentity != lock.Identity() {
 			return nil
 		}
 		if resource.Annotations == nil {
