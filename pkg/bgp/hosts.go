@@ -26,7 +26,7 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 		return fmt.Errorf("failed to get path for %v", ip)
 	}
 
-	if !exists || objects[object] {
+	if !exists || !objects[object] {
 		// Without Add-Path, GoBGP replaces an identical path. Re-add an existing
 		// reference so reconciliation can recover after a failed withdrawal.
 		if _, err := b.s.AddPath(apiutil.AddPathRequest{
