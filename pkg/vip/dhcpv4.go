@@ -32,6 +32,9 @@ type DHCPv4Client struct {
 	ipChan          chan string
 	backoffAttempts uint
 	stopOnce        sync.Once
+	startOnce       sync.Once
+	started         chan struct{}
+	done            chan struct{}
 	mtx             sync.RWMutex
 }
 
@@ -58,6 +61,8 @@ func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP stri
 		broadcastFlag:   broadcastFlag,
 		ipChan:          make(chan string),
 		backoffAttempts: backoffAttempts,
+		started:         make(chan struct{}),
+		done:            make(chan struct{}),
 	}
 }
 
@@ -69,6 +74,11 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
 	c.close()
+	select {
+	case <-c.started:
+		<-c.done
+	default:
+	}
 }
 
 func (c *DHCPv4Client) close() {
@@ -142,6 +152,8 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
+	c.startOnce.Do(func() { close(c.started) })
+	defer close(c.done)
 	lease, err := c.requestWithBackoff(ctx)
 	if err != nil {
 		return fmt.Errorf("DHCPv4 client failed: %w", err)
