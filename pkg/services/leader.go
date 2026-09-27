@@ -199,6 +199,9 @@ func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1
 }
 
 func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *lease.Lease, service *v1.Service) error {
+	p.lifecycleMutex.Lock()
+	defer p.lifecycleMutex.Unlock()
+
 	currentSvcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
 		return err
