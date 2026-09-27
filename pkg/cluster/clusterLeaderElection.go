@@ -104,6 +104,13 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		LeaseID:          leaseID,
 		LeaseAnnotations: c.LeaseAnnotations,
 		Mgr:              em,
+		VIPs: func() []string {
+			vips := make([]string, 0, len(cluster.Network))
+			for _, network := range cluster.Network {
+				vips = append(vips, network.IP())
+			}
+			return vips
+		}(),
 		OnStartedLeading: func(context.Context) { //nolint TODO: potential clean code
 			cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, false)
 		},
