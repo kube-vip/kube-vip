@@ -142,6 +142,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		LeaseID:          id,
 		Mgr:              p.electionMgr,
 		LeaseAnnotations: map[string]string{},
+		VIPs:             func() []string { vips, _ := instance.FetchServiceAddresses(service); return vips }(),
 
 		OnStartedLeading: func(_ context.Context) {
 			svcLease.Elected.Store(true)
