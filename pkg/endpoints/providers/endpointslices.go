@@ -192,12 +192,16 @@ func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
 }
 
 func (ep *Endpointslices) GetBackends(servicePort v1.ServicePort, nodeName string, local bool) ([]Backend, error) {
+	serviceProtocol := servicePort.Protocol
+	if serviceProtocol == "" {
+		serviceProtocol = v1.ProtocolTCP
+	}
 	seen := map[Backend]struct{}{}
 	backends := []Backend{}
 	for _, eps := range ep.slices {
 		targetPort := ResolvePortWithLookup(servicePort, func(name string) int32 {
 			for _, port := range eps.Ports {
-				if port.Name != nil && *port.Name == name && port.Port != nil && endpointPortProtocol(port) == servicePort.Protocol {
+				if port.Name != nil && *port.Name == name && port.Port != nil && endpointPortProtocol(port) == serviceProtocol {
 					return *port.Port
 				}
 			}
