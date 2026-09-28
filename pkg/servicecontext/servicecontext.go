@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+
+	v1 "k8s.io/api/core/v1"
 )
 
 type Context struct {
@@ -17,6 +19,9 @@ type Context struct {
 	leaderElection     sync.Once
 	Signalled          atomic.Bool
 	LeaderCancel       context.CancelFunc
+	// watchedService is the Service the service and endpoint watchers were started with.
+	// They keep using it, even after the instance is removed from the manager.
+	watchedService *v1.Service
 }
 
 func New(ctx context.Context) *Context {
@@ -108,4 +113,18 @@ func (ctx *Context) IsWatchedLocked() bool {
 	defer ctx.mu.Unlock()
 
 	return ctx.IsWatched
+}
+
+func (ctx *Context) SetWatchedService(svc *v1.Service) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	ctx.watchedService = svc
+}
+
+func (ctx *Context) WatchedService() *v1.Service {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	return ctx.watchedService
 }
