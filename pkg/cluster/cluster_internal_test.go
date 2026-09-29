@@ -17,8 +17,8 @@ import (
 func TestControlPlaneElectionVIPsPreservesConfigOrder(t *testing.T) {
 	config := &kubevip.Config{Address: "2001:db8::10,192.0.2.10"}
 	want := []string{"2001:db8::10", "192.0.2.10"}
-	if got := controlPlaneElectionVIPs(config); !slices.Equal(got, want) {
-		t.Fatalf("controlPlaneElectionVIPs() = %v, want %v", got, want)
+	if got := ControlPlaneElectionVIPs(config); !slices.Equal(got, want) {
+		t.Fatalf("ControlPlaneElectionVIPs() = %v, want %v", got, want)
 	}
 }
 
@@ -118,11 +118,15 @@ func TestControlPlaneFollowsSharedServiceElection(t *testing.T) {
 	config := &kubevip.Config{KubernetesLeaderElection: kubevip.KubernetesLeaderElection{LeaseName: "default/shared"}}
 	leaseID := lease.NewID(config.LeaderElectionType, "default", "shared")
 	leaseMgr := lease.NewManager()
-	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service")
-	if !sharedLease.BeginElection() {
+	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service", nil)
+	serviceParticipation := sharedLease.JoinElection()
+	serviceElection := serviceParticipation.Session
+	if !serviceParticipation.RunsCampaign() {
 		t.Fatal("Service election did not start")
 	}
-	sharedLease.ElectionStarted()
+	if !serviceElection.Started() {
+		t.Fatal("Service election did not become leader")
+	}
 
 	labels := &recordingLabeler{added: make(chan struct{}, 1), removed: make(chan struct{}, 1)}
 	cluster := &Cluster{stop: make(chan struct{}), nodeLabelMgr: labels}
@@ -136,7 +140,7 @@ func TestControlPlaneFollowsSharedServiceElection(t *testing.T) {
 		t.Fatal("control plane did not activate under the shared Service election")
 	}
 
-	sharedLease.ElectionStopped()
+	serviceElection.Stopped()
 	select {
 	case err := <-done:
 		if err != nil {

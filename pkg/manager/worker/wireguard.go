@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -96,7 +97,7 @@ func (w *WireGuard) StartControlPlane(ctx context.Context, electionManager *elec
 		log.Error("no WireGuard tunnel configuration found for control plane VIP", "vip", w.config.VIP)
 		return
 	}
-	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager, controlPlaneElectionVIPs(w.config))
+	w.runGlobalElection(ctx, w, w.config.LeaseName, w.config, electionManager, cluster.ControlPlaneElectionVIPs(w.config))
 }
 
 func (w *WireGuard) ConfigureServices() {

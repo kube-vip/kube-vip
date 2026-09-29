@@ -45,10 +45,12 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 			modified.Annotations = annotations
 
 			p := &Processor{
+				serviceLock:      newTestServiceLocks(),
 				config:           &kubevip.Config{},
 				leaseMgr:         lease.NewManager(),
 				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
 			}
+			initializeTestElectionCoordinators(p)
 			svcCtx := servicecontext.New(context.Background())
 			p.svcMap.Store(uid, svcCtx)
 
@@ -84,10 +86,13 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 // always has a matching lease in the lease manager.
 func TestDropCancelledServiceContext(t *testing.T) {
 	newProcessor := func() *Processor {
-		return &Processor{
-			config:   &kubevip.Config{},
-			leaseMgr: lease.NewManager(),
+		processor := &Processor{
+			serviceLock: newTestServiceLocks(),
+			config:      &kubevip.Config{},
+			leaseMgr:    lease.NewManager(),
 		}
+		initializeTestElectionCoordinators(processor)
+		return processor
 	}
 
 	uid := types.UID("service-uid")
@@ -112,7 +117,16 @@ func TestDropCancelledServiceContext(t *testing.T) {
 		if serviceInstance.AddCalled {
 			t.Fatal("cancelled context left the Service marked as configured")
 		}
-		if action := p.getServiceInstanceAction(service); action != ActionAdd {
+		replacementCtx := servicecontext.New(context.Background())
+		p.svcMap.Store(uid, replacementCtx)
+		action, current, err := p.getServiceInstanceAction(replacementCtx, service)
+		if err != nil {
+			t.Fatalf("getServiceInstanceAction() error = %v", err)
+		}
+		if !current {
+			t.Fatal("replacement Service context was not current")
+		}
+		if action != ActionAdd {
 			t.Fatalf("action after dropping cancelled context = %q, want %q", action, ActionAdd)
 		}
 	})
@@ -142,7 +156,8 @@ func TestDropCancelledServiceContext(t *testing.T) {
 }
 
 func TestEnsureServiceContextWaitsForOldWatcherCleanup(t *testing.T) {
-	p := &Processor{config: &kubevip.Config{}}
+	p := &Processor{serviceLock: newTestServiceLocks(), config: &kubevip.Config{}}
+	initializeTestElectionCoordinators(p)
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", UID: "service"}}
 	oldContext := servicecontext.New(context.Background())
 	if !oldContext.StartWatching() {
@@ -187,9 +202,11 @@ func TestEnsureServiceContextWaitsForOldWatcherCleanup(t *testing.T) {
 // created again, so StartServicesLeaderElection no longer fails with "no existing lease found".
 func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 	p := &Processor{
-		config:   &kubevip.Config{},
-		leaseMgr: lease.NewManager(),
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		leaseMgr:    lease.NewManager(),
 	}
+	initializeTestElectionCoordinators(p)
 
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -217,8 +234,10 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 		t.Fatalf("expected the stale service context to be dropped, got %v", got)
 	}
 
-	// This mirrors the `if svcCtx == nil` branch in AddOrModify.
-	p.leaseMgr.Add(context.Background(), id)
+	// This mirrors registration after the stale Service context has been removed.
+	if _, added := p.leaseMgr.Acquire(context.Background(), id, lease.ServiceNamespacedName(svc), nil); !added {
+		t.Fatal("replacement Service was not registered")
+	}
 
 	if p.leaseMgr.Get(id) == nil {
 		t.Fatal("expected a new lease to be created once the cancelled service context was dropped")
@@ -227,9 +246,11 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 
 func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
 	p := &Processor{
-		config:   &kubevip.Config{},
-		leaseMgr: lease.NewManager(),
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		leaseMgr:    lease.NewManager(),
 	}
+	initializeTestElectionCoordinators(p)
 
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -245,12 +266,9 @@ func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
 	replacementInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service.DeepCopy()}
 	p.ServiceInstances = []*instance.Instance{replacementInstance}
 
-	leaseNamespace, serviceLease := lease.ServiceName(service)
-	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease))
-	member := &serviceElectionMember{service: service, serviceContext: oldCtx}
-
-	if err := p.onStoppedLeadingMember(member, svcLease); err != nil {
-		t.Fatalf("onStoppedLeadingMember returned an error: %v", err)
+	if err := (&electionAdapter{processor: p}).Cleanup(context.Background(), service, oldCtx,
+		func() bool { return true }); err != nil {
+		t.Fatalf("Cleanup returned an error: %v", err)
 	}
 	if got, err := p.getServiceContext(service.UID); err != nil || got != replacementCtx {
 		t.Fatalf("replacement context was changed: got %v, err %v", got, err)

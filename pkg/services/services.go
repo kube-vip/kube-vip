@@ -32,6 +32,8 @@ import (
 
 type ServiceInstanceAction string
 
+var errStaleServiceContext = errors.New("stale service context")
+
 const (
 	ActionDelete ServiceInstanceAction = "delete"
 	ActionAdd    ServiceInstanceAction = "add"
@@ -41,33 +43,57 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
-func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
-	return p.syncServicesWithContext(ctx.Ctx, ctx, svc, wg, usesLeaderElection)
+type serviceSyncReadiness uint8
+
+const (
+	waitForServiceReadiness serviceSyncReadiness = iota
+	serviceReadinessReserved
+)
+
+// SyncServices reconciles a Service after reserving its current ready endpoint
+// generation.
+func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+	return p.syncServicesWithContext(ctx.Ctx, ctx, svc, wg, waitForServiceReadiness)
+}
+
+// activateElectedService reconciles a Service whose readiness generation is
+// already reserved by the election coordinator.
+func (p *Processor) activateElectedService(operationCtx context.Context, svcCtx *servicecontext.Context,
+	svc *v1.Service, wg *sync.WaitGroup) error {
+	return p.syncServicesWithContext(operationCtx, svcCtx, svc, wg, serviceReadinessReserved)
 }
 
 func (p *Processor) syncServicesWithContext(operationCtx context.Context, svcCtx *servicecontext.Context,
-	svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
+	svc *v1.Service, wg *sync.WaitGroup, readiness serviceSyncReadiness) error {
+	defer p.refreshOwnedServiceVIPs()
+
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
-	action := p.getServiceInstanceAction(svc)
+	action, current, err := p.getServiceInstanceAction(svcCtx, svc)
+	if err != nil {
+		return fmt.Errorf("validate service context for %s/%s: %w", svc.Namespace, svc.Name, err)
+	}
+	if !current {
+		return nil
+	}
 	switch action {
 	case ActionDelete:
 		log.Debug("[service] delete", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if err := p.deleteService(operationCtx, svc.UID); err != nil {
+		if err := p.deleteServiceForContext(operationCtx, svc.UID, svcCtx); err != nil {
 			return fmt.Errorf("error deleting service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 	case ActionAdd:
 		log.Debug("[service] add", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
-		if !usesLeaderElection {
-			releaseReadiness, ready := svcCtx.WaitForReadiness()
+		if readiness == waitForServiceReadiness {
+			readinessReservation, ready := svcCtx.WaitForReadiness()
 			if !ready {
 				return nil
 			}
-			defer releaseReadiness()
+			defer readinessReservation.Release()
 		}
 
-		if err := p.addService(operationCtx, svc, wg); err != nil {
+		if err := p.addService(operationCtx, svcCtx, svc, wg); err != nil {
 			return fmt.Errorf("error adding service %s/%s: %w", svc.Namespace, svc.Name, err)
 		}
 
@@ -78,7 +104,7 @@ func (p *Processor) syncServicesWithContext(operationCtx context.Context, svcCtx
 		// LB IP, the initial addService call may have missed the SNAT configuration because
 		// ActiveEndpoint was not yet present. Re-run it here.
 		if svc.Annotations[kubevip.Egress] == "true" && svc.Annotations[kubevip.ActiveEndpoint] != "" {
-			if err := p.updateEgressConfiguration(operationCtx, svc); err != nil {
+			if err := p.updateEgressConfiguration(operationCtx, svcCtx, svc, nil); err != nil {
 				log.Warn("[service] egress reconfigure on ActionNone", "service", svc.Name, "namespace", svc.Namespace, "err", err)
 			}
 		}
@@ -87,9 +113,18 @@ func (p *Processor) syncServicesWithContext(operationCtx context.Context, svcCtx
 	return nil
 }
 
-func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAction {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+func (p *Processor) getServiceInstanceAction(svcCtx *servicecontext.Context,
+	svc *v1.Service) (ServiceInstanceAction, bool, error) {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
+	currentContext, err := p.serviceContextCurrentLocked(svc.UID, svcCtx)
+	if err != nil || !currentContext {
+		return ActionNone, currentContext, err
+	}
 
 	// protect against multiple calls
 	// get the annotations or legacy values from manual configuration
@@ -99,52 +134,52 @@ func (p *Processor) getServiceInstanceAction(svc *v1.Service) ServiceInstanceAct
 	inst := p.findServiceInstance(svc)
 	if inst != nil {
 		if !inst.AddCalled {
-			return ActionAdd
+			return ActionAdd, true, nil
 		}
 		for _, address := range addresses {
 			// handle the case where the service instance needs to be deleted
 			if inst.IsDHCPv4 {
 				if address != "0.0.0.0" {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, inst.DHCPInterfaceIPv4) {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 			} else {
 				if address == "0.0.0.0" {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 			}
 			if inst.IsDHCPv6 {
 				if address != "::" {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, inst.DHCPInterfaceIPv6) {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 			} else {
 				if address == "::" {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 				if len(svc.Status.LoadBalancer.Ingress) > 0 && !slices.Contains(statusAddresses, address) {
-					return ActionDelete
+					return ActionDelete, true, nil
 				}
 			}
 			if len(svc.Status.LoadBalancer.Ingress) > 0 && !comparePortsAndPortStatuses(svc) {
-				return ActionDelete
+				return ActionDelete, true, nil
 			}
 		}
 		// If we reach here, it means the service instance matches the service UID and is not a DHCP service, so we can return "no action"
-		return ActionNone
+		return ActionNone, true, nil
 	}
 	if len(addresses) > 0 || len(hostnames) > 0 {
 		log.Debug("no matching service instance found", "service", svc.Name, "namespace", svc.Namespace, "uid", svc.UID, "addresses", addresses, "hostnames", hostnames)
-		return ActionAdd // If no matching instance is found, we need to add a new service instance
+		return ActionAdd, true, nil // If no matching instance is found, we need to add a new service instance
 	}
-	return ActionNone
+	return ActionNone, true, nil
 }
 
 func comparePortsAndPortStatuses(svc *v1.Service) bool {
@@ -163,10 +198,11 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+func (p *Processor) addService(ctx context.Context, svcCtx *servicecontext.Context, svc *v1.Service,
+	wg *sync.WaitGroup) error {
 	startTime := time.Now()
 
-	inst, err := p.prepareServiceInstance(ctx, svc, wg)
+	inst, err := p.prepareServiceInstance(ctx, svcCtx, svc, wg)
 	if err != nil {
 		return err
 	}
@@ -174,10 +210,13 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.Wa
 		return nil
 	}
 
-	if err := p.configureService(ctx, inst, svc, wg); err != nil {
+	if err := p.configureService(ctx, svcCtx, inst, svc, wg); err != nil {
 		cleanupErr := p.deleteServiceInstance(context.WithoutCancel(ctx), inst)
 		if cleanupErr != nil {
 			return fmt.Errorf("configure service %s/%s: %w; cleanup: %w", svc.Namespace, svc.Name, err, cleanupErr)
+		}
+		if errors.Is(err, errStaleServiceContext) {
+			return nil
 		}
 		return err
 	}
@@ -190,11 +229,23 @@ func (p *Processor) addService(ctx context.Context, svc *v1.Service, wg *sync.Wa
 
 // prepareServiceInstance finds or constructs the instance and marks it added. It
 // acquires the Service lock for svc.UID; callers must not already hold it.
-func (p *Processor) prepareServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, error) {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+func (p *Processor) prepareServiceInstance(ctx context.Context, svcCtx *servicecontext.Context, svc *v1.Service,
+	wg *sync.WaitGroup) (*instance.Instance, error) {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	currentContext, err := p.serviceContextCurrentLocked(svc.UID, svcCtx)
+	if err != nil {
+		return nil, err
+	}
+	if !currentContext {
+		return nil, nil
 	}
 
 	current := p.findServiceInstance(svc)
@@ -210,6 +261,17 @@ func (p *Processor) prepareServiceInstance(ctx context.Context, svc *v1.Service,
 	if err != nil {
 		return nil, err
 	}
+	currentContext, contextErr := p.serviceContextCurrentLocked(svc.UID, svcCtx)
+	if contextErr != nil || !currentContext {
+		cleanupErr := inst.CleanupLinkAttachments(p.serviceInstances()...)
+		if contextErr != nil {
+			return nil, errors.Join(contextErr, cleanupErr)
+		}
+		if cleanupErr != nil {
+			return nil, fmt.Errorf("cleanup instance for stale service context: %w", cleanupErr)
+		}
+		return nil, nil
+	}
 	inst.AddCalled = true
 	p.appendServiceInstance(inst)
 
@@ -218,11 +280,23 @@ func (p *Processor) prepareServiceInstance(ctx context.Context, svc *v1.Service,
 
 // configureService configures a tracked instance. It acquires the Service lock
 // for svc.UID and verifies inst is still current; callers must not hold the lock.
-func (p *Processor) configureService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext.Context, inst *instance.Instance,
+	svc *v1.Service, wg *sync.WaitGroup) error {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	currentContext, err := p.serviceContextCurrentLocked(svc.UID, svcCtx)
+	if err != nil {
+		return err
+	}
+	if !currentContext {
+		return errStaleServiceContext
 	}
 	current := p.findServiceInstance(svc)
 	if current != inst {
@@ -233,6 +307,11 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		if err := endpoints.StartService(ctx, svc, inst, p.bgpServer, wg); err != nil {
 			return fmt.Errorf("start service datapath: %w", err)
+		}
+	}
+	if p.config.EnableWireguard {
+		if err := endpoints.AcquireWireguardServiceTunnels(p.TunnelMgr, svc); err != nil {
+			return fmt.Errorf("start WireGuard Service tunnels: %w", err)
 		}
 	}
 
@@ -413,8 +492,12 @@ func dhcpConfigIndex(configs []*kubevip.Config, ipv6 bool) int {
 // svc.UID and returns false if inst is no longer current; callers must not
 // already hold the lock.
 func (p *Processor) updateDHCPAddress(ctx context.Context, svc *v1.Service, inst *instance.Instance, index int, ip string, ipv6 bool) bool {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 
 	if p.findServiceInstance(svc) != inst {
 		return false
@@ -451,21 +534,43 @@ func serviceSnapshotForEgress(inst *instance.Instance, service *v1.Service) *v1.
 	return merged
 }
 
-// deleteService removes the tracked instance for uid. It acquires the Service
-// lock; callers must not already hold it.
-func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCtx ...*servicecontext.Context) error {
-	unlockService := p.lockService(uid)
-	defer unlockService()
-	var expected *servicecontext.Context
-	if len(expectedCtx) > 0 {
-		expected = expectedCtx[0]
+// deleteServiceForContext removes the tracked instance only while expectedCtx
+// remains the current live Service generation.
+func (p *Processor) deleteServiceForContext(ctx context.Context, uid types.UID,
+	expectedCtx *servicecontext.Context) error {
+	p.serviceLock.Lock(uid)
+	defer func() {
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
+	}()
+	current, err := p.serviceContextCurrentLocked(uid, expectedCtx)
+	if err != nil {
+		return err
 	}
-	if expected != nil {
+	if !current {
+		return nil
+	}
+	return p.deleteCurrentServiceByUID(ctx, uid)
+}
+
+// deleteService removes the tracked instance for uid. It acquires the Service
+// lock; callers must not already hold it. Unlike deleteServiceForContext, this
+// cleanup operation may intentionally run after its Service context was removed.
+func (p *Processor) deleteService(ctx context.Context, uid types.UID, expectedCtx *servicecontext.Context) error {
+	p.serviceLock.Lock(uid)
+	defer func() {
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
+	}()
+
+	if expectedCtx != nil {
 		currentCtx, err := p.getServiceContext(uid)
 		if err != nil {
 			return err
 		}
-		if currentCtx != nil && currentCtx != expected {
+		if currentCtx != nil && currentCtx != expectedCtx {
 			return nil
 		}
 	}
@@ -493,8 +598,12 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 		return nil
 	}
 
-	unlockService := p.lockService(expected.UID())
-	defer unlockService()
+	p.serviceLock.Lock(expected.UID())
+	defer func() {
+		if err := p.serviceLock.Unlock(expected.UID()); err != nil {
+			log.Error("failed to release service lock", "uid", expected.UID(), "err", err)
+		}
+	}()
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: expected.UID()}}
 	if p.findServiceInstance(service) != expected {
 		return nil
@@ -530,15 +639,27 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 
 // updateEgressConfiguration updates egress state for the current instance. It
 // acquires the Service lock for svc.UID; callers must not already hold it.
-func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service, expected ...*instance.Instance) error {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+func (p *Processor) updateEgressConfiguration(ctx context.Context, svcCtx *servicecontext.Context,
+	svc *v1.Service, expected *instance.Instance) error {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
+	currentContext, err := p.serviceContextCurrentLocked(svc.UID, svcCtx)
+	if err != nil {
+		return err
+	}
+	if !currentContext {
+		return nil
+	}
 
 	i := p.findServiceInstance(svc)
 	if i == nil {
 		return fmt.Errorf("service instance not found for %s/%s", svc.Namespace, svc.Name)
 	}
-	if len(expected) > 0 && expected[0] != nil && i != expected[0] {
+	if expected != nil && i != expected {
 		return nil
 	}
 
@@ -993,8 +1114,12 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 // the Service lock for serviceInstance.UID; callers must not already hold it.
 func (p *Processor) refreshUPNPForward(ctx context.Context, serviceInstance *instance.Instance) {
 	uid := serviceInstance.UID()
-	unlockService := p.lockService(uid)
-	defer unlockService()
+	p.serviceLock.Lock(uid)
+	defer func() {
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
+	}()
 
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
 	if p.findServiceInstance(service) != serviceInstance {

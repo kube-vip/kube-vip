@@ -98,15 +98,6 @@ func (rt *RoutingTable) setInstanceEndpointsStatus(service *v1.Service, inst *in
 	return nil
 }
 
-func ClearRoutes(service *v1.Service, instances *[]*instance.Instance, routeMgr *route.Manager) []error {
-	errs := []error{}
-	if svcInst := instance.FindServiceInstance(service, *instances); svcInst != nil {
-		clearErrs := ClearRoutesByInstance(service, svcInst, instances, routeMgr)
-		errs = append(errs, clearErrs...)
-	}
-	return errs
-}
-
 func ClearRoutesByInstance(service *v1.Service, svcInst *instance.Instance, instances *[]*instance.Instance, routeMgr *route.Manager) []error {
 	if svcInst == nil {
 		return []error{fmt.Errorf("failed to remove routes for nil instance of service %s/%s, uid: %s", service.Namespace, service.Name, service.UID)}

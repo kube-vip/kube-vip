@@ -13,6 +13,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
+	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
@@ -23,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/services/serviceelection"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
@@ -34,10 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/utils/keymutex"
 )
-
-const concurrentServiceLocks = 128
 
 var errServiceAddressPending = errors.New("service load-balancer address pending")
 
@@ -48,17 +47,16 @@ type Processor struct {
 
 	// instancesMutex protects membership of ServiceInstances. Mutable fields on each
 	// instance are protected separately by serviceLocks, keyed by Instance.UID().
-	ServiceInstances []*instance.Instance
-	instancesMutex   sync.RWMutex
-	serviceCleanupMu sync.Mutex
-	recoveryMu       sync.Mutex
-	recovered        bool
-	serviceLocks     keymutex.KeyMutex
-	serviceLocksOnce sync.Once
-	electionsMutex   sync.Mutex
-	elections        map[string]*serviceElection
-	nextMemberToken  atomic.Uint64
-	electionLoops    sync.Map
+	ServiceInstances     []*instance.Instance
+	instancesMutex       sync.RWMutex
+	serviceCleanupMu     sync.Mutex
+	recoveryMu           sync.Mutex
+	recovered            bool
+	ownedVIPsMu          sync.Mutex
+	ownedServiceVIPs     atomic.Pointer[[]string]
+	serviceLock          *ServiceLock
+	electionCoordinators *serviceelection.Manager
+	electionLoops        sync.Map
 
 	bgpServer *bgp.Server
 
@@ -73,14 +71,11 @@ type Processor struct {
 	// nodeLabelManager is the manager for the node labels
 	nodeLabelManager node.Labeler
 
-	electionMgr             *election.Manager
-	electionRun             func(context.Context, *election.RunConfig, *kubevip.Config) error
-	serviceSync             func(context.Context, *servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error
-	scheduleElectionRestart func(func())
-	instanceFactory         func(context.Context, *v1.Service, *sync.WaitGroup) (*instance.Instance, error)
+	electionMgr     *election.Manager
+	instanceFactory serviceInstanceFactory
 
 	// TunnelMgr manages multiple WireGuard tunnels (one per service VIP)
-	TunnelMgr *wireguard.TunnelManager
+	TunnelMgr wireguard.ServiceTunnelManager
 
 	routeMgr *route.Manager
 }
@@ -90,18 +85,23 @@ type Processor struct {
 func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	clientSet *kubernetes.Clientset, rwClientSet *kubernetes.Clientset,
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, nodeLabelManager node.Labeler,
-	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) *Processor {
+	electionMgr *election.Manager, leaseMgr *lease.Manager, routeMgr *route.Manager) (*Processor, error) {
+	if config == nil {
+		return nil, fmt.Errorf("create services processor: config is required")
+	}
+	if leaseMgr == nil {
+		return nil, fmt.Errorf("create services processor: lease manager is required")
+	}
 	lbClassFilterFunc := lbClassFilter
 	if config.LoadBalancerClassLegacyHandling {
 		lbClassFilterFunc = lbClassFilterLegacy
 	}
 
-	return &Processor{
+	processor := &Processor{
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
 		ServiceInstances: []*instance.Instance{},
-		serviceLocks:     keymutex.NewHashed(concurrentServiceLocks),
-		elections:        make(map[string]*serviceElection),
+		serviceLock:      NewServiceLock(),
 		bgpServer:        bgpServer,
 		clientSet:        clientSet,
 		rwClientSet:      rwClientSet,
@@ -112,16 +112,22 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		electionMgr:      electionMgr,
 		TunnelMgr:        wireguard.NewTunnelManager(),
 		routeMgr:         routeMgr,
+		instanceFactory:  instance.NewFactory(config, intfMgr, arpMgr, routeMgr, nodeLabelManager),
 	}
+	var err error
+	processor.electionCoordinators, err = newElectionCoordinatorManager(processor)
+	if err != nil {
+		return nil, fmt.Errorf("create services processor: %w", err)
+	}
+	return processor, nil
 }
 
-func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFunc Callback, forcedOnly bool,
 	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok || svc == nil {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
 	}
-
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
@@ -143,6 +149,9 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	// Check the loadBalancer class
 	if p.lbClassFilter(svc, p.config) {
 		return nil
+	}
+	if serviceFunc == nil {
+		return errServiceCallbackRequired
 	}
 
 	// The Service annotation is cluster-wide while nftables state is local to
@@ -170,8 +179,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	shouldGarbageCollect := false
 	var err error
 	if err := func() error {
-		unlockService := p.lockService(svc.UID)
-		defer unlockService()
+		p.serviceLock.Lock(svc.UID)
+		defer func() {
+			if err := p.serviceLock.Unlock(svc.UID); err != nil {
+				log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+			}
+		}()
 
 		svcInstance = p.findServiceInstance(svc)
 		_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
@@ -193,12 +206,6 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	}(); err != nil {
 		return err
 	}
-	if svcCtx != nil && svcCtx.Ctx.Err() != nil {
-		svcCtx, err = p.ensureServiceContext(ctx, svc)
-		if err != nil {
-			return fmt.Errorf("replace cancelled service context: %w", err)
-		}
-	}
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
@@ -213,11 +220,11 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				//Set it to inactive
 				svcCtx.Cancel()
 
-				if err := p.deleteService(ctx, svc.UID); err != nil {
+				if err := p.deleteService(ctx, svc.UID, nil); err != nil {
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
 					log.Error("(svc) unable to remove", "service", svc.UID)
 				}
-				p.leaveServiceElectionForContext(svcCtx, oldService)
+				p.electionCoordinators.DetachForContext(svcCtx, oldService)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
@@ -261,7 +268,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				// start if service is not already watched/handled
 				// signal endpoints goroutine we are ready to start and run service handling function
 				log.Info("(svcs) service function starting", "uid", svc.UID)
-				err = serviceFunc.Run(svcCtx, svc, wg)
+				err = serviceFunc(svcCtx, svc, wg)
 				if err != nil {
 					log.Error(err.Error())
 					if utils.IsPanicError(err) {
@@ -303,8 +310,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 // admitServiceInstance constructs and tracks a Service instance under its
 // Service lock. Callers must not already hold that lock.
 func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, bool, error) {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 
 	serviceInstance := p.findServiceInstance(svc)
 	if serviceInstance != nil {
@@ -321,10 +332,7 @@ func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, w
 }
 
 func (p *Processor) createServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, error) {
-	if p.instanceFactory != nil {
-		return p.instanceFactory(ctx, svc, wg)
-	}
-	return instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+	return p.instanceFactory.Create(ctx, svc, wg)
 }
 
 func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Service, error) {
@@ -353,10 +361,20 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list Services for address recovery: %w", err)
 	}
+	desiredServiceVIPs := make(map[string]struct{})
+	for index := range services.Items {
+		service := &services.Items[index]
+		if !p.serviceOwnsRecoverableVIP(service) {
+			continue
+		}
+		for _, address := range serviceVIPAddresses(service) {
+			desiredServiceVIPs[address] = struct{}{}
+		}
+	}
 	holders := make(map[string]string)
 	retainedVIPs := make(map[string]struct{})
 	if p.config.LeaderElectionType != "etcd" {
-		if err := p.retainAnnotatedLeaseVIPs(ctx, holders, retainedVIPs); err != nil {
+		if err := p.retainAnnotatedLeaseVIPs(ctx, holders, retainedVIPs, desiredServiceVIPs); err != nil {
 			return err
 		}
 	}
@@ -400,7 +418,7 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 }
 
 func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[string]string,
-	retainedVIPs map[string]struct{}) error {
+	retainedVIPs, desiredServiceVIPs map[string]struct{}) error {
 	namespace := v1.NamespaceAll
 	if p.config.ServiceNamespace != "" {
 		namespace = p.config.ServiceNamespace
@@ -428,7 +446,9 @@ func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[st
 			continue
 		}
 		for _, claimedVIP := range metadata.VIPs {
-			retainedVIPs[claimedVIP.Value] = struct{}{}
+			if _, desired := desiredServiceVIPs[claimedVIP.Value]; desired {
+				retainedVIPs[claimedVIP.Value] = struct{}{}
+			}
 		}
 	}
 	return nil
@@ -516,12 +536,9 @@ func (p *Processor) retainControlPlaneVIPs(ctx context.Context, holders map[stri
 }
 
 func configuredVIPAddresses(config *kubevip.Config) ([]string, bool) {
-	configured := config.VIP
-	if config.Address != "" {
-		configured = config.Address
-	}
+	configured := cluster.ControlPlaneElectionVIPs(config)
 	addresses := make([]string, 0)
-	for _, value := range vip.Split(configured) {
+	for _, value := range configured {
 		address := net.ParseIP(utils.StripCIDR(value))
 		if address == nil {
 			return nil, false
@@ -567,25 +584,6 @@ func serviceVIPAddresses(service *v1.Service) []string {
 	return addresses
 }
 
-// ElectionVIPs returns configured Service VIPs in stable Service creation order.
-func (p *Processor) ElectionVIPs(ctx context.Context) ([]string, error) {
-	if p == nil || p.clientSet == nil {
-		return nil, nil
-	}
-	serviceList, err := p.clientSet.CoreV1().Services(p.config.ServiceNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list Services for election VIP metadata: %w", err)
-	}
-	services := make([]*v1.Service, 0, len(serviceList.Items))
-	for index := range serviceList.Items {
-		service := &serviceList.Items[index]
-		if p.serviceOwnsRecoverableVIP(service) {
-			services = append(services, service)
-		}
-	}
-	return orderedServiceVIPs(services), nil
-}
-
 func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok || svc == nil {
@@ -605,6 +603,8 @@ func serviceMatchesWatcher(svc *v1.Service, forcedOnly bool) bool {
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
+	defer p.refreshOwnedServiceVIPs()
+
 	svcCtx, cleanupCtx, err := p.retireServiceContext(svc)
 	if err != nil {
 		return err
@@ -633,8 +633,12 @@ func (p *Processor) retireServiceContext(svc *v1.Service) (*servicecontext.Conte
 		return nil, nil, fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 
 	// A replacement context may have been published while waiting for the lock.
 	currentContext, err := p.getServiceContext(svc.UID)
@@ -648,7 +652,7 @@ func (p *Processor) retireServiceContext(svc *v1.Service) (*servicecontext.Conte
 		if currentContext != contextBeforeLock {
 			currentContext.Cancel()
 		}
-		p.leaveServiceElectionForContext(currentContext, svc)
+		p.electionCoordinators.DetachForContext(currentContext, svc)
 		cleanupCtx = context.WithoutCancel(currentContext.Ctx)
 	}
 	return currentContext, cleanupCtx, nil
@@ -668,6 +672,8 @@ func (p *Processor) cancelPublishedServiceContext(uid types.UID) (*servicecontex
 // Stop acquires each instance's Service lock while stopping its workers and
 // marking it for reconfiguration.
 func (p *Processor) Stop() {
+	defer p.refreshOwnedServiceVIPs()
+
 	p.svcMap.Range(func(_, value any) bool {
 		if svcCtx, ok := value.(*servicecontext.Context); ok {
 			svcCtx.Cancel()
@@ -675,13 +681,22 @@ func (p *Processor) Stop() {
 		return true
 	})
 	for _, instance := range p.serviceInstances() {
-		unlockService := p.lockService(instance.UID())
+		uid := instance.UID()
+		p.serviceLock.Lock(uid)
 		for _, cluster := range instance.Clusters {
 			cluster.StopAndWait()
 		}
 		instance.AddCalled = false
-		unlockService()
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
 	}
+}
+
+// WaitForElectionCampaigns blocks until all Service election campaigns have
+// stopped. Callers must first stop the watchers that can start new campaigns.
+func (p *Processor) WaitForElectionCampaigns() {
+	p.electionCoordinators.Wait()
 }
 
 // getServiceContext performs one concurrency-safe svcMap lookup. Callers that
@@ -696,6 +711,20 @@ func (p *Processor) getServiceContext(uid types.UID) (*servicecontext.Context, e
 		return nil, fmt.Errorf("failed to cast service context pointer - UID: %s", uid)
 	}
 	return ctx, nil
+}
+
+// serviceContextCurrentLocked reports whether expected is the live context
+// published for uid. The caller must hold the Service lock for uid so the
+// identity check and the state mutation it guards form one critical section.
+func (p *Processor) serviceContextCurrentLocked(uid types.UID, expected *servicecontext.Context) (bool, error) {
+	if expected == nil || expected.Ctx == nil {
+		return false, nil
+	}
+	current, err := p.getServiceContext(uid)
+	if err != nil {
+		return false, err
+	}
+	return current == expected && expected.Ctx.Err() == nil, nil
 }
 
 // ensureServiceContext returns the current usable context or creates one. It
@@ -725,8 +754,12 @@ func (p *Processor) ensureServiceContext(ctx context.Context, svc *v1.Service) (
 
 func (p *Processor) ensureServiceContextLocked(ctx context.Context, svc *v1.Service,
 	observed *servicecontext.Context) (*servicecontext.Context, bool, error) {
-	unlockService := p.lockService(svc.UID)
-	defer unlockService()
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+		}
+	}()
 
 	current, err := p.getServiceContext(svc.UID)
 	if err != nil {
@@ -792,11 +825,14 @@ func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
 func (p *Processor) updateActiveServicesMetric() {
 	counts := map[string]int{}
 	for _, inst := range p.serviceInstances() {
-		unlockService := p.lockService(inst.UID())
+		uid := inst.UID()
+		p.serviceLock.Lock(uid)
 		if inst.ServiceSnapshot != nil {
 			counts[inst.ServiceSnapshot.Namespace]++
 		}
-		unlockService()
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
@@ -820,22 +856,37 @@ func (p *Processor) serviceInstances() []*instance.Instance {
 	return append([]*instance.Instance(nil), p.ServiceInstances...)
 }
 
-// ServiceSnapshots returns stable copies for external observers such as
-// diagnostics. It acquires each instance's Service lock while copying.
-func (p *Processor) ServiceSnapshots() []*v1.Service {
+// OwnedServiceVIPs returns the VIPs whose Service datapath is currently active.
+// It is safe to use as a dynamic provider for Lease ownership metadata.
+func (p *Processor) OwnedServiceVIPs() []string {
+	vips := p.ownedServiceVIPs.Load()
+	if vips == nil {
+		return nil
+	}
+	return append([]string(nil), (*vips)...)
+}
+
+func (p *Processor) refreshOwnedServiceVIPs() {
+	p.ownedVIPsMu.Lock()
+	defer p.ownedVIPsMu.Unlock()
+
 	instances := p.serviceInstances()
-	snapshots := make([]*v1.Service, 0, len(instances))
+	vips := make([]string, 0)
 	for _, inst := range instances {
 		if inst == nil {
 			continue
 		}
-		unlockService := p.lockService(inst.UID())
-		if inst.ServiceSnapshot != nil {
-			snapshots = append(snapshots, inst.ServiceSnapshot.DeepCopy())
+		uid := inst.UID()
+		p.serviceLock.Lock(uid)
+		if inst.AddCalled && inst.ServiceSnapshot != nil {
+			addresses, _ := instance.FetchServiceAddresses(inst.ServiceSnapshot)
+			vips = append(vips, addresses...)
 		}
-		unlockService()
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
 	}
-	return snapshots
+	p.ownedServiceVIPs.Store(&vips)
 }
 
 // appendServiceInstance adds inst to the tracked collection. The caller must
@@ -868,21 +919,4 @@ func (p *Processor) detachServiceInstance(uid types.UID) (*instance.Instance, []
 		return found, append([]*instance.Instance(nil), remaining...)
 	}
 	return nil, append([]*instance.Instance(nil), remaining...)
-}
-
-// lockService serializes mutable state for one Service UID. The returned unlock
-// function must be called exactly once; the lock is not reentrant.
-func (p *Processor) lockService(uid types.UID) func() {
-	p.serviceLocksOnce.Do(func() {
-		if p.serviceLocks == nil {
-			p.serviceLocks = keymutex.NewHashed(concurrentServiceLocks)
-		}
-	})
-	key := string(uid)
-	p.serviceLocks.LockKey(key)
-	return func() {
-		if err := p.serviceLocks.UnlockKey(key); err != nil {
-			log.Error("failed to unlock service reconciliation", "uid", uid, "err", err)
-		}
-	}
 }

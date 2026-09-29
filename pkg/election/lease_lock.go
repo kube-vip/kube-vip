@@ -13,14 +13,19 @@ import (
 
 type annotatedLeaseLock struct {
 	resourcelock.Interface
-	leases      coordinationv1client.LeaseInterface
-	name        string
-	annotations map[string]string
+	leases              coordinationv1client.LeaseInterface
+	name                string
+	annotationsProvider func() (map[string]string, error)
 }
 
-func newAnnotatedLeaseLock(lock resourcelock.Interface, leases coordinationv1client.LeaseInterface,
-	name string, annotations map[string]string) resourcelock.Interface {
-	return &annotatedLeaseLock{Interface: lock, leases: leases, name: name, annotations: annotations}
+func newAnnotatedLeaseLockWithProvider(lock resourcelock.Interface, leases coordinationv1client.LeaseInterface,
+	name string, annotationsProvider func() (map[string]string, error)) resourcelock.Interface {
+	return &annotatedLeaseLock{
+		Interface:           lock,
+		leases:              leases,
+		name:                name,
+		annotationsProvider: annotationsProvider,
+	}
 }
 
 func (lock *annotatedLeaseLock) Create(ctx context.Context, record resourcelock.LeaderElectionRecord) error {
@@ -62,17 +67,21 @@ func (lock *annotatedLeaseLock) ensure(ctx context.Context, record resourcelock.
 }
 
 func (lock *annotatedLeaseLock) ensureAnnotations(ctx context.Context) (bool, error) {
+	annotations, err := lock.annotationsProvider()
+	if err != nil {
+		return false, err
+	}
 	changed := false
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		resource, err := lock.leases.Get(ctx, lock.name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 		if resource.Annotations == nil {
-			resource.Annotations = make(map[string]string, len(lock.annotations))
+			resource.Annotations = make(map[string]string, len(annotations))
 		}
 		resourceChanged := false
-		for key, value := range lock.annotations {
+		for key, value := range annotations {
 			if resource.Annotations[key] == value {
 				continue
 			}

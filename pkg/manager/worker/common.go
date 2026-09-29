@@ -17,7 +17,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/services"
-	"github.com/kube-vip/kube-vip/pkg/vip"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -97,15 +96,11 @@ func (c *Common) GlobalLeader(ctx context.Context, leaseName string) {
 		})
 	}
 
-	var vips []string
+	var vipProvider lease.VIPProvider
 	if c.svcProcessor != nil {
-		var err error
-		vips, err = c.svcProcessor.ElectionVIPs(servicesCtx)
-		if err != nil {
-			log.Warn("unable to list Service VIPs for Lease metadata", "err", err)
-		}
+		vipProvider = c.svcProcessor.OwnedServiceVIPs
 	}
-	c.runGlobalElection(servicesCtx, c, leaseName, c.config, c.electionMgr, vips)
+	c.runGlobalElectionWithVIPProvider(servicesCtx, c, leaseName, c.config, c.electionMgr, vipProvider)
 }
 
 func (c *Common) ServicesNoLeader(ctx context.Context) error {
@@ -125,7 +120,7 @@ func (c *Common) ServicesNoLeader(ctx context.Context) error {
 	}
 
 	log.Info("beginning watching services without leader election")
-	err := c.svcProcessor.ServicesWatcher(servicesCtx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
+	err := c.svcProcessor.ServicesWatcher(servicesCtx, c.svcProcessor.SyncServices, false)
 	if err != nil {
 		return fmt.Errorf("error while watching services: %w", err)
 	}
@@ -137,7 +132,7 @@ func (c *Common) Cleanup() {
 }
 
 func (c *Common) OnStartedLeading(ctx context.Context) {
-	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
+	err := c.svcProcessor.ServicesWatcher(ctx, c.svcProcessor.SyncServices, false)
 	if err != nil {
 		log.Error("service watcher", "err", err)
 		c.killFunc()
@@ -165,6 +160,11 @@ func (c *Common) OnNewLeader(identity string) {
 
 func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leaseName string,
 	config *kubevip.Config, electionManager *election.Manager, vips []string) {
+	c.runGlobalElectionWithVIPProvider(ctx, a, leaseName, config, electionManager, lease.StaticVIPProvider(vips))
+}
+
+func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a election.Actions, leaseName string,
+	config *kubevip.Config, electionManager *election.Manager, vipProvider lease.VIPProvider) {
 
 	log.Debug("starting global election")
 	ns, leaseName := lease.NamespaceName(leaseName, config)
@@ -172,15 +172,20 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)
 	objectName := lease.ObjectName(leaseID, "svcs0")
 
-	objLease, _ := c.leaseMgr.Acquire(context.Background(), leaseID, objectName)
+	objLease, _ := c.leaseMgr.Acquire(context.Background(), leaseID, objectName, vipProvider)
 	defer c.leaseMgr.Delete(leaseID, objectName, objLease)
 	electionCtx, cancelElection := objLease.NewElectionContext(ctx)
 	defer cancelElection()
 
-	for !objLease.BeginElection() {
+	var electionSession *lease.ElectionSession
+	for {
+		participation := objLease.JoinElection()
+		if participation.RunsCampaign() {
+			electionSession = participation.Session
+			break
+		}
 		log.Debug("this election was already done, shared lease", "lease", leaseID.Name())
-		leaderGeneration, elected := objLease.WaitForLeaderGeneration(electionCtx)
-		if !elected {
+		if !participation.Session.WaitForLeader(electionCtx) {
 			if electionCtx.Err() != nil {
 				return
 			}
@@ -192,7 +197,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		wg.Go(func() {
 			a.OnStartedLeading(leaderCtx)
 		})
-		objLease.WaitForElectionEndAfter(electionCtx, leaderGeneration)
+		participation.Session.WaitForEnd(electionCtx)
 		cancelLeader()
 		wg.Wait()
 		if electionCtx.Err() != nil {
@@ -205,17 +210,19 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		return
 	}
 	wg := sync.WaitGroup{}
-	defer objLease.ElectionStopped()
+	defer electionSession.Stopped()
 	defer wg.Wait()
 
 	run := &election.RunConfig{
 		Config:           config,
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
-		VIPs:             vips,
+		VIPsProvider:     objLease.OwnedVIPs,
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
-			objLease.ElectionStarted()
+			if !electionSession.Started() {
+				return
+			}
 			wg.Go(func() {
 				a.OnStartedLeading(ctx)
 				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
@@ -223,7 +230,9 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 			})
 		},
 		OnStoppedLeading: func() {
-			objLease.ElectionStopped()
+			if !electionSession.IsCurrent() {
+				return
+			}
 			a.OnStoppedLeading()
 			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
 		},
@@ -233,12 +242,4 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	if err := election.RunOrDie(electionCtx, run, config); err != nil {
 		log.Error("leaderelection failed", "err", err, "id", config.NodeName, "name", leaseID.Name())
 	}
-}
-
-func controlPlaneElectionVIPs(config *kubevip.Config) []string {
-	configured := config.VIP
-	if config.Address != "" {
-		configured = config.Address
-	}
-	return vip.Split(configured)
 }

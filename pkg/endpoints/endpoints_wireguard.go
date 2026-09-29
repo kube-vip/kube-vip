@@ -20,10 +20,10 @@ import (
 type wireguardWorker struct {
 	config    *kubevip.Config
 	provider  providers.Provider
-	tunnelMgr *wireguard.TunnelManager
+	tunnelMgr tunnelConfigProvider
 }
 
-func newWireguardWorker(config *kubevip.Config, provider providers.Provider, tunnelMgr *wireguard.TunnelManager) *wireguardWorker {
+func newWireguardWorker(config *kubevip.Config, provider providers.Provider, tunnelMgr tunnelConfigProvider) *wireguardWorker {
 	return &wireguardWorker{
 		config:    config,
 		provider:  provider,
@@ -60,11 +60,6 @@ func (w *wireguardWorker) processInstance(ctx context.Context, _ *sync.Map, serv
 	serviceIPs, err := utils.FetchServiceIPs(service)
 	if err != nil {
 		return fmt.Errorf("failed to get service IPs: %w", err)
-	}
-	if len(service.Spec.Ports) != 0 {
-		if err := w.ensureTunnels(service, serviceIPs); err != nil {
-			return err
-		}
 	}
 	w.clearDNAT(service)
 
@@ -115,32 +110,6 @@ func (w *wireguardWorker) processInstance(ctx context.Context, _ *sync.Map, serv
 		}
 	}
 
-	return nil
-}
-
-func (w *wireguardWorker) ensureTunnels(service *v1.Service, serviceIPs []string) error {
-	if w.tunnelMgr == nil {
-		return fmt.Errorf("WireGuard tunnel manager not configured")
-	}
-	if len(serviceIPs) == 0 {
-		return fmt.Errorf("no service IPs found for service %s/%s", service.Namespace, service.Name)
-	}
-	var successCount int
-	var lastErr error
-	for _, serviceIP := range serviceIPs {
-		if !w.tunnelMgr.HasConfigForVIP(serviceIP) {
-			lastErr = fmt.Errorf("no WireGuard tunnel configuration found for VIP %s", serviceIP)
-			continue
-		}
-		if err := w.tunnelMgr.AcquireTunnelForVIP(serviceIP, string(service.UID)); err != nil {
-			lastErr = fmt.Errorf("bring up WireGuard tunnel for VIP %s: %w", serviceIP, err)
-			continue
-		}
-		successCount++
-	}
-	if successCount == 0 {
-		return fmt.Errorf("failed to setup WireGuard tunnel for any VIP in service %s/%s: %w", service.Namespace, service.Name, lastErr)
-	}
 	return nil
 }
 
