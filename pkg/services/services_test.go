@@ -18,12 +18,14 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/node/noop"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 )
 
 type testDHCPClient struct {
-	ips    chan string
-	errors chan error
+	ips     chan string
+	errors  chan error
+	stopped bool
 }
 
 func newTestDHCPClient() *testDHCPClient {
@@ -36,7 +38,7 @@ func (c *testDHCPClient) IPChannel() chan string   { return c.ips }
 func (c *testDHCPClient) Start(context.Context) error {
 	return nil
 }
-func (c *testDHCPClient) Stop() {}
+func (c *testDHCPClient) Stop() { c.stopped = true }
 func (c *testDHCPClient) WithHostName(string) vip.DHCPClient {
 	return c
 }
@@ -93,6 +95,7 @@ func TestAddServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 		t.Fatalf("create Kubernetes client: %v", err)
 	}
 	processor := &Processor{
+		serviceLock: newTestServiceLocks(),
 		config: &kubevip.Config{
 			EnableServicesElection: true,
 			EnableARP:              true,
@@ -101,9 +104,11 @@ func TestAddServiceDoesNotOverwriteActiveEndpoint(t *testing.T) {
 		clientSet:        clientSet,
 		nodeLabelManager: noop.NewManager(),
 	}
+	initializeTestElectionCoordinators(processor)
 	serviceInstance := &instance.Instance{ServiceUID: staleService.UID, ServiceSnapshot: staleService}
 	processor.ServiceInstances = []*instance.Instance{serviceInstance}
-	if err := processor.addService(context.Background(), staleService, &sync.WaitGroup{}); err != nil {
+	svcCtx := publishTestServiceContext(processor, staleService)
+	if err := processor.addService(context.Background(), svcCtx, staleService, &sync.WaitGroup{}); err != nil {
 		t.Fatalf("addService returned error: %v", err)
 	}
 
@@ -123,14 +128,42 @@ func TestConfigureServiceRejectsCancelledContext(t *testing.T) {
 	}}
 	serviceInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service}
 	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
 		config:           &kubevip.Config{EnableServicesElection: true},
 		ServiceInstances: []*instance.Instance{serviceInstance},
 	}
+	initializeTestElectionCoordinators(processor)
+	svcCtx := publishTestServiceContext(processor, service)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := processor.configureService(ctx, serviceInstance, service, &sync.WaitGroup{}); !errors.Is(err, context.Canceled) {
+	if err := processor.configureService(ctx, svcCtx, serviceInstance, service, &sync.WaitGroup{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("configureService() error = %v, want context cancellation", err)
+	}
+}
+
+func TestConfigureServiceRejectsStaleServiceContext(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "stale", Namespace: "default", UID: "stale",
+	}}
+	serviceInstance := &instance.Instance{ServiceUID: service.UID, ServiceSnapshot: service}
+	labeler := &testLabeler{}
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{EnableServicesElection: true},
+		ServiceInstances: []*instance.Instance{serviceInstance},
+		nodeLabelManager: labeler,
+	}
+	initializeTestElectionCoordinators(processor)
+	staleCtx := servicecontext.New(context.Background())
+	publishTestServiceContext(processor, service)
+
+	err := processor.configureService(context.Background(), staleCtx, serviceInstance, service, &sync.WaitGroup{})
+	if !errors.Is(err, errStaleServiceContext) {
+		t.Fatalf("configureService() error = %v, want stale Service context", err)
+	}
+	if labeler.addCalls != 0 {
+		t.Fatalf("node label additions for stale context = %d, want 0", labeler.addCalls)
 	}
 }
 
@@ -167,16 +200,44 @@ func TestUpdateEgressConfigurationRejectsRecreatedService(t *testing.T) {
 	snapshot := trackedService.DeepCopy()
 	serviceInstance := &instance.Instance{ServiceUID: trackedService.UID, ServiceSnapshot: snapshot}
 	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
 		config:           &kubevip.Config{},
 		clientSet:        clientSet,
 		ServiceInstances: []*instance.Instance{serviceInstance},
 	}
+	initializeTestElectionCoordinators(processor)
+	svcCtx := publishTestServiceContext(processor, trackedService)
 
-	if err := processor.updateEgressConfiguration(context.Background(), updatedService); err != nil {
+	if err := processor.updateEgressConfiguration(context.Background(), svcCtx, updatedService, nil); err != nil {
 		t.Fatalf("updateEgressConfiguration() error = %v", err)
 	}
 	if serviceInstance.ServiceSnapshot != snapshot {
 		t.Fatal("recreated Service replaced the tracked instance snapshot")
+	}
+}
+
+func TestUpdateEgressConfigurationRejectsStaleServiceContext(t *testing.T) {
+	trackedService := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "test-service", Namespace: "default", UID: "service-uid",
+		Annotations: map[string]string{kubevip.ActiveEndpoint: "10.0.0.1"},
+	}}
+	updatedService := trackedService.DeepCopy()
+	updatedService.Annotations[kubevip.ActiveEndpoint] = "10.0.0.2"
+	serviceInstance := &instance.Instance{ServiceUID: trackedService.UID, ServiceSnapshot: trackedService}
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{serviceInstance},
+	}
+	initializeTestElectionCoordinators(processor)
+	staleCtx := servicecontext.New(context.Background())
+	publishTestServiceContext(processor, trackedService)
+
+	if err := processor.updateEgressConfiguration(context.Background(), staleCtx, updatedService, nil); err != nil {
+		t.Fatalf("updateEgressConfiguration() error = %v", err)
+	}
+	if serviceInstance.ServiceSnapshot != trackedService {
+		t.Fatal("stale Service context updated the instance snapshot")
 	}
 }
 
@@ -199,6 +260,7 @@ func TestConfigureServiceWatchesBothDHCPFamilies(t *testing.T) {
 		DHCPv6Client: dhcpv6,
 	}
 	processor := &Processor{
+		serviceLock: newTestServiceLocks(),
 		config: &kubevip.Config{
 			DisableServiceUpdates: true,
 			EnableARP:             true,
@@ -209,12 +271,14 @@ func TestConfigureServiceWatchesBothDHCPFamilies(t *testing.T) {
 		ServiceInstances: []*instance.Instance{serviceInstance},
 		nodeLabelManager: noop.NewManager(),
 	}
+	initializeTestElectionCoordinators(processor)
+	svcCtx := publishTestServiceContext(processor, service)
 	wg := &sync.WaitGroup{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := processor.configureService(ctx, serviceInstance, service, wg); err != nil {
+	if err := processor.configureService(ctx, svcCtx, serviceInstance, service, wg); err != nil {
 		t.Fatalf("configureService() error = %v", err)
 	}
 	dhcpv4.ips <- "192.0.2.10"

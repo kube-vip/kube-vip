@@ -1,10 +1,30 @@
 package manager
 
 import (
+	"context"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestWaitForShutdownReturnsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	manager := &Manager{signalChan: make(chan os.Signal, 1)}
+	done := make(chan struct{})
+	go func() {
+		manager.waitForShutdown(ctx, cancel, nil)
+		close(done)
+	}()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("waitForShutdown did not return after context cancellation")
+	}
+}
 
 func TestNormalizeNodeName(t *testing.T) {
 	tests := []struct {
