@@ -13,7 +13,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -24,29 +23,43 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+type serviceInstanceFinder func(*v1.Service) *instance.Instance
+
 type Processor struct {
-	config         *kubevip.Config
-	provider       providers.Provider
-	bgpServer      *bgp.Server
-	worker         endpointWorker
-	instances      *[]*instance.Instance
-	instancesMutex *sync.RWMutex
-	leaseMgr       *lease.Manager
-	lockService    func(types.UID) func()
+	config              *kubevip.Config
+	provider            providers.Provider
+	bgpServer           *bgp.Server
+	worker              endpointWorker
+	findServiceInstance serviceInstanceFinder
+	serviceLocks        ServiceLocker
+}
+
+type reconcileResult struct {
+	updatedService        *v1.Service
+	instance              *instance.Instance
+	annotationsChanged    bool
+	skip                  bool
+	endpointCount         int
+	readinessToInvalidate servicecontext.ReadinessGeneration
+	invalidateReadiness   bool
+}
+
+// ServiceLocker serializes operations belonging to the same Service UID.
+type ServiceLocker interface {
+	Lock(types.UID)
+	Unlock(types.UID) error
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, instancesMutex *sync.RWMutex, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager,
-	lockService func(types.UID) func()) *Processor {
+	findServiceInstance serviceInstanceFinder, tunnelMgr wireguard.ServiceTunnelManager, routeMgr *route.Manager,
+	serviceLocks ServiceLocker) *Processor {
 	return &Processor{
-		config:         config,
-		provider:       provider,
-		bgpServer:      bgpServer,
-		instances:      instances,
-		instancesMutex: instancesMutex,
-		leaseMgr:       leaseMgr,
-		lockService:    lockService,
-		worker:         newEndpointWorker(config, provider, bgpServer, leaseMgr, tunnelMgr, routeMgr),
+		config:              config,
+		provider:            provider,
+		bgpServer:           bgpServer,
+		findServiceInstance: findServiceInstance,
+		serviceLocks:        serviceLocks,
+		worker:              newEndpointWorker(config, provider, bgpServer, tunnelMgr, routeMgr),
 	}
 }
 
@@ -60,92 +73,109 @@ func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	wg *sync.WaitGroup,
 	clientSet *kubernetes.Clientset,
 	egressUpdateFunc func(context.Context, *v1.Service, *instance.Instance) error) (bool, error) {
-	if p.lockService == nil {
+	if p.serviceLocks == nil {
 		return false, fmt.Errorf("service operation lock is not configured")
 	}
-	endpointCount := 0
-	var readinessLossGeneration uint64
-	clearNoEndpoints := false
-	updatedService, inst, changed, skip, err := func() (*v1.Service, *instance.Instance, bool, bool, error) {
-		unlockService := p.lockService(service.UID)
-		defer unlockService()
 
-		if err := p.applyEvent(svcCtx, event); err != nil {
-			return nil, nil, false, false, err
-		}
-
-		endpoints, err := p.worker.getEndpoints(service, id)
-		if err != nil {
-			return nil, nil, false, false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
-		}
-		if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
-			endpoints = nil
-		}
-		endpointCount = len(endpoints)
-
-		inst := p.findServiceInstance(service)
-
-		if err := p.worker.setInstanceEndpointsStatus(service, inst, endpoints); err != nil {
-			log.Error("updating instance", "err", err)
-		}
-
-		allowReconcileWithoutEndpoints := shouldAllowReconcileWithoutEndpoints(service)
-
-		if len(endpoints) != 0 {
-			p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
-
-			if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, wg); err != nil {
-				return nil, nil, false, true, err
-			}
-
-			svcCtx.SignalReadiness()
-
-			if p.shouldProcessInstance() {
-				if err := p.worker.processInstance(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, service, inst); err != nil {
-					return nil, nil, false, false, fmt.Errorf("failed to process non-empty instance: %w", err)
-				}
-			}
-		} else {
-			if allowReconcileWithoutEndpoints {
-				// Explicit opt-in for controllers that create LoadBalancer services without endpoints
-				if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, wg); err != nil {
-					return nil, nil, false, true, err
-				}
-				svcCtx.SignalReadiness()
-
-				if p.shouldProcessInstance() {
-					if err := p.worker.processInstance(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, service, inst); err != nil {
-						return nil, nil, false, false, fmt.Errorf("failed to process endpointless instance: %w", err)
-					}
-				}
-			} else if svcCtx.IsReady() {
-				readinessLossGeneration, _, _, _ = svcCtx.ReadinessState()
-				clearNoEndpoints = true
-			}
-		}
-
-		updatedService, changed := p.updateAnnotations(service, inst, lastKnownGoodEndpoint, clientSet)
-		return updatedService, inst, changed, false, nil
-	}()
-	if err != nil || skip {
-		return skip, err
-	}
-	if clearNoEndpoints && svcCtx.ResetReadinessGeneration(readinessLossGeneration) {
-		unlockService := p.lockService(service.UID)
-		p.handleNoEndpoints(svcCtx, service, inst, lastKnownGoodEndpoint)
-		unlockService()
+	result, err := p.reconcileEndpointState(svcCtx, event, lastKnownGoodEndpoint, service, id, wg, clientSet)
+	if err != nil || result.skip {
+		return result.skip, err
 	}
 
-	if changed && egressUpdateFunc != nil {
-		if err := egressUpdateFunc(context.Background(), updatedService, inst); err != nil {
+	// Invalidation waits for in-flight activation. It must happen without the
+	// Service lock because activation may need that lock to finish.
+	if result.invalidateReadiness && svcCtx.ResetReadinessGeneration(result.readinessToInvalidate) {
+		p.cleanupEndpointlessService(svcCtx, service, lastKnownGoodEndpoint)
+	}
+
+	if result.annotationsChanged && egressUpdateFunc != nil {
+		if err := egressUpdateFunc(context.Background(), result.updatedService, result.instance); err != nil {
 			log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
 		}
 	}
 
 	log.Debug("watcher", "provider",
-		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", endpointCount, "last endpoint", *lastKnownGoodEndpoint)
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", result.endpointCount, "last endpoint", *lastKnownGoodEndpoint)
 
 	return false, nil
+}
+
+// reconcileEndpointState applies the endpoint event and computes the readiness
+// transition while serializing all Service state changes for this UID.
+func (p *Processor) reconcileEndpointState(svcCtx *servicecontext.Context, event watch.Event,
+	lastKnownGoodEndpoint *string, service *v1.Service, id string, wg *sync.WaitGroup,
+	clientSet *kubernetes.Clientset) (reconcileResult, error) {
+	p.serviceLocks.Lock(service.UID)
+	defer func() {
+		if err := p.serviceLocks.Unlock(service.UID); err != nil {
+			log.Error("failed to release service lock", "uid", service.UID, "err", err)
+		}
+	}()
+
+	result := reconcileResult{}
+	if err := p.applyEvent(svcCtx, event); err != nil {
+		return result, err
+	}
+
+	endpoints, err := p.worker.getEndpoints(service, id)
+	if err != nil {
+		return result, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
+	}
+	if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
+		endpoints = nil
+	}
+	result.endpointCount = len(endpoints)
+	result.instance = p.serviceInstance(service)
+
+	if err := p.worker.setInstanceEndpointsStatus(service, result.instance, endpoints); err != nil {
+		log.Error("updating instance", "err", err)
+	}
+
+	if len(endpoints) != 0 {
+		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
+		if skip, err := p.makeServiceReady(svcCtx, service, result.instance, wg, "non-empty"); err != nil {
+			result.skip = skip
+			return result, err
+		}
+	} else if shouldAllowReconcileWithoutEndpoints(service) {
+		// Explicit opt-in for controllers that create LoadBalancer services without endpoints.
+		if skip, err := p.makeServiceReady(svcCtx, service, result.instance, wg, "endpointless"); err != nil {
+			result.skip = skip
+			return result, err
+		}
+	} else if svcCtx.IsReady() {
+		result.readinessToInvalidate = svcCtx.CurrentReadiness()
+		result.invalidateReadiness = true
+	}
+
+	result.updatedService, result.annotationsChanged = p.updateAnnotations(service, result.instance, lastKnownGoodEndpoint, clientSet)
+	return result, nil
+}
+
+func (p *Processor) makeServiceReady(svcCtx *servicecontext.Context, service *v1.Service,
+	inst *instance.Instance, wg *sync.WaitGroup, endpointState string) (bool, error) {
+	if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, wg); err != nil {
+		return true, err
+	}
+	svcCtx.SignalReadiness()
+	if p.shouldProcessInstance() {
+		if err := p.worker.processInstance(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, service, inst); err != nil {
+			return false, fmt.Errorf("failed to process %s instance: %w", endpointState, err)
+		}
+	}
+	return false, nil
+}
+
+func (p *Processor) cleanupEndpointlessService(svcCtx *servicecontext.Context, service *v1.Service,
+	lastKnownGoodEndpoint *string) {
+	p.serviceLocks.Lock(service.UID)
+	defer func() {
+		if err := p.serviceLocks.Unlock(service.UID); err != nil {
+			log.Error("failed to release service lock", "uid", service.UID, "err", err)
+		}
+	}()
+	instance := p.serviceInstance(service)
+	p.handleNoEndpoints(svcCtx, service, instance, lastKnownGoodEndpoint)
 }
 
 // applyEvent updates the provider's view of the objects backing this service.
@@ -309,16 +339,11 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 	return nil
 }
 
-func (p *Processor) findServiceInstance(service *v1.Service) *instance.Instance {
-	if p.instances == nil {
+func (p *Processor) serviceInstance(service *v1.Service) *instance.Instance {
+	if p.findServiceInstance == nil {
 		return nil
 	}
-	if p.instancesMutex != nil {
-		p.instancesMutex.RLock()
-		defer p.instancesMutex.RUnlock()
-	}
-	inst := instance.FindServiceInstance(service, *p.instances)
-	return inst
+	return p.findServiceInstance(service)
 }
 
 func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {

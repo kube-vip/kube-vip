@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,11 +31,15 @@ func TestGlobalElectionFollowsSharedLeaseLeadership(t *testing.T) {
 	config := &kubevip.Config{KubernetesLeaderElection: kubevip.KubernetesLeaderElection{LeaseName: "default/shared"}}
 	leaseID := lease.NewID(config.LeaderElectionType, "default", "shared")
 	leaseMgr := lease.NewManager()
-	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service")
-	if !sharedLease.BeginElection() {
+	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service", nil)
+	serviceParticipation := sharedLease.JoinElection()
+	serviceElection := serviceParticipation.Session
+	if !serviceParticipation.RunsCampaign() {
 		t.Fatal("Service election did not start")
 	}
-	sharedLease.ElectionStarted()
+	if !serviceElection.Started() {
+		t.Fatal("Service election did not become leader")
+	}
 
 	actions := &sharedElectionActions{started: make(chan struct{}), stopped: make(chan struct{})}
 	var killed atomic.Bool
@@ -50,7 +55,7 @@ func TestGlobalElectionFollowsSharedLeaseLeadership(t *testing.T) {
 		t.Fatal("global election follower did not activate")
 	}
 
-	sharedLease.ElectionStopped()
+	serviceElection.Stopped()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -74,11 +79,15 @@ func TestGlobalElectionFollowerShutdownIsNotLeadershipLoss(t *testing.T) {
 	config := &kubevip.Config{KubernetesLeaderElection: kubevip.KubernetesLeaderElection{LeaseName: "default/shared"}}
 	leaseID := lease.NewID(config.LeaderElectionType, "default", "shared")
 	leaseMgr := lease.NewManager()
-	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service")
-	if !sharedLease.BeginElection() {
+	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "service", nil)
+	serviceParticipation := sharedLease.JoinElection()
+	serviceElection := serviceParticipation.Session
+	if !serviceParticipation.RunsCampaign() {
 		t.Fatal("Service election did not start")
 	}
-	sharedLease.ElectionStarted()
+	if !serviceElection.Started() {
+		t.Fatal("Service election did not become leader")
+	}
 
 	actions := &sharedElectionActions{started: make(chan struct{}), stopped: make(chan struct{})}
 	var killed atomic.Bool
@@ -112,4 +121,54 @@ func TestGlobalElectionFollowerShutdownIsNotLeadershipLoss(t *testing.T) {
 		t.Fatal("global follower shutdown cancelled the surviving Service lease")
 	}
 	leaseMgr.Delete(leaseID, "service", sharedLease)
+}
+
+func TestGlobalElectionContributesDynamicVIPsToSharedLease(t *testing.T) {
+	config := &kubevip.Config{KubernetesLeaderElection: kubevip.KubernetesLeaderElection{LeaseName: "default/shared"}}
+	leaseID := lease.NewID(config.LeaderElectionType, "default", "shared")
+	leaseMgr := lease.NewManager()
+	sharedLease, _ := leaseMgr.Acquire(context.Background(), leaseID, "control-plane",
+		lease.StaticVIPProvider([]string{"192.0.2.10"}))
+	controlPlaneParticipation := sharedLease.JoinElection()
+	controlPlaneElection := controlPlaneParticipation.Session
+	if !controlPlaneParticipation.RunsCampaign() {
+		t.Fatal("control-plane election did not start")
+	}
+	if !controlPlaneElection.Started() {
+		t.Fatal("control-plane election did not become leader")
+	}
+
+	serviceVIPs := []string{"192.0.2.20"}
+	serviceProvider := func() []string { return append([]string(nil), serviceVIPs...) }
+	actions := &sharedElectionActions{started: make(chan struct{}), stopped: make(chan struct{})}
+	common := &Common{config: config, leaseMgr: leaseMgr, killFunc: func() {}}
+	done := make(chan struct{})
+	go func() {
+		common.runGlobalElectionWithVIPProvider(context.Background(), actions, config.LeaseName, config, nil, serviceProvider)
+		close(done)
+	}()
+	select {
+	case <-actions.started:
+	case <-time.After(time.Second):
+		t.Fatal("global election follower did not activate")
+	}
+
+	if got, want := sharedLease.OwnedVIPs(), []string{"192.0.2.10", "192.0.2.20"}; !slices.Equal(got, want) {
+		t.Fatalf("shared Lease VIPs = %v, want %v", got, want)
+	}
+	serviceVIPs = []string{"192.0.2.30"}
+	if got, want := sharedLease.OwnedVIPs(), []string{"192.0.2.10", "192.0.2.30"}; !slices.Equal(got, want) {
+		t.Fatalf("shared Lease VIPs after Service update = %v, want %v", got, want)
+	}
+
+	controlPlaneElection.Stopped()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("global election follower did not stop")
+	}
+	if got, want := sharedLease.OwnedVIPs(), []string{"192.0.2.10"}; !slices.Equal(got, want) {
+		t.Fatalf("shared Lease VIPs after Service leave = %v, want %v", got, want)
+	}
+	leaseMgr.Delete(leaseID, "control-plane", sharedLease)
 }

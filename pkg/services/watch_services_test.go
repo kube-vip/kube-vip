@@ -2,12 +2,17 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,6 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // fakeWatchInterface is a minimal watch.Interface for testing.
@@ -112,16 +119,14 @@ func TestServiceEventQueuePreservesOrderPerUID(t *testing.T) {
 	order := make(chan int, 2)
 	firstStarted := make(chan struct{})
 
-	queue.Add(key, types.UID("service"), func() time.Duration {
+	queue.Add(key, types.UID("service"), func() {
 		close(firstStarted)
 		<-releaseFirst
 		order <- 1
-		return 0
 	})
 	<-firstStarted
-	queue.Add(key, types.UID("service"), func() time.Duration {
+	queue.Add(key, types.UID("service"), func() {
 		order <- 2
-		return 0
 	})
 	releaseOnce.Do(func() { close(releaseFirst) })
 	queue.Wait()
@@ -139,15 +144,13 @@ func TestServiceEventQueueRunsDifferentUIDsConcurrently(t *testing.T) {
 	firstStarted := make(chan struct{})
 	secondStarted := make(chan struct{})
 
-	queue.Add(types.NamespacedName{Namespace: "default", Name: "first"}, types.UID("first"), func() time.Duration {
+	queue.Add(types.NamespacedName{Namespace: "default", Name: "first"}, types.UID("first"), func() {
 		close(firstStarted)
 		<-releaseFirst
-		return 0
 	})
 	<-firstStarted
-	queue.Add(types.NamespacedName{Namespace: "default", Name: "second"}, types.UID("second"), func() time.Duration {
+	queue.Add(types.NamespacedName{Namespace: "default", Name: "second"}, types.UID("second"), func() {
 		close(secondStarted)
-		return 0
 	})
 
 	select {
@@ -163,8 +166,8 @@ func TestServiceEventQueueCoalescesPendingUpdates(t *testing.T) {
 	queue := newServiceEventQueue(context.Background(), 0)
 	key := types.NamespacedName{Namespace: "default", Name: "service"}
 	ran := ""
-	queue.Add(key, types.UID("service"), func() time.Duration { ran = "first"; return 0 })
-	queue.Add(key, types.UID("service"), func() time.Duration { ran = "second"; return 0 })
+	queue.Add(key, types.UID("service"), func() { ran = "first" })
+	queue.Add(key, types.UID("service"), func() { ran = "second" })
 	queue.wg.Go(queue.run)
 	queue.Wait()
 
@@ -181,17 +184,15 @@ func TestServiceEventQueueOrdersDeleteAndRecreateByName(t *testing.T) {
 	addStarted := make(chan struct{})
 	order := make(chan string, 2)
 
-	queue.Add(key, types.UID("old"), func() time.Duration {
+	queue.Add(key, types.UID("old"), func() {
 		close(deleteStarted)
 		<-releaseDelete
 		order <- "delete"
-		return 0
 	})
 	<-deleteStarted
-	queue.Add(key, types.UID("new"), func() time.Duration {
+	queue.Add(key, types.UID("new"), func() {
 		close(addStarted)
 		order <- "add"
-		return 0
 	})
 	select {
 	case <-addStarted:
@@ -206,25 +207,6 @@ func TestServiceEventQueueOrdersDeleteAndRecreateByName(t *testing.T) {
 	}
 }
 
-func TestServiceEventQueueDelayedTasksDoNotStarveWorkers(t *testing.T) {
-	queue := newServiceEventQueue(context.Background(), concurrentServiceEventWorkers)
-	for index := range concurrentServiceEventWorkers {
-		key := types.NamespacedName{Namespace: "default", Name: fmt.Sprintf("pending-%d", index)}
-		queue.Add(key, types.UID(key.Name), func() time.Duration { return time.Hour })
-	}
-	run := make(chan struct{})
-	queue.Add(types.NamespacedName{Namespace: "default", Name: "ready"}, types.UID("ready"), func() time.Duration {
-		close(run)
-		return 0
-	})
-	select {
-	case <-run:
-	case <-time.After(time.Second):
-		t.Fatal("delayed address tasks starved an unrelated Service event")
-	}
-	queue.Wait()
-}
-
 func TestServiceMatchesWatcher(t *testing.T) {
 	regular := &v1.Service{}
 	forced := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}}}
@@ -233,5 +215,60 @@ func TestServiceMatchesWatcher(t *testing.T) {
 	}
 	if !serviceMatchesWatcher(forced, true) || serviceMatchesWatcher(forced, false) {
 		t.Fatal("forced-election Service watcher ownership is incorrect")
+	}
+}
+
+// TestServiceEventWithoutAddressDoesNotRequestRetry asserts the desired
+// behaviour: a watch event for a Service that has no load-balancer address
+// yet must let processServiceEvent return nil instead of the sentinel that
+// makes ServicesWatcher re-queue the event once per second forever. The
+// address will arrive on a later Modified event instead.
+func TestServiceEventWithoutAddressDoesNotRequestRetry(t *testing.T) {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-service", Namespace: "default", UID: "service-uid"},
+		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
+	}
+
+	var requests int32
+	// Processor.clientSet is a concrete *kubernetes.Clientset (not an interface),
+	// so the client-go fake clientset cannot be substituted; an httptest server
+	// stands in for the API server instead.
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v1/namespaces/default/services/test-service" {
+			t.Errorf("unexpected request: %s %s", request.Method, request.URL.Path)
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&requests, 1)
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(svc); err != nil {
+			t.Errorf("encode Service response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	clientSet, err := kubernetes.NewForConfig(&rest.Config{
+		Host: server.URL,
+		ContentConfig: rest.ContentConfig{
+			ContentType: "application/json",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create Kubernetes client: %v", err)
+	}
+
+	p := &Processor{
+		config:        &kubevip.Config{},
+		clientSet:     clientSet,
+		lbClassFilter: func(*v1.Service, *kubevip.Config) bool { return false },
+	}
+	callback := Callback(func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error { return nil })
+
+	err = p.processServiceEvent(context.Background(), watch.Event{Type: watch.Added, Object: svc}, callback, false, &sync.WaitGroup{}, func(error) {})
+	if err != nil {
+		t.Fatalf("processServiceEvent() error = %v, want nil: a Service without an address yet must not request a retry", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("GET requests for the Service = %d, want 1", got)
 	}
 }

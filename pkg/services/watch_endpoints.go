@@ -67,7 +67,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 		}
 	})
 
-	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, &p.ServiceInstances, &p.instancesMutex, p.leaseMgr, p.TunnelMgr, p.routeMgr, p.lockService)
+	epProcessor := endpoints.NewEndpointProcessor(p.config, provider, p.bgpServer, p.findServiceInstance, p.TunnelMgr, p.routeMgr, p.serviceLock)
 
 	ch := rw.ResultChan()
 	if d != nil {
@@ -86,7 +86,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 
 			restart, err := epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
 				&wg, p.clientSet, func(ctx context.Context, service *v1.Service, inst *instance.Instance) error {
-					return p.updateEgressConfiguration(ctx, service, inst)
+					return p.updateEgressConfiguration(ctx, svcCtx, service, inst)
 				})
 			if restart {
 				continue

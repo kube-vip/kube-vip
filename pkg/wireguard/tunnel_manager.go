@@ -16,6 +16,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// ServiceTunnelManager is the WireGuard state needed by the Service lifecycle.
+// Endpoint workers receive this dependency only as a tunnelConfigProvider, so
+// observing endpoints cannot claim tunnel ownership.
+type ServiceTunnelManager interface {
+	GetConfigForVIP(vip string) *TunnelConfig
+	HasConfigForVIP(vip string) bool
+	AcquireTunnelForVIP(vip, owner string) error
+	ReleaseTunnelForVIP(vip, owner string) error
+}
+
 // TunnelConfig represents a single WireGuard tunnel configuration
 type TunnelConfig struct {
 	VIP           string   `yaml:"vip"`           // The VIP this tunnel serves (e.g., "10.0.0.100/24")
