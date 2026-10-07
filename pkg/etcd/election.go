@@ -176,28 +176,29 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 			wg.Wait()
 			return nil
 		case <-sessionDone:
-			m.stop()
 			if ctx.Err() != nil {
 				cancel()
+				m.stop()
 				wg.Wait()
 				return nil
 			}
 			result = errors.New("election session ended")
 			cancel()
+			m.stop()
 			wg.Wait()
 			return result
 		case err := <-campaignDone:
 			campaignDone = nil
 			if err != nil {
 				if ctx.Err() != nil {
-					m.stop()
 					cancel()
+					m.stop()
 					wg.Wait()
 					return nil
 				}
 				result = errors.Wrap(err, "campaigning for leadership")
-				m.stop()
 				cancel()
+				m.stop()
 				wg.Wait()
 				return result
 			}
@@ -205,22 +206,22 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 			observerDone = nil
 			if err != nil {
 				if ctx.Err() != nil {
-					m.stop()
 					cancel()
+					m.stop()
 					wg.Wait()
 					return nil
 				}
 				result = errors.Wrap(err, "observing leader changes")
-				m.stop()
 				cancel()
+				m.stop()
 				wg.Wait()
 				return result
 			}
 		}
 	}
 
-	m.stop()
 	cancel()
+	m.stop()
 	wg.Wait()
 	return result
 }
