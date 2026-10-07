@@ -82,6 +82,9 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 }
 
 func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b.startWithdrawalWorker()
 	result := make(chan error, 1)
 	request := withdrawalRequest{ctx: ctx, req: req, result: result}

@@ -11,21 +11,31 @@ import (
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
 )
 
-func TestWithdrawalWorkerSkipsCanceledQueuedRequest(t *testing.T) {
+func TestWithdrawalWorkerCompletesAcceptedRequestAfterCallerCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
 	b := &Server{deletePathFunc: func(apiutil.DeletePathRequest) error {
-		t.Fatal("canceled request reached GoBGP")
+		close(started)
+		<-release
 		return nil
 	}}
 	b.startWithdrawalWorker()
 	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
 		close(b.withdrawStop)
 		<-b.withdrawDone
 	})
 
-	result := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- b.deletePath(ctx, apiutil.DeletePathRequest{}) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not start accepted request")
+	}
 	cancel()
-	b.withdrawQueue <- withdrawalRequest{ctx: ctx, result: result}
 
 	select {
 	case err := <-result:
@@ -33,8 +43,9 @@ func TestWithdrawalWorkerSkipsCanceledQueuedRequest(t *testing.T) {
 			t.Fatalf("error = %v, want context.Canceled", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("canceled request was not completed")
+		t.Fatal("caller did not stop waiting after cancellation")
 	}
+	releaseOnce.Do(func() { close(release) })
 }
 
 func TestWithdrawalWorkerUsesBoundedQueueAndSingleBackendCall(t *testing.T) {
