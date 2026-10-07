@@ -150,7 +150,19 @@ func TestObserverTerminationRacingCampaignNeverStartsLeadership(t *testing.T) {
 		go func() { runDone <- m.run(context.Background(), make(chan struct{})) }()
 		waitFor(t, &e.observeCalls, 1)
 		close(observe)
-		waitFor(t, &m.state, 2)
+		deadline := time.Now().Add(time.Second)
+		for {
+			m.stateMu.Lock()
+			stopped := m.stopped
+			m.stateMu.Unlock()
+			if stopped {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("member did not stop")
+			}
+			time.Sleep(time.Millisecond)
+		}
 		close(campaignRelease)
 		if err := receive(t, runDone); err == nil {
 			t.Fatal("run returned nil after observer termination")
