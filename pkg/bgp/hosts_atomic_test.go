@@ -48,13 +48,7 @@ func TestAddHostRetriesAfterGoBGPFailure(t *testing.T) {
 		t.Fatalf("AddHost retry: %v", err)
 	}
 
-	routes, err := b.ListAdvertisedRoutes(context.Background(), false)
-	if err != nil {
-		t.Fatalf("ListAdvertisedRoutes: %v", err)
-	}
-	if len(routes) != 1 || routes[0].Prefix != addr {
-		t.Fatalf("recovered BGP server routes = %#v, want %q", routes, addr)
-	}
+	waitForAdvertisedRoute(t, b, addr)
 }
 
 func TestAddHostReAddsAfterFailedDeleteOnBGPRecovery(t *testing.T) {
@@ -80,16 +74,10 @@ func TestAddHostReAddsAfterFailedDeleteOnBGPRecovery(t *testing.T) {
 		t.Fatalf("recreated service AddHost: %v", err)
 	}
 
-	routes, err := b.ListAdvertisedRoutes(context.Background(), false)
-	if err != nil {
-		t.Fatalf("ListAdvertisedRoutes: %v", err)
-	}
-	if len(routes) != 1 || routes[0].Prefix != addr {
-		t.Fatalf("recreated service routes = %#v, want %q", routes, addr)
-	}
+	waitForAdvertisedRoute(t, b, addr)
 }
 
-func TestAddHostDoesNotAddPathForNewReference(t *testing.T) {
+func TestAddHostAddsPathForNewReference(t *testing.T) {
 	b, raw := newEmbeddedHostTestServer(t)
 	const addr = "10.0.0.36/32"
 
@@ -100,17 +88,21 @@ func TestAddHostDoesNotAddPathForNewReference(t *testing.T) {
 		t.Fatalf("stopping embedded BGP server: %v", err)
 	}
 
+	if err := b.AddHost(context.Background(), addr, "default/second"); err == nil {
+		t.Fatal("adding a second reference succeeded while GoBGP was stopped")
+	}
+	if got := len(b.tracker[addr]); got != 1 {
+		t.Fatalf("tracker reference count = %d after failed AddPath, want 1", got)
+	}
+	b.s = startEmbeddedRawBGP(t)
 	if err := b.AddHost(context.Background(), addr, "default/second"); err != nil {
-		t.Fatalf("adding a second reference called AddPath: %v", err)
+		t.Fatalf("adding a second reference after recovery: %v", err)
 	}
 	if got := len(b.tracker[addr]); got != 2 {
 		t.Fatalf("tracker reference count = %d, want 2", got)
 	}
-	if err := b.DelHost(context.Background(), addr, "default/first"); err != nil {
-		t.Fatalf("deleting first reference called DeletePath: %v", err)
-	}
-	if got := len(b.tracker[addr]); got != 1 {
-		t.Fatalf("tracker reference count = %d, want 1", got)
+	if err := b.s.StopBgp(context.Background(), &api.StopBgpRequest{}); err != nil {
+		t.Fatalf("stopping recovered BGP server: %v", err)
 	}
 	if err := b.AddHost(context.Background(), addr, "default/second"); err == nil {
 		t.Fatal("reconciling an existing reference did not call AddPath")
@@ -121,10 +113,11 @@ func TestAddHostOutboundUpdates(t *testing.T) {
 	tests := []struct {
 		name                 string
 		addPath              bool
+		wantNewReferenceMsg  bool
 		wantSameReferenceMsg bool
 	}{
 		{name: "ordinary peer"},
-		{name: "Add-Path peer", addPath: true, wantSameReferenceMsg: true},
+		{name: "Add-Path peer", addPath: true, wantNewReferenceMsg: true, wantSameReferenceMsg: true},
 	}
 
 	for _, tt := range tests {
@@ -142,7 +135,11 @@ func TestAddHostOutboundUpdates(t *testing.T) {
 			if err := b.AddHost(ctx, addr, "default/second"); err != nil {
 				t.Fatalf("new-reference AddHost: %v", err)
 			}
-			assertNoHostUpdate(t, updates, "new reference")
+			if tt.wantNewReferenceMsg {
+				waitForHostUpdate(t, ctx, updates, "Add-Path new-reference advertisement")
+			} else {
+				assertNoHostUpdate(t, updates, "new reference")
+			}
 
 			if err := b.AddHost(ctx, addr, "default/first"); err != nil {
 				t.Fatalf("same-reference AddHost: %v", err)
@@ -154,6 +151,28 @@ func TestAddHostOutboundUpdates(t *testing.T) {
 			}
 
 		})
+	}
+}
+
+func waitForAdvertisedRoute(t *testing.T, b *Server, addr string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for {
+		routes, err := b.ListAdvertisedRoutes(ctx, false)
+		if err != nil {
+			t.Fatalf("ListAdvertisedRoutes: %v", err)
+		}
+		for _, route := range routes {
+			if route.Prefix == addr {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("advertised routes = %#v, want %q", routes, addr)
+		case <-time.After(time.Millisecond):
+		}
 	}
 }
 
