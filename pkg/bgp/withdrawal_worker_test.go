@@ -48,6 +48,33 @@ func TestWithdrawalWorkerCompletesAcceptedRequestAfterCallerCancellation(t *test
 	releaseOnce.Do(func() { close(release) })
 }
 
+func TestWithdrawalWorkerAdmitsCancellationWhenQueueHasCapacity(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b := &Server{deletePathFunc: func(apiutil.DeletePathRequest) error {
+		close(started)
+		<-release
+		return nil
+	}}
+	b.startWithdrawalWorker()
+	t.Cleanup(func() {
+		close(release)
+		close(b.withdrawStop)
+		<-b.withdrawDone
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := b.deletePath(ctx, apiutil.DeletePathRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled withdrawal was not admitted")
+	}
+}
+
 func TestWithdrawalWorkerUsesBoundedQueueAndSingleBackendCall(t *testing.T) {
 	var calls atomic.Int32
 	release := make(chan struct{})
