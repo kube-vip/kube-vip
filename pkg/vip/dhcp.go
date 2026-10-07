@@ -9,6 +9,17 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
+// channelClosed reports whether ch has already been closed without blocking.
+// Callers use it while holding their lifecycle mutex when they may close ch.
+func channelClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
 type DHCPClient interface {
 	ErrorChannel() chan error
 	IPChannel() chan string

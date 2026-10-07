@@ -32,9 +32,11 @@ type DHCPv4Client struct {
 	ipChan          chan string
 	backoffAttempts uint
 	stopOnce        sync.Once
-	startOnce       sync.Once
 	started         chan struct{}
 	done            chan struct{}
+	lifecycleMu     sync.Mutex
+	stopRequested   bool
+	doneOnce        sync.Once
 	mtx             sync.RWMutex
 }
 
@@ -73,11 +75,21 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
+	c.lifecycleMu.Lock()
+	c.stopRequested = true
 	c.close()
-	select {
-	case <-c.started:
+	started := channelClosed(c.started)
+	if !started {
+		if c.started != nil {
+			close(c.started)
+		}
+		if c.done != nil {
+			c.doneOnce.Do(func() { close(c.done) })
+		}
+	}
+	c.lifecycleMu.Unlock()
+	if started {
 		<-c.done
-	default:
 	}
 }
 
@@ -152,8 +164,22 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
-	c.startOnce.Do(func() { close(c.started) })
-	defer close(c.done)
+	c.lifecycleMu.Lock()
+	if c.stopRequested {
+		if c.started != nil && !channelClosed(c.started) {
+			close(c.started)
+		}
+		if c.done != nil {
+			c.doneOnce.Do(func() { close(c.done) })
+		}
+		c.lifecycleMu.Unlock()
+		return nil
+	}
+	if c.started != nil && !channelClosed(c.started) {
+		close(c.started)
+	}
+	c.lifecycleMu.Unlock()
+	defer c.doneOnce.Do(func() { close(c.done) })
 	lease, err := c.requestWithBackoff(ctx)
 	if err != nil {
 		return fmt.Errorf("DHCPv4 client failed: %w", err)
