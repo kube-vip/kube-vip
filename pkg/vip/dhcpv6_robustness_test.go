@@ -1,6 +1,7 @@
 package vip
 
 import (
+	"context"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -118,6 +119,40 @@ func TestDHCPStopWaitsForReleaseCompletion(t *testing.T) {
 	case <-v6Done:
 	case <-time.After(time.Second):
 		t.Fatal("DHCPv6 Stop did not finish after release completion")
+	}
+}
+
+func TestDHCPStopBeforeStartPreventsNetworkSetup(t *testing.T) {
+	v4 := NewDHCPv4Client(nil, false, "", 0, false)
+	v4.Stop()
+	v4Done := make(chan error, 1)
+	go func() { v4Done <- v4.Start(context.Background()) }()
+	select {
+	case err := <-v4Done:
+		if err != nil {
+			t.Fatalf("DHCPv4 Start after Stop returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DHCPv4 Start after Stop did not skip setup")
+	}
+
+	v6 := &DHCPv6Client{
+		iface:      &net.Interface{Name: "never-started"},
+		stopChan:   make(chan struct{}),
+		done:       make(chan struct{}),
+		started:    make(chan struct{}),
+		managerKey: "missing",
+	}
+	v6.Stop()
+	v6Done := make(chan error, 1)
+	go func() { v6Done <- v6.Start(context.Background()) }()
+	select {
+	case err := <-v6Done:
+		if err != nil {
+			t.Fatalf("DHCPv6 Start after Stop returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DHCPv6 Start after Stop did not skip setup")
 	}
 }
 
