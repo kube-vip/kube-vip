@@ -21,6 +21,7 @@ func TestBGPWorkerRetriesAddAfterFailedWithdrawal(t *testing.T) {
 	network := &bgpTestNetwork{ip: "10.0.0.40", cidr: "10.0.0.40/32"}
 	instances := []*instance.Instance{{
 		ServiceSnapshot: service.DeepCopy(),
+		ServiceUID:      service.UID,
 		Clusters:        []*cluster.Cluster{{Network: []vip.Network{network}}},
 	}}
 	manager := &recordingBGPRouteManager{}
