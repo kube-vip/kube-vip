@@ -26,14 +26,12 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 		return fmt.Errorf("failed to get path for %v", ip)
 	}
 
-	if !exists || !objects[object] {
-		// Without Add-Path, GoBGP replaces an identical path. Re-add an existing
-		// reference so reconciliation can recover after a failed withdrawal.
-		if _, err := b.s.AddPath(apiutil.AddPathRequest{
-			Paths: []*apiutil.Path{p},
-		}); err != nil {
-			return err
-		}
+	// Reconcile the path even for tracked references: the BGP daemon may have
+	// restarted or lost the route while the local tracker remained populated.
+	if _, err := b.s.AddPath(apiutil.AddPathRequest{
+		Paths: []*apiutil.Path{p},
+	}); err != nil {
+		return err
 	}
 
 	if !exists {
@@ -77,6 +75,10 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		if err := b.s.DeletePath(apiutil.DeletePathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
+			delete(objects, object)
+			if len(objects) == 0 {
+				delete(b.tracker, addr)
+			}
 			return err
 		}
 		delete(b.tracker, addr)
