@@ -93,10 +93,6 @@ func (b *Server) withdrawalWorker() {
 		}
 		select {
 		case req := <-b.withdrawQueue:
-			if err := req.ctx.Err(); err != nil {
-				req.result <- err
-				continue
-			}
 			req.result <- b.deletePathFunc(req.req)
 		case <-b.withdrawStop:
 			b.cancelQueuedWithdrawals()
