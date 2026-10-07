@@ -215,6 +215,7 @@ func testMember(e election) *member {
 		election:    e,
 		memberID:    "member",
 		leaderDelay: time.Hour,
+		startedDone: make(chan struct{}),
 		callbacks: LeaderCallbacks{
 			OnStartedLeading: func(context.Context) {},
 			OnStoppedLeading: func() {},
