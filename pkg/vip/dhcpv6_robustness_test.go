@@ -156,6 +156,43 @@ func TestDHCPStopBeforeStartPreventsNetworkSetup(t *testing.T) {
 	}
 }
 
+func TestDHCPv6ConcurrentPreStartStopsShareCleanupCompletion(t *testing.T) {
+	previousManager := dhcpv6ClientManager
+	t.Cleanup(func() { dhcpv6ClientManager = previousManager })
+	manager := &DHCPv6ClientManager{clients: map[string]*DHCPv6InternalClient{}}
+	dhcpv6ClientManager = manager
+	manager.mu.Lock()
+
+	client := &DHCPv6Client{
+		stopChan:   make(chan struct{}),
+		started:    make(chan struct{}),
+		done:       make(chan struct{}),
+		managerKey: "missing",
+	}
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() { client.Stop(); close(firstDone) }()
+	select {
+	case <-firstDone:
+		t.Fatal("first DHCPv6 Stop returned before manager cleanup completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	go func() { client.Stop(); close(secondDone) }()
+	select {
+	case <-secondDone:
+		t.Fatal("second DHCPv6 Stop returned before first cleanup completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	manager.mu.Unlock()
+	for name, done := range map[string]chan struct{}{"first": firstDone, "second": secondDone} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("%s DHCPv6 Stop did not finish after manager cleanup", name)
+		}
+	}
+}
+
 func TestGetAddressRejectsIANAWithoutAddresses(t *testing.T) {
 	// DEFECT: getAddress indexes the first IAADDR without checking whether the IANA contains one, so a malformed/expired reply panics (pkg/vip/dhcpv6.go:392).
 	defer func() {

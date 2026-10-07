@@ -168,15 +168,15 @@ func (c *DHCPv6Client) Stop() {
 		if c.started != nil {
 			close(c.started)
 		}
-		if c.done != nil {
-			c.doneOnce.Do(func() { close(c.done) })
-		}
 	}
 	c.lifecycleMu.Unlock()
 	if started {
 		<-c.done
-	} else {
-		c.releaseManager()
+		return
+	}
+	c.releaseManager()
+	if c.done != nil {
+		c.doneOnce.Do(func() { close(c.done) })
 	}
 }
 
@@ -207,10 +207,10 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 		if c.started != nil && !channelClosed(c.started) {
 			close(c.started)
 		}
-		if c.done != nil {
-			c.doneOnce.Do(func() { close(c.done) })
-		}
 		c.lifecycleMu.Unlock()
+		if c.done != nil {
+			<-c.done
+		}
 		return nil
 	}
 	if c.started != nil && !channelClosed(c.started) {
