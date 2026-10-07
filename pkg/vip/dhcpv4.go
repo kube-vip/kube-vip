@@ -83,13 +83,14 @@ func (c *DHCPv4Client) Stop() {
 		if c.started != nil {
 			close(c.started)
 		}
-		if c.done != nil {
-			c.doneOnce.Do(func() { close(c.done) })
-		}
 	}
 	c.lifecycleMu.Unlock()
 	if started {
 		<-c.done
+		return
+	}
+	if c.done != nil {
+		c.doneOnce.Do(func() { close(c.done) })
 	}
 }
 
@@ -169,10 +170,10 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 		if c.started != nil && !channelClosed(c.started) {
 			close(c.started)
 		}
-		if c.done != nil {
-			c.doneOnce.Do(func() { close(c.done) })
-		}
 		c.lifecycleMu.Unlock()
+		if c.done != nil {
+			<-c.done
+		}
 		return nil
 	}
 	if c.started != nil && !channelClosed(c.started) {
