@@ -129,6 +129,7 @@ func RunElection(ctx context.Context, config *LeaderElectionConfig) (runErr erro
 		callbacks:   config.Callbacks,
 		memberID:    config.MemberID,
 		leaderDelay: time.Second * time.Duration(lease.TTL),
+		startedDone: make(chan struct{}),
 	}
 	return m.run(ctx, s.Done())
 }
@@ -147,6 +148,7 @@ type member struct {
 	stateMu     sync.Mutex
 	stopped     bool
 	started     bool
+	startedDone chan struct{}
 }
 
 type campaignResult struct {
@@ -229,6 +231,7 @@ func (m *member) watchLeaderChanges(ctx context.Context, elected <-chan campaign
 	var isLeader bool
 	defer func() {
 		if isLeader && m.wasStarted() {
+			<-m.startedDone
 			m.callbacks.OnStoppedLeading()
 		}
 		log.Debug("Exiting watcher", "id", m.memberID)
@@ -325,10 +328,9 @@ func (m *member) campaign(ctx context.Context, elected chan<- campaignResult, se
 	default:
 	}
 	m.started = true
-	// Keep shutdown from overtaking callback admission. stop waits for this
-	// lock, so OnStoppedLeading cannot run before OnStartedLeading returns.
-	m.callbacks.OnStartedLeading(ctx)
 	m.stateMu.Unlock()
+	defer close(m.startedDone)
+	m.callbacks.OnStartedLeading(ctx)
 	return nil
 }
 
