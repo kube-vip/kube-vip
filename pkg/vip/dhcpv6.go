@@ -105,7 +105,6 @@ type DHCPv6Client struct {
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
 	stop            sync.Once
-	startOnce       sync.Once
 	deleteOnce      sync.Once
 	started         chan struct{}
 	done            chan struct{}
