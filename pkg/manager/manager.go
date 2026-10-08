@@ -250,8 +250,11 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	leaseMgr := lease.NewManager()
 	routeMgr := route.NewManager()
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
+	svcProcessor, err := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
 		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr)
+	if err != nil {
+		return nil, fmt.Errorf("creating services processor: %w", err)
+	}
 
 	return &Manager{
 		clientSet:        clientset,
@@ -342,8 +345,8 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-
 		wg.Wait()
+		sm.svcProcessor.WaitForElectionCampaigns()
 		w.Cleanup()
 		cancel()
 		log.Info("Shutting down Kube-Vip")
@@ -418,7 +421,12 @@ func (sm *Manager) startMode(ctx context.Context) error {
 
 func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
 	for {
-		sig := <-sm.signalChan
+		var sig os.Signal
+		select {
+		case <-ctx.Done():
+			return
+		case sig = <-sm.signalChan:
+		}
 		switch sig {
 		case syscall.SIGUSR1:
 			log.Info("Received SIGUSR1, dumping configuration")

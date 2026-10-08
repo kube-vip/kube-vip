@@ -37,3 +37,14 @@ func ServicePortIDs(namespace, name string, port v1.ServicePort) (string, string
 	}
 	return serviceID + suffix, legacyID
 }
+
+// ServicePortIDSet returns the newer protocol-qualified ID first and the legacy
+// port-only ID second so callers can actively use the new ID while also
+// deleting older rules during migration.
+func ServicePortIDSet(namespace, name string, port v1.ServicePort) []string {
+	currentID, legacyID := ServicePortIDs(namespace, name, port)
+	if currentID == legacyID {
+		return []string{currentID}
+	}
+	return []string{currentID, legacyID}
+}

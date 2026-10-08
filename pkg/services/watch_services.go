@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -25,16 +24,15 @@ import (
 )
 
 const concurrentServiceEventWorkers = 4
-const serviceAddressRetryDelay = time.Second
 
 type serviceEventTask struct {
 	uid types.UID
-	run func() time.Duration
+	run func()
 }
 
 type serviceEventQueue struct {
 	ctx   context.Context
-	queue workqueue.TypedDelayingInterface[types.NamespacedName]
+	queue workqueue.TypedInterface[types.NamespacedName]
 	mutex sync.Mutex
 	tasks map[types.NamespacedName][]*serviceEventTask
 	wg    sync.WaitGroup
@@ -43,7 +41,7 @@ type serviceEventQueue struct {
 func newServiceEventQueue(ctx context.Context, workers int) *serviceEventQueue {
 	q := &serviceEventQueue{
 		ctx:   ctx,
-		queue: workqueue.NewTypedDelayingQueue[types.NamespacedName](),
+		queue: workqueue.NewTyped[types.NamespacedName](),
 		tasks: make(map[types.NamespacedName][]*serviceEventTask),
 	}
 	for range workers {
@@ -52,7 +50,7 @@ func newServiceEventQueue(ctx context.Context, workers int) *serviceEventQueue {
 	return q
 }
 
-func (q *serviceEventQueue) Add(key types.NamespacedName, uid types.UID, run func() time.Duration) {
+func (q *serviceEventQueue) Add(key types.NamespacedName, uid types.UID, run func()) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	if q.ctx.Err() != nil || q.queue.ShuttingDown() {
@@ -87,22 +85,9 @@ func (q *serviceEventQueue) runNext(key types.NamespacedName) {
 			return
 		}
 		if q.ctx.Err() == nil {
-			if retryAfter := task.run(); retryAfter > 0 {
-				q.retry(key, task, retryAfter)
-				return
-			}
+			task.run()
 		}
 	}
-}
-
-func (q *serviceEventQueue) retry(key types.NamespacedName, task *serviceEventTask, retryAfter time.Duration) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
-	if q.ctx.Err() != nil || q.queue.ShuttingDown() || len(q.tasks[key]) != 0 {
-		return
-	}
-	q.tasks[key] = []*serviceEventTask{task}
-	q.queue.AddAfter(key, retryAfter)
 }
 
 func (q *serviceEventQueue) nextTask(key types.NamespacedName) *serviceEventTask {
@@ -131,7 +116,10 @@ func (q *serviceEventQueue) Wait() {
 }
 
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) error {
+func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, forcedOnly bool) error {
+	if serviceFunc == nil {
+		return errServiceCallbackRequired
+	}
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -157,8 +145,8 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return utils.WatchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
+		WatchFuncWithContext: func(watchCtx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
+			return utils.WatchWithAuthRetry(watchCtx, func(ctx context.Context) (watch.Interface, error) {
 				return p.rwClientSet.CoreV1().Services(p.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
 			})
 		},
@@ -224,14 +212,10 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 			}
 			event := event
 			key := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-			eventQueue.Add(key, svc.UID, func() time.Duration {
+			eventQueue.Add(key, svc.UID, func() {
 				if err := p.processServiceEvent(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
-					if errors.Is(err, errServiceAddressPending) {
-						return serviceAddressRetryDelay
-					}
 					cancelWatcher(err)
 				}
-				return 0
 			})
 		case watch.Bookmark:
 			// Un-used
@@ -254,7 +238,7 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	return utils.NewPanicError("service watch channel closed unexpectedly")
 }
 
-func (p *Processor) processServiceEvent(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+func (p *Processor) processServiceEvent(ctx context.Context, event watch.Event, serviceFunc Callback, forcedOnly bool,
 	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	var err error
 	switch event.Type {
@@ -271,7 +255,10 @@ func (p *Processor) processServiceEvent(ctx context.Context, event watch.Event, 
 	}
 	if err != nil {
 		if errors.Is(err, errServiceAddressPending) {
-			return err
+			// The address controller publishes the address in a later Modified event.
+			log.Debug("service has no load-balancer address yet, waiting for update",
+				"type", event.Type, "error", err)
+			return nil
 		}
 		log.Error("service watcher event failed", "type", event.Type, "error", err)
 	}

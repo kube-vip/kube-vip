@@ -11,7 +11,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
@@ -26,8 +25,8 @@ type endpointWorker interface {
 }
 
 func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager) endpointWorker {
-	generic := newGeneric(config, provider, leaseMgr)
+	tunnelMgr wireguard.ServiceTunnelManager, routeMgr *route.Manager) endpointWorker {
+	generic := newGeneric(config, provider)
 
 	if config.EnableWireguard {
 		return newWireguardWorker(config, provider, tunnelMgr)
@@ -45,14 +44,12 @@ func newEndpointWorker(config *kubevip.Config, provider providers.Provider, bgpS
 type generic struct {
 	config   *kubevip.Config
 	provider providers.Provider
-	leaseMgr *lease.Manager
 }
 
-func newGeneric(config *kubevip.Config, provider providers.Provider, leaseMgr *lease.Manager) generic {
+func newGeneric(config *kubevip.Config, provider providers.Provider) generic {
 	return generic{
 		config:   config,
 		provider: provider,
-		leaseMgr: leaseMgr,
 	}
 }
 

@@ -13,11 +13,40 @@ type Context struct {
 	ready               bool
 	isWatched           bool
 	watchingStopped     chan struct{}
-	endpointsReady      chan any
-	endpointsLost       chan any
+	endpointsReady      chan struct{}
+	endpointsLost       chan struct{}
 	readinessGeneration uint64
 	readinessOperations int
 	readinessChanged    *sync.Cond
+}
+
+// ReadinessGeneration identifies one endpoint-readiness lifecycle. Ready is
+// closed when the generation becomes usable; Lost is closed when it is
+// invalidated. A generation is only meaningful for the Context that created it.
+type ReadinessGeneration struct {
+	id    uint64
+	ready <-chan struct{}
+	lost  <-chan struct{}
+}
+
+func (g ReadinessGeneration) ID() uint64 { return g.id }
+
+func (g ReadinessGeneration) Ready() <-chan struct{} { return g.ready }
+
+func (g ReadinessGeneration) Lost() <-chan struct{} { return g.lost }
+
+// ReadinessReservation prevents invalidation from completing while datapath
+// work belonging to the generation is still running.
+type ReadinessReservation struct {
+	context *Context
+	once    sync.Once
+}
+
+func (r *ReadinessReservation) Release() {
+	if r == nil || r.context == nil {
+		return
+	}
+	r.once.Do(r.context.releaseReadinessGeneration)
 }
 
 func New(ctx context.Context) *Context {
@@ -26,21 +55,21 @@ func New(ctx context.Context) *Context {
 	serviceContext := &Context{
 		Ctx:                 svcCtx,
 		Cancel:              svcCancel,
-		endpointsReady:      make(chan any),
-		endpointsLost:       make(chan any),
+		endpointsReady:      make(chan struct{}),
+		endpointsLost:       make(chan struct{}),
 		readinessGeneration: 1,
 	}
 	serviceContext.readinessChanged = sync.NewCond(&serviceContext.stateMutex)
 	return serviceContext
 }
 
-// ReadinessState returns one readiness lifecycle. The ready channel is closed
+// CurrentReadiness returns one readiness lifecycle. The ready channel is closed
 // when endpoints become usable and the lost channel is closed when that exact
 // generation is reset.
-func (ctx *Context) ReadinessState() (uint64, <-chan any, <-chan any, bool) {
+func (ctx *Context) CurrentReadiness() ReadinessGeneration {
 	ctx.stateMutex.Lock()
 	defer ctx.stateMutex.Unlock()
-	return ctx.readinessGeneration, ctx.endpointsReady, ctx.endpointsLost, ctx.ready
+	return ReadinessGeneration{id: ctx.readinessGeneration, ready: ctx.endpointsReady, lost: ctx.endpointsLost}
 }
 
 func (ctx *Context) IsReady() bool {
@@ -51,22 +80,22 @@ func (ctx *Context) IsReady() bool {
 
 // ReadinessGenerationCurrent reports whether generation is the current usable
 // endpoint generation for this Service context.
-func (ctx *Context) ReadinessGenerationCurrent(generation uint64) bool {
+func (ctx *Context) ReadinessGenerationCurrent(generation ReadinessGeneration) bool {
 	ctx.stateMutex.Lock()
 	defer ctx.stateMutex.Unlock()
-	return ctx.ready && ctx.readinessGeneration == generation
+	return ctx.ready && ctx.readinessGeneration == generation.id
 }
 
-func (ctx *Context) ResetReadinessGeneration(generation uint64) bool {
+func (ctx *Context) ResetReadinessGeneration(generation ReadinessGeneration) bool {
 	ctx.stateMutex.Lock()
 	defer ctx.stateMutex.Unlock()
-	if !ctx.ready || ctx.readinessGeneration != generation {
+	if !ctx.ready || ctx.readinessGeneration != generation.id {
 		return false
 	}
 	close(ctx.endpointsLost)
 	ctx.readinessGeneration++
-	ctx.endpointsReady = make(chan any)
-	ctx.endpointsLost = make(chan any)
+	ctx.endpointsReady = make(chan struct{})
+	ctx.endpointsLost = make(chan struct{})
 	ctx.ready = false
 	for ctx.readinessOperations > 0 {
 		ctx.readinessChanged.Wait()
@@ -86,15 +115,16 @@ func (ctx *Context) SignalReadiness() {
 
 // WaitForReadiness reserves the first ready generation that remains current.
 // The caller must release the returned reservation after its datapath operation.
-func (ctx *Context) WaitForReadiness() (func(), bool) {
+func (ctx *Context) WaitForReadiness() (*ReadinessReservation, bool) {
 	for {
-		generation, ready, _, isReady := ctx.ReadinessState()
-		if !isReady {
-			select {
-			case <-ctx.Ctx.Done():
-				return nil, false
-			case <-ready:
-			}
+		if ctx.Ctx.Err() != nil {
+			return nil, false
+		}
+		generation := ctx.CurrentReadiness()
+		select {
+		case <-ctx.Ctx.Done():
+			return nil, false
+		case <-generation.Ready():
 		}
 		if release, acquired := ctx.AcquireReadinessGeneration(generation); acquired {
 			return release, true
@@ -105,21 +135,18 @@ func (ctx *Context) WaitForReadiness() (func(), bool) {
 // AcquireReadinessGeneration reserves a ready generation while a caller starts
 // or stops datapath work. ResetReadinessGeneration waits for the returned
 // release function, preventing that work from outliving its endpoint state.
-func (ctx *Context) AcquireReadinessGeneration(generation uint64) (func(), bool) {
+func (ctx *Context) AcquireReadinessGeneration(generation ReadinessGeneration) (*ReadinessReservation, bool) {
 	if !ctx.acquireReadinessGeneration(generation) {
 		return nil, false
 	}
 
-	var releaseOnce sync.Once
-	return func() {
-		releaseOnce.Do(ctx.releaseReadinessGeneration)
-	}, true
+	return &ReadinessReservation{context: ctx}, true
 }
 
-func (ctx *Context) acquireReadinessGeneration(generation uint64) bool {
+func (ctx *Context) acquireReadinessGeneration(generation ReadinessGeneration) bool {
 	ctx.stateMutex.Lock()
 	defer ctx.stateMutex.Unlock()
-	if ctx.Ctx.Err() != nil || !ctx.ready || ctx.readinessGeneration != generation {
+	if ctx.Ctx.Err() != nil || !ctx.ready || ctx.readinessGeneration != generation.id {
 		return false
 	}
 	ctx.readinessOperations++

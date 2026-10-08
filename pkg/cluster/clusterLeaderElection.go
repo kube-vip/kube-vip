@@ -26,7 +26,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	log.Info("cluster membership", "namespace", leaseID.Namespace(), "lock", leaseID.Name(), "id", c.NodeName)
 
 	objectName := lease.ObjectName(leaseID, "cp")
-	objLease, _ := leaseMgr.Acquire(context.Background(), leaseID, objectName)
+	controlPlaneVIPs := ControlPlaneElectionVIPs(c)
+	objLease, _ := leaseMgr.Acquire(context.Background(), leaseID, objectName,
+		lease.StaticVIPProvider(controlPlaneVIPs))
 	defer leaseMgr.Delete(leaseID, objectName, objLease)
 
 	wg := sync.WaitGroup{}
@@ -56,11 +58,12 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		}
 	}
 
+	var electionSession *lease.ElectionSession
 	for {
-		if !objLease.BeginElection() {
+		participation := objLease.JoinElection()
+		if !participation.RunsCampaign() {
 			log.Debug("this election was already done, shared lease", "lease", leaseName)
-			leaderGeneration, elected := objLease.WaitForLeaderGeneration(electionCtx)
-			if !elected {
+			if !participation.Session.WaitForLeader(electionCtx) {
 				if electionCtx.Err() != nil {
 					return nil
 				}
@@ -73,11 +76,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			leaderCtx, cancelLeader := context.WithCancel(electionCtx)
 			leaderWG := sync.WaitGroup{}
 			leaderWG.Go(func() {
-				cluster.OnStartedLeading(leaderCtx, c, em, bgpServer, killFunc, true)
+				cluster.OnStartedLeading(leaderCtx, c, em, bgpServer, killFunc)
 			})
 
 			log.Debug("cluster waiting for shared election to finish", "lease", leaseName)
-			objLease.WaitForElectionEndAfter(electionCtx, leaderGeneration)
+			participation.Session.WaitForEnd(electionCtx)
 			cancelLeader()
 			leaderWG.Wait()
 
@@ -85,22 +88,28 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 
 			return nil
 		}
+		electionSession = participation.Session
 		break
 	}
-	defer objLease.ElectionStopped()
+	defer electionSession.Stopped()
 
 	run := &election.RunConfig{
 		Config:           c,
 		LeaseID:          leaseID,
 		LeaseAnnotations: c.LeaseAnnotations,
-		VIPs:             controlPlaneElectionVIPs(c),
+		VIPs:             controlPlaneVIPs,
+		VIPsProvider:     objLease.OwnedVIPs,
 		Mgr:              em,
 		OnStartedLeading: func(ctx context.Context) {
-			objLease.ElectionStarted()
-			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc, false)
+			if !electionSession.Started() {
+				return
+			}
+			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
-			objLease.ElectionStopped()
+			if !electionSession.IsCurrent() {
+				return
+			}
 			cluster.OnStoppedLeading(c, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
@@ -116,7 +125,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	return nil
 }
 
-func controlPlaneElectionVIPs(config *kubevip.Config) []string {
+func ControlPlaneElectionVIPs(config *kubevip.Config) []string {
 	configured := config.VIP
 	if config.Address != "" {
 		configured = config.Address
@@ -125,7 +134,7 @@ func controlPlaneElectionVIPs(config *kubevip.Config) []string {
 }
 
 func (cluster *Cluster) OnStartedLeading(ctx context.Context, c *kubevip.Config,
-	em *election.Manager, bgpServer *bgp.Server, killFunc func(), _ bool) {
+	em *election.Manager, bgpServer *bgp.Server, killFunc func()) {
 	labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
 	if err := cluster.nodeLabelMgr.AddLabel(labels); err != nil {
 		log.Error("error adding label to node", "err", err)

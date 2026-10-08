@@ -16,7 +16,6 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/route"
-	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 )
 
@@ -24,7 +23,7 @@ import (
 // The service processor owns labels and instance bookkeeping; this package owns
 // endpoint-dependent networking and waits for worker shutdown to complete.
 func CleanupService(ctx context.Context, config *kubevip.Config, bgpServer *bgp.Server, routeMgr *route.Manager,
-	tunnelMgr *wireguard.TunnelManager, serviceInstance *instance.Instance, remaining []*instance.Instance) error {
+	tunnelMgr wireguard.ServiceTunnelManager, serviceInstance *instance.Instance, remaining []*instance.Instance) error {
 	if serviceInstance == nil || serviceInstance.ServiceSnapshot == nil {
 		return nil
 	}
@@ -126,7 +125,7 @@ func sharedServiceVIPs(config *kubevip.Config, serviceInstance *instance.Instanc
 	return shared
 }
 
-func cleanupWireguardService(tunnelMgr *wireguard.TunnelManager, service *v1.Service) {
+func cleanupWireguardService(tunnelMgr wireguard.ServiceTunnelManager, service *v1.Service) {
 	if tunnelMgr == nil {
 		return
 	}
@@ -136,17 +135,4 @@ func cleanupWireguardService(tunnelMgr *wireguard.TunnelManager, service *v1.Ser
 		}
 	})
 	releaseWireguardServiceTunnels(tunnelMgr, service)
-}
-
-type wireguardTunnelReleaser interface {
-	ReleaseTunnelForVIP(vip, owner string) error
-}
-
-func releaseWireguardServiceTunnels(tunnelMgr wireguardTunnelReleaser, service *v1.Service) {
-	serviceIPs, _ := utils.FetchServiceIPs(service)
-	for _, serviceIP := range serviceIPs {
-		if err := tunnelMgr.ReleaseTunnelForVIP(serviceIP, string(service.UID)); err != nil {
-			log.Error("[wireguard] failed to tear down tunnel", "service", service.Name, "vip", serviceIP, "err", err)
-		}
-	}
 }
