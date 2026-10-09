@@ -64,6 +64,7 @@ func TestParseEnvironmentInstanceName(t *testing.T) {
 		{name: "lowercase", lowercase: "release_a", want: "release_a"},
 		{name: "uppercase fallback", uppercase: "release_b", want: "release_b"},
 		{name: "lowercase takes precedence", lowercase: "release_a", uppercase: "release_b", want: "release_a"},
+		{name: "explicit empty lowercase overrides uppercase", lowercase: "", uppercase: "release_b", want: ""},
 	}
 
 	for _, tt := range tests {
