@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	googlenftables "github.com/google/nftables"
+	"github.com/google/nftables/expr"
 )
 
 func TestEgressTableName(t *testing.T) {
@@ -106,4 +107,62 @@ func TestShouldDeleteSNATChain(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildSNATRulesUsesDistinctPortSets(t *testing.T) {
+	conn, err := googlenftables.New()
+	if err != nil {
+		t.Fatalf("failed to create nftables connection: %v", err)
+	}
+	rules, err := buildSNATRules(
+		conn,
+		"10.244.0.10",
+		"192.0.2.10",
+		"service-uid",
+		"tcp:5060,udp:5060",
+		nil,
+		[]string{"198.51.100.0/24", "203.0.113.0/24"},
+		false,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("buildSNATRules() returned an error: %v", err)
+	}
+	if len(rules) != 4 {
+		t.Fatalf("buildSNATRules() returned %d rules, want 4", len(rules))
+	}
+
+	setIDs := make(map[uint32]struct{}, len(rules))
+	for i, rule := range rules {
+		portSetID := destinationPortSetID(t, rule)
+		if portSetID == 0 {
+			t.Fatalf("rule %d does not contain a destination-port set lookup", i)
+		}
+		if _, exists := setIDs[portSetID]; exists {
+			t.Fatalf("destination-port set ID %d is reused by multiple rules", portSetID)
+		}
+		setIDs[portSetID] = struct{}{}
+	}
+}
+
+func destinationPortSetID(t *testing.T, rule *googlenftables.Rule) uint32 {
+	t.Helper()
+
+	for i, expression := range rule.Exprs {
+		payload, ok := expression.(*expr.Payload)
+		if !ok || payload.Base != expr.PayloadBaseTransportHeader || payload.Offset != 2 || payload.Len != 2 {
+			continue
+		}
+		if i+1 >= len(rule.Exprs) {
+			t.Fatal("destination-port payload is not followed by a lookup expression")
+		}
+		lookup, ok := rule.Exprs[i+1].(*expr.Lookup)
+		if !ok {
+			t.Fatal("destination-port payload is not followed by a lookup expression")
+		}
+		return lookup.SetID
+	}
+
+	t.Fatal("rule does not contain a destination-port payload")
+	return 0
 }

@@ -81,56 +81,13 @@ func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCI
 		return err
 	}
 
-	portExpressions, err := portSet(conn, IPv6, destinationPorts, tableName)
+	rules, err := buildSNATRules(conn, podIP, vipIP, service, destinationPorts, ignoreCIDR, allowCIDR, IPv6, tableName)
 	if err != nil {
 		return err
 	}
-	var rule *nftables.Rule
-	if len(portExpressions) != 0 {
-		for x := range portExpressions {
-			// Create our nftables rule
-			if len(allowCIDR) == 0 {
-				// No allowed CIDRs
-				rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, portExpressions[x], tableName)
-				if err != nil {
-					return err
-				}
-				slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
-				conn.AddRule(rule) // Add the rule
-			} else {
-				// Create a rule for each allowed CIDR
-				for y := range allowCIDR {
-					rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, portExpressions[x], tableName)
-					if err != nil {
-						return err
-					}
-					slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
-					conn.AddRule(rule) // Add the rule
-				}
-			}
-
-		}
-	} else {
-		// Create our nftables rule
-		if len(allowCIDR) == 0 {
-			// No allowed CIDRs
-			rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, "", conn, IPv6, nil, tableName)
-			if err != nil {
-				return err
-			}
-			slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
-			conn.AddRule(rule) // Add the rule
-		} else {
-			// Create a rule for each allowed CIDR
-			for y := range allowCIDR {
-				rule, err = CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowCIDR[y], conn, IPv6, nil, tableName)
-				if err != nil {
-					return err
-				}
-				slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
-				conn.AddRule(rule) // Add the rule
-			}
-		}
+	for _, rule := range rules {
+		slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
+		conn.AddRule(rule)
 	}
 
 	err = conn.Flush() // Commit the rule to nftables
@@ -139,6 +96,38 @@ func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCI
 	}
 
 	return conn.CloseLasting() // Close out any remaining netlink communication
+}
+
+// buildSNATRules queues the sets required by the SNAT rules and returns the
+// rules for the caller to add to the same nftables transaction.
+func buildSNATRules(conn *nftables.Conn, podIP, vipIP, service, destinationPorts string, ignoreCIDR, allowCIDR []string, IPv6 bool, tableName string) ([]*nftables.Rule, error) {
+	allowedCIDRs := allowCIDR
+	if len(allowedCIDRs) == 0 {
+		allowedCIDRs = []string{""}
+	}
+
+	var rules []*nftables.Rule
+	for _, allowedCIDR := range allowedCIDRs {
+		// Anonymous sets can only be bound to one rule, so each allowed CIDR
+		// needs its own destination-port sets and lookup expressions.
+		portExpressions, err := portSet(conn, IPv6, destinationPorts, tableName)
+		if err != nil {
+			return nil, err
+		}
+		if len(portExpressions) == 0 {
+			portExpressions = [][]expr.Any{nil}
+		}
+
+		for _, portExpression := range portExpressions {
+			rule, err := CreateRuleForTable(podIP, vipIP, service, ignoreCIDR, allowedCIDR, conn, IPv6, portExpression, tableName)
+			if err != nil {
+				return nil, err
+			}
+			rules = append(rules, rule)
+		}
+	}
+
+	return rules, nil
 }
 
 func portSet(conn *nftables.Conn, IPv6 bool, destinationPorts, tableName string) (setExpression [][]expr.Any, err error) {
