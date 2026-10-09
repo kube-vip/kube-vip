@@ -963,6 +963,7 @@ func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]stri
 	}
 
 	return map[string]string{
-		fmt.Sprintf("%s/%s.%s", labelKey, svc.Name, svc.Namespace): strings.Join(sanitized, ","),
+		// Commas are not allowed in label values, so join dual-stack addresses with "_".
+		fmt.Sprintf("%s/%s.%s", labelKey, svc.Name, svc.Namespace): strings.Join(sanitized, "_"),
 	}
 }
