@@ -16,6 +16,16 @@ func CheckCommonLeaseOwnership(getHolder func() (string, error), nodes, addresse
 	if holder == "" {
 		return "", fmt.Errorf("common lease has no holder")
 	}
+	knownHolder := false
+	for _, node := range nodes {
+		if node == holder {
+			knownHolder = true
+			break
+		}
+	}
+	if !knownHolder {
+		return "", fmt.Errorf("common lease holder %q is not one of the listed nodes", holder)
+	}
 
 	for _, node := range nodes {
 		for _, address := range addresses {

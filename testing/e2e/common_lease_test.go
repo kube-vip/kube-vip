@@ -74,6 +74,13 @@ func TestCheckCommonLeaseOwnershipRejectsMissingHolder(t *testing.T) {
 	}
 }
 
+func TestCheckCommonLeaseOwnershipRejectsUnknownHolder(t *testing.T) {
+	_, err := CheckCommonLeaseOwnership(func() (string, error) { return "ghost", nil }, []string{"node-a"}, []string{"192.0.2.10"}, func(string, string) bool { return false })
+	if err == nil {
+		t.Fatal("checkCommonLeaseOwnership() accepted a holder absent from the node list")
+	}
+}
+
 func TestCheckCommonLeaseRetired(t *testing.T) {
 	getError := errors.New("get lease")
 	tests := []struct {
