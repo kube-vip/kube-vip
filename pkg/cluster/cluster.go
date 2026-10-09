@@ -105,6 +105,15 @@ func (cluster *Cluster) Stop() {
 	}
 }
 
+// stopChan returns the current stop signal. Stop() replaces the channel after
+// closing it, so every read of the field must happen under stopMutex; use
+// this to take a stable snapshot before selecting on it.
+func (cluster *Cluster) stopChan() chan bool {
+	cluster.stopMutex.Lock()
+	defer cluster.stopMutex.Unlock()
+	return cluster.stop
+}
+
 func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {

@@ -47,8 +47,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	}
 
 	wg.Go(func() {
+		stopCh := cluster.stopChan()
 		select {
-		case <-cluster.stop:
+		case <-stopCh:
 		case <-ctx.Done():
 		}
 

@@ -16,6 +16,12 @@ import (
 
 // The StartServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context, forcedOnly bool) error {
+	// A release that hit an unreachable API can strand VIP bindings and node
+	// labels on this host (#1775); drop stale local state shortly after
+	// startup (serialized against fresh binds through Processor.mutex) and
+	// keep re-checking periodically.
+	p.startStaleStateReconcile(ctx)
+
 	err := p.ServicesWatcher(ctx, NewCallback(p.StartServicesLeaderElection, true), forcedOnly)
 	if err != nil {
 		return err
@@ -160,8 +166,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
 			if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
-				metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
-				leaderCancel()
+				p.markReleaseFailure(service, leaderCancel)
 			}
 			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(0)
 			svcLease.Started = make(chan any)
@@ -182,6 +187,14 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	log.Info("stopping leader election", "service", service.Name, "uid", service.UID)
 	return nil
+}
+
+// markReleaseFailure records a lease release whose local VIP teardown completed
+// but whose API bookkeeping failed: the operator-visible counter still
+// increments and the election is cancelled so the restart loop can re-arm.
+func (p *Processor) markReleaseFailure(service *v1.Service, cancel context.CancelFunc) {
+	metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
+	cancel()
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
@@ -206,7 +219,11 @@ func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *l
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
 	err = p.deleteService(svcLease.Ctx, service.UID)
 	if err != nil {
-		log.Error("service deletion", "err", err)
+		// The VIP and broadcaster are already released at this point; the
+		// error only reports failed API bookkeeping (#1775). Warn instead of
+		// Error so a partitioned API during release does not look like the
+		// whole teardown failed.
+		log.Warn("service deletion", "err", err)
 		return err
 	}
 	return nil
