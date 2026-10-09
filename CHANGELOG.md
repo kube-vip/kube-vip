@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retry on 403 Forbidden and 401 Unauthorized in `ServicesWatcher` at startup with exponential backoff. Fixes #1464.
 - Reintroduce BGP config via node annotations. Fixes #1488.
 - Fail fast in runtime `manager` and `service` paths when legacy `vip_address` is used without `vip_subnet` in control-plane ARP, BGP, or Routing Table mode.
+- Service VIP releases no longer abort when the Kubernetes API is unreachable: losing a service lease while the API is down previously attempted the node-label removal first, and on failure skipped stopping the ARP/NDP broadcaster and deleting the VIP from the interface, leaving the node answering ARP for a VIP it no longer owned. Local teardown (broadcaster stop, VIP address and route removal) now always runs first; node-label removal and other API bookkeeping are retried best-effort afterwards, logged and counted without blocking the release. The control-plane release path already behaved this way. Fixes #1775.
+- Stale service state on non-leader nodes is reconciled: at services-watcher startup, and periodically for state attributed to this node, kube-vip now removes VIPs bound on the host interface for service leases it does not hold and cleans leftover `service-provided.kube-vip.io/*` node labels, healing bindings and labels stranded by an interrupted release (or by restarting the pod after one) without a node reboot. Fixes #1775.
 - Cancel the mode context on init or configuration failure before waiting on goroutines during shutdown.
 
 
