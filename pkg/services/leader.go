@@ -16,6 +16,11 @@ import (
 
 // The StartServicesWatchForLeaderElection function will start a services watcher, the
 func (p *Processor) StartServicesWatchForLeaderElection(ctx context.Context, forcedOnly bool) error {
+	// A release that hit an unreachable API can strand VIP bindings and node
+	// labels on this host (#1775); drop stale local state before any election
+	// of this process can bind a VIP, and keep re-checking periodically.
+	p.startStaleStateReconcile(ctx)
+
 	err := p.ServicesWatcher(ctx, NewCallback(p.StartServicesLeaderElection, true), forcedOnly)
 	if err != nil {
 		return err
