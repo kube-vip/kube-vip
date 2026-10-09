@@ -833,7 +833,7 @@ func ParseEnvironment(c *Config) error {
 			*destination = value
 		}
 	}
-	if value, ok := os.LookupEnv(instanceName); ok && value != "" {
+	if value, ok := os.LookupEnv(instanceName); ok {
 		c.InstanceName = value
 	} else if value, ok := os.LookupEnv(strings.ToUpper(instanceName)); ok {
 		c.InstanceName = value
