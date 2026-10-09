@@ -408,21 +408,24 @@ func scrapeServiceGauge(metric, namespace, name string, extraLabels ...string) (
 // vipBindings reports, per kind node container, whether the given address is
 // bound on any of the node's interfaces. The kube-vip DaemonSet runs with
 // hostNetwork, so this is the direct view of what a node can answer ARP for.
+// The match is exact (grep -w) because kind's `auto` subnet binds the VIP with
+// the docker network mask (e.g. /16), which a `to <ip>/32` filter would miss.
 func vipBindings(address string) (map[string]bool, error) {
 	nodes, err := provider.ListNodes("services")
 	if err != nil {
 		return nil, err
 	}
 	bound := map[string]bool{}
+	needle := "ip -o addr show | grep -qw -- " + strconv.Quote(address) + " && echo bound; exit 0"
 	for x := range nodes {
 		var out bytes.Buffer
-		cmd := nodes[x].Command("ip", "-o", "addr", "show", "to", address)
+		cmd := nodes[x].Command("sh", "-c", needle)
 		cmd.SetStdout(&out)
 		cmd.SetStderr(&bytes.Buffer{})
 		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("inspecting VIP bindings on node %q: %w", nodes[x].String(), err)
 		}
-		bound[nodes[x].String()] = strings.TrimSpace(out.String()) != ""
+		bound[nodes[x].String()] = strings.Contains(out.String(), "bound")
 	}
 	return bound, nil
 }
