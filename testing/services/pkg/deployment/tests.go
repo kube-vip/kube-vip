@@ -968,30 +968,41 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 
+	// Positive control: the leader must actually have the VIP bound before the
+	// partition, otherwise the release watch below could pass vacuously.
+	staleContainer := strings.TrimSuffix(leader, "-modified")
+	if err := waitForVIPBoundOn(staleContainer, lbAddress, true, time.Second*30); err != nil {
+		return err
+	}
+
 	slog.Infof("💥 blocking API server access from node [%s]", leader)
 	if err := setAPIServerReachable(leader, false); err != nil {
 		return err
 	}
 
-	// #1775 regression: watch the partitioned leader's own interfaces while
-	// its lease lapses (renew deadline is 10 s). Losing leadership must
-	// release the VIP locally even though the node-label patch behind it fails;
-	// before the fix the VIP stayed bound indefinitely on this node.
-	staleContainer := strings.TrimSuffix(leader, "-modified")
-	partitionStart := time.Now()
-	releasedDuringPartition := false
-	for time.Since(partitionStart) < time.Second*18 {
-		bound, err := vipBoundOnNode(staleContainer, lbAddress)
-		if err != nil {
-			slog.Debugf("VIP binding check failed on %q: %v", staleContainer, err)
-		} else if !bound {
-			releasedDuringPartition = true
-			break
-		}
-		time.Sleep(time.Second * 2)
+	// #1775 regression: watch the partitioned leader's own interfaces while its
+	// lease lapses. Losing leadership must release the VIP locally even though
+	// the node-label patch behind it fails; before the fix the VIP stayed
+	// bound indefinitely. client-go only declares the loss once the renew
+	// deadline and in-flight request timeouts stack up (~20 s here), so hold
+	// the partition until the release is observed, bounded at 90 s.
+	releaseErr := waitForVIPBoundOn(staleContainer, lbAddress, false, time.Second*90)
+	releasedDuringPartition := releaseErr == nil
+	if releasedDuringPartition {
+		slog.Infof("🔎 VIP [%s] released from [%s] while still partitioned", lbAddress, staleContainer)
+	} else {
+		slog.Infof("⚠️  VIP [%s] still bound on [%s] after 90 s partitioned: %v", lbAddress, staleContainer, releaseErr)
 	}
-	if elapsed := time.Since(partitionStart); elapsed < time.Second*20 {
-		time.Sleep(time.Second*20 - elapsed)
+
+	// The failed node-label patch must be counted while still partitioned.
+	// client-go retries the PATCH for several seconds after the release; the
+	// increment has to land before we restore, or a recovering API would make
+	// the bookkeeping succeed and drain the very error this checks.
+	if releasedDuringPartition {
+		if err := waitForDeleteServiceError(staleContainer, config, deleteErrBefore, time.Second*30); err != nil {
+			_ = setAPIServerReachable(leader, true)
+			return err
+		}
 	}
 
 	slog.Infof("🔌 restoring API server access on node [%s]", leader)
@@ -1008,7 +1019,7 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	}
 
 	if err := checkLeaderPartitionRelease(ctx, clientset, config, leader, leaseName, lbAddress,
-		releasedDuringPartition, deleteErrBefore); err != nil {
+		releasedDuringPartition); err != nil {
 		return err
 	}
 
@@ -1360,58 +1371,45 @@ func waitForVIPReleased(address string) error {
 
 // checkLeaderPartitionRelease verifies the aftermath of partitioning the lease
 // leader away from the API (fault 4, #1775): losing the lease while
-// unreachable must still release the VIP on that node's own interface — the
-// node must not keep answering ARP for a service it no longer leads — while
-// the failed node-label bookkeeping is still surfaced as a counted reconcile
-// error.
+// unreachable must have released the VIP on that node's own interface - the
+// node must not keep answering ARP for a service it no longer leads. The
+// caller already waited for the delete_service counter while partitioned.
 //
-// With more than one candidate, leadership moves to another node and the
-// assertions extend to the VIP binding only existing there and the stale
-// label on the partitioned node healing through the periodic stale-state
-// reconcile without a pod restart. On a single-candidate cluster (how
-// service-tests run in CI) the leader re-acquires its lease after the
-// partition ends and legitimately re-binds the VIP, so the release is proven
-// by the observation made during the partition window.
-func checkLeaderPartitionRelease(ctx context.Context, clientset *kubernetes.Clientset, config *TestConfig, staleLeader, leaseName, address string, releasedDuringPartition bool, deleteErrBefore map[string]float64) error {
+// The leader then re-acquires its lease once the API returns (in this suite
+// the backend pod pins leadership to one candidate: the endpoints-ready gate
+// keeps nodes without a local endpoint from campaigning), so the steady state
+// is: binding back on the holder, label back on the holder. If leadership
+// genuinely moved to a second candidate instead, the old leader must stay
+// clean and its stale label must heal through the periodic stale-state
+// reconcile without a pod restart.
+func checkLeaderPartitionRelease(ctx context.Context, clientset *kubernetes.Clientset, config *TestConfig, staleLeader, leaseName, address string, releasedDuringPartition bool) error {
 	labelKey := fmt.Sprintf("service-provided.kube-vip.io/%s.%s", config.ServiceName, config.ns())
-	// Node identities seen by kube-vip carry the "<container>-modified"
-	// hostname; the kind container name addresses the node's netns.
+	// Kind node identities may carry a "<container>-modified" hostname (the
+	// control-plane suites rename inside the container); stripping the suffix
+	// normalizes both forms to the container address.
 	staleContainer := strings.TrimSuffix(staleLeader, "-modified")
-
-	// The failed API bookkeeping during the release was still surfaced.
-	after, err := scrapeServiceGauge("kube_vip_service_reconcile_errors_total",
-		config.ns(), config.ServiceName, `reason="delete_service"`)
-	if err != nil {
-		return err
-	}
-	if after[staleContainer] <= deleteErrBefore[staleContainer] {
-		return fmt.Errorf("node %q did not count the failed label teardown: %v before, %v after; "+
-			"ServiceReconcileErrorsTotal{delete_service} must increment when the release partially fails",
-			staleContainer, deleteErrBefore[staleContainer], after[staleContainer])
-	}
-	slog.Infof("🔎 failed label teardown counted on [%s]", staleContainer)
-
-	holder, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
-	if err != nil {
-		return err
-	}
 
 	if !releasedDuringPartition {
 		return fmt.Errorf("VIP %q stayed bound on %q throughout the lease loss while its API was unreachable: "+
 			"the release was aborted by the failed node-label patch (#1775)", address, staleContainer)
 	}
-	slog.Infof("🔎 VIP [%s] was released from [%s] during the partition", address, staleContainer)
 
-	if strings.TrimSuffix(holder, "-modified") == staleContainer {
-		// Single candidate: the node re-acquired its lease; its binding and
-		// label are legitimately back.
+	holder, err := leaseHolder(ctx, clientset, config.ns(), leaseName)
+	if err != nil {
+		return err
+	}
+	holderContainer := strings.TrimSuffix(holder, "-modified")
+
+	if holderContainer == staleContainer {
+		// Same node re-acquired: binding and label legitimately came back.
+		if err := waitForVIPBoundOn(staleContainer, address, true, time.Second*30); err != nil {
+			return err
+		}
 		return waitForNodeLabel(ctx, clientset, holder, labelKey, true, time.Second*30)
 	}
 
 	// Another node leads now: only it may hold the VIP, and the partitioned
 	// node's stale label must heal via the stale-state reconcile.
-	holderContainer := strings.TrimSuffix(holder, "-modified")
-
 	deadline := time.Now().Add(time.Minute)
 	for {
 		bound, err := vipBindings(address)
@@ -1424,7 +1422,7 @@ func checkLeaderPartitionRelease(ctx context.Context, clientset *kubernetes.Clie
 				withVIP = append(withVIP, node)
 			}
 		}
-		if len(withVIP) == 1 && withVIP[0] == holderContainer && !bound[staleContainer] {
+		if len(withVIP) == 1 && withVIP[0] == holderContainer {
 			slog.Infof("🔎 VIP [%s] is bound only on the lease holder [%s]", address, holderContainer)
 			break
 		}
@@ -1440,6 +1438,29 @@ func checkLeaderPartitionRelease(ctx context.Context, clientset *kubernetes.Clie
 	return waitForNodeLabel(ctx, clientset, holder, labelKey, true, time.Second*30)
 }
 
+// waitForDeleteServiceError polls until the partitioned node counted a
+// delete_service reconcile error.
+func waitForDeleteServiceError(staleContainer string, config *TestConfig, before map[string]float64, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		now, err := scrapeServiceGauge("kube_vip_service_reconcile_errors_total",
+			config.ns(), config.ServiceName, `reason="delete_service"`)
+		if err != nil {
+			return err
+		}
+		if now[staleContainer] > before[staleContainer] {
+			slog.Infof("🔎 failed label teardown counted on [%s] while partitioned (%v -> %v)",
+				staleContainer, before[staleContainer], now[staleContainer])
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("node %q did not count the failed label teardown while partitioned: still %v after %s",
+				staleContainer, now[staleContainer], timeout)
+		}
+		time.Sleep(time.Second * 2)
+	}
+}
+
 // vipBoundOnNode reports whether the address is currently bound on the named
 // kind node container.
 func vipBoundOnNode(node, address string) (bool, error) {
@@ -1452,6 +1473,25 @@ func vipBoundOnNode(node, address string) (bool, error) {
 		return false, fmt.Errorf("node %q is not part of the services cluster", node)
 	}
 	return isBound, nil
+}
+
+// waitForVIPBoundOn polls until the VIP's binding state on the node matches
+// want.
+func waitForVIPBoundOn(node, address string, want bool, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		bound, err := vipBoundOnNode(node, address)
+		if err != nil {
+			return err
+		}
+		if bound == want {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("VIP %q bound on %q: got %t, want %t within %s", address, node, bound, want, timeout)
+		}
+		time.Sleep(time.Second * 2)
+	}
 }
 
 // waitForNodeLabel polls until the given label on a node object is present as
