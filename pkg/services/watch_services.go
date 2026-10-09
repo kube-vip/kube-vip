@@ -41,6 +41,9 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	} else {
 		log.Info("(svcs) starting services watcher", "namespace", p.config.ServiceNamespace)
 	}
+	if err := p.RecoverAddresses(ctx); err != nil {
+		return fmt.Errorf("recover kube-vip addresses: %w", err)
+	}
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
