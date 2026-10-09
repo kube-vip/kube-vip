@@ -305,7 +305,7 @@ func run() int {
 	// It runs alone so no host-port conflict.
 	if t.FaultElection {
 		ns := "kube-vip-election"
-		if err := deployment.EnsureNamespaceWithMetrics(ctx, clientset, ns, t.ImagePath, t.GlobalWatch, ":2112"); err != nil {
+		if err := deployment.EnsureNamespaceWithMetrics(ctx, clientset, ns, t.ImagePath, t.GlobalWatch, ":2112", true); err != nil {
 			slog.Fatalf("failed to create namespace %q: %v", ns, err)
 		}
 		defer cleanup(ns)

@@ -345,7 +345,9 @@ func scrapeElectionLoops(namespace, name string) (map[string]float64, error) {
 
 // scrapeServiceGauge sums the samples of a {namespace,name}-labelled metric per
 // node, by curl-ing each kind node's kube-vip metrics endpoint from inside it.
-func scrapeServiceGauge(metric, namespace, name string) (map[string]float64, error) {
+// Additional label matchers (e.g. `reason="delete_service"`) restrict the
+// samples counted.
+func scrapeServiceGauge(metric, namespace, name string, extraLabels ...string) (map[string]float64, error) {
 	values := map[string]float64{}
 
 	nodes, err := provider.ListNodes("services")
@@ -357,6 +359,7 @@ func scrapeServiceGauge(metric, namespace, name string) (map[string]float64, err
 		fmt.Sprintf(`namespace="%s"`, namespace),
 		fmt.Sprintf(`name="%s"`, name),
 	}
+	wantLabels = append(wantLabels, extraLabels...)
 
 	for x := range nodes {
 		var out bytes.Buffer
@@ -400,4 +403,26 @@ func scrapeServiceGauge(metric, namespace, name string) (map[string]float64, err
 	}
 
 	return values, nil
+}
+
+// vipBindings reports, per kind node container, whether the given address is
+// bound on any of the node's interfaces. The kube-vip DaemonSet runs with
+// hostNetwork, so this is the direct view of what a node can answer ARP for.
+func vipBindings(address string) (map[string]bool, error) {
+	nodes, err := provider.ListNodes("services")
+	if err != nil {
+		return nil, err
+	}
+	bound := map[string]bool{}
+	for x := range nodes {
+		var out bytes.Buffer
+		cmd := nodes[x].Command("ip", "-o", "addr", "show", "to", address)
+		cmd.SetStdout(&out)
+		cmd.SetStderr(&bytes.Buffer{})
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("inspecting VIP bindings on node %q: %w", nodes[x].String(), err)
+		}
+		bound[nodes[x].String()] = strings.TrimSpace(out.String()) != ""
+	}
+	return bound, nil
 }
