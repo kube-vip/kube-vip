@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kube-vip/kube-vip/pkg/arp"
+	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -20,9 +21,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+type controlPlaneCluster interface {
+	StartCluster(context.Context, *kubevip.Config, *election.Manager, *bgp.Server, *lease.Manager, func()) error
+	StartVipService(context.Context, *kubevip.Config, *election.Manager, bgp.BGPManager, func()) error
+}
+
 type Common struct {
 	arpMgr       *arp.Manager
-	cpCluster    *cluster.Cluster
+	cpCluster    controlPlaneCluster
 	intfMgr      *networkinterface.Manager
 	config       *kubevip.Config
 	closing      *atomic.Bool
@@ -237,6 +243,7 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
 		Mgr:              electionManager,
+		VIPs:             []string{config.VIP},
 		OnStartedLeading: func(ctx context.Context) {
 			wg.Go(func() {
 				objLease.Elected.Store(true)

@@ -105,6 +105,10 @@ type DHCPv6Client struct {
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
 	stop            sync.Once
+	startOnce       sync.Once
+	deleteOnce      sync.Once
+	started         chan struct{}
+	done            chan struct{}
 	mtx             sync.RWMutex
 }
 
@@ -142,6 +146,8 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 		ipChan:          make(chan string),
 		ic:              client,
 		backoffAttempts: backoffAttempts,
+		started:         make(chan struct{}),
+		done:            make(chan struct{}),
 	}, nil
 }
 
@@ -153,6 +159,12 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
 	c.close()
+	select {
+	case <-c.started:
+		<-c.done
+	default:
+		c.releaseManager()
+	}
 }
 
 // Close dhcp client channels
@@ -160,7 +172,10 @@ func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
 		close(c.stopChan)
 	})
-	dhcpv6ClientManager.Delete(c.managerKey)
+}
+
+func (c *DHCPv6Client) releaseManager() {
+	c.deleteOnce.Do(func() { dhcpv6ClientManager.Delete(c.managerKey) })
 }
 
 // Gets the IPChannel for consumption
@@ -174,6 +189,9 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
+	c.startOnce.Do(func() { close(c.started) })
+	defer close(c.done)
+	defer c.releaseManager()
 	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
@@ -226,6 +244,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 				addr, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv6] failed to reacquire lease", "err", backoffErr)
+					resetLeaseTimers(t1, t2, t1Timeout, t2Timeout)
 					continue
 				}
 				c.storeAddr(addr)
