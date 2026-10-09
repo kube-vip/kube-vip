@@ -438,9 +438,8 @@ var kubeVipManager = &cobra.Command{
 
 				wg.Go(func() {
 					if err := vip.MonitorDefaultInterface(ctx, defaultIF); err != nil {
-
 						log.Error("interface monitor", "err", err)
-						return
+						cancel()
 					}
 				})
 			}
