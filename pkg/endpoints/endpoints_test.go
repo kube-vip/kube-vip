@@ -429,6 +429,8 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-svc", Namespace: "default", UID: "test-uid"},
 		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
 	}
+	metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
+	defer metrics.ServiceElectionAttemptsTotal.DeleteLabelValues(service.Namespace, service.Name)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -488,5 +490,153 @@ func TestReconcile_ServicesElectionStartsOnce(t *testing.T) {
 	// The gauge the e2e fault tests assert on has to agree with the call count.
 	if got := testutil.ToFloat64(metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)); got != 1 {
 		t.Errorf("kube_vip_service_election_loops is %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)); got != 0 {
+		t.Errorf("wrapper election attempts is %v, want 0", got)
+	}
+
+	svcCtx.Cancel()
+	wg.Wait()
+}
+
+func TestReconcile_OnDemandElectionOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		annotations        map[string]string
+		wantEndpointWorker bool
+	}{
+		{
+			name: "forced service waits for election winner",
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection: "true",
+			},
+		},
+		{
+			name:               "ordinary service remains endpoint managed",
+			annotations:        map[string]string{},
+			wantEndpointWorker: true,
+		},
+		{
+			name: "annotation value must be exact",
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection: "True",
+			},
+			wantEndpointWorker: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+				Name: "mixed-mode", Namespace: "default", UID: "mixed-mode", Annotations: test.annotations,
+			}}
+			worker := &fakeWorker{endpoints: []string{"10.0.0.1"}}
+			processor := &Processor{
+				config:   &kubevip.Config{PerServiceElectionOnDemand: true},
+				provider: providers.NewEndpointslices(),
+				worker:   worker,
+			}
+			svcCtx := servicecontext.New(context.Background())
+			defer svcCtx.Cancel()
+
+			var endpointStarts atomic.Int64
+			syncServices := func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error {
+				endpointStarts.Add(1)
+				return nil
+			}
+			lastEndpoint := ""
+			if _, err := processor.Reconcile(svcCtx,
+				watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+				&lastEndpoint, service, "node-1", syncServices, &sync.WaitGroup{}, nil, nil); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+
+			if !svcCtx.Signalled.Load() {
+				t.Fatal("endpoint worker did not signal readiness")
+			}
+			if got := endpointStarts.Load(); got != 0 {
+				t.Fatalf("endpoint service starts = %d, want 0", got)
+			}
+			if worker.processCalled != test.wantEndpointWorker {
+				t.Fatalf("endpoint datapath programmed = %v, want %v", worker.processCalled, test.wantEndpointWorker)
+			}
+
+			if service.Annotations[kubevip.ForcePerServiceElection] == "true" {
+				if err := syncServices(svcCtx, service, &sync.WaitGroup{}, true); err != nil {
+					t.Fatalf("winner SyncServices() error = %v", err)
+				}
+				if got := endpointStarts.Load(); got != 1 {
+					t.Fatalf("service programs = %d, want election winner only", got)
+				}
+			}
+		})
+	}
+}
+
+func TestReconcile_OnDemandElectionRunsCommonEgressTail(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		endpoints    []string
+		annotations  map[string]string
+		lastEndpoint string
+		wantEndpoint string
+	}{
+		{
+			name:      "endpoint",
+			endpoints: []string{"10.0.0.1"},
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection: "true",
+				kubevip.Egress:                  "true",
+			},
+			wantEndpoint: "10.0.0.1",
+		},
+		{
+			name: "endpointless",
+			annotations: map[string]string{
+				kubevip.ForcePerServiceElection:        "true",
+				kubevip.AllowReconcileWithoutEndpoints: "true",
+				kubevip.Egress:                         "true",
+				kubevip.ActiveEndpoint:                 "10.0.0.1",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "forced", Namespace: "default", UID: "forced", Annotations: test.annotations},
+				Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster},
+			}
+			worker := &fakeWorker{endpoints: test.endpoints}
+			recorder := &recordingProvider{Provider: providers.NewEndpointslices()}
+			processor := &Processor{
+				config:   &kubevip.Config{PerServiceElectionOnDemand: true},
+				provider: recorder,
+				worker:   worker,
+			}
+			svcCtx := servicecontext.New(context.Background())
+			defer svcCtx.Cancel()
+			lastEndpoint := test.lastEndpoint
+			egressUpdates := 0
+
+			if _, err := processor.Reconcile(svcCtx,
+				watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+				&lastEndpoint, service, "node-1",
+				func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error { return nil },
+				&sync.WaitGroup{}, nil, func(context.Context, *v1.Service) error {
+					egressUpdates++
+					return nil
+				}); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if !svcCtx.Signalled.Load() {
+				t.Fatal("endpoint readiness was not signalled")
+			}
+			if worker.processCalled {
+				t.Fatal("election-managed service programmed endpoint datapath")
+			}
+			if lastEndpoint != test.wantEndpoint {
+				t.Fatalf("last endpoint = %q, want %q", lastEndpoint, test.wantEndpoint)
+			}
+			if egressUpdates != 1 {
+				t.Fatalf("egress updates = %d, want 1", egressUpdates)
+			}
+		})
 	}
 }
