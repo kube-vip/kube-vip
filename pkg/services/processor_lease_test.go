@@ -267,3 +267,25 @@ func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
 		t.Fatal("replacement service instance was removed by superseded cleanup")
 	}
 }
+
+func TestOnStoppedLeadingDeletesTrackedService(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "example", Namespace: "default", UID: types.UID("service-uid"),
+	}}
+	ctx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, ctx)
+	p.ServiceInstances = []*instance.Instance{{ServiceSnapshot: service.DeepCopy()}}
+
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease))
+	if err := p.onStoppedLeading(ctx, svcLease, service); err != nil {
+		t.Fatalf("onStoppedLeading returned an error: %v", err)
+	}
+	if len(p.ServiceInstances) != 0 {
+		t.Fatalf("tracked service was not deleted: %d instances remain", len(p.ServiceInstances))
+	}
+}
