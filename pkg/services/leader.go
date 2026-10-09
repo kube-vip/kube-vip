@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -142,6 +143,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		LeaseID:          id,
 		Mgr:              p.electionMgr,
 		LeaseAnnotations: map[string]string{},
+		VIPs:             func() []string { vips, _ := instance.FetchServiceAddresses(service); return vips }(),
 
 		OnStartedLeading: func(_ context.Context) {
 			svcLease.Elected.Store(true)
@@ -185,7 +187,12 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	err := p.SyncServices(svcCtx, service, wg, true)
+	var err error
+	if !p.withActiveService(svcCtx, func() {
+		err = p.SyncServices(svcCtx, service, wg, true)
+	}) {
+		return nil
+	}
 	if err != nil {
 		log.Error("service sync", "uid", service.UID, "err", err)
 		return err
@@ -194,6 +201,9 @@ func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1
 }
 
 func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *lease.Lease, service *v1.Service) error {
+	p.lifecycleMutex.Lock()
+	defer p.lifecycleMutex.Unlock()
+
 	currentSvcCtx, err := p.getServiceContext(service.UID)
 	if err != nil {
 		return err
