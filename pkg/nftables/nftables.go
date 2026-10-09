@@ -1172,6 +1172,13 @@ func ApplyDNAT(
 		KeyType:  nftables.TypeInteger,
 		DataType: ipMapDataType,
 	}
+	dnatPortsMap := &nftables.Set{
+		Table:    table,
+		Name:     dnatMapName + "_ports",
+		IsMap:    true,
+		KeyType:  nftables.TypeInteger,
+		DataType: nftables.TypeInetService,
+	}
 
 	dnatMapElements := make([]nftables.SetElement, len(parsedTargets))
 	for i, t := range parsedTargets {
@@ -1183,6 +1190,18 @@ func ApplyDNAT(
 
 	if err := conn.AddSet(dnatMap, dnatMapElements); err != nil {
 		return fmt.Errorf("failed to create DNAT map: %w", err)
+	}
+	if len(parsedTargets) > 1 {
+		portElements := make([]nftables.SetElement, len(parsedTargets))
+		for i, t := range parsedTargets {
+			portElements[i] = nftables.SetElement{
+				Key: binaryutil.BigEndian.PutUint32(uint32(i)), //nolint:gosec
+				Val: binaryutil.BigEndian.PutUint16(t.port),
+			}
+		}
+		if err := conn.AddSet(dnatPortsMap, portElements); err != nil {
+			return fmt.Errorf("failed to create DNAT port map: %w", err)
+		}
 	}
 
 	// Create DNAT rule for this port
@@ -1198,7 +1217,7 @@ func ApplyDNAT(
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(sourcePort)},
 			&expr.Numgen{Register: 1, Modulus: uint32(len(parsedTargets)), Type: unix.NFT_NG_RANDOM}, //nolint:gosec
 			&expr.Lookup{SourceRegister: 1, DestRegister: 1, IsDestRegSet: true, SetName: dnatMapName},
-			&expr.Immediate{Register: 2, Data: binaryutil.BigEndian.PutUint16(targetPort)},
+			&expr.Lookup{SourceRegister: 1, DestRegister: 2, IsDestRegSet: true, SetName: dnatMapName + "_ports"},
 			&expr.NAT{Type: expr.NATTypeDestNAT, Family: ipFamily(IPv6), RegAddrMin: 1, RegAddrMax: 1, RegProtoMin: 2, RegProtoMax: 2, Specified: true},
 		}
 	} else {
@@ -1240,10 +1259,12 @@ func ApplyDNAT(
 	// Add target port to snat_ports set
 	snatPortsSet, _ := conn.GetSetByName(table, snatSetName)
 	if snatPortsSet != nil {
-		if err := conn.SetAddElements(snatPortsSet, []nftables.SetElement{
-			{Key: binaryutil.BigEndian.PutUint16(targetPort)},
-		}); err != nil {
-			return fmt.Errorf("failed to add element to snat_ports set: %w", err)
+		for _, t := range parsedTargets {
+			if err := conn.SetAddElements(snatPortsSet, []nftables.SetElement{
+				{Key: binaryutil.BigEndian.PutUint16(t.port)},
+			}); err != nil {
+				return fmt.Errorf("failed to add element to snat_ports set: %w", err)
+			}
 		}
 	}
 
@@ -1263,10 +1284,12 @@ func ApplyDNAT(
 		}
 
 		if masqPortsSet != nil {
-			if err := conn.SetAddElements(masqPortsSet, []nftables.SetElement{
-				{Key: binaryutil.BigEndian.PutUint16(targetPort)},
-			}); err != nil {
-				return fmt.Errorf("failed to add element to masq_ports set: %w", err)
+			for _, t := range parsedTargets {
+				if err := conn.SetAddElements(masqPortsSet, []nftables.SetElement{
+					{Key: binaryutil.BigEndian.PutUint16(t.port)},
+				}); err != nil {
+					return fmt.Errorf("failed to add element to masq_ports set: %w", err)
+				}
 			}
 		}
 	}
@@ -1297,6 +1320,9 @@ func DeleteDNATRule(wgIf string, IPv6 bool, service string) error {
 	dnatMap, err := conn.GetSetByName(table, dnatMapName)
 	if err == nil && dnatMap != nil {
 		conn.DelSet(dnatMap)
+	}
+	if dnatPortsMap, err := conn.GetSetByName(table, dnatMapName+"_ports"); err == nil && dnatPortsMap != nil {
+		conn.DelSet(dnatPortsMap)
 	}
 
 	// Find and delete the DNAT rule by matching UserData
