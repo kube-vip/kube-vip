@@ -68,7 +68,11 @@ func TestParseEnvironmentInstanceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(instanceName, tt.lowercase)
+			if tt.lowercase == "" {
+				unsetEnv(t, instanceName)
+			} else {
+				t.Setenv(instanceName, tt.lowercase)
+			}
 			t.Setenv(strings.ToUpper(instanceName), tt.uppercase)
 
 			config := &Config{}
