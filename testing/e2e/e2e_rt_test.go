@@ -4,12 +4,10 @@
 package e2e_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -194,7 +192,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				otherContainer := controlPlaneContainerName(clusterName, 1)
 
 				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
-				setAPIServerState(targetContainer, false)
+				Expect(e2e.StashPodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
 
 				By("verifying the unhealthy node withdraws its VIP and route")
 				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
@@ -205,7 +203,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				e2e.CheckRoutePresence(cpVIP, otherContainer, true)
 
 				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
-				setAPIServerState(targetContainer, true)
+				Expect(e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
 
 				By("verifying the recovered node re-adds its VIP and route")
 				// Allow extra time here: the apiserver static pod must be restarted
@@ -333,7 +331,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				otherContainer := controlPlaneContainerName(clusterName, 1)
 
 				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
-				setAPIServerState(targetContainer, false)
+				Expect(e2e.StashPodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
 
 				By("verifying the unhealthy node withdraws its VIP and route")
 				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
@@ -344,7 +342,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 				e2e.CheckRoutePresence(cpVIP, otherContainer, true)
 
 				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
-				setAPIServerState(targetContainer, true)
+				Expect(e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
 
 				By("verifying the recovered node re-adds its VIP and route")
 				// Allow extra time here: the apiserver static pod must be restarted
@@ -1814,24 +1812,4 @@ func controlPlaneContainerName(clusterName string, i int) string {
 		return fmt.Sprintf("%s-control-plane%d", clusterName, i)
 	}
 	return fmt.Sprintf("%s-control-plane", clusterName)
-}
-
-// setAPIServerEnabled stops or starts the static apiserver pod on a control-plane
-// container by moving its manifest in or out of the kubelet manifests directory.
-func setAPIServerState(container string, enabled bool) {
-	const (
-		manifestPath = "/etc/kubernetes/manifests/kube-apiserver.yaml"
-		stashPath    = "/tmp/kube-apiserver.yaml"
-	)
-
-	src, dst := manifestPath, stashPath
-	if enabled {
-		src, dst = stashPath, manifestPath
-	}
-
-	out := new(bytes.Buffer)
-	cmd := exec.Command("docker", "exec", container, "mv", src, dst)
-	cmd.Stdout = out
-	cmd.Stderr = out
-	Expect(cmd.Run()).To(Succeed(), out.String())
 }
