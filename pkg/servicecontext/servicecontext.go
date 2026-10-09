@@ -12,6 +12,7 @@ type Context struct {
 	Ctx                context.Context
 	Cancel             context.CancelFunc
 	IsWatched          bool
+	watchingStopped    chan struct{}
 	ConfiguredNetworks sync.Map
 	EndpointsReady     chan any
 	mu                 sync.Mutex
@@ -105,7 +106,28 @@ func (ctx *Context) SetWatched(watched bool) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 
+	if watched && !ctx.IsWatched {
+		ctx.watchingStopped = make(chan struct{})
+	}
+	if !watched && ctx.IsWatched {
+		close(ctx.watchingStopped)
+	}
 	ctx.IsWatched = watched
+}
+
+func (ctx *Context) StartWatching() bool {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if ctx.Ctx.Err() != nil || ctx.IsWatched {
+		return false
+	}
+	ctx.IsWatched = true
+	ctx.watchingStopped = make(chan struct{})
+	return true
+}
+
+func (ctx *Context) StopWatching() {
+	ctx.SetWatched(false)
 }
 
 func (ctx *Context) IsWatchedLocked() bool {
@@ -118,13 +140,28 @@ func (ctx *Context) IsWatchedLocked() bool {
 func (ctx *Context) SetWatchedService(svc *v1.Service) {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
-
 	ctx.watchedService = svc
 }
 
 func (ctx *Context) WatchedService() *v1.Service {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
-
 	return ctx.watchedService
+}
+
+func (ctx *Context) WaitForWatchingStopped(waitCtx context.Context) error {
+	ctx.mu.Lock()
+	if !ctx.IsWatched {
+		ctx.mu.Unlock()
+		return nil
+	}
+	stopped := ctx.watchingStopped
+	ctx.mu.Unlock()
+
+	select {
+	case <-waitCtx.Done():
+		return waitCtx.Err()
+	case <-stopped:
+		return nil
+	}
 }

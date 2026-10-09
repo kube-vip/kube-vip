@@ -147,12 +147,18 @@ func (p *Processor) shouldProcessInstance() bool {
 	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
 }
 
+// serviceElectionManaged reports whether service lifecycle is delegated to a service election.
+func (p *Processor) serviceElectionManaged(service *v1.Service) bool {
+	return p.config.EnableServicesElection ||
+		p.config.PerServiceElectionOnDemand && service.Annotations[kubevip.ForcePerServiceElection] == "true"
+}
+
 // handleNoEndpoints tears down everything backing a service that no longer has
 // any usable endpoints.
 func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, lastKnownGoodEndpoint *string) {
 	svcCtx.ResetReadiness()
 	p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
-	if p.config.EnableARP && !p.config.EnableServicesElection && p.instances != nil {
+	if p.config.EnableARP && !p.serviceElectionManaged(service) && p.instances != nil {
 		if i := instance.FindServiceInstance(service, *p.instances); i != nil {
 			for _, c := range i.Clusters {
 				c.Stop()
