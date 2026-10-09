@@ -3,6 +3,8 @@ package kubevip
 import (
 	"strings"
 	"testing"
+
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 )
 
 func TestValidate_HealthCheckAddress(t *testing.T) {
@@ -27,6 +29,30 @@ func TestValidate_HealthCheckAddress(t *testing.T) {
 			err := c.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidate_Pprof(t *testing.T) {
+	tests := []struct {
+		name        string
+		enablePprof bool
+		addr        string
+		wantErr     bool
+	}{
+		{name: "disabled without address"},
+		{name: "disabled with address", addr: "127.0.0.1:6060"},
+		{name: "enabled with address", enablePprof: true, addr: "127.0.0.1:6060"},
+		{name: "enabled with default address", enablePprof: true, addr: metrics.DefaultPprofHTTPServer},
+		{name: "enabled without address", enablePprof: true, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := &Config{EnablePprof: test.enablePprof, PprofHTTPServer: test.addr}
+			if err := config.Validate(); (err != nil) != test.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, test.wantErr)
 			}
 		})
 	}
