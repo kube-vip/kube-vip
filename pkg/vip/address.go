@@ -327,7 +327,7 @@ func (configurator *network) PrepareRoute() (route *netlink.Route) {
 func (configurator *network) prepareRoute(intf netlink.Link) *netlink.Route {
 	routeScope := netlink.SCOPE_UNIVERSE
 	if configurator.routingTableType == unix.RTN_LOCAL {
-		routeScope = netlink.SCOPE_LINK
+		routeScope = netlink.SCOPE_HOST
 	}
 	route := &netlink.Route{
 		Scope:     routeScope,
