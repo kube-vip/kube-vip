@@ -613,13 +613,16 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 
 // deleteCurrentService removes the supplied tracked instance. The caller must
 // hold the Service lock for serviceInstance.UID().
+//
+// Local teardown runs first and unconditional: releasing the VIP, stopping the
+// ARP/NDP broadcaster and clearing routes only need netlink. API-dependent
+// bookkeeping (the node label) runs last and is best-effort, so an unreachable
+// API server can no longer abort the release and leave this node answering ARP
+// for a VIP it no longer owns (#1775). A failed label patch only leaves a
+// stale label behind, healed by the stale-state reconcile; the error is still
+// returned so callers keep counting ServiceReconcileErrorsTotal{delete_service}.
 func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
-	if serviceInstance.LabelAdded {
-		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
-		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
-			return fmt.Errorf("error removing label from node: %w", err)
-		}
-	}
+	var cleanupErrs []error
 
 	p.serviceCleanupMu.Lock()
 	defer p.serviceCleanupMu.Unlock()
@@ -634,7 +637,17 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 
 	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
 
-	return nil
+	// API-dependent bookkeeping runs last: the VIP and the broadcaster are
+	// already released by this point, so a failed patch cannot strand them.
+	if serviceInstance.LabelAdded {
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
+		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
+			log.Warn("[service] removing label from node after releasing the VIP", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("error removing label from node: %w", err))
+		}
+	}
+
+	return errors.Join(cleanupErrs...)
 }
 
 // updateEgressConfiguration updates egress state for the current instance. It
