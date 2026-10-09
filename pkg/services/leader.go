@@ -8,6 +8,7 @@ import (
 	log "log/slog"
 
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -142,6 +143,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		LeaseID:          id,
 		Mgr:              p.electionMgr,
 		LeaseAnnotations: map[string]string{},
+		VIPs:             func() []string { vips, _ := instance.FetchServiceAddresses(service); return vips }(),
 
 		OnStartedLeading: func(_ context.Context) {
 			svcLease.Elected.Store(true)
