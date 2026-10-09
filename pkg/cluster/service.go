@@ -481,8 +481,9 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
+		stopCh := cluster.stopChan()
 		select {
-		case <-cluster.stop:
+		case <-stopCh:
 		case <-ctx.Done():
 		}
 
