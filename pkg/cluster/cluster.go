@@ -133,6 +133,22 @@ func newHealthCheckHTTPClient(c *kubevip.Config) (*http.Client, error) {
 		tlsConfig.RootCAs = rootCAs
 		transport.TLSClientConfig = tlsConfig
 	}
+	if c.ControlPlaneHealthCheck.ClientCertPath != "" {
+		clientCert, err := tls.LoadX509KeyPair(
+			c.ControlPlaneHealthCheck.ClientCertPath,
+			c.ControlPlaneHealthCheck.ClientKeyPath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("loading health check client certificate %q: %w", c.ControlPlaneHealthCheck.ClientCertPath, err)
+		}
+
+		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+		if transport.TLSClientConfig != nil {
+			tlsConfig = transport.TLSClientConfig.Clone()
+		}
+		tlsConfig.Certificates = []tls.Certificate{clientCert}
+		transport.TLSClientConfig = tlsConfig
+	}
 
 	return &http.Client{
 		Timeout:   time.Duration(c.ControlPlaneHealthCheck.TimeoutSeconds) * time.Second,

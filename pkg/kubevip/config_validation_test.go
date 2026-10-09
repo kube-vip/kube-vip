@@ -32,6 +32,28 @@ func TestValidate_HealthCheckAddress(t *testing.T) {
 	}
 }
 
+func TestValidate_HealthCheckClientCertificate(t *testing.T) {
+	tests := []struct {
+		name    string
+		check   HealthCheck
+		wantErr bool
+	}{
+		{name: "no client certificate", check: HealthCheck{}},
+		{name: "certificate and key", check: HealthCheck{ClientCertPath: "/tls/client.crt", ClientKeyPath: "/tls/client.key"}},
+		{name: "certificate without key", check: HealthCheck{ClientCertPath: "/tls/client.crt"}, wantErr: true},
+		{name: "key without certificate", check: HealthCheck{ClientKeyPath: "/tls/client.key"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&Config{ControlPlaneHealthCheck: tt.check}).Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidate_InstanceName(t *testing.T) {
 	tests := []struct {
 		name         string

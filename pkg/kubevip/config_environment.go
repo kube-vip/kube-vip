@@ -618,6 +618,14 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		c.ControlPlaneHealthCheck.CAPath = env
 	}
+	env = os.Getenv(controlPlaneHealthCheckClientCertPath)
+	if env != "" {
+		c.ControlPlaneHealthCheck.ClientCertPath = env
+	}
+	env = os.Getenv(controlPlaneHealthCheckClientKeyPath)
+	if env != "" {
+		c.ControlPlaneHealthCheck.ClientKeyPath = env
+	}
 
 	env = os.Getenv(zebraEnable)
 	if env != "" {
@@ -821,7 +829,9 @@ func ParseEnvironment(c *Config) error {
 		mpbgpIPv4: &c.BGPConfig.MpbgpIPv4, mpbgpIPv6: &c.BGPConfig.MpbgpIPv6,
 		bgpPeerPassword: &c.BGPPeerConfig.Password, bgpSourceIF: &c.BGPConfig.SourceIF,
 		bgpSourceIP: &c.BGPConfig.SourceIP, controlPlaneHealthCheckAddress: &c.ControlPlaneHealthCheck.Address,
-		controlPlaneHealthCheckCAPath: &c.ControlPlaneHealthCheck.CAPath, zebraURL: &c.BGPConfig.Zebra.URL,
+		controlPlaneHealthCheckCAPath:         &c.ControlPlaneHealthCheck.CAPath,
+		controlPlaneHealthCheckClientCertPath: &c.ControlPlaneHealthCheck.ClientCertPath,
+		controlPlaneHealthCheckClientKeyPath:  &c.ControlPlaneHealthCheck.ClientKeyPath, zebraURL: &c.BGPConfig.Zebra.URL,
 		zebraSoftwareName: &c.BGPConfig.Zebra.SoftwareName, lbForwardingMethod: &c.LoadBalancerForwardingMethod,
 		prometheusServer: &c.PrometheusHTTPServer, egressPodCidr: &c.EgressPodCidr,
 		egressServiceCidr: &c.EgressServiceCidr, k8sConfigFile: &c.K8sConfigFile,

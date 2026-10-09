@@ -2,7 +2,12 @@ package cluster_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,6 +38,22 @@ func TestBGPHealthCheckLoop_AnnouncesOnHealthy(t *testing.T) {
 
 	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
 		"route should be announced")
+}
+
+func TestBGPHealthCheckLoop_UsesClientCertificate(t *testing.T) {
+	t.Parallel()
+	healthcheck := newMutualTLSHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+	certPath, keyPath := writeClientCertificate(t)
+
+	config := newBGPConfig(healthcheck.server.URL, healthcheck.caPath)
+	config.ControlPlaneHealthCheck.ClientCertPath = certPath
+	config.ControlPlaneHealthCheck.ClientKeyPath = keyPath
+	bgpManager := newMockBGPRouteManager()
+	startVipService(t, config, bgpManager)
+
+	expectEventually(t, func() bool { return bgpManager.isAnnounced() },
+		"route should be announced when mutual TLS health check succeeds")
 }
 
 func TestBGPHealthCheckLoop_NoAnnouncementUntilHealthy(t *testing.T) {
@@ -397,6 +418,58 @@ func newTestHealthServer(t *testing.T, status int) *testHealthServer {
 	}
 	healthcheck.caPath = caFile
 	return healthcheck
+}
+
+func newMutualTLSHealthServer(t *testing.T, status int) *testHealthServer {
+	t.Helper()
+	healthcheck := &testHealthServer{}
+	healthcheck.statusCode.Store(int64(status))
+	healthcheck.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(int(healthcheck.statusCode.Load()))
+	}))
+	healthcheck.server.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert, MinVersion: tls.VersionTLS12}
+	healthcheck.server.StartTLS()
+
+	cert := healthcheck.server.Certificate()
+	if cert == nil {
+		t.Fatal("TLS server has no certificate")
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caFile, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	healthcheck.caPath = caFile
+	return healthcheck
+}
+
+func writeClientCertificate(t *testing.T) (string, string) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	certificateDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	certPath := filepath.Join(directory, "client.crt")
+	keyPath := filepath.Join(directory, "client.key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
 }
 
 func (ths *testHealthServer) setStatus(code int) {
