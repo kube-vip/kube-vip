@@ -167,8 +167,19 @@ func (w *wireguardWorker) processInstance(svcCtx *servicecontext.Context, servic
 func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
 	log.Info("[wireguard] clearing DNAT rules (no endpoints)", "service", service.Name, "namespace", service.Namespace)
 
-	// Get service IPs to determine IPv4 vs IPv6
-	serviceIPs, _ := utils.FetchServiceIPs(service)
+	// Get service IPs to determine which address families had chains created.
+	serviceIPs, err := utils.FetchServiceIPs(service)
+	if err != nil {
+		// If we cannot determine the service IPs, we do not know which
+		// address families had DNAT chains created. Clean up both families
+		// so stale rules are not leaked when the service loses its
+		// endpoints.
+		log.Warn("[wireguard] failed to fetch service IPs during clear; cleaning both address families",
+			"service", service.Name,
+			"namespace", service.Namespace,
+			"err", err)
+		serviceIPs = nil
+	}
 
 	// Delete DNAT chains for each port
 	for _, port := range service.Spec.Ports {
@@ -178,11 +189,16 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 
 		// Determine if we have IPv4 or IPv6
 		hasIPv4, hasIPv6 := false, false
-		for _, vip := range serviceIPs {
-			if isIPv6Address(vip) {
-				hasIPv6 = true
-			} else {
-				hasIPv4 = true
+		if serviceIPs == nil {
+			// Families unknown; clean both to avoid leaving stale rules.
+			hasIPv4, hasIPv6 = true, true
+		} else {
+			for _, vip := range serviceIPs {
+				if isIPv6Address(vip) {
+					hasIPv6 = true
+				} else {
+					hasIPv4 = true
+				}
 			}
 		}
 
