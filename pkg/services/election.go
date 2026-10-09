@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/services/serviceelection"
 	v1 "k8s.io/api/core/v1"
@@ -81,7 +82,19 @@ func (a *electionAdapter) Cleanup(ctx context.Context, service *v1.Service, svcC
 	if currentSvcCtx != svcCtx || !memberCurrent() {
 		return nil
 	}
-	return p.deleteCurrentServiceByUID(ctx, service.UID)
+	if err := p.deleteCurrentServiceByUID(ctx, service.UID); err != nil {
+		p.markReleaseFailure(service)
+		return err
+	}
+	return nil
+}
+
+// markReleaseFailure records a lease release whose local VIP teardown
+// completed but whose API bookkeeping failed: the operator-visible counter
+// still increments. The election restart is inherent to the coordinator, so
+// no separate re-arm is required.
+func (p *Processor) markReleaseFailure(service *v1.Service) {
+	metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
 }
 
 // RunCampaign implements serviceelection.CampaignRunner.
