@@ -32,6 +32,7 @@ type KubevipManifestValues struct {
 	ControlPlaneHealthCheckCAPath           string
 	EnableServiceSecurity                   string
 	PerServiceElectionOnDemand              string
+	PrometheusHTTPServer                    string
 }
 
 type BGPPeerValues struct {
