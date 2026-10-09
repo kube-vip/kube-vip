@@ -137,6 +137,18 @@ func (ctx *Context) IsWatchedLocked() bool {
 	return ctx.IsWatched
 }
 
+func (ctx *Context) SetWatchedService(svc *v1.Service) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.watchedService = svc
+}
+
+func (ctx *Context) WatchedService() *v1.Service {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.watchedService
+}
+
 func (ctx *Context) WaitForWatchingStopped(waitCtx context.Context) error {
 	ctx.mu.Lock()
 	if !ctx.IsWatched {
