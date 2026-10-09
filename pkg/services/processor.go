@@ -65,9 +65,9 @@ type Processor struct {
 	// it was bound. Defaults to vip.GarbageCollect; replaceable in tests.
 	gcStaleAddress func(adapter, address string, intfMgr *networkinterface.Manager) (bool, error)
 
-	// staleReconcileOnce guards the startup+periodic stale-state reconcile so
-	// a Processor shared by the regular and forced-election watchers runs it
-	// only once.
+	// staleReconcileOnce defensively guards against a second start of the
+	// stale-state reconcile on the same Processor (e.g. if both election
+	// watcher variants were ever wired up).
 	staleReconcileOnce sync.Once
 }
 

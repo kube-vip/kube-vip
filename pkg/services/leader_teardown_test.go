@@ -15,9 +15,11 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -282,5 +284,31 @@ func TestReleaseAbortsVIPDeletionWhenAPIUnavailable(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second * 5):
 		t.Fatal("load balancer teardown did not complete after leadership loss")
+	}
+}
+
+// TestMarkReleaseFailureKeepsCountingDeleteService pins the contract that a
+// release with failed API bookkeeping still raises the operator-visible
+// counter and cancels the election for a re-arm, even though the local VIP
+// teardown completed. Before the reordering this happened implicitly via an
+// early error return; the helper keeps both effects explicit and testable
+// without driving a full leader election against an API.
+func TestMarkReleaseFailureKeepsCountingDeleteService(t *testing.T) {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "traefik", Namespace: "kube-system"},
+	}
+	p := &Processor{config: &kubevip.Config{}, leaseMgr: lease.NewManager()}
+
+	counter := metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service")
+	before := testutil.ToFloat64(counter)
+
+	canceled := false
+	p.markReleaseFailure(svc, func() { canceled = true })
+
+	if after := testutil.ToFloat64(counter); after-before != 1 {
+		t.Fatalf("delete_service counter delta = %v, want 1", after-before)
+	}
+	if !canceled {
+		t.Fatal("markReleaseFailure did not cancel the election context")
 	}
 }

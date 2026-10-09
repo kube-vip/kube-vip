@@ -483,7 +483,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 
 		if err := serviceInstance.CleanupLinkAttachments(updatedInstances...); err != nil {
 			// Local but best-effort: a failed link cleanup must not strand the
-			// instance bookkeeping below (#1735: stale macvlan after switchover).
+			// instance bookkeeping below.
 			log.Warn("[service] error cleaning up link attachments", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
 			cleanupErrs = append(cleanupErrs, fmt.Errorf("[service] error cleaning up link attachments: %w", err))
 		}

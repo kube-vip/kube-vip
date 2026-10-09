@@ -369,7 +369,7 @@ func TestReconcileStaleServiceStateFullPass(t *testing.T) {
 	})
 
 	t.Run("never releases what this process leads", func(t *testing.T) {
-		t.Run("registered instance", func(t *testing.T) {
+		t.Run("provided instance", func(t *testing.T) {
 			f := newFakeAPI(t)
 			f.nodeLabels = map[string]string{staleLabelKey: staleVIPAddr}
 			f.services = []v1.Service{*staleService()}
@@ -378,7 +378,7 @@ func TestReconcileStaleServiceStateFullPass(t *testing.T) {
 			p, rec := staleProcessor(t, f, staleConfig())
 			svc := staleService()
 			p.ServiceInstances = []*instance.Instance{
-				{ServiceUID: svc.UID, ServiceSnapshot: svc},
+				{ServiceUID: svc.UID, ServiceSnapshot: svc, AddCalled: true},
 			}
 			if err := p.reconcileStaleServiceState(context.Background(), true); err != nil {
 				t.Fatalf("reconcile: %v", err)
@@ -406,6 +406,50 @@ func TestReconcileStaleServiceStateFullPass(t *testing.T) {
 				t.Fatalf("locally elected lease still reached the API: %d lease gets", leaseGets)
 			}
 		})
+	})
+
+	t.Run("follower-registered instance does not block healing", func(t *testing.T) {
+		// The watcher registers an instance on every node, leader or not.
+		// Treating that registration as ownership would disable the reconcile
+		// everywhere (#1775's healing exists precisely for non-leader nodes).
+		f := newFakeAPI(t)
+		f.nodeLabels = map[string]string{staleLabelKey: staleVIPAddr}
+		f.services = []v1.Service{*staleService()}
+		f.leases["kube-system/kubevip-traefik"] = holderLease("kubevip-traefik", stalePeer)
+
+		p, rec := staleProcessor(t, f, staleConfig())
+		svc := staleService()
+		p.ServiceInstances = []*instance.Instance{
+			{ServiceUID: svc.UID, ServiceSnapshot: svc}, // never AddCalled/LabelAdded
+		}
+		if err := p.reconcileStaleServiceState(context.Background(), true); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		assertReleased(t, rec, f, []string{"lo/" + staleVIPAddr}, 1)
+	})
+
+	t.Run("keeps VIP shared with a locally provided service", func(t *testing.T) {
+		// netbird provides the same address here; releasing it because
+		// traefik's lease went stale would black-hole netbird, the exact
+		// failure mode this PR removes. deleteService guards shared VIPs the
+		// same way.
+		f := newFakeAPI(t)
+		f.nodeLabels = map[string]string{staleLabelKey: staleVIPAddr}
+		shared := staleOtherService()
+		shared.Annotations[kubevip.LoadbalancerIPAnnotation] = staleVIPAddr
+		f.services = []v1.Service{*staleService(), *shared}
+		f.leases["kube-system/kubevip-traefik"] = holderLease("kubevip-traefik", stalePeer)
+		f.leases["kube-system/kubevip-netbird"] = holderLease("kubevip-netbird", staleNode)
+
+		p, rec := staleProcessor(t, f, staleConfig())
+		p.ServiceInstances = []*instance.Instance{
+			{ServiceUID: shared.UID, ServiceSnapshot: shared, AddCalled: true, LabelAdded: true},
+		}
+		if err := p.reconcileStaleServiceState(context.Background(), true); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		// The shared address stays; traefik's stale label still gets removed.
+		assertReleased(t, rec, f, nil, 1)
 	})
 }
 
@@ -537,11 +581,14 @@ func TestStartStaleStateReconcileRunsPeriodically(t *testing.T) {
 
 	p.startStaleStateReconcile(ctx)
 
-	_, nodeGets, _, listGets := f.snapshot()
-	if listGets < 1 {
-		t.Fatal("startup full pass did not enumerate services")
-	}
-	waitFor(t, time.Second*5, func() bool {
+	// The startup full pass runs asynchronously so lease lookups cannot delay
+	// the watcher.
+	waitFor(t, time.Second*10, func() bool {
+		_, _, _, lists := f.snapshot()
+		return lists >= 1
+	}, "startup full pass to enumerate services")
+	_, nodeGets, _, _ := f.snapshot()
+	waitFor(t, time.Second*10, func() bool {
 		_, gets, _, _ := f.snapshot()
 		return gets >= nodeGets+3
 	}, "periodic reconcile passes")

@@ -29,16 +29,14 @@ var staleStateReconcileInterval = time.Minute * 2
 // node's interface and `service-provided.kube-vip.io/...` labels on this node
 // for leases some other node holds.
 //
-// The full pass runs synchronously before the watcher starts - before this
-// process can win any election, so it cannot race a fresh bind - and covers
-// deployments without node labeling, whose stranded bindings have no label to
-// point at them. The label-driven pass then repeats periodically: a best-effort
-// label removal that failed during the API outage heals itself once the API
-// returns, without waiting for a pod restart.
-//
-// The forced-election watcher and the regular one share a Processor, so this
-// runs once per processor. Candidate services are the union of both watchers'
-// partitions, which is what a single pass over all services gives.
+// The first pass enumerates candidate services - this also finds stale
+// bindings in deployments without node labeling, whose stranded bindings have
+// no label to point at them - and runs asynchronously so hundreds of lease
+// lookups cannot delay the watcher. Binding/release of services is serialized
+// against this pass through Processor.mutex (see releaseStaleLocalState).
+// The label-driven passes then repeat on a ticker: a best-effort label removal
+// that failed during the API outage heals itself once the API returns, without
+// waiting for a pod restart.
 //
 // It only ever touches state on this node and only when the lease object
 // proves another node holds (or owns) the service: if the API is unreachable,
@@ -54,11 +52,11 @@ func (p *Processor) startStaleStateReconcile(ctx context.Context) {
 	}
 
 	p.staleReconcileOnce.Do(func() {
-		if err := p.reconcileStaleServiceState(ctx, true); err != nil {
-			log.Warn("stale service state reconcile", "err", err)
-		}
-
 		go func() {
+			if err := p.reconcileStaleServiceState(ctx, true); err != nil {
+				log.Warn("stale service state reconcile", "err", err)
+			}
+
 			ticker := time.NewTicker(staleStateReconcileInterval)
 			defer ticker.Stop()
 			for {
@@ -137,20 +135,22 @@ func (p *Processor) reconcileStaleServiceState(ctx context.Context, full bool) e
 	return nil
 }
 
-// leaseHeldByOtherNode reports whether the service's lease exists elsewhere or
-// is demonstrably not this node's. A lease this process is electing for, or
-// that this process still runs an instance for, is never stale locally.
+// leaseHeldByOtherNode reports whether the service's lease is held by a
+// different node (or absent while this node provides nothing for it). A service
+// this process actively leads is never stale locally: that's checked via
+// providedLocally, not via mere instance registration - the watcher registers
+// an instance on every node, leader or not.
 func (p *Processor) leaseHeldByOtherNode(ctx context.Context, svc *v1.Service) bool {
-	if p.leadsServiceLocally(svc) {
+	if p.providedLocally(svc) {
 		return false
 	}
 
 	ns, name := lease.ServiceName(svc)
 	l, err := p.clientSet.CoordinationV1().Leases(ns).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		// No lease object: nobody owns the service, so a local binding can
-		// only be a leftover. A leader that is re-creating its lease after a
-		// deletion keeps its binding protected through leadsServiceLocally.
+		// No lease object: nobody owns the service. A follower's leftover
+		// binding can be released; a leader mid-re-creation is protected by
+		// providedLocally (its lease reports Elected while the election holds).
 		return true
 	}
 	if err != nil {
@@ -158,26 +158,37 @@ func (p *Processor) leaseHeldByOtherNode(ctx context.Context, svc *v1.Service) b
 		log.Debug("stale service state reconcile: lease lookup failed", "service", svc.Name, "err", err)
 		return false
 	}
-	if l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity == p.config.NodeName {
-		return false
-	}
-	return true
+	return l.Spec.HolderIdentity == nil || *l.Spec.HolderIdentity != p.config.NodeName
 }
 
-// leadsServiceLocally reports whether this process currently owns the service:
-// either an instance was registered for it (we lead, or the release is still
-// running) or the in-memory lease says we are elected.
-func (p *Processor) leadsServiceLocally(svc *v1.Service) bool {
-	p.mutex.Lock()
-	found := instance.FindServiceInstance(svc, p.ServiceInstances) != nil
-	p.mutex.Unlock()
-	if found {
+// providedLocally reports whether this process is currently serving the
+// service as leader: it has registered an instance that was actually added
+// (AddCalled) or labelled (LabelAdded), or its in-memory lease reports elected
+// but the instance list has not caught up yet. A bare instance for a follower
+// (registered by the watcher, never added) is deliberately NOT treated as
+// provided, otherwise the reconcile would skip every service the watcher has
+// ever seen and never heal anything.
+func (p *Processor) providedLocally(svc *v1.Service) bool {
+	ns, name := lease.ServiceName(svc)
+	if l := p.leaseMgr.Get(lease.NewID(p.config.LeaderElectionType, ns, name)); l != nil && l.Elected.Load() {
 		return true
 	}
 
-	ns, name := lease.ServiceName(svc)
-	l := p.leaseMgr.Get(lease.NewID(p.config.LeaderElectionType, ns, name))
-	return l != nil && l.Elected.Load()
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	for _, inst := range p.ServiceInstances {
+		if inst == nil || inst.ServiceSnapshot == nil {
+			continue
+		}
+		snapshot := inst.ServiceSnapshot
+		if (snapshot.UID != "" && snapshot.UID == svc.UID) ||
+			(snapshot.Name == svc.Name && snapshot.Namespace == svc.Namespace) {
+			if inst.AddCalled || inst.LabelAdded {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // dropStaleServiceState releases everything this node holds locally for a
@@ -185,8 +196,7 @@ func (p *Processor) leadsServiceLocally(svc *v1.Service) bool {
 func (p *Processor) dropStaleServiceState(svc *v1.Service, labels map[string]string) {
 	leaseNS, leaseName := lease.ServiceName(svc)
 	addresses, _ := instance.FetchServiceAddresses(svc)
-	if p.releaseStaleLocalState(svc.Name, svc.Namespace, svc.UID, leaseNS, leaseName, addresses, labels) &&
-		(len(addresses) > 0 || len(labels) > 0) {
+	if p.releaseStaleLocalState(svc.Name, svc.Namespace, svc.UID, leaseNS, leaseName, addresses, labels) {
 		log.Info("stale service state reconcile: released local state",
 			"service", svc.Namespace+"/"+svc.Name, "addresses", addresses)
 	}
@@ -203,61 +213,105 @@ func (p *Processor) dropStaleServiceState(svc *v1.Service, labels map[string]str
 // seen and skipped. The lease mutex cannot be used for this: a follower's
 // parked election holds it for its entire lifetime.
 //
-// The label patch happens under the mutex too, which serializes it against
-// addService's AddLabel; the API was just reachable for the lease lookup, so
-// the 30-second labeler timeout can only bite in a narrow double-fault window,
-// and blocking reconciliation for it is preferred over removing a label that a
-// concurrent winner just added.
+// An address that another locally-provided service still uses is never removed
+// (shared-VIP guard): doing so would black-hole a live service whose VIP merely
+// happens to collide with the stale one's.
 func (p *Processor) releaseStaleLocalState(name, namespace string, uid types.UID, leaseNS, leaseName string, addresses []string, labels map[string]string) (released bool) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
-	for _, inst := range p.ServiceInstances {
-		if inst == nil {
-			continue
-		}
-		snapshot := inst.ServiceSnapshot
-		if snapshot == nil {
-			continue
-		}
-		if (uid != "" && snapshot.UID == uid) || (snapshot.Name == name && snapshot.Namespace == namespace) {
-			// An instance is registered: this process leads the service or is
-			// still releasing it; the release path owns the cleanup.
-			return false
-		}
+	// Re-check actual local ownership (added/labelled/elected) before releasing.
+	if p.providedLocallyLocked(name, namespace, uid) {
+		return false
 	}
 	if l := p.leaseMgr.Get(lease.NewID(p.config.LeaderElectionType, leaseNS, leaseName)); l != nil && l.Elected.Load() {
 		return false
 	}
 
-	p.dropStaleAddresses(addresses)
-	p.removeStaleLabels(labels)
-	return true
+	for _, addr := range addresses {
+		if p.addressProvidedByOtherLocked(addr, uid) {
+			log.Debug("stale service state reconcile: keeping shared VIP used by another local service",
+				"address", addr, "service", namespace+"/"+name)
+			continue
+		}
+		if p.dropStaleAddressLocked(addr) {
+			released = true
+		}
+	}
+	if p.removeStaleLabels(labels) {
+		released = true
+	}
+	return released
 }
 
-func (p *Processor) dropStaleAddresses(addresses []string) {
-	if !p.config.EnableARP || len(addresses) == 0 {
-		return
+// providedLocallyLocked reports an instance that was actually added or
+// labelled for the service. Callers must hold p.mutex.
+func (p *Processor) providedLocallyLocked(name, namespace string, uid types.UID) bool {
+	for _, inst := range p.ServiceInstances {
+		if inst == nil || inst.ServiceSnapshot == nil {
+			continue
+		}
+		snapshot := inst.ServiceSnapshot
+		if (uid != "" && snapshot.UID == uid) || (snapshot.Name == name && snapshot.Namespace == namespace) {
+			if inst.AddCalled || inst.LabelAdded {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// addressProvidedByOtherLocked reports whether a locally-provided service
+// (added or labelled) other than uid still advertises the address. Callers
+// must hold p.mutex.
+func (p *Processor) addressProvidedByOtherLocked(address string, uid types.UID) bool {
+	for _, inst := range p.ServiceInstances {
+		if inst == nil || inst.ServiceSnapshot == nil {
+			continue
+		}
+		if !inst.AddCalled && !inst.LabelAdded {
+			continue
+		}
+		if uid != "" && inst.ServiceSnapshot.UID == uid {
+			continue
+		}
+		others, _ := instance.FetchServiceAddresses(inst.ServiceSnapshot)
+		for _, a := range others {
+			if a == address {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dropStaleAddressLocked removes the address from the service interface if it
+// is bound; reports whether anything was actually deleted. Callers hold p.mutex.
+func (p *Processor) dropStaleAddressLocked(address string) (deleted bool) {
+	if !p.config.EnableARP {
+		return false
 	}
 	gc := p.gcStaleAddress
 	if gc == nil {
 		gc = vip.GarbageCollect
 	}
-	for _, addr := range addresses {
-		found, err := gc(p.serviceInterface(), addr, p.intfMgr)
-		switch {
-		case err != nil:
-			log.Warn("stale service state reconcile: VIP check failed", "address", addr, "err", err)
-		case found:
-			log.Warn("stale service state reconcile: removed VIP bound without the lease",
-				"address", addr, "interface", p.serviceInterface())
-		}
+	found, err := gc(p.serviceInterface(), address, p.intfMgr)
+	switch {
+	case err != nil:
+		log.Warn("stale service state reconcile: VIP check failed", "address", address, "err", err)
+	case found:
+		log.Warn("stale service state reconcile: removed VIP bound without the lease",
+			"address", address, "interface", p.serviceInterface())
+		return true
 	}
+	return false
 }
 
-func (p *Processor) removeStaleLabels(labels map[string]string) {
+// removeStaleLabels removes the given node labels, best-effort. Reports
+// whether the patch succeeded; a failure is retried by the next pass.
+func (p *Processor) removeStaleLabels(labels map[string]string) (removed bool) {
 	if len(labels) == 0 {
-		return
+		return false
 	}
 	if !p.config.EnableNodeLabeling {
 		// Without labeling there is no writable labeler (noop), and kube-vip
@@ -267,11 +321,12 @@ func (p *Processor) removeStaleLabels(labels map[string]string) {
 	}
 	if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 		log.Warn("stale service state reconcile: label removal failed, will retry next pass", "err", err)
-		return
+		return false
 	}
 	for key := range labels {
 		log.Info("stale service state reconcile: removed stale node label", "label", key)
 	}
+	return true
 }
 
 // isStaleStateCandidate mirrors the watcher's filter chain for services this
