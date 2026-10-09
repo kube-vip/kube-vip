@@ -426,12 +426,12 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		return nil
 	}
 
-	if serviceInstance.LabelAdded {
-		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
-		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
-			return fmt.Errorf("error removing label from node: %w", err)
-		}
-	}
+	// Local teardown first, and unconditional: releasing the VIP, stopping the
+	// ARP/NDP broadcaster and clearing routes only needs netlink. API-dependent
+	// bookkeeping (the node label) is retried best-effort below, so an
+	// unreachable API server can no longer abort the release and leave this node
+	// answering ARP for a VIP it no longer owns (#1775).
+	var cleanupErrs []error
 
 	for _, c := range serviceInstance.Clusters {
 		for n := range c.Network {
@@ -482,7 +482,10 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		}
 
 		if err := serviceInstance.CleanupLinkAttachments(updatedInstances...); err != nil {
-			return fmt.Errorf("[service] error cleaning up link attachments: %w", err)
+			// Local but best-effort: a failed link cleanup must not strand the
+			// instance bookkeeping below (#1735: stale macvlan after switchover).
+			log.Warn("[service] error cleaning up link attachments", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("[service] error cleaning up link attachments: %w", err))
 		}
 
 		// We will need to tear down the egress
@@ -506,9 +509,23 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		p.deleteServiceWireguard(ctx, serviceInstance.ServiceSnapshot)
 	}
 
+	// API-dependent bookkeeping runs last and is best-effort: the VIP and the
+	// broadcaster are already released by this point, so a failed node-label
+	// patch only leaves a stale label (healed by the stale-state reconcile)
+	// instead of stranding the VIP on an interface this node no longer owns.
+	// The error is still returned so the caller can keep counting
+	// ServiceReconcileErrorsTotal{delete_service}.
+	if serviceInstance.LabelAdded {
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
+		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
+			log.Warn("[service] removing label from node after releasing the VIP", "service", serviceInstance.ServiceSnapshot.Name, "err", err)
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("error removing label from node: %w", err))
+		}
+	}
+
 	log.Info("Removed instance from manager", "uid", uid, "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(p.ServiceInstances))
 
-	return nil
+	return errors.Join(cleanupErrs...)
 }
 
 func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Service) error {

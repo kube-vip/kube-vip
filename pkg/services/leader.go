@@ -206,7 +206,11 @@ func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *l
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
 	err = p.deleteService(svcLease.Ctx, service.UID)
 	if err != nil {
-		log.Error("service deletion", "err", err)
+		// The VIP and broadcaster are already released at this point; the
+		// error only reports failed API bookkeeping (#1775). Warn instead of
+		// Error so a partitioned API during release does not look like the
+		// whole teardown failed.
+		log.Warn("service deletion", "err", err)
 		return err
 	}
 	return nil
