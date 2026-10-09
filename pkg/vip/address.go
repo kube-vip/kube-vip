@@ -26,6 +26,7 @@ import (
 
 	iptables "github.com/kube-vip/kube-vip/pkg/iptables"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	nfinternal "github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 
@@ -122,6 +123,10 @@ type network struct {
 	// dadSkip marks the address with IFA_F_NODAD on every add:
 	// anycast semantics, e.g. ECMP, must not use DAD
 	dadSkip bool
+
+	// trackedVIPAddress is this network's reference represented in VIPAddresses.
+	// AddIP, DeleteIP, and SetIP access it while holding link.Lock.
+	trackedVIPAddress string
 }
 
 // NewConfig will attempt to provide an interface to the kernel network configuration
@@ -410,7 +415,12 @@ func (configurator *network) ReplaceRoute() error {
 		} else {
 			route.Realm = 2
 		}
-		return netlink.RouteReplace(route)
+		if err := netlink.RouteReplace(route); err != nil {
+			metrics.RouteOperationsTotal.WithLabelValues("replace", "error").Inc()
+			return err
+		}
+		metrics.RouteOperationsTotal.WithLabelValues("replace", "ok").Inc()
+		return nil
 	})
 }
 
@@ -434,6 +444,7 @@ func (configurator *network) getRoutes() (*[]netlink.Route, error) {
 func (configurator *network) UpdateRoutes() (bool, error) {
 	routes, err := configurator.getRoutes()
 	if err != nil {
+		metrics.RouteOperationsTotal.WithLabelValues("update", "error").Inc()
 		return false, fmt.Errorf("error updating routes: %w", err)
 	}
 	isUpdated := false
@@ -443,11 +454,13 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 			(route.Type == r.Type || route.Type == unix.RTN_UNICAST) &&
 			route.LinkIndex == r.LinkIndex && route.Scope == r.Scope {
 			if err = netlink.RouteReplace(r); err != nil {
+				metrics.RouteOperationsTotal.WithLabelValues("update", "error").Inc()
 				return false, fmt.Errorf("error replacing route: %w", err)
 			}
 			isUpdated = true
 		}
 	}
+	metrics.RouteOperationsTotal.WithLabelValues("update", "ok").Inc()
 	return isUpdated, nil
 }
 
@@ -456,6 +469,56 @@ func (configurator *network) UpdateRoutes() (bool, error) {
 // specific add (e.g. DADFAILED state recovery in ARP mode).
 func (configurator *network) shouldSkipDAD(override bool) bool {
 	return override || configurator.dadSkip
+}
+
+func (configurator *network) accountVIPAddressAdd() {
+	_ = configurator.link.WithInterface(func(intf netlink.Link) error {
+		configurator.accountVIPAddressAddOn(intf)
+		return nil
+	})
+}
+
+func (configurator *network) accountVIPAddressAddOn(intf netlink.Link) {
+	if configurator.address == nil {
+		return
+	}
+
+	key := configurator.address.String()
+	if configurator.trackedVIPAddress == key {
+		return
+	}
+	if configurator.trackedVIPAddress != "" {
+		configurator.accountVIPAddressDeleteOn(intf)
+	}
+
+	metrics.TrackVIPAddress(intf.Attrs().Name, addressFamily(configurator.address), key)
+	configurator.trackedVIPAddress = key
+}
+
+func (configurator *network) accountVIPAddressDelete() {
+	_ = configurator.link.WithInterface(func(intf netlink.Link) error {
+		configurator.accountVIPAddressDeleteOn(intf)
+		return nil
+	})
+}
+
+func (configurator *network) accountVIPAddressDeleteOn(intf netlink.Link) {
+	if configurator.trackedVIPAddress == "" {
+		return
+	}
+
+	tracked, err := netlink.ParseAddr(configurator.trackedVIPAddress)
+	if err == nil {
+		metrics.UntrackVIPAddress(intf.Attrs().Name, addressFamily(tracked), configurator.trackedVIPAddress)
+	}
+	configurator.trackedVIPAddress = ""
+}
+
+func addressFamily(address *netlink.Addr) string {
+	if utils.IsIPv6(address.IP.String()) {
+		return utils.IPv6Family
+	}
+	return utils.IPv4Family
 }
 
 // AddIP - Add an IP address to the interface
@@ -478,6 +541,7 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 	var err error
 	if precheck {
 		if existing, err = configurator.isSet(intf); err != nil {
+			metrics.VIPOperationsTotal.WithLabelValues("add", "error").Inc()
 			return false, errors.Wrap(err, "could not check if address exists")
 		}
 	}
@@ -489,6 +553,8 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 	}
 
 	if existing != nil && existing.ValidLft > lifetime {
+		configurator.accountVIPAddressAddOn(intf)
+		metrics.VIPOperationsTotal.WithLabelValues("add", "ok").Inc()
 		return false, nil
 	}
 
@@ -509,19 +575,25 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 
 	log.Debug("replacing IP", "address", configurator.address)
 	if err := netlink.AddrReplace(intf, configurator.address); err != nil {
+		metrics.VIPOperationsTotal.WithLabelValues("add", "error").Inc()
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", intf.Attrs().Name))
 	}
 
+	configurator.accountVIPAddressAddOn(intf)
+
 	if configurator.nftables {
 		if err := configurator.configureNFTables(); err != nil {
+			metrics.VIPOperationsTotal.WithLabelValues("add", "error").Inc()
 			return true, errors.Wrap(err, "could not configure NFTables")
 		}
 	} else {
 		if err := configurator.configureIPTables(); err != nil {
+			metrics.VIPOperationsTotal.WithLabelValues("add", "error").Inc()
 			return true, errors.Wrap(err, "could not configure IPTables")
 		}
 	}
 
+	metrics.VIPOperationsTotal.WithLabelValues("add", "ok").Inc()
 	return true, nil
 }
 
@@ -1101,17 +1173,23 @@ func (configurator *network) DeleteIP() (bool, error) {
 func (configurator *network) deleteIP(intf netlink.Link) (bool, error) {
 	result, err := configurator.isSet(intf)
 	if err != nil {
+		metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 		return false, errors.Wrap(err, "ip check in DeleteIP failed")
 	}
 
 	// Nothing to delete
 	if result == nil {
+		configurator.accountVIPAddressDeleteOn(intf)
+		metrics.VIPOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		return false, nil
 	}
 
 	if err = netlink.AddrDel(intf, configurator.address); err != nil {
+		metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 		return false, errors.Wrap(err, "could not delete ip")
 	}
+
+	configurator.accountVIPAddressDeleteOn(intf)
 
 	if configurator.nftables {
 		vip := configurator.address.IP.String()
@@ -1122,6 +1200,7 @@ func (configurator *network) deleteIP(intf netlink.Link) (bool, error) {
 		}
 		c, err := nfinternal.NewClient(opt)
 		if err != nil {
+			metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 			return false, fmt.Errorf("unable to create nftables client: %w", err)
 		}
 
@@ -1138,22 +1217,26 @@ func (configurator *network) deleteIP(intf netlink.Link) (bool, error) {
 		}
 
 		if err := c.Close(); err != nil {
+			metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 			return true, errors.Wrap(err, "failed to close nftables client")
 		}
 	} else {
 		if configurator.enableSecurity && !configurator.ignoreSecurity {
 			if err := configurator.removeIptablesRuleToLimitTrafficPorts(); err != nil {
+				metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 				return true, errors.Wrap(err, "could not remove iptables rules to limit traffic ports")
 			}
 		}
 
 		if configurator.serviceName == "" && configurator.ipvsEnabled && configurator.forwardMethod == "masquerade" && configurator.address.IP.To4() != nil {
 			if err := configurator.removeIptablesRulesForMasquerade(); err != nil {
+				metrics.VIPOperationsTotal.WithLabelValues("delete", "error").Inc()
 				return true, errors.Wrap(err, "could not remove iptables masquerade rules ")
 			}
 		}
 	}
 
+	metrics.VIPOperationsTotal.WithLabelValues("delete", "ok").Inc()
 	return true, nil
 }
 

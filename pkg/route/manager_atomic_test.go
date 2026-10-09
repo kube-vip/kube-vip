@@ -2,6 +2,8 @@ package route
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -27,3 +29,35 @@ func TestManagerRetriesRouteAfterInitialAddFailure(t *testing.T) {
 		t.Fatalf("AddRoute called %d times, want 2", r.addCalls)
 	}
 }
+
+func TestManagerConcurrentLifecycle(t *testing.T) {
+	m := NewManager()
+	var wg sync.WaitGroup
+	for i := range 20 {
+		r := concurrentRoute{hash: fmt.Sprintf("route-%d", i)}
+		wg.Go(func() {
+			for j := range 100 {
+				object := fmt.Sprintf("service-%d", j)
+				if err := m.Add(object, r, false, false); err != nil {
+					t.Errorf("adding route: %v", err)
+				}
+				m.Check(r.RouteHash())
+				if err := m.Delete(object, r); err != nil {
+					t.Errorf("deleting route: %v", err)
+				}
+				if j%10 == 0 {
+					m.Clear()
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+type concurrentRoute struct{ hash string }
+
+func (r concurrentRoute) AddRoute(bool) (bool, error) { return true, nil }
+func (r concurrentRoute) UpdateRoutes() (bool, error) { return false, nil }
+func (r concurrentRoute) DeleteRoute() error          { return nil }
+func (r concurrentRoute) RouteHash() string           { return r.hash }
+func (concurrentRoute) Interface() string             { return "test" }
