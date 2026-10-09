@@ -67,7 +67,7 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 			return nil
 		}
 
-		if err := b.s.DeletePath(apiutil.DeletePathRequest{
+		if err := b.deletePath(ctx, apiutil.DeletePathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
 			return err
@@ -79,4 +79,28 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 	}
 
 	return nil
+}
+
+func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest) error {
+	b.startWithdrawalWorker()
+	result := make(chan error, 1)
+	request := withdrawalRequest{ctx: ctx, req: req, result: result}
+	select {
+	case b.withdrawQueue <- request:
+	default:
+		// An available queue slot transfers ownership of the non-cancellable
+		// GoBGP call even if the caller has just been cancelled. If the
+		// bounded queue is full, cancellation remains the escape hatch.
+		select {
+		case b.withdrawQueue <- request:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

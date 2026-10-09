@@ -22,10 +22,24 @@ type BGPManager interface {
 
 // Server manages a server object
 type Server struct {
-	s       *gobgp.BgpServer
-	c       *kubevip.BGPConfig
-	mtx     sync.Mutex
-	tracker map[string]map[string]bool
+	s                 *gobgp.BgpServer
+	c                 *kubevip.BGPConfig
+	mtx               sync.Mutex
+	tracker           map[string]map[string]bool
+	withdrawOnce      sync.Once
+	withdrawCloseOnce sync.Once
+	withdrawQueue     chan withdrawalRequest
+	withdrawStop      chan struct{}
+	withdrawDone      chan struct{}
+	deletePathFunc    func(apiutil.DeletePathRequest) error
+}
+
+const withdrawalQueueSize = 32
+
+type withdrawalRequest struct {
+	ctx    context.Context
+	req    apiutil.DeletePathRequest
+	result chan error
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -50,7 +64,52 @@ func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error
 		c:       &c,
 		tracker: make(map[string]map[string]bool),
 	}
+	b.deletePathFunc = b.s.DeletePath
 	return
+}
+
+func (b *Server) startWithdrawalWorker() {
+	b.withdrawOnce.Do(func() {
+		b.withdrawQueue = make(chan withdrawalRequest, withdrawalQueueSize)
+		b.withdrawStop = make(chan struct{})
+		b.withdrawDone = make(chan struct{})
+		go b.withdrawalWorker()
+	})
+}
+
+// withdrawalWorker serializes withdrawals so cancellation cannot create an
+// unbounded goroutine-per-call. GoBGP's embedded DeletePath has no context
+// parameter; a queued operation therefore remains non-cancellable once it
+// starts, but the caller can stop waiting and the bounded worker owns its
+// eventual completion.
+func (b *Server) withdrawalWorker() {
+	defer close(b.withdrawDone)
+	for {
+		select {
+		case <-b.withdrawStop:
+			b.cancelQueuedWithdrawals()
+			return
+		default:
+		}
+		select {
+		case req := <-b.withdrawQueue:
+			req.result <- b.deletePathFunc(req.req)
+		case <-b.withdrawStop:
+			b.cancelQueuedWithdrawals()
+			return
+		}
+	}
+}
+
+func (b *Server) cancelQueuedWithdrawals() {
+	for {
+		select {
+		case req := <-b.withdrawQueue:
+			req.result <- context.Canceled
+		default:
+			return
+		}
+	}
 }
 
 // Start starts the BGP server
@@ -100,6 +159,10 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
+	if b.withdrawDone != nil {
+		b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
+		<-b.withdrawDone
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return b.s.StopBgp(ctx, &api.StopBgpRequest{})

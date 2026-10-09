@@ -99,8 +99,9 @@ EventLoop:
 		select {
 		case <-ctx.Done():
 			log.Info("global context done")
+			break EventLoop
 		case <-watcherCtx.Done():
-			log.Info("WatcheConotext done")
+			log.Info("watcher context done")
 			break EventLoop
 		default:
 			// We need to inspect the event and get ResourceVersion out of it
