@@ -168,7 +168,7 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 	defer watchCancel()
 
 	rw, err := watchtools.NewRetryWatcherWithContext(watchCtx, "1", &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(_ context.Context, _ metav1.ListOptions) (watch.Interface, error) {
 			return utils.WatchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
 				return em.RetryWatcherClient.CoreV1().Nodes().Watch(watchCtx, listOptions)
 			})

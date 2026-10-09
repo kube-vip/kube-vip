@@ -20,7 +20,7 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12
+          version: v2.14
           install-only: true
       - name: Checkout code
         uses: actions/checkout@v7
