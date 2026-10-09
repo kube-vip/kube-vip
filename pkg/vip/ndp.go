@@ -7,6 +7,8 @@ import (
 
 	"github.com/mdlayher/ndp"
 
+	"github.com/kube-vip/kube-vip/pkg/metrics"
+
 	log "log/slog"
 )
 
@@ -47,11 +49,18 @@ func (n *NdpResponder) Close() error {
 func (n *NdpResponder) SendGratuitous(address string) error {
 	ip, err := netip.ParseAddr(address)
 	if err != nil {
+		metrics.NDPAdvertisementsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("failed to parse address %s", ip)
 	}
 
 	log.Info("Broadcasting NDP update", "ip", address, "hwaddr", n.hardwareAddr, "interface", n.intf)
-	return n.advertise(netip.IPv6LinkLocalAllNodes(), ip, true)
+	err = n.advertise(netip.IPv6LinkLocalAllNodes(), ip, true)
+	if err != nil {
+		metrics.NDPAdvertisementsTotal.WithLabelValues("error").Inc()
+	} else {
+		metrics.NDPAdvertisementsTotal.WithLabelValues("ok").Inc()
+	}
+	return err
 }
 
 func (n *NdpResponder) advertise(dst, target netip.Addr, gratuitous bool) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/networkinterface"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/node"
@@ -155,6 +156,10 @@ func (w *WireGuard) OnStartedLeading(ctx context.Context) {
 // watchKubernetesEndpoints watches the kubernetes service EndpointSlices for changes
 // and updates the DNAT rules when API server endpoints change (e.g., when an API server goes down)
 func (w *WireGuard) watchKubernetesEndpoints(ctx context.Context, tunnelConfig *wireguard.TunnelConfig) {
+	loops := metrics.WatcherLoops.WithLabelValues("endpoint")
+	loops.Inc()
+	defer loops.Dec()
+
 	log.Info("starting kubernetes endpoint watcher for control plane")
 
 	kubeSvc := &v1.Service{
