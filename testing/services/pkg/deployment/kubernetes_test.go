@@ -6,7 +6,7 @@ func TestBackendLabelsExcludeKubeVIPDaemonSet(t *testing.T) {
 	const namespace = "kube-vip-egress"
 
 	backend := backendLabels(namespace)
-	daemonSet := buildKVDsDaemonSet(namespace, "kube-vip:test", "", false)
+	daemonSet := buildKVDsDaemonSet(namespace, "kube-vip:test", "", false, false)
 
 	if backend["app.kubernetes.io/instance"] != namespace {
 		t.Fatalf("backend instance label = %q, want %q", backend["app.kubernetes.io/instance"], namespace)
@@ -27,7 +27,7 @@ func TestBackendLabelsExcludeKubeVIPDaemonSet(t *testing.T) {
 func TestNamespacedKubeVIPDaemonSetEgressIsolation(t *testing.T) {
 	const namespace = "kube-vip-egress"
 
-	daemonSet := buildKVDsDaemonSet(namespace, "kube-vip:test", "", false)
+	daemonSet := buildKVDsDaemonSet(namespace, "kube-vip:test", "", false, false)
 	env := daemonSet.Spec.Template.Spec.Containers[0].Env
 
 	want := map[string]string{
