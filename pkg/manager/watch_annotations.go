@@ -62,7 +62,7 @@ func annotationsWatcher(ctx context.Context, clientSet,
 	log.Warn(err.Error())
 
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, node.ResourceVersion, &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(_ context.Context, _ metav1.ListOptions) (watch.Interface, error) {
 			return rwClientSet.CoreV1().Nodes().Watch(ctx, listOptions)
 		},
 	})

@@ -38,7 +38,7 @@ func (ep *Endpoints) CreateRetryWatcher(ctx context.Context, clientSet *kubernet
 	}
 
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(_ context.Context, _ metav1.ListOptions) (watch.Interface, error) {
 			return clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
 		},
 	})
