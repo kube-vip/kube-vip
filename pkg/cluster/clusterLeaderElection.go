@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
@@ -124,6 +125,44 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	return nil
 }
 
+func (cluster *Cluster) controlPlaneHealthCheckLoop(ctx context.Context, c *kubevip.Config, onFailure func()) {
+	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
+
+	consecutiveFailures := 0
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+
+	log.Info("Starting control-plane health check for leader election",
+		"address", c.ControlPlaneHealthCheck.Address,
+		"period", period,
+		"timeout", cluster.healthCheckHTTPClient.Timeout,
+		"threshold", c.ControlPlaneHealthCheck.FailureThreshold,
+	)
+
+	for {
+		healthy, healthErr := cluster.controlPlaneHealthCheck(ctx, c)
+		if healthy {
+			consecutiveFailures = 0
+		} else {
+			consecutiveFailures++
+			log.Warn("control-plane health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures,
+				"threshold", c.ControlPlaneHealthCheck.FailureThreshold, "err", healthErr)
+
+			if consecutiveFailures >= c.ControlPlaneHealthCheck.FailureThreshold {
+				log.Warn("control-plane health check threshold reached, relinquishing leadership", "failureThreshold", c.ControlPlaneHealthCheck.FailureThreshold)
+				onFailure()
+				return
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Lease,
 	em *election.Manager, bgpServer *bgp.Server, killFunc func(), isShared bool) {
 	objLease.Elected.Store(true)
@@ -153,6 +192,10 @@ func (cluster *Cluster) OnStartedLeading(c *kubevip.Config, objLease *lease.Leas
 				log.Info("VIP already configured on interface", "IP", cluster.Network[i].IP(), "interface", cluster.Network[i].Interface())
 			}
 		}
+	}
+
+	if c.EnableARP && c.ControlPlaneHealthCheck.Address != "" {
+		go cluster.controlPlaneHealthCheckLoop(objLease.Ctx, c, objLease.Cancel)
 	}
 
 	// As we're leading lets start the vip service
