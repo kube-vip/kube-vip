@@ -67,15 +67,6 @@ func (m *Manager) Remove(instance *Instance) {
 	m.RemoveWithIPDelete(instance, true)
 }
 
-// RemoveOnLeadershipLoss removes an ARP instance when leadership is lost
-func (m *Manager) RemoveOnLeadershipLoss(instance *Instance) {
-	// Use the inverse of PreserveVIPOnLeadershipLoss to decide whether to delete the IP
-	// If preserve is true, don't delete IP (deleteIP = false)
-	// If preserve is false, delete IP (deleteIP = true), This is the legacy behavior
-	deleteIP := !m.config.PreserveVIPOnLeadershipLoss
-	m.RemoveWithIPDelete(instance, deleteIP)
-}
-
 func (m *Manager) RemoveWithIPDelete(instance *Instance, deleteIP bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
