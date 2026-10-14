@@ -880,6 +880,24 @@ func (p *Processor) serviceInstances() []*instance.Instance {
 	return append([]*instance.Instance(nil), p.ServiceInstances...)
 }
 
+func (p *Processor) ServiceSnapshots() []*v1.Service {
+	var snapshots []*v1.Service
+	for _, inst := range p.serviceInstances() {
+		if inst == nil {
+			continue
+		}
+		uid := inst.UID()
+		p.serviceLock.Lock(uid)
+		if inst.ServiceSnapshot != nil {
+			snapshots = append(snapshots, inst.ServiceSnapshot.DeepCopy())
+		}
+		if err := p.serviceLock.Unlock(uid); err != nil {
+			log.Error("failed to release service lock", "uid", uid, "err", err)
+		}
+	}
+	return snapshots
+}
+
 // OwnedServiceVIPs returns the VIPs whose Service datapath is currently active.
 // It is safe to use as a dynamic provider for Lease ownership metadata.
 func (p *Processor) OwnedServiceVIPs() []string {

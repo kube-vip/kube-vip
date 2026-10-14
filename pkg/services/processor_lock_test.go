@@ -28,6 +28,28 @@ type testLabeler struct {
 	removeErr error
 }
 
+func TestServiceSnapshotsAreDetached(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service", Namespace: "default", UID: types.UID("service"),
+		Annotations: map[string]string{"example.test/value": "original"},
+	}}
+	processor := &Processor{
+		serviceLock: NewServiceLock(),
+		ServiceInstances: []*instance.Instance{
+			nil,
+			{ServiceUID: service.UID, ServiceSnapshot: service},
+		},
+	}
+	snapshots := processor.ServiceSnapshots()
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1", len(snapshots))
+	}
+	snapshots[0].Annotations["example.test/value"] = "changed"
+	if got := service.Annotations["example.test/value"]; got != "original" {
+		t.Fatalf("snapshot mutation changed tracked Service: %q", got)
+	}
+}
+
 func (l *testLabeler) AddLabel(map[string]string) error {
 	l.addCalls++
 	if len(l.addErrors) > 0 {

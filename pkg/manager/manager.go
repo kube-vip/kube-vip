@@ -52,7 +52,12 @@ type Manager struct {
 	// This channel is used to catch an OS signal and trigger a shutdown
 	signalChan chan os.Signal
 
-	sigint sync.Once
+	sigint       sync.Once
+	killChan     chan struct{}
+	killChanOnce sync.Once
+	dumpWG       sync.WaitGroup
+	dumping      atomic.Bool
+	dump         func(context.Context)
 
 	svcProcessor *services.Processor
 
@@ -80,7 +85,8 @@ type Manager struct {
 	leaseMgr *lease.Manager
 
 	// Will handle routes
-	routeMgr *route.Manager
+	routeMgr   *route.Manager
+	modeWorker func() worker.Worker
 }
 
 // New will create a new managing object
@@ -347,16 +353,19 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.electionMgr,
 		sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
+	if sm.modeWorker != nil {
+		w = sm.modeWorker()
+	}
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
+		cancel()
 		wg.Wait()
 		sm.svcProcessor.WaitForElectionCampaigns()
 		w.Cleanup()
-		cancel()
 		log.Info("Shutting down Kube-Vip")
 	}()
 
@@ -382,6 +391,9 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	if sm.config.EnableControlPlane {
 		wg.Go(func() {
 			w.StartControlPlane(modeCtx, sm.electionMgr)
+			if modeCtx.Err() == nil {
+				sm.Kill()
+			}
 		})
 	}
 
@@ -420,25 +432,45 @@ func (sm *Manager) startMode(ctx context.Context) error {
 						log.Error("failed to reconcile services, restarting", "error", err)
 					}
 				}
+				select {
+				case <-modeCtx.Done():
+					return nil
+				case <-time.After(200 * time.Millisecond):
+				}
 			}
 		}
 	}
 
+	if sm.config.EnableControlPlane {
+		<-modeCtx.Done()
+	}
 	return nil
 }
 
 func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+	defer sm.dumpWG.Wait()
 	for {
 		var sig os.Signal
 		select {
 		case <-ctx.Done():
 			return
+		case <-sm.killChannel():
+			sig = syscall.SIGINT
 		case sig = <-sm.signalChan:
 		}
 		switch sig {
 		case syscall.SIGUSR1:
-			log.Info("Received SIGUSR1, dumping configuration")
-			sm.dumpConfiguration(ctx)
+			if sm.dumping.CompareAndSwap(false, true) {
+				log.Info("Received SIGUSR1, dumping configuration")
+				dump := sm.dump
+				if dump == nil {
+					dump = sm.dumpConfiguration
+				}
+				sm.dumpWG.Go(func() {
+					defer sm.dumping.Store(false)
+					dump(ctx)
+				})
+			}
 		case syscall.SIGINT, syscall.SIGTERM:
 			sm.closing.Store(true)
 			log.Info("Received kube-vip termination, signaling shutdown")
@@ -454,8 +486,15 @@ func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFun
 
 func (sm *Manager) Kill() {
 	sm.sigint.Do(func() {
-		sm.signalChan <- syscall.SIGINT
+		close(sm.killChannel())
 	})
+}
+
+func (sm *Manager) killChannel() chan struct{} {
+	sm.killChanOnce.Do(func() {
+		sm.killChan = make(chan struct{})
+	})
+	return sm.killChan
 }
 
 // normalizeNodeName ensures the local machine hostname conforms to
