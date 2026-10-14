@@ -6,7 +6,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -14,35 +13,53 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/lease"
-	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/wireguard"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
+type serviceInstanceFinder func(*v1.Service) *instance.Instance
+
 type Processor struct {
-	config    *kubevip.Config
-	provider  providers.Provider
-	bgpServer *bgp.Server
-	worker    endpointWorker
-	instances *[]*instance.Instance
-	leaseMgr  *lease.Manager
+	config              *kubevip.Config
+	provider            providers.Provider
+	bgpServer           *bgp.Server
+	worker              endpointWorker
+	findServiceInstance serviceInstanceFinder
+	serviceLocks        ServiceLocker
+}
+
+type reconcileResult struct {
+	updatedService        *v1.Service
+	instance              *instance.Instance
+	annotationsChanged    bool
+	skip                  bool
+	endpointCount         int
+	readinessToInvalidate servicecontext.ReadinessGeneration
+	invalidateReadiness   bool
+}
+
+// ServiceLocker serializes operations belonging to the same Service UID.
+type ServiceLocker interface {
+	Lock(types.UID)
+	Unlock(types.UID) error
 }
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
-	instances *[]*instance.Instance, leaseMgr *lease.Manager, tunnelMgr *wireguard.TunnelManager, routeMgr *route.Manager) *Processor {
+	findServiceInstance serviceInstanceFinder, tunnelMgr wireguard.ServiceTunnelManager, routeMgr *route.Manager,
+	serviceLocks ServiceLocker) *Processor {
 	return &Processor{
-		config:    config,
-		provider:  provider,
-		bgpServer: bgpServer,
-		instances: instances,
-		leaseMgr:  leaseMgr,
-		worker:    newEndpointWorker(config, provider, bgpServer, instances, leaseMgr, tunnelMgr, routeMgr),
+		config:              config,
+		provider:            provider,
+		bgpServer:           bgpServer,
+		findServiceInstance: findServiceInstance,
+		serviceLocks:        serviceLocks,
+		worker:              newEndpointWorker(config, provider, bgpServer, tunnelMgr, routeMgr),
 	}
 }
 
@@ -53,76 +70,112 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 // and wait for the next one.
 func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
-	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup,
+	wg *sync.WaitGroup,
 	clientSet *kubernetes.Clientset,
-	egressUpdateFunc func(context.Context, *v1.Service) error) (bool, error) {
+	egressUpdateFunc func(context.Context, *v1.Service, *instance.Instance) error) (bool, error) {
+	if p.serviceLocks == nil {
+		return false, fmt.Errorf("service operation lock is not configured")
+	}
 
+	result, err := p.reconcileEndpointState(svcCtx, event, lastKnownGoodEndpoint, service, id, wg, clientSet)
+	if err != nil || result.skip {
+		return result.skip, err
+	}
+
+	// Invalidation waits for in-flight activation. It must happen without the
+	// Service lock because activation may need that lock to finish.
+	if result.invalidateReadiness && svcCtx.ResetReadinessGeneration(result.readinessToInvalidate) {
+		p.cleanupEndpointlessService(svcCtx, service, lastKnownGoodEndpoint)
+	}
+
+	if result.annotationsChanged && egressUpdateFunc != nil {
+		if err := egressUpdateFunc(context.Background(), result.updatedService, result.instance); err != nil {
+			log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
+		}
+	}
+
+	log.Debug("watcher", "provider",
+		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", result.endpointCount, "last endpoint", *lastKnownGoodEndpoint)
+
+	return false, nil
+}
+
+// reconcileEndpointState applies the endpoint event and computes the readiness
+// transition while serializing all Service state changes for this UID.
+func (p *Processor) reconcileEndpointState(svcCtx *servicecontext.Context, event watch.Event,
+	lastKnownGoodEndpoint *string, service *v1.Service, id string, wg *sync.WaitGroup,
+	clientSet *kubernetes.Clientset) (reconcileResult, error) {
+	p.serviceLocks.Lock(service.UID)
+	defer func() {
+		if err := p.serviceLocks.Unlock(service.UID); err != nil {
+			log.Error("failed to release service lock", "uid", service.UID, "err", err)
+		}
+	}()
+
+	result := reconcileResult{}
 	if err := p.applyEvent(svcCtx, event); err != nil {
-		return false, err
+		return result, err
 	}
 
 	endpoints, err := p.worker.getEndpoints(service, id)
 	if err != nil {
-		return false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
+		return result, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
 	}
+	if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
+		endpoints = nil
+	}
+	result.endpointCount = len(endpoints)
+	result.instance = p.serviceInstance(service)
 
-	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
+	if err := p.worker.setInstanceEndpointsStatus(service, result.instance, endpoints); err != nil {
 		log.Error("updating instance", "err", err)
 	}
 
-	allowReconcileWithoutEndpoints := shouldAllowReconcileWithoutEndpoints(service)
-
-	// Find out if we have any local endpoints
-	// if out endpoint is empty then populate it
-	// if not, go through the endpoints and see if ours still exists
-	// If we have a local endpoint then begin the leader Election, unless it's already running
-	//
-
-	// Check that we have local endpoints
 	if len(endpoints) != 0 {
-		// Ignore IPv4
-		if service.Annotations[kubevip.EgressIPv6] == "true" && !hasV6(endpoints) {
-			return true, nil
-		}
-
 		p.updateLastKnownGoodEndpoint(lastKnownGoodEndpoint, endpoints, service)
-
-		if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg); err != nil {
-			return true, err
+		if skip, err := p.makeServiceReady(svcCtx, service, result.instance, wg, "non-empty"); err != nil {
+			result.skip = skip
+			return result, err
 		}
-
-		svcCtx.SignalReadiness()
-
-		if p.shouldProcessInstance() {
-			if err := p.worker.processInstance(svcCtx, service); err != nil {
-				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
-			}
+	} else if shouldAllowReconcileWithoutEndpoints(service) {
+		// Explicit opt-in for controllers that create LoadBalancer services without endpoints.
+		if skip, err := p.makeServiceReady(svcCtx, service, result.instance, wg, "endpointless"); err != nil {
+			result.skip = skip
+			return result, err
 		}
-	} else {
-		if allowReconcileWithoutEndpoints {
-			// Explicit opt-in for controllers that create LoadBalancer services without endpoints
-			if err := p.startServiceHandlingIfNeeded(svcCtx, service, serviceFunc, wg); err != nil {
-				return true, err
-			}
-			svcCtx.SignalReadiness()
-
-			if p.shouldProcessInstance() {
-				if err := p.worker.processInstance(svcCtx, service); err != nil {
-					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
-				}
-			}
-		} else if svcCtx.Signalled.Load() {
-			p.handleNoEndpoints(svcCtx, service, lastKnownGoodEndpoint)
-		}
+	} else if svcCtx.IsReady() {
+		result.readinessToInvalidate = svcCtx.CurrentReadiness()
+		result.invalidateReadiness = true
 	}
 
-	// Set the service accordingly
-	p.updateAnnotations(service, lastKnownGoodEndpoint, clientSet, egressUpdateFunc)
+	result.updatedService, result.annotationsChanged = p.updateAnnotations(service, result.instance, lastKnownGoodEndpoint, clientSet)
+	return result, nil
+}
 
-	log.Debug("watcher", "provider",
-		p.provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace, "endpoints", len(endpoints), "last endpoint", *lastKnownGoodEndpoint)
-
+func (p *Processor) makeServiceReady(svcCtx *servicecontext.Context, service *v1.Service,
+	inst *instance.Instance, wg *sync.WaitGroup, endpointState string) (bool, error) {
+	if err := p.startServiceHandlingIfNeeded(svcCtx, service, inst, wg); err != nil {
+		return true, err
+	}
+	svcCtx.SignalReadiness()
+	if p.shouldProcessInstance() {
+		if err := p.worker.processInstance(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, service, inst); err != nil {
+			return false, fmt.Errorf("failed to process %s instance: %w", endpointState, err)
+		}
+	}
 	return false, nil
+}
+
+func (p *Processor) cleanupEndpointlessService(svcCtx *servicecontext.Context, service *v1.Service,
+	lastKnownGoodEndpoint *string) {
+	p.serviceLocks.Lock(service.UID)
+	defer func() {
+		if err := p.serviceLocks.Unlock(service.UID); err != nil {
+			log.Error("failed to release service lock", "uid", service.UID, "err", err)
+		}
+	}()
+	instance := p.serviceInstance(service)
+	p.handleNoEndpoints(svcCtx, service, instance, lastKnownGoodEndpoint)
 }
 
 // applyEvent updates the provider's view of the objects backing this service.
@@ -149,13 +202,13 @@ func (p *Processor) shouldProcessInstance() bool {
 
 // handleNoEndpoints tears down everything backing a service that no longer has
 // any usable endpoints.
-func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, lastKnownGoodEndpoint *string) {
-	svcCtx.ResetReadiness()
-	p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
-	if p.config.EnableARP && !p.config.EnableServicesElection && p.instances != nil {
-		if i := instance.FindServiceInstance(service, *p.instances); i != nil {
-			for _, c := range i.Clusters {
-				c.Stop()
+func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance, lastKnownGoodEndpoint *string) {
+	p.worker.clear(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, lastKnownGoodEndpoint, service, inst)
+	stopWorkers := p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection)
+	if stopWorkers && !p.config.EnableServicesElection {
+		if inst != nil {
+			for _, c := range inst.Clusters {
+				c.StopAndWait()
 			}
 		}
 	}
@@ -195,9 +248,8 @@ func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, e
 	}
 }
 
-func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint *string,
-	clientSet *kubernetes.Clientset,
-	egressUpdateFunc func(context.Context, *v1.Service) error) {
+func (p *Processor) updateAnnotations(service *v1.Service, inst *instance.Instance, lastKnownGoodEndpoint *string,
+	clientSet *kubernetes.Clientset) (*v1.Service, bool) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
 		if *lastKnownGoodEndpoint != "" {
@@ -209,7 +261,7 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 					"namespace", service.Namespace,
 					"endpoint", *lastKnownGoodEndpoint,
 					"expected_ipv6", expectIPv6)
-				return
+				return nil, false
 			}
 		}
 
@@ -218,12 +270,11 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 		// may have stale annotations if the last update failed
 		var oldEndpoint, oldEndpointIPv6 string
 		snapshotFound := false
-		if p.instances != nil {
-			serviceInstance := instance.FindServiceInstance(service, *p.instances)
-			if serviceInstance != nil && serviceInstance.ServiceSnapshot != nil {
+		if inst != nil {
+			if inst.ServiceSnapshot != nil {
 				snapshotFound = true
-				oldEndpoint = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
-				oldEndpointIPv6 = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
+				oldEndpoint = inst.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
+				oldEndpointIPv6 = inst.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 			}
 		}
 		// Empty annotations in an existing snapshot are meaningful after a zero-endpoint transition.
@@ -247,7 +298,7 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 		// Check if annotation actually changed
 		annotationChanged := (oldEndpoint != endpoint) || (oldEndpointIPv6 != endpointIPv6)
 		if !annotationChanged {
-			return // Nothing to do
+			return nil, false
 		}
 
 		// Persist to Kubernetes
@@ -255,51 +306,32 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 
 		if err := p.provider.UpdateServiceAnnotation(ctx, endpoint, endpointIPv6, service, clientSet); err != nil {
 			log.Warn("failed to update service annotation", "service", service.Name, "namespace", service.Namespace, "err", err)
-			return
+			return nil, false
 		}
 
 		log.Debug("updated active endpoint annotation", "service", service.Name, "namespace", service.Namespace, "endpoint", *lastKnownGoodEndpoint)
 
-		// Trigger egress reconfiguration
-		// For services with leader election, the service watcher doesn't process Modified events
-		// after initial setup, so we need to directly call the update function
-		if egressUpdateFunc != nil {
-			// Create a copy of service with updated annotations
-			svcCopy := service.DeepCopy()
-			svcCopy.Annotations[kubevip.ActiveEndpoint] = endpoint
-			svcCopy.Annotations[kubevip.ActiveEndpointIPv6] = endpointIPv6
-
-			if err := egressUpdateFunc(ctx, svcCopy); err != nil {
-				log.Error("failed to reconfigure egress", "service", service.Name, "namespace", service.Namespace, "err", err)
-			}
-		}
+		svcCopy := service.DeepCopy()
+		svcCopy.Annotations[kubevip.ActiveEndpoint] = endpoint
+		svcCopy.Annotations[kubevip.ActiveEndpointIPv6] = endpointIPv6
+		return svcCopy, true
 	}
+	return nil, false
 }
 
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
-	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) error {
+	inst *instance.Instance, wg *sync.WaitGroup) error {
 	if p.config.EnableServicesElection {
-		// startLeaderElection restarts itself until the service context is cancelled,
-		// so start it only once instead of on every endpoint event.
-		svcCtx.StartLeaderElectionOnce(func() {
-			wg.Go(func() {
-				p.startLeaderElection(svcCtx, service, serviceFunc, wg)
-			})
-		})
 		return nil
 	}
 
 	if p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection) {
-		if !svcCtx.Signalled.Load() {
-			inst := instance.FindServiceInstance(service, *p.instances)
+		if !svcCtx.IsReady() {
 			if inst == nil {
 				return fmt.Errorf("[%s] failed to find an instance for service %s/%s", p.provider.GetLabel(), service.Namespace, service.Name)
 			}
-			for x := range inst.VIPConfigs {
-				log.Debug("starting loadbalancer for service", "provider", p.provider.GetLabel(), "name", service.Name, "namespace", service.Namespace, "uid", service.UID)
-				if err := inst.Clusters[x].StartLoadBalancerService(svcCtx.Ctx, inst.VIPConfigs[x], p.bgpServer, lease.ServiceNamespacedName(service), wg); err != nil {
-					return fmt.Errorf("failed to start lb: %w", err)
-				}
+			if err := StartService(svcCtx.Ctx, service, inst, p.bgpServer, wg); err != nil {
+				return fmt.Errorf("start service datapath: %w", err)
 			}
 		}
 	}
@@ -307,44 +339,11 @@ func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context,
 	return nil
 }
 
-func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service *v1.Service, serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup) {
-	// Track this loop for the lifetime of the goroutine. There has to be at most
-	// one per service, so a value above 1 means loops leaked.
-	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
-	loops.Inc()
-	defer loops.Dec()
-
-	attempts := metrics.ServiceElectionAttemptsTotal.WithLabelValues(service.Namespace, service.Name)
-
-	// This is a blocking function, that will restart (in the event of failure)
-	for {
-		select {
-		case <-svcCtx.Ctx.Done():
-			return
-		default:
-			leaseNamespace, serviceLease := lease.ServiceName(service)
-			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
-			// The lease is retired once its last service is gone, so an absent one means
-			// this loop has nothing left to elect for.
-			l := p.leaseMgr.Get(id)
-			if l == nil {
-				return
-			}
-			l.Lock()
-
-			if !l.Elected.Load() {
-				l.Unlock()
-				attempts.Inc()
-				err := serviceFunc(svcCtx, service, wg, true)
-				if err != nil {
-					log.Error(err.Error())
-				}
-			} else {
-				l.Unlock()
-				time.Sleep(time.Millisecond * 200)
-			}
-		}
+func (p *Processor) serviceInstance(service *v1.Service) *instance.Instance {
+	if p.findServiceInstance == nil {
+		return nil
 	}
+	return p.findServiceInstance(service)
 }
 
 func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {

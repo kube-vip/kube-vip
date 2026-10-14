@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -15,13 +16,110 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
+	"k8s.io/client-go/util/workqueue"
 )
 
+const concurrentServiceEventWorkers = 4
+
+type serviceEventTask struct {
+	uid types.UID
+	run func()
+}
+
+type serviceEventQueue struct {
+	ctx   context.Context
+	queue workqueue.TypedInterface[types.NamespacedName]
+	mutex sync.Mutex
+	tasks map[types.NamespacedName][]*serviceEventTask
+	wg    sync.WaitGroup
+}
+
+func newServiceEventQueue(ctx context.Context, workers int) *serviceEventQueue {
+	q := &serviceEventQueue{
+		ctx:   ctx,
+		queue: workqueue.NewTyped[types.NamespacedName](),
+		tasks: make(map[types.NamespacedName][]*serviceEventTask),
+	}
+	for range workers {
+		q.wg.Go(q.run)
+	}
+	return q
+}
+
+func (q *serviceEventQueue) Add(key types.NamespacedName, uid types.UID, run func()) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if q.ctx.Err() != nil || q.queue.ShuttingDown() {
+		return
+	}
+	tasks := q.tasks[key]
+	task := &serviceEventTask{uid: uid, run: run}
+	if len(tasks) != 0 && tasks[len(tasks)-1].uid == uid {
+		tasks[len(tasks)-1] = task
+	} else {
+		tasks = append(tasks, task)
+	}
+	q.tasks[key] = tasks
+	q.queue.Add(key)
+}
+
+func (q *serviceEventQueue) run() {
+	for {
+		key, shutdown := q.queue.Get()
+		if shutdown {
+			return
+		}
+		q.runNext(key)
+	}
+}
+
+func (q *serviceEventQueue) runNext(key types.NamespacedName) {
+	defer q.queue.Done(key)
+	for {
+		task := q.nextTask(key)
+		if task == nil {
+			return
+		}
+		if q.ctx.Err() == nil {
+			task.run()
+		}
+	}
+}
+
+func (q *serviceEventQueue) nextTask(key types.NamespacedName) *serviceEventTask {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	tasks := q.tasks[key]
+	if len(tasks) == 0 {
+		delete(q.tasks, key)
+		return nil
+	}
+	task := tasks[0]
+	if len(tasks) == 1 {
+		delete(q.tasks, key)
+	} else {
+		q.tasks[key] = tasks[1:]
+	}
+	return task
+}
+
+func (q *serviceEventQueue) Wait() {
+	q.queue.ShutDown()
+	q.wg.Wait()
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	clear(q.tasks)
+}
+
 // This function handles the watching of a services endpoints and updates a load balancers endpoint configurations accordingly
-func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, forcedOnly bool) error {
+func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, forcedOnly bool) error {
+	if serviceFunc == nil {
+		return errServiceCallbackRequired
+	}
 	// first start port mirroring if enabled
 	if err := p.startTrafficMirroringIfEnabled(); err != nil {
 		return err
@@ -41,11 +139,14 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	} else {
 		log.Info("(svcs) starting services watcher", "namespace", p.config.ServiceNamespace)
 	}
+	if err := p.RecoverAddresses(ctx); err != nil {
+		log.Warn("skipping kube-vip address recovery", "err", err)
+	}
 
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFuncWithContext: func(_ context.Context, _ metav1.ListOptions) (watch.Interface, error) {
-			return utils.WatchWithAuthRetry(ctx, func(ctx context.Context) (watch.Interface, error) {
+		WatchFuncWithContext: func(watchCtx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
+			return utils.WatchWithAuthRetry(watchCtx, func(ctx context.Context) (watch.Interface, error) {
 				return p.rwClientSet.CoreV1().Services(p.config.ServiceNamespace).Watch(ctx, metav1.ListOptions{})
 			})
 		},
@@ -60,15 +161,16 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	}
 
 	var wg sync.WaitGroup
+	watcherCtx, cancelWatcher := context.WithCancelCause(ctx)
+	eventQueue := newServiceEventQueue(watcherCtx, concurrentServiceEventWorkers)
 	defer func() {
 		if d != nil {
 			d.Stop()
 		}
 		rw.Stop()
+		eventQueue.Wait()
 		wg.Wait()
 	}()
-
-	watcherCtx, cancelWatcher := context.WithCancelCause(ctx)
 	defer cancelWatcher(nil)
 
 	wg.Go(func() {
@@ -93,41 +195,36 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc *Callback, 
 	}
 
 	// Used for tracking an active endpoint / pod
-EventLoop:
 	for event := range ch {
 		metrics.CountServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
-		select {
-		case <-ctx.Done():
-			log.Info("global context done")
-		case <-watcherCtx.Done():
-			log.Info("WatcheConotext done")
-			break EventLoop
-		default:
-			// We need to inspect the event and get ResourceVersion out of it
-			switch event.Type {
-			case watch.Added, watch.Modified:
-				if err := p.AddOrModify(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
-					if utils.IsPanicError(err) {
-						return fmt.Errorf("add/modify service error: %w", err)
-					}
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
-				}
-			case watch.Deleted:
-				if err := p.Delete(event, forcedOnly); err != nil {
-					if utils.IsPanicError(err) {
-						return fmt.Errorf("delete service error: %w", err)
-					}
-					log.Error("service watcher event failed", "type", event.Type, "error", err)
-				}
-			case watch.Bookmark:
-				// Un-used
-			case watch.Error:
-				log.Error("Error attempting to watch Kubernetes services")
-				watchErr := utils.WatchError(event.Object)
-				log.Error("services", "err", watchErr)
-				return utils.WrapPanicError(watchErr, "service watch failed")
-			default:
+
+		switch event.Type {
+		case watch.Added, watch.Modified, watch.Deleted:
+			svc, ok := event.Object.(*v1.Service)
+			if !ok || svc == nil {
+				log.Error("service watcher event failed", "type", event.Type, "error", "unable to parse Kubernetes Service")
+				continue
 			}
+			if event.Type == watch.Deleted && serviceMatchesWatcher(svc, forcedOnly) {
+				if _, err := p.cancelPublishedServiceContext(svc.UID); err != nil {
+					log.Error("failed to cancel deleted Service context", "service", svc.Name, "namespace", svc.Namespace, "error", err)
+				}
+			}
+			event := event
+			key := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+			eventQueue.Add(key, svc.UID, func() {
+				if err := p.processServiceEvent(watcherCtx, event, serviceFunc, forcedOnly, &wg, cancelWatcher); err != nil {
+					cancelWatcher(err)
+				}
+			})
+		case watch.Bookmark:
+			// Un-used
+		case watch.Error:
+			log.Error("Error attempting to watch Kubernetes services")
+			watchErr := utils.WatchError(event.Object)
+			log.Error("services", "err", watchErr)
+			return utils.WrapPanicError(watchErr, "service watch failed")
+		default:
 		}
 	}
 
@@ -139,6 +236,33 @@ EventLoop:
 	}
 	log.Warn("Stopping watching services for type: LoadBalancer in all namespaces")
 	return utils.NewPanicError("service watch channel closed unexpectedly")
+}
+
+func (p *Processor) processServiceEvent(ctx context.Context, event watch.Event, serviceFunc Callback, forcedOnly bool,
+	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
+	var err error
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		err = p.Reconcile(ctx, event, serviceFunc, forcedOnly, wg, cancelWatcher)
+		if utils.IsPanicError(err) {
+			return fmt.Errorf("reconcile service error: %w", err)
+		}
+	case watch.Deleted:
+		err = p.Delete(event, forcedOnly)
+		if utils.IsPanicError(err) {
+			return fmt.Errorf("delete service error: %w", err)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, errServiceAddressPending) {
+			// The address controller publishes the address in a later Modified event.
+			log.Debug("service has no load-balancer address yet, waiting for update",
+				"type", event.Type, "error", err)
+			return nil
+		}
+		log.Error("service watcher event failed", "type", event.Type, "error", err)
+	}
+	return nil
 }
 
 func lbClassFilterLegacy(svc *v1.Service, config *kubevip.Config) bool {
