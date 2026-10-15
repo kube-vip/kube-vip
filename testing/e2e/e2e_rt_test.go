@@ -190,9 +190,15 @@ var _ = Describe("kube-vip routing table mode", func() {
 				// Pick a non-first node so the others keep serving the control plane.
 				targetContainer := controlPlaneContainerName(clusterName, 2)
 				otherContainer := controlPlaneContainerName(clusterName, 1)
+				restored := false
 
 				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
 				Expect(e2e.StashPodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
+				DeferCleanup(func() {
+					if !restored {
+						_ = e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")
+					}
+				})
 
 				By("verifying the unhealthy node withdraws its VIP and route")
 				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
@@ -204,6 +210,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
 				Expect(e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
+				restored = true
 
 				By("verifying the recovered node re-adds its VIP and route")
 				// Allow extra time here: the apiserver static pod must be restarted
@@ -329,9 +336,15 @@ var _ = Describe("kube-vip routing table mode", func() {
 				// Pick a non-first node so the others keep serving the control plane.
 				targetContainer := controlPlaneContainerName(clusterName, 2)
 				otherContainer := controlPlaneContainerName(clusterName, 1)
+				restored := false
 
 				By(fmt.Sprintf("stopping the apiserver on %q", targetContainer))
 				Expect(e2e.StashPodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
+				DeferCleanup(func() {
+					if !restored {
+						_ = e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")
+					}
+				})
 
 				By("verifying the unhealthy node withdraws its VIP and route")
 				Expect(checkIPAddress(cpVIP, targetContainer, false)).To(BeTrue())
@@ -343,6 +356,7 @@ var _ = Describe("kube-vip routing table mode", func() {
 
 				By(fmt.Sprintf("restoring the apiserver on %q", targetContainer))
 				Expect(e2e.RestorePodManifest(clusterName, targetContainer, "kube-apiserver.yaml")).To(Succeed())
+				restored = true
 
 				By("verifying the recovered node re-adds its VIP and route")
 				// Allow extra time here: the apiserver static pod must be restarted
