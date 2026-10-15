@@ -10,7 +10,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
-	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/vip"
@@ -94,17 +93,14 @@ func TestRoutingTableLeaderContext_WithdrawsRouteOnLeadershipLoss(t *testing.T) 
 	}
 	c.Network = []vip.Network{network}
 
-	leaseMgr := lease.NewManager()
-	objLease := leaseMgr.Add(context.Background(), lease.NewID("kubernetes", "default", "control-plane"))
-	objLease.Lock()
 	done := make(chan struct{})
 	go func() {
-		c.OnStartedLeading(cfg, objLease, &election.Manager{}, nil, func() {}, false)
+		c.OnStartedLeading(context.Background(), cfg, &election.Manager{}, nil, func() {})
 		close(done)
 	}()
 
-	expectEventually(t, func() bool { return objLease.Elected.Load() }, "leader service should start")
-	c.OnStoppedLeading(cfg, objLease, nil)
+	expectEventually(t, network.isRoutePresent, "leader service should start")
+	c.OnStoppedLeading(cfg, nil)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
