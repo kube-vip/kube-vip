@@ -272,7 +272,7 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 		select {
 		case <-c.stopChan:
 			cancel()
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}()
 
@@ -304,7 +304,7 @@ RequestLoop:
 				select {
 				case <-t.C:
 					t.Stop()
-				case <-ctx.Done():
+				case <-requestCtx.Done():
 				}
 				continue RequestLoop
 			}
@@ -318,7 +318,7 @@ RequestLoop:
 		select {
 		case c.ipChan <- lease.ACK.YourIPAddr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}
 
