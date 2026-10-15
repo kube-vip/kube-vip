@@ -76,7 +76,7 @@ func BlackholeAPIServer(clusterName, node string) error {
 	}
 
 	return runDocker(clusterName, "exec", node, "sh", "-c",
-		"for table in iptables ip6tables; do $table -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null || $table -I OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null || true; done",
+		"if ! iptables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; then iptables -I OUTPUT -p tcp --dport 6443 -j DROP || exit $?; fi; if command -v ip6tables >/dev/null 2>&1; then if ! ip6tables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; then ip6tables -I OUTPUT -p tcp --dport 6443 -j DROP || exit $?; fi; fi",
 	)
 }
 
@@ -89,7 +89,7 @@ func RestoreAPIServer(clusterName, node string) error {
 	}
 
 	return runDocker(clusterName, "exec", node, "sh", "-c",
-		"for table in iptables ip6tables; do while $table -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do $table -D OUTPUT -p tcp --dport 6443 -j DROP; done; done",
+		"while iptables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do iptables -D OUTPUT -p tcp --dport 6443 -j DROP; done; if command -v ip6tables >/dev/null 2>&1; then while ip6tables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do ip6tables -D OUTPUT -p tcp --dport 6443 -j DROP; done; fi",
 	)
 }
 
