@@ -133,3 +133,15 @@ func TrackServiceElectionLoop(namespace, name string) func() {
 		ServiceElectionLoops.WithLabelValues(namespace, name).Dec()
 	}
 }
+
+// TrackElectionLoop records a live leader election runner.
+func TrackElectionLoop(kind string) func() {
+	ElectionLoops.WithLabelValues(kind).Inc()
+	return func() { ElectionLoops.WithLabelValues(kind).Dec() }
+}
+
+// TrackWatcherLoop records a live watcher runner.
+func TrackWatcherLoop(kind string) func() {
+	WatcherLoops.WithLabelValues(kind).Inc()
+	return func() { WatcherLoops.WithLabelValues(kind).Dec() }
+}
