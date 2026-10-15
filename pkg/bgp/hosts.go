@@ -2,6 +2,7 @@ package bgp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	log "log/slog"
 	"net"
@@ -11,8 +12,10 @@ import (
 
 // AddHost will update peers of a host
 func (b *Server) AddHost(ctx context.Context, addr string, object string) error {
-	b.admission.RLock()
-	defer b.admission.RUnlock()
+	if !b.begin(ctx) {
+		return context.Canceled
+	}
+	defer b.active.Done()
 	for {
 		b.mtx.Lock()
 		if b.closing.Load() {
@@ -55,8 +58,10 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 }
 
 func (b *Server) DelHost(ctx context.Context, addr string, object string) error {
-	b.admission.RLock()
-	defer b.admission.RUnlock()
+	if !b.begin(ctx) {
+		return context.Canceled
+	}
+	defer b.active.Done()
 	for {
 		b.mtx.Lock()
 		if b.closing.Load() {
@@ -107,6 +112,13 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 			b.mtx.Unlock()
 		}
 		if err := b.deletePath(ctx, apiutil.DeletePathRequest{Paths: []*apiutil.Path{p}}, complete); err != nil {
+			if errors.Is(err, errWithdrawalNotQueued) {
+				b.mtx.Lock()
+				b.tracker[addr][object] = true
+				delete(b.pending, addr)
+				close(done)
+				b.mtx.Unlock()
+			}
 			return err
 		}
 		return nil
