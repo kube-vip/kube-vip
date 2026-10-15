@@ -32,7 +32,7 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 			continue
 		}
 		objects, exists := b.tracker[addr]
-		if !exists {
+		if !exists || len(objects) == 0 {
 			b.tracker[addr] = make(map[string]bool)
 			objects = b.tracker[addr]
 			ip, _, err := net.ParseCIDR(addr)
@@ -107,7 +107,7 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		complete := func(operationErr error) {
 			b.mtx.Lock()
 			if operationErr != nil {
-				b.tracker[addr][object] = true
+				b.tracker[addr] = make(map[string]bool)
 			} else {
 				delete(b.tracker, addr)
 			}
@@ -146,7 +146,7 @@ func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest, 
 		select {
 		case b.withdrawQueue <- request:
 		case <-ctx.Done():
-			return errWithdrawalNotQueued
+			return fmt.Errorf("%w: %w", errWithdrawalNotQueued, ctx.Err())
 		}
 	}
 	// Once queued, the withdrawal owns the serialized route operation. Wait for
