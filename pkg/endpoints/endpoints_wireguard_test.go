@@ -189,7 +189,7 @@ func TestWireguardDNATTargetsPreservePerSliceNamedPorts(t *testing.T) {
 	}
 
 	worker := &wireguardWorker{config: &kubevip.Config{}, provider: provider}
-	port := v1.ServicePort{Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString(name)}
+	port := v1.ServicePort{Name: "web", Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("target")}
 	got, err := worker.dnatTargets(&v1.Service{}, port)
 	if err != nil {
 		t.Fatalf("dnatTargets returned error: %v", err)

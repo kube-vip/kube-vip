@@ -145,10 +145,14 @@ func (ep *Endpoints) GetLabel() string {
 }
 
 func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
-	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+	lookupName := servicePort.Name
+	if lookupName == "" && servicePort.TargetPort.StrVal != "" {
+		lookupName = servicePort.TargetPort.StrVal
+	}
+	return ResolvePortWithLookup(servicePort, func(_ string) int32 {
 		for _, subset := range ep.endpoints.Subsets {
 			for _, p := range subset.Ports {
-				if p.Name == name {
+				if p.Name == lookupName {
 					return p.Port
 				}
 			}
@@ -165,13 +169,17 @@ func (ep *Endpoints) GetBackends(servicePort v1.ServicePort, nodeName string, lo
 	seen := map[Backend]struct{}{}
 	backends := []Backend{}
 	for _, subset := range ep.endpoints.Subsets {
-		targetPort := ResolvePortWithLookup(servicePort, func(name string) int32 {
+		lookupName := servicePort.Name
+		if lookupName == "" && servicePort.TargetPort.StrVal != "" {
+			lookupName = servicePort.TargetPort.StrVal
+		}
+		targetPort := ResolvePortWithLookup(servicePort, func(_ string) int32 {
 			for _, port := range subset.Ports {
 				endpointProtocol := port.Protocol
 				if endpointProtocol == "" {
 					endpointProtocol = v1.ProtocolTCP
 				}
-				if port.Name == name && endpointProtocol == serviceProtocol {
+				if port.Name == lookupName && endpointProtocol == serviceProtocol {
 					return port.Port
 				}
 			}

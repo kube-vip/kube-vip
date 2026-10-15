@@ -161,7 +161,7 @@ func TestResolvePortFromFakeClientObjects(t *testing.T) {
 		t.Fatalf("loading fake EndpointSlice: %v", err)
 	}
 
-	namedPort := v1.ServicePort{Port: 80, TargetPort: intstr.FromString("web")}
+	namedPort := v1.ServicePort{Name: "web", Port: 80, TargetPort: intstr.FromString("target")}
 	if got := legacy.ResolvePort(namedPort); got != 8080 {
 		t.Errorf("legacy ResolvePort() = %d, want 8080", got)
 	}
@@ -258,7 +258,7 @@ func TestLegacyEndpointsDeleteClearsNamedPortBackends(t *testing.T) {
 		Addresses: []v1.EndpointAddress{{IP: "10.0.0.1"}},
 		Ports:     []v1.EndpointPort{{Name: "web", Port: 8080, Protocol: v1.ProtocolTCP}},
 	}}}
-	servicePort := v1.ServicePort{Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("web")}
+	servicePort := v1.ServicePort{Name: "web", Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("target")}
 	if err := provider.LoadObject(object, func() {}); err != nil {
 		t.Fatalf("LoadObject returned error: %v", err)
 	}
