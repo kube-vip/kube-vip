@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 const (
 	kindNetworkName        = "kind"
+	kindNetworkEnv         = "KIND_EXPERIMENTAL_DOCKER_NETWORK"
 	manifestDirectory      = "/etc/kubernetes/manifests"
 	manifestStashDirectory = "/tmp"
 	nodeReadyTimeout       = 60 * time.Second
@@ -34,7 +36,7 @@ func PartitionNode(clusterName, node string) error {
 		return err
 	}
 
-	return runDockerAllow(clusterName, []string{"is not connected"}, "network", "disconnect", kindNetworkName, node)
+	return runDockerAllow(clusterName, []string{"is not connected"}, "network", "disconnect", kindNetwork(), node)
 }
 
 // HealNode models recovery from a node-level network partition by reconnecting
@@ -45,7 +47,7 @@ func HealNode(clusterName, node string) error {
 		return err
 	}
 
-	if err := runDockerAllow(clusterName, []string{"already exists"}, "network", "connect", kindNetworkName, node); err != nil {
+	if err := runDockerAllow(clusterName, []string{"already exists"}, "network", "connect", kindNetwork(), node); err != nil {
 		return err
 	}
 
@@ -74,7 +76,7 @@ func BlackholeAPIServer(clusterName, node string) error {
 	}
 
 	return runDocker(clusterName, "exec", node, "sh", "-c",
-		"iptables -C OUTPUT -p tcp --dport 6443 -j DROP || iptables -I OUTPUT -p tcp --dport 6443 -j DROP",
+		"for table in iptables ip6tables; do $table -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null || $table -I OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null || true; done",
 	)
 }
 
@@ -87,7 +89,7 @@ func RestoreAPIServer(clusterName, node string) error {
 	}
 
 	return runDocker(clusterName, "exec", node, "sh", "-c",
-		"while iptables -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do iptables -D OUTPUT -p tcp --dport 6443 -j DROP; done",
+		"for table in iptables ip6tables; do while $table -C OUTPUT -p tcp --dport 6443 -j DROP 2>/dev/null; do $table -D OUTPUT -p tcp --dport 6443 -j DROP; done; done",
 	)
 }
 
@@ -169,8 +171,7 @@ func StashPodManifest(clusterName, node, manifestName string) error {
 		return err
 	}
 
-	return runDocker(clusterName, "exec", node, "sh", "-c",
-		fmt.Sprintf("if [ -e %s ]; then mv %s %s; elif [ ! -e %s ]; then exit 1; fi", src, src, dst, dst))
+	return moveManifest(clusterName, node, src, dst)
 }
 
 // RestorePodManifest models static-pod recovery by moving a stashed manifest
@@ -184,8 +185,24 @@ func RestorePodManifest(clusterName, node, manifestName string) error {
 		return err
 	}
 
-	return runDocker(clusterName, "exec", node, "sh", "-c",
-		fmt.Sprintf("if [ -e %s ]; then mv %s %s; elif [ ! -e %s ]; then exit 1; fi", dst, dst, src, src))
+	return moveManifest(clusterName, node, dst, src)
+}
+
+func moveManifest(clusterName, node, src, dst string) error {
+	if err := runDocker(clusterName, "exec", node, "test", "-e", src); err == nil {
+		return runDocker(clusterName, "exec", node, "mv", src, dst)
+	}
+	if err := runDocker(clusterName, "exec", node, "test", "-e", dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+func kindNetwork() string {
+	if network := strings.TrimSpace(os.Getenv(kindNetworkEnv)); network != "" {
+		return network
+	}
+	return kindNetworkName
 }
 
 func runDocker(clusterName string, args ...string) error {
