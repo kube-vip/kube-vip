@@ -38,7 +38,7 @@ func TestBGPWorkerRetriesAddAfterFailedWithdrawal(t *testing.T) {
 		t.Fatalf("initial processInstance: %v", err)
 	}
 	manager.delErr = errors.New("withdrawal failed")
-	lastEndpoint := "10.0.0.2"
+	lastEndpoint := ""
 	worker.clear(context.Background(), configuredNetworks, &lastEndpoint, service, instances[0])
 	if _, configured := configuredNetworks.Load(network.ip); configured {
 		t.Fatal("network remained configured after failed withdrawal")
