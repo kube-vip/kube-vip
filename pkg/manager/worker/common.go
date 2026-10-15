@@ -195,7 +195,7 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 		leaderCtx, cancelLeader := context.WithCancel(electionCtx)
 		wg := sync.WaitGroup{}
 		wg.Go(func() {
-			a.OnStartedLeading(leaderCtx)
+			onStartedLeading(leaderCtx, a, config.NodeName, leaseID.Name())
 		})
 		participation.Session.WaitForEnd(electionCtx)
 		cancelLeader()
