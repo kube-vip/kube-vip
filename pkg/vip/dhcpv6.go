@@ -290,25 +290,38 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 
 	var addr *dhcpv6.OptIAAddress
 	var err error
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopChan:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	log.Debug("[DHCPv6]", "attempts", c.backoffAttempts)
 
 RequestLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("[DHCPv6] context error: %w", ctx.Err())
+		case <-requestCtx.Done():
+			return nil, fmt.Errorf("[DHCPv6] context error: %w", requestCtx.Err())
 		default:
 			log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt()+1)
 
-			addr, err = c.request(ctx, false)
+			addr, err = c.request(requestCtx, false)
 
 			if err != nil {
 				dur := backoff.Duration()
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv6 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					select {
+					case c.errorChan <- errMsg:
+					case <-c.stopChan:
+					case <-requestCtx.Done():
+					}
 					return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 				}
 				log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
