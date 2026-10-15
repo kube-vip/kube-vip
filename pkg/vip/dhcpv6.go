@@ -296,7 +296,7 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 		select {
 		case <-c.stopChan:
 			cancel()
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}()
 
@@ -329,7 +329,7 @@ RequestLoop:
 				select {
 				case <-t.C:
 					t.Stop()
-				case <-ctx.Done():
+				case <-requestCtx.Done():
 				}
 				continue RequestLoop
 			}
@@ -343,7 +343,7 @@ RequestLoop:
 		select {
 		case c.ipChan <- addr.IPv6Addr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}
 
