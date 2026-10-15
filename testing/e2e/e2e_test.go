@@ -1955,3 +1955,45 @@ func MustMkdirTemp(dir, prefix string) string {
 	Expect(err).NotTo(HaveOccurred())
 	return tempDirPath
 }
+
+func newTestService(name, namespace, target, lbAddress string, ipfPolicy corev1.IPFamilyPolicy,
+	ipFamilies []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
+) *corev1.Service {
+	svcAnnotations := make(map[string]string)
+	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
+	if leaseName != "" {
+		svcAnnotations[kubevip.ServiceLease] = leaseName
+	}
+	if dhcpBroadcast {
+		svcAnnotations[kubevip.DHCPBroadcast] = "true"
+	}
+
+	if forceElection {
+		svcAnnotations[kubevip.ForcePerServiceElection] = "true"
+	}
+
+	labels := make(map[string]string)
+	labels["app"] = target
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: svcAnnotations,
+		},
+		Spec: corev1.ServiceSpec{
+			IPFamilies:            ipFamilies,
+			IPFamilyPolicy:        &ipfPolicy,
+			Type:                  corev1.ServiceTypeLoadBalancer,
+			ExternalTrafficPolicy: externalPolicy,
+			Ports: []corev1.ServicePort{
+				{
+					Protocol: corev1.ProtocolTCP,
+					Port:     int32(port),
+				},
+			},
+			Selector: labels,
+		},
+	}
+}
