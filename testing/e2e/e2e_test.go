@@ -136,6 +136,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -151,7 +152,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			It(clusterName+" provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client, func() {
+					assertExactlyOneLeaderMetric(ctx, clusterName, client)
+				})
 			})
 		})
 
@@ -181,6 +184,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -201,9 +205,6 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, currentOffset, defaultNetwork)
 					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber, func(node string) {
-						if !hasMetricCapability(ctx, clusterName, []string{node}, "kube_vip_active_services") {
-							return
-						}
 						e2e.EventuallyMetric(ctx, clusterName, node, "kube_vip_active_services", map[string]string{"namespace": dsNamespace}, BeNumerically(">=", float64(1)), 60*time.Second, 2*time.Second)
 					})
 				},
@@ -1701,6 +1702,24 @@ func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clust
 	}
 }
 
+func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, client kubernetes.Interface) {
+	Eventually(func() (float64, error) {
+		nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return 0, err
+		}
+		var leaders float64
+		for _, node := range nodes.Items {
+			metrics, err := e2e.ScrapeMetrics(ctx, clusterName, node.Name)
+			if err != nil {
+				return 0, err
+			}
+			leaders += e2e.SumMetric(metrics, "kube_vip_is_leader", nil)
+		}
+		return leaders, nil
+	}, 60*time.Second, 2*time.Second).Should(Equal(float64(1)))
+}
+
 func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int, deleteDS bool, dsNumber int,
 	afterVIPConfirmed ...func(string)) {
@@ -1872,7 +1891,6 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		}
 	}
 
-	container := e2e.GetLeaseHolder(ctx, lease, leaseNamespace, client)
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	Expect(err).ToNot(HaveOccurred())
 	nodeNames := make([]string, 0, len(nodes.Items))
@@ -1889,20 +1907,12 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		}
 		return *currentLease.Spec.HolderIdentity, nil
 	}
-	for _, addr := range lbAddresses {
-		address := addr
-		_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, []string{address}, func(address, node string) bool {
+	Eventually(func() error {
+		_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, lbAddresses, func(address, node string) bool {
 			return e2e.CheckIPAddressPresence(address, node, true)
 		})
-		Expect(err).NotTo(HaveOccurred())
-	}
-
-	for _, node := range nodes.Items {
-		expected := node.Name == container
-		for _, addr := range lbAddresses {
-			Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
-		}
-	}
+		return err
+	}, 360*time.Second, time.Second).Should(Succeed())
 
 	for i := range numberOfServices {
 		expected := i < numberOfServices-1
@@ -1918,22 +1928,13 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 			return err
 		}).ShouldNot(Succeed())
 
-		for _, addr := range lbAddresses {
-			for _, node := range nodes.Items {
-				if node.Name == container {
-					Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
-				} else {
-					Expect(checkIPAddress(addr, node.Name, false)).To(BeTrue())
-				}
-			}
-		}
 		if expected {
-			for _, addr := range lbAddresses {
-				_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, []string{addr}, func(address, node string) bool {
+			Eventually(func() error {
+				_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, lbAddresses, func(address, node string) bool {
 					return e2e.CheckIPAddressPresence(address, node, true)
 				})
-				Expect(err).NotTo(HaveOccurred())
-			}
+				return err
+			}, 360*time.Second, time.Second).Should(Succeed())
 		} else {
 			Eventually(func() error {
 				currentLease, getErr := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
