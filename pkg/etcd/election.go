@@ -166,7 +166,7 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 	wg.Go(func() { observerDone <- m.watchLeaderChanges(runCtx, elected) })
 
 	var result error
-	for campaignDone != nil && observerDone != nil {
+	for campaignDone != nil || observerDone != nil {
 		select {
 		case <-ctx.Done():
 			m.stop()
@@ -234,8 +234,6 @@ func (m *member) watchLeaderChanges(ctx context.Context, elected <-chan campaign
 		}
 		log.Debug("Exiting watcher", "id", m.memberID)
 	}()
-	defer m.stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -326,11 +324,11 @@ func (m *member) campaign(ctx context.Context, elected chan<- campaignResult, se
 	default:
 	}
 	m.started = true
-	// Keep shutdown from overtaking callback admission. The run loop cancels
-	// before calling stop, so a blocking callback is released before stop waits
-	// for this mutex.
-	m.callbacks.OnStartedLeading(ctx)
 	m.stateMu.Unlock()
+	// Do not hold stateMu while user code runs. Shutdown cancels ctx before
+	// calling stop, allowing a blocking callback to return and the observer to
+	// report the terminal condition without a mutex deadlock.
+	m.callbacks.OnStartedLeading(ctx)
 	return nil
 }
 
