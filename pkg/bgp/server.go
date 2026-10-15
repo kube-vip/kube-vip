@@ -2,6 +2,7 @@ package bgp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,8 @@ type Server struct {
 	s                 *gobgp.BgpServer
 	c                 *kubevip.BGPConfig
 	mtx               sync.Mutex
-	admission         sync.RWMutex
+	stateMu           sync.Mutex
+	active            sync.WaitGroup
 	tracker           map[string]map[string]bool
 	withdrawOnce      sync.Once
 	withdrawCloseOnce sync.Once
@@ -41,7 +43,19 @@ type Server struct {
 	closeErr          error
 }
 
+func (b *Server) begin(ctx context.Context) bool {
+	b.stateMu.Lock()
+	defer b.stateMu.Unlock()
+	if b.closing.Load() {
+		return false
+	}
+	b.active.Add(1)
+	return true
+}
+
 const withdrawalQueueSize = 32
+
+var errWithdrawalNotQueued = errors.New("withdrawal not queued")
 
 type withdrawalRequest struct {
 	ctx      context.Context
@@ -175,12 +189,13 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
+	b.stateMu.Lock()
 	b.closing.Store(true)
+	b.stateMu.Unlock()
 	b.closeOnce.Do(func() {
 		b.closeDone = make(chan struct{})
 		go func() {
-			b.admission.Lock()
-			defer b.admission.Unlock()
+			b.active.Wait()
 			if b.withdrawDone != nil {
 				b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
 				<-b.withdrawDone
