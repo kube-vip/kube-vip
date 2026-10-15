@@ -43,10 +43,30 @@ const (
 	defaultUPNPLeaseDuration = 1 * time.Hour
 )
 
-func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup, usesLeaderElection bool) error {
-	if ctx.Ctx.Err() != nil {
-		return nil
-	}
+type serviceSyncReadiness uint8
+
+const (
+	waitForServiceReadiness serviceSyncReadiness = iota
+	serviceReadinessReserved
+)
+
+// SyncServices reconciles a Service after reserving its current ready endpoint
+// generation.
+func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, wg *sync.WaitGroup) error {
+	return p.syncServicesWithContext(ctx.Ctx, ctx, svc, wg, waitForServiceReadiness)
+}
+
+// activateElectedService reconciles a Service whose readiness generation is
+// already reserved by the election coordinator.
+func (p *Processor) activateElectedService(operationCtx context.Context, svcCtx *servicecontext.Context,
+	svc *v1.Service, wg *sync.WaitGroup) error {
+	return p.syncServicesWithContext(operationCtx, svcCtx, svc, wg, serviceReadinessReserved)
+}
+
+func (p *Processor) syncServicesWithContext(operationCtx context.Context, svcCtx *servicecontext.Context,
+	svc *v1.Service, wg *sync.WaitGroup, readiness serviceSyncReadiness) error {
+	defer p.refreshOwnedServiceVIPs()
+
 	log.Debug("[STARTING] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 
 	// Iterate through the synchronising services
@@ -178,14 +198,8 @@ func comparePortsAndPortStatuses(svc *v1.Service) bool {
 	return true
 }
 
-func (p *Processor) addService(ctx context.Context, inst *instance.Instance, svc *v1.Service, wg *sync.WaitGroup) error {
-	// protect against addService while reading
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	if ctx.Err() != nil {
-		return nil
-	}
-
+func (p *Processor) addService(ctx context.Context, svcCtx *servicecontext.Context, svc *v1.Service,
+	wg *sync.WaitGroup) error {
 	startTime := time.Now()
 
 	inst, err := p.prepareServiceInstance(ctx, svcCtx, svc, wg)
