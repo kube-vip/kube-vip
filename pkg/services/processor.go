@@ -321,7 +321,8 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 // so it must not be parsed or ordered; Generation is the API's monotonic
 // revision for spec changes and is safe for this admission guard.
 func serviceSnapshotNewer(watched, svc *v1.Service) bool {
-	if watched == nil || svc == nil || watched.Generation == 0 || svc.Generation == 0 {
+	if watched == nil || svc == nil || watched.UID == "" || svc.UID == "" ||
+		watched.UID != svc.UID || watched.Generation == 0 || svc.Generation == 0 {
 		return false
 	}
 	return watched.Generation > svc.Generation

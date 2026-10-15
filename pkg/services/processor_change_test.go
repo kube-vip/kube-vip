@@ -10,13 +10,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestServiceSnapshotNewerRejectsDelayedResourceVersion(t *testing.T) {
-	watched := &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 12, ResourceVersion: "opaque-new"}}
-	if !serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 11, ResourceVersion: "opaque-old"}}) {
+func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
+	watched := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-new"}}
+	if !serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 11, ResourceVersion: "opaque-old"}}) {
 		t.Fatal("expected delayed generation to be rejected")
 	}
-	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 12, ResourceVersion: "opaque-other"}}) {
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-other"}}) {
 		t.Fatal("equal generation should remain admissible")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-b", Generation: 99, ResourceVersion: "opaque-recreated"}}) {
+		t.Fatal("a recreated Service UID must remain admissible")
 	}
 }
 
