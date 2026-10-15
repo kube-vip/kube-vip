@@ -199,6 +199,11 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
+		if event.Type != watch.Deleted {
+			if watched := svcCtx.WatchedService(); serviceSnapshotNewer(watched, svc) {
+				return nil
+			}
+		}
 		if event.Type == watch.Modified {
 			shouldGarbageCollect = changedSinceWatched(svcInstance, svcCtx, svc)
 		}
@@ -309,6 +314,17 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	}
 
 	return nil
+}
+
+// serviceSnapshotNewer reports whether watched represents a newer desired
+// Service generation. ResourceVersion is intentionally opaque in Kubernetes,
+// so it must not be parsed or ordered; Generation is the API's monotonic
+// revision for spec changes and is safe for this admission guard.
+func serviceSnapshotNewer(watched, svc *v1.Service) bool {
+	if watched == nil || svc == nil || watched.Generation == 0 || svc.Generation == 0 {
+		return false
+	}
+	return watched.Generation > svc.Generation
 }
 
 // admitServiceInstance constructs and tracks a Service instance under its
