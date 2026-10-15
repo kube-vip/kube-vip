@@ -40,6 +40,15 @@ import (
 
 var errServiceAddressPending = errors.New("service load-balancer address pending")
 
+type serviceVIPClaim struct {
+	uid                   types.UID
+	namespace             string
+	name                  string
+	leaseID               string
+	externalTrafficPolicy v1.ServiceExternalTrafficPolicy
+	addresses             []string
+}
+
 type Processor struct {
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
@@ -50,6 +59,8 @@ type Processor struct {
 	ServiceInstances     []*instance.Instance
 	instancesMutex       sync.RWMutex
 	serviceCleanupMu     sync.Mutex
+	vipAdmissionMu       sync.Mutex
+	pendingAdmissions    map[types.UID]*serviceVIPClaim
 	recoveryMu           sync.Mutex
 	recovered            bool
 	ownedVIPsMu          sync.Mutex
@@ -314,6 +325,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 // admitServiceInstance constructs and tracks a Service instance under its
 // Service lock. Callers must not already hold that lock.
 func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, bool, error) {
+	releaseAdmission, err := p.reserveServiceAdmission(svc)
+	if err != nil {
+		return nil, false, err
+	}
+	defer releaseAdmission()
+
 	p.serviceLock.Lock(svc.UID)
 	defer func() {
 		if err := p.serviceLock.Unlock(svc.UID); err != nil {
@@ -326,13 +343,83 @@ func (p *Processor) admitServiceInstance(ctx context.Context, svc *v1.Service, w
 		return serviceInstance, false, nil
 	}
 
-	serviceInstance, err := p.createServiceInstance(ctx, svc, wg)
+	serviceInstance, err = p.createServiceInstance(ctx, svc, wg)
 	if err != nil {
 		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
 		return nil, false, fmt.Errorf("unable to create instance for service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
 	p.appendServiceInstance(serviceInstance)
 	return serviceInstance, true, nil
+}
+
+func (p *Processor) reserveServiceAdmission(svc *v1.Service) (func(), error) {
+	if svc == nil {
+		return nil, fmt.Errorf("cannot reserve VIP admission for nil service")
+	}
+	p.vipAdmissionMu.Lock()
+	defer p.vipAdmissionMu.Unlock()
+
+	namespace, name := lease.ServiceName(svc)
+	addresses, _ := instance.FetchServiceAddresses(svc)
+	claim := &serviceVIPClaim{
+		uid: svc.UID, namespace: svc.Namespace, name: svc.Name,
+		leaseID:               lease.NewID(p.config.LeaderElectionType, namespace, name).NamespacedName(),
+		externalTrafficPolicy: svc.Spec.ExternalTrafficPolicy,
+		addresses:             addresses,
+	}
+	for _, tracked := range p.serviceInstances() {
+		if tracked == nil || tracked.UID() == svc.UID {
+			continue
+		}
+		info, ok := tracked.CleanupInfo()
+		if !ok {
+			continue
+		}
+		leaseNamespace, leaseName := lease.ServiceNameFor(info.Namespace, info.Name, info.Lease)
+		other := &serviceVIPClaim{
+			uid: tracked.UID(), namespace: info.Namespace, name: info.Name,
+			leaseID:               lease.NewID(p.config.LeaderElectionType, leaseNamespace, leaseName).NamespacedName(),
+			externalTrafficPolicy: info.ExternalTrafficPolicy,
+			addresses:             tracked.Addresses(),
+		}
+		if err := p.validateServiceVIPConflict(claim, other); err != nil {
+			return nil, err
+		}
+	}
+	for uid, pending := range p.pendingAdmissions {
+		if uid != svc.UID {
+			if err := p.validateServiceVIPConflict(claim, pending); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if p.pendingAdmissions == nil {
+		p.pendingAdmissions = make(map[types.UID]*serviceVIPClaim)
+	}
+	p.pendingAdmissions[svc.UID] = claim
+	return func() {
+		p.vipAdmissionMu.Lock()
+		defer p.vipAdmissionMu.Unlock()
+		if p.pendingAdmissions[svc.UID] == claim {
+			delete(p.pendingAdmissions, svc.UID)
+		}
+	}, nil
+}
+
+func (p *Processor) validateServiceVIPConflict(claim, other *serviceVIPClaim) error {
+	if claim.externalTrafficPolicy == v1.ServiceExternalTrafficPolicyCluster &&
+		other.externalTrafficPolicy == v1.ServiceExternalTrafficPolicyCluster &&
+		(!p.config.EnableServicesElection || claim.leaseID == other.leaseID) {
+		return nil
+	}
+	for _, address := range claim.addresses {
+		for _, otherAddress := range other.addresses {
+			if address == otherAddress {
+				return fmt.Errorf("VIP %q cannot be shared with service %s/%s", address, other.namespace, other.name)
+			}
+		}
+	}
+	return nil
 }
 
 func (p *Processor) createServiceInstance(ctx context.Context, svc *v1.Service, wg *sync.WaitGroup) (*instance.Instance, error) {

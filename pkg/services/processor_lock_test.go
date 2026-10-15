@@ -265,6 +265,148 @@ func admissionTestService(name, address string) *v1.Service {
 	}
 }
 
+func TestServiceVIPSharingRequiresClusterPolicyAndElectionLease(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		candidatePolicy    v1.ServiceExternalTrafficPolicy
+		trackedPolicy      v1.ServiceExternalTrafficPolicy
+		serviceElection    bool
+		candidateLease     string
+		trackedLease       string
+		candidateNamespace string
+		address            string
+		wantErr            bool
+	}{
+		{name: "cluster without election", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster},
+		{name: "same lease", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "shared", trackedLease: "shared"},
+		{name: "different lease", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "other", trackedLease: "shared", wantErr: true},
+		{name: "different namespace", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "shared", trackedLease: "shared", candidateNamespace: "other", wantErr: true},
+		{name: "candidate local", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, wantErr: true},
+		{name: "tracked local", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, wantErr: true},
+		{name: "both local with same lease", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, serviceElection: true, candidateLease: "shared", trackedLease: "shared", wantErr: true},
+		{name: "different VIP", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, address: "192.0.2.20"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tracked := admissionTestService("tracked", "192.0.2.10")
+			tracked.Spec.ExternalTrafficPolicy = test.trackedPolicy
+			tracked.Annotations = map[string]string{kubevip.ServiceLease: test.trackedLease}
+			candidate := admissionTestService("candidate", "192.0.2.10")
+			candidate.Spec.ExternalTrafficPolicy = test.candidatePolicy
+			candidate.Annotations = map[string]string{kubevip.ServiceLease: test.candidateLease}
+			if test.candidateNamespace != "" {
+				candidate.Namespace = test.candidateNamespace
+			}
+			if test.address != "" {
+				candidate.Spec.LoadBalancerIP = test.address
+			}
+			processor := &Processor{
+				config:           &kubevip.Config{EnableServicesElection: test.serviceElection},
+				serviceLock:      newTestServiceLocks(),
+				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+			}
+			release, err := processor.reserveServiceAdmission(candidate)
+			if release != nil {
+				release()
+			}
+			if (err != nil) != test.wantErr {
+				t.Fatalf("reserveServiceAdmission() error = %v, want error %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestAdmissionRejectsConflictWithPendingConstruction(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	processor := &Processor{
+		config:      &kubevip.Config{},
+		serviceLock: newTestServiceLocks(),
+		instanceFactory: serviceInstanceFactoryFunc(func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			close(started)
+			<-release
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := processor.admitServiceInstance(context.Background(), admissionTestService("slow", "192.0.2.10"), &sync.WaitGroup{})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("instance construction did not start")
+	}
+	releaseAdmission, err := processor.reserveServiceAdmission(admissionTestService("conflicting", "192.0.2.10"))
+	if releaseAdmission != nil {
+		releaseAdmission()
+	}
+	if err == nil {
+		t.Fatal("conflicting admission ignored pending construction")
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("admission did not complete")
+	}
+}
+
+func TestAdmissionReleasesReservationAfterConstructionFailure(t *testing.T) {
+	processor := &Processor{
+		config:      &kubevip.Config{},
+		serviceLock: newTestServiceLocks(),
+		instanceFactory: serviceInstanceFactoryFunc(func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			if svc.Name == "failed" {
+				return nil, errors.New("construction failed")
+			}
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		}),
+	}
+	if _, _, err := processor.admitServiceInstance(context.Background(), admissionTestService("failed", "192.0.2.10"), &sync.WaitGroup{}); err == nil {
+		t.Fatal("failed construction returned no error")
+	}
+	if _, added, err := processor.admitServiceInstance(context.Background(), admissionTestService("replacement", "192.0.2.10"), &sync.WaitGroup{}); err != nil || !added {
+		t.Fatalf("replacement admission = %t, %v", added, err)
+	}
+}
+
+func TestAdmissionDoesNotWaitForTrackedServiceLock(t *testing.T) {
+	tracked := admissionTestService("tracked", "192.0.2.10")
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		serviceLock:      newTestServiceLocks(),
+		ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceAddresses: []string{"192.0.2.10"}, ServiceSnapshot: tracked}},
+	}
+	processor.serviceLock.Lock(tracked.UID)
+	defer func() {
+		if err := processor.serviceLock.Unlock(tracked.UID); err != nil {
+			t.Error(err)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		release, err := processor.reserveServiceAdmission(admissionTestService("unrelated", "192.0.2.20"))
+		if release != nil {
+			release()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unrelated admission waited for the tracked Service lock")
+	}
+}
+
 func TestReconcileAndDeleteRejectTypedNilService(t *testing.T) {
 	var service *v1.Service
 	event := watch.Event{Object: service}
