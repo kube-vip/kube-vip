@@ -26,6 +26,7 @@ type Server struct {
 	s                 *gobgp.BgpServer
 	c                 *kubevip.BGPConfig
 	mtx               sync.Mutex
+	admission         sync.RWMutex
 	tracker           map[string]map[string]bool
 	withdrawOnce      sync.Once
 	withdrawCloseOnce sync.Once
@@ -178,6 +179,8 @@ func (b *Server) Close() error {
 	b.closeOnce.Do(func() {
 		b.closeDone = make(chan struct{})
 		go func() {
+			b.admission.Lock()
+			defer b.admission.Unlock()
 			if b.withdrawDone != nil {
 				b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
 				<-b.withdrawDone

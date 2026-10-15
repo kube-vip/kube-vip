@@ -11,6 +11,8 @@ import (
 
 // AddHost will update peers of a host
 func (b *Server) AddHost(ctx context.Context, addr string, object string) error {
+	b.admission.RLock()
+	defer b.admission.RUnlock()
 	for {
 		b.mtx.Lock()
 		if b.closing.Load() {
@@ -53,6 +55,8 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 }
 
 func (b *Server) DelHost(ctx context.Context, addr string, object string) error {
+	b.admission.RLock()
+	defer b.admission.RUnlock()
 	for {
 		b.mtx.Lock()
 		if b.closing.Load() {
