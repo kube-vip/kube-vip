@@ -132,6 +132,46 @@ func TestParseBgpAnnotationsRejectsInvalidPeerPort(t *testing.T) {
 	}
 }
 
+func TestParseBgpAnnotationsPeerPortBoundaries(t *testing.T) {
+	base := map[string]string{
+		"bgp/node-asn": "65000",
+		"bgp/peer-asn": "64000",
+		"bgp/src-ip":   "10.0.0.254",
+		"bgp/peer-ip":  "10.0.0.1",
+	}
+	tests := []struct {
+		name     string
+		value    string
+		wantPort uint16
+		wantErr  bool
+	}{
+		{name: "annotation omitted uses downstream default", wantPort: 0},
+		{name: "explicit default port", value: "179", wantPort: 179},
+		{name: "custom GoBGP port", value: "1179", wantPort: 1179},
+		{name: "zero rejected", value: "0", wantErr: true},
+		{name: "non numeric rejected", value: "not-a-port", wantErr: true},
+		{name: "out of range rejected", value: "65536", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			annotations := make(map[string]string, len(base)+1)
+			for key, value := range base {
+				annotations[key] = value
+			}
+			if tt.value != "" {
+				annotations["bgp/peer-port"] = tt.value
+			}
+			_, peer, err := parseBgpAnnotations(kubevip.BGPConfig{}, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: annotations}}, "bgp")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseBgpAnnotations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && peer.Port != tt.wantPort {
+				t.Fatalf("parseBgpAnnotations() peer port = %d, want %d", peer.Port, tt.wantPort)
+			}
+		})
+	}
+}
+
 func Test_parseBgpAnnotations(t *testing.T) {
 	type args struct {
 		node   *corev1.Node
