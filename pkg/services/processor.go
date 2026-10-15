@@ -274,6 +274,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			p.updateActiveServicesMetric()
 		}
 	}
+	// Keep the admission snapshot current for later watch events. Without this,
+	// a delayed event is compared with only the original watcher snapshot and
+	// can regress an already accepted Service generation.
+	if svcCtx.Ctx.Err() == nil {
+		svcCtx.SetWatchedService(svc)
+	}
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
