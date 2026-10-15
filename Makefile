@@ -23,7 +23,7 @@ GINKGO_PROCS ?=
 GINKGO_PARALLEL := $(if $(GINKGO_PROCS),--procs=$(GINKGO_PROCS),-p)
 BUILDX_CACHE_FLAGS ?=
 
-.PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker e2e-tests-etcd
+.PHONY: all build clean install uninstall simplify check run e2e-tests e2e-tests-faults e2e-tests-matrix unit-tests integration-tests unit-tests-docker integration-tests-docker e2e-tests-etcd
 
 all: check install
 
@@ -149,6 +149,13 @@ e2e-tests-rt: get-whoami
 
 e2e-tests-bgp: get-whoami get-gobgp
 	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
+
+e2e-tests-faults: get-whoami
+	@test "$(TEST_MODE)" = "arp" -o "$(TEST_MODE)" = "rt" || (echo "fault tests support TEST_MODE=arp or TEST_MODE=rt; BGP is not implemented" >&2; exit 1)
+	GOMAXPROCS=4 TEST_MODE=$(TEST_MODE) K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) --label-filter=faults ./testing/e2e
+
+e2e-tests-matrix: get-whoami get-gobgp
+	GOMAXPROCS=4 TEST_MODE=matrix K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) --label-filter=matrix ./testing/e2e
 
 e2e-tests-etcd: get-whoami
 	GOMAXPROCS=4 K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e/etcd
