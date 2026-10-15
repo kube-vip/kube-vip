@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -33,9 +34,10 @@ type Server struct {
 	withdrawDone      chan struct{}
 	deletePathFunc    func(apiutil.DeletePathRequest) error
 	pending           map[string]chan struct{}
-	closing           bool
+	closing           atomic.Bool
 	closeOnce         sync.Once
-	closeDone         chan error
+	closeDone         chan struct{}
+	closeErr          error
 }
 
 const withdrawalQueueSize = 32
@@ -172,22 +174,21 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
-	b.mtx.Lock()
-	b.closing = true
-	b.mtx.Unlock()
+	b.closing.Store(true)
 	b.closeOnce.Do(func() {
-		b.closeDone = make(chan error, 1)
+		b.closeDone = make(chan struct{})
 		go func() {
 			if b.withdrawDone != nil {
 				b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
 				<-b.withdrawDone
 			}
-			b.closeDone <- b.s.StopBgp(context.Background(), &api.StopBgpRequest{})
+			b.closeErr = b.s.StopBgp(context.Background(), &api.StopBgpRequest{})
+			close(b.closeDone)
 		}()
 	})
 	select {
-	case err := <-b.closeDone:
-		return err
+	case <-b.closeDone:
+		return b.closeErr
 	case <-time.After(5 * time.Second):
 		return context.DeadlineExceeded
 	}
