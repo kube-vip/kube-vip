@@ -101,7 +101,11 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 	}
 }
 
-func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest, complete func(error)) error {
+func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest, callbacks ...func(error)) error {
+	var complete func(error)
+	if len(callbacks) > 0 {
+		complete = callbacks[0]
+	}
 	b.startWithdrawalWorker()
 	result := make(chan error, 1)
 	request := withdrawalRequest{ctx: ctx, req: req, result: result, complete: complete}
