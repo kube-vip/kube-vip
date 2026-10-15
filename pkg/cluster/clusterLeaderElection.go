@@ -100,15 +100,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 		VIPs:             controlPlaneVIPs,
 		VIPsProvider:     objLease.OwnedVIPs,
 		Mgr:              em,
-		VIPs: func() []string {
-			vips := make([]string, 0, len(cluster.Network))
-			for _, network := range cluster.Network {
-				vips = append(vips, network.IP())
+		OnStartedLeading: func(ctx context.Context) {
+			if !electionSession.Started() {
+				return
 			}
-			return vips
-		}(),
-		OnStartedLeading: func(context.Context) { //nolint TODO: potential clean code
-			cluster.OnStartedLeading(c, objLease, em, bgpServer, killFunc, false)
+			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
 			if !electionSession.IsCurrent() {
