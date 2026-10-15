@@ -251,6 +251,19 @@ func TestEndpointSliceBackendsPreservePerSliceNamedPorts(t *testing.T) {
 	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.3", Port: 9091}})
 }
 
+func TestLegacyEndpointsUnnamedServicePortUsesUnnamedEndpointPort(t *testing.T) {
+	provider := NewEndpoints()
+	object := &v1.Endpoints{Subsets: []v1.EndpointSubset{{
+		Addresses: []v1.EndpointAddress{{IP: "10.0.0.2"}},
+		Ports:     []v1.EndpointPort{{Port: 8080, Protocol: v1.ProtocolTCP}},
+	}}}
+	servicePort := v1.ServicePort{Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("web")}
+	if err := provider.LoadObject(object, func() {}); err != nil {
+		t.Fatalf("LoadObject returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.2", Port: 8080}})
+}
+
 func TestLegacyEndpointsDeleteClearsNamedPortBackends(t *testing.T) {
 	provider := NewEndpoints()
 	//nolint:staticcheck // legacy Endpoints cleanup is the subject under test

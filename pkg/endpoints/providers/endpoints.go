@@ -146,9 +146,6 @@ func (ep *Endpoints) GetLabel() string {
 
 func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
 	lookupName := servicePort.Name
-	if lookupName == "" && servicePort.TargetPort.StrVal != "" {
-		lookupName = servicePort.TargetPort.StrVal
-	}
 	return ResolvePortWithLookup(servicePort, func(_ string) int32 {
 		for _, subset := range ep.endpoints.Subsets {
 			for _, p := range subset.Ports {
