@@ -1471,22 +1471,7 @@ func removePod(ctx context.Context, name, namespace string, client kubernetes.In
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
 	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
 ) {
-	svcAnnotations := make(map[string]string)
-	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
-	if leaseName != "" {
-		svcAnnotations[kubevip.ServiceLease] = leaseName
-	}
-	if dhcpBroadcast {
-		svcAnnotations[kubevip.DHCPBroadcast] = "true"
-	}
-
-	if forceElection {
-		svcAnnotations[kubevip.ForcePerServiceElection] = "true"
-	}
-
-	labels := make(map[string]string)
-	labels["app"] = target
-
+	s := *newTestService(name, namespace, target, lbAddress, ipfPolicy, ipFamiles, externalPolicy, leaseName, port, dhcpBroadcast, forceElection)
 	By(withTimestamp(fmt.Sprintf("creating service %s/%s", namespace, name)))
 
 	s := corev1.Service{
