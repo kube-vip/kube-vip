@@ -43,7 +43,7 @@ type Server struct {
 	closeErr          error
 }
 
-func (b *Server) begin(ctx context.Context) bool {
+func (b *Server) begin() bool {
 	b.stateMu.Lock()
 	defer b.stateMu.Unlock()
 	if b.closing.Load() {
