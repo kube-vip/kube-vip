@@ -353,6 +353,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
+		sm.Kill()
 		wg.Wait()
 		sm.svcProcessor.WaitForElectionCampaigns()
 		w.Cleanup()
@@ -422,6 +423,9 @@ func (sm *Manager) startMode(ctx context.Context) error {
 				}
 			}
 		}
+	} else {
+		// If services weren't enabled we wait for the other functions to return before shutting down
+		wg.Wait()
 	}
 
 	return nil
