@@ -13,7 +13,7 @@ import (
 func (b *Server) AddHost(ctx context.Context, addr string, object string) error {
 	for {
 		b.mtx.Lock()
-		if b.closing {
+		if b.closing.Load() {
 			b.mtx.Unlock()
 			return context.Canceled
 		}
@@ -55,7 +55,7 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 func (b *Server) DelHost(ctx context.Context, addr string, object string) error {
 	for {
 		b.mtx.Lock()
-		if b.closing {
+		if b.closing.Load() {
 			b.mtx.Unlock()
 			return context.Canceled
 		}
