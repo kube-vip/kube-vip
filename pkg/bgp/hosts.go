@@ -104,9 +104,13 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		}
 		b.pending[addr] = done
 		b.mtx.Unlock()
-		complete := func(_ error) {
+		complete := func(operationErr error) {
 			b.mtx.Lock()
-			delete(b.tracker, addr)
+			if operationErr != nil {
+				b.tracker[addr][object] = true
+			} else {
+				delete(b.tracker, addr)
+			}
 			delete(b.pending, addr)
 			close(done)
 			b.mtx.Unlock()
