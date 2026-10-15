@@ -244,6 +244,13 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				}
 				//Set it to inactive
 				svcCtx.Cancel()
+				// Join the old watcher before deleting its instance. Its service
+				// callback may still be unwinding dataplane state; publishing a
+				// replacement before it stops permits late cleanup to remove the
+				// replacement's VIP or routes.
+				if err := svcCtx.WaitForWatchingStopped(ctx); err != nil {
+					return fmt.Errorf("wait for service watcher shutdown: %w", err)
+				}
 
 				if err := p.deleteService(ctx, svc.UID, nil); err != nil {
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
