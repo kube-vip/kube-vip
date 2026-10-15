@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
@@ -72,6 +73,8 @@ func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 }
 
 func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
+	stopTracking := metrics.TrackElectionLoop("kubernetes")
+	defer stopTracking()
 	annotationProvider := func() (map[string]string, error) {
 		vips := run.VIPs
 		if run.VIPsProvider != nil {
@@ -117,6 +120,8 @@ func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error
 }
 
 func runEtcdLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
+	stopTracking := metrics.TrackElectionLoop("etcd")
+	defer stopTracking()
 	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.Mgr.EtcdClient},
 		Name:                 run.LeaseID.NamespacedName(),
@@ -158,6 +163,8 @@ type RunConfig struct {
 }
 
 func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
+	stopTracking := metrics.TrackWatcherLoop("node")
+	defer stopTracking()
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
