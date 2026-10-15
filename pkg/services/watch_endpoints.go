@@ -84,14 +84,10 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 				log.Info("[endpoint watcher] endpoint object deleted", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 			}
 
-			var restart bool
-			var err error
-			if !p.withActiveService(svcCtx, func() {
-				restart, err = epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
-					p.StartServicesLeaderElection, &wg, p.clientSet, p.updateEgressConfiguration)
-			}) {
-				return nil
-			}
+			restart, err := epProcessor.Reconcile(svcCtx, event, &lastKnownGoodEndpoint, service, id,
+				&wg, p.clientSet, func(ctx context.Context, service *v1.Service, inst *instance.Instance) error {
+					return p.updateEgressConfiguration(ctx, svcCtx, service, inst)
+				})
 			if restart {
 				continue
 			}
