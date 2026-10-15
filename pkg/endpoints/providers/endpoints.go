@@ -167,9 +167,6 @@ func (ep *Endpoints) GetBackends(servicePort v1.ServicePort, nodeName string, lo
 	backends := []Backend{}
 	for _, subset := range ep.endpoints.Subsets {
 		lookupName := servicePort.Name
-		if lookupName == "" && servicePort.TargetPort.StrVal != "" {
-			lookupName = servicePort.TargetPort.StrVal
-		}
 		targetPort := ResolvePortWithLookup(servicePort, func(_ string) int32 {
 			for _, port := range subset.Ports {
 				endpointProtocol := port.Protocol
