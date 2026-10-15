@@ -492,8 +492,15 @@ func (m *mockNetwork) routeDeleteCalls() int {
 	defer m.mu.Unlock()
 	return m.deleteRouteCalls
 }
-func (m *mockNetwork) UpdateRoutes() (bool, error)     { return false, nil }
-func (m *mockNetwork) IsSet() (*netlink.Addr, error)   { return nil, nil }
+func (m *mockNetwork) UpdateRoutes() (bool, error) { return false, nil }
+func (m *mockNetwork) IsSet() (*netlink.Addr, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.present {
+		return &netlink.Addr{}, nil
+	}
+	return nil, nil
+}
 func (m *mockNetwork) IP() string                      { return m.ip }
 func (m *mockNetwork) CIDR() string                    { return m.cidr }
 func (m *mockNetwork) IPisLinkLocal() bool             { return false }
