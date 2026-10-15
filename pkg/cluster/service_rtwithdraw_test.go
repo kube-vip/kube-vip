@@ -80,7 +80,10 @@ func TestRoutingTableHealthCheck_ReturnsRouteDeletionFailure(t *testing.T) {
 func TestRoutingTableLeaderContext_WithdrawsRouteOnLeadershipLoss(t *testing.T) {
 	t.Parallel()
 
-	cfg := newRoutingTableConfig("", "")
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+	cfg := newRoutingTableConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg.PreserveVIPOnLeadershipLoss = true
 	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
 	routeMgr := route.NewManager()
 	c, err := cluster.InitCluster(cfg, true, nil, nil, routeMgr, node.NewManager(cfg, nil))
