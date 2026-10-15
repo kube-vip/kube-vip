@@ -27,9 +27,8 @@ func TestBGPWorkerRetriesAddAfterFailedWithdrawal(t *testing.T) {
 	manager := &recordingBGPRouteManager{}
 	worker := &BGP{
 		generic: generic{
-			config:    &kubevip.Config{},
-			provider:  providers.NewEndpointslices(),
-			instances: &instances,
+			config:   &kubevip.Config{},
+			provider: providers.NewEndpointslices(),
 		},
 		bgpServer: manager,
 	}
