@@ -99,7 +99,7 @@ func TestCancellationStopsElectionWithoutStartingLeadership(t *testing.T) {
 
 	runDone := make(chan error, 1)
 	go func() { runDone <- m.run(ctx, make(chan struct{})) }()
-	waitFor(t, &e.keyCalls, 1)
+	waitFor(t, &e.keyCalls)
 	cancel()
 
 	if err := receive(t, runDone); err != nil {
@@ -122,7 +122,7 @@ func TestCancellationStopsBlockedCampaign(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- testMember(e).run(ctx, make(chan struct{})) }()
-	waitFor(t, &e.observeCalls, 1)
+	waitFor(t, &e.observeCalls)
 	cancel()
 
 	if err := receive(t, runDone); err != nil {
@@ -148,7 +148,7 @@ func TestObserverTerminationRacingCampaignNeverStartsLeadership(t *testing.T) {
 
 		runDone := make(chan error, 1)
 		go func() { runDone <- m.run(context.Background(), make(chan struct{})) }()
-		waitFor(t, &e.observeCalls, 1)
+		waitFor(t, &e.observeCalls)
 		close(observe)
 		deadline := time.Now().Add(time.Second)
 		for {
@@ -229,12 +229,12 @@ func closedObserveChannel() chan *clientv3.GetResponse {
 	return ch
 }
 
-func waitFor(t *testing.T, value *atomic.Int32, want int32) {
+func waitFor(t *testing.T, value *atomic.Int32) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
-	for value.Load() != want {
+	for value.Load() != 1 {
 		if time.Now().After(deadline) {
-			t.Fatalf("value = %d, want %d", value.Load(), want)
+			t.Fatalf("value = %d, want 1", value.Load())
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -264,7 +264,7 @@ func TestCampaignSuccessKeepsElectionAliveAfterCallbackReturns(t *testing.T) {
 	m.callbacks.OnStoppedLeading = func() { stopped.Add(1) }
 	runDone := make(chan error, 1)
 	go func() { runDone <- m.run(context.Background(), sessionDone) }()
-	waitFor(t, &started, 1)
+	waitFor(t, &started)
 	select {
 	case err := <-runDone:
 		t.Fatalf("run returned after callback success: %v", err)
@@ -289,7 +289,7 @@ func TestObserverFailureCancelsBlockingLeadershipCallback(t *testing.T) {
 	m.callbacks.OnStoppedLeading = func() { stopped.Add(1) }
 	runDone := make(chan error, 1)
 	go func() { runDone <- m.run(context.Background(), make(chan struct{})) }()
-	waitFor(t, &started, 1)
+	waitFor(t, &started)
 	close(observe)
 	err := receive(t, runDone)
 	if err == nil || !strings.Contains(err.Error(), "leader observation ended") {
