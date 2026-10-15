@@ -71,7 +71,7 @@ func (d *Deployment) ns() string {
 // share the same host network. It has to be an arg: the env var equivalent
 // (prometheus_server) is ignored by ParseEnvironment when empty, so an env var
 // cannot override the :2112 flag default.
-func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) appsv1.DaemonSet {
+func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch, nodeLabeling bool) appsv1.DaemonSet {
 	labels := map[string]string{
 		"app":                        "kube-vip",
 		"app.kubernetes.io/name":     "kube-vip-ds",
@@ -96,6 +96,11 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 	}
 	if !globalWatch {
 		env = append(env, v1.EnvVar{Name: "svc_namespace", Value: ns})
+	}
+	if nodeLabeling {
+		// The election-fault suite verifies the node-label bookkeeping around
+		// lease releases (#1775), which needs labeling to be active.
+		env = append(env, v1.EnvVar{Name: "enable_node_labeling", Value: "true"})
 	}
 	var gracePeriod int64 = 10
 	return appsv1.DaemonSet{
@@ -130,7 +135,7 @@ func buildKVDsDaemonSet(ns, imageURL, metricsAddr string, globalWatch bool) apps
 // CreateNamespacedKVDs creates a kube-vip DaemonSet and all RBAC resources
 // inside ns. The DaemonSet is scoped to watch only ns so no ClusterRole for
 // services or leases is needed; only nodes remain cluster-scoped.
-func (d *Deployment) CreateNamespacedKVDs(ctx context.Context, clientset *kubernetes.Clientset, imageURL, ns string, globalWatch bool, metricsAddr string) error {
+func (d *Deployment) CreateNamespacedKVDs(ctx context.Context, clientset *kubernetes.Clientset, imageURL, ns string, globalWatch bool, metricsAddr string, nodeLabeling bool) error {
 	// ServiceAccount
 	sa := &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "kube-vip", Namespace: ns}}
 	if _, err := clientset.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -186,7 +191,7 @@ func (d *Deployment) CreateNamespacedKVDs(ctx context.Context, clientset *kubern
 	}
 
 	// DaemonSet scoped to this namespace
-	ds := buildKVDsDaemonSet(ns, imageURL, metricsAddr, globalWatch)
+	ds := buildKVDsDaemonSet(ns, imageURL, metricsAddr, globalWatch, nodeLabeling)
 	if _, err := clientset.AppsV1().DaemonSets(ns).Create(ctx, &ds, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("daemonset: %w", err)
 	}

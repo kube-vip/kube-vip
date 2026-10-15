@@ -89,6 +89,15 @@ type Processor struct {
 	TunnelMgr wireguard.ServiceTunnelManager
 
 	routeMgr *route.Manager
+
+	// gcStaleAddress deletes an address from an interface and reports whether
+	// it was bound. Defaults to vip.GarbageCollect; replaceable in tests.
+	gcStaleAddress func(adapter, address string, intfMgr *networkinterface.Manager) (bool, error)
+
+	// staleReconcileOnce defensively guards against a second start of the
+	// stale-state reconcile on the same Processor (e.g. if both election
+	// watcher variants were ever wired up).
+	staleReconcileOnce sync.Once
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -124,6 +133,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 		TunnelMgr:        wireguard.NewTunnelManager(),
 		routeMgr:         routeMgr,
 		instanceFactory:  instance.NewFactory(config, intfMgr, arpMgr, routeMgr, nodeLabelManager),
+		gcStaleAddress:   vip.GarbageCollect,
 	}
 	var err error
 	processor.electionCoordinators, err = newElectionCoordinatorManager(processor)
