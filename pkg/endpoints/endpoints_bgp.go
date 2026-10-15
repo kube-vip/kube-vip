@@ -55,8 +55,8 @@ func (b *BGP) clear(ctx context.Context, configuredNetworks *sync.Map, lastKnown
 		if inst != nil {
 			for _, cluster := range inst.Clusters {
 				for i := range cluster.Network {
-					err := b.bgpServer.DelHost(svcCtx.Ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
-					svcCtx.ConfiguredNetworks.Delete(cluster.Network[i].IP())
+					err := b.bgpServer.DelHost(ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
+					configuredNetworks.Delete(cluster.Network[i].IP())
 					if err != nil {
 						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
