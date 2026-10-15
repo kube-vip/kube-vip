@@ -293,24 +293,37 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 
 	var lease *nclient4.Lease
 	var err error
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopChan:
+			cancel()
+		case <-requestCtx.Done():
+		}
+	}()
 
 	log.Debug("[DHCPv4]", "attempts", c.backoffAttempts)
 
 RequestLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("[DHCPv4] context error: %w", ctx.Err())
+		case <-requestCtx.Done():
+			return nil, fmt.Errorf("[DHCPv4] context error: %w", requestCtx.Err())
 		default:
 			log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
-			lease, err = c.request(ctx, false)
+			lease, err = c.request(requestCtx, false)
 			if err != nil {
 				dur := backoff.Duration()
 
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					select {
+					case c.errorChan <- errMsg:
+					case <-c.stopChan:
+					case <-requestCtx.Done():
+					}
 					return nil, errMsg
 				}
 				log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
@@ -318,7 +331,7 @@ RequestLoop:
 				select {
 				case <-t.C:
 					t.Stop()
-				case <-ctx.Done():
+				case <-requestCtx.Done():
 				}
 				continue RequestLoop
 			}
@@ -332,7 +345,7 @@ RequestLoop:
 		select {
 		case c.ipChan <- lease.ACK.YourIPAddr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}
 
