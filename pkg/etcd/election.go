@@ -181,9 +181,7 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 			return nil
 		case <-sessionDone:
 			if ctx.Err() != nil {
-				cancel()
-				m.stop()
-				wg.Wait()
+				finish()
 				return nil
 			}
 			result = errors.New("election session ended")
