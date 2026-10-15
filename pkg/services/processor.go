@@ -219,7 +219,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
-		if event.Type != watch.Deleted {
+		if event.Type != watch.Deleted && svcCtx != nil {
 			if watched := svcCtx.WatchedService(); serviceSnapshotNewer(watched, svc) {
 				return nil
 			}
@@ -748,6 +748,11 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	svcCtx, cleanupCtx, err := p.retireServiceContext(svc)
 	if err != nil {
 		return err
+	}
+	if svcCtx != nil {
+		if err := svcCtx.WaitForWatchingStopped(context.Background()); err != nil {
+			return fmt.Errorf("wait for service watcher shutdown: %w", err)
+		}
 	}
 
 	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
