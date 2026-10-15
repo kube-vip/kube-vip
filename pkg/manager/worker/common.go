@@ -231,8 +231,8 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 			if !electionSession.IsCurrent() {
 				return
 			}
-			a.OnStoppedLeading()
 			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
+			a.OnStoppedLeading()
 		},
 		OnNewLeader: a.OnNewLeader,
 	}
