@@ -881,7 +881,7 @@ func TestStaleActivationCleanupPreservesReplacementInstance(t *testing.T) {
 	}
 }
 
-func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
+func TestDeleteServiceReturnsLabelRemovalErrorAfterRelease(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		UID: uid, Name: "service-a", Namespace: "default",
@@ -898,8 +898,8 @@ func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
 	if err := processor.deleteService(context.Background(), uid, nil); err == nil {
 		t.Fatal("deleteService() error = nil, want label removal error")
 	}
-	if got := processor.findServiceInstance(service); got != serviceInstance {
-		t.Fatal("failed deletion removed the Service instance, preventing cleanup retry")
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("failed label bookkeeping kept the released Service instance registered")
 	}
 }
 
@@ -992,8 +992,11 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	if err := processor.deleteTrackedService(service); err == nil {
 		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")
 	}
-	if got := processor.findServiceInstance(service); got == nil {
-		t.Fatal("persistent cleanup failure removed the Service instance")
+	// The local teardown already ran, so a failed label patch must not keep
+	// the released instance tracked; the stale label heals through the
+	// periodic stale-state reconcile.
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("label-removal failure left the released Service instance tracked")
 	}
 	if got, err := processor.getServiceContext(uid); err != nil || got != svcCtx {
 		t.Fatalf("failed cleanup did not retain its context for retry: got %v, err %v", got, err)

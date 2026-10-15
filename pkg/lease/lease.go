@@ -490,6 +490,16 @@ func (l *Lease) electionState(generation *electionGeneration) (electionPhase, bo
 	return generation.phase, true
 }
 
+// Leading reports whether any local election generation on this Lease is
+// currently in the leading phase. It is generation-agnostic: callers that own
+// an ElectionSession should prefer Session.IsLeading, which only reports their
+// own generation.
+func (l *Lease) Leading() bool {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	return l.election != nil && l.election.phase == electionLeading
+}
+
 // ServiceName gets lease name and id for the service.
 func ServiceName(service *v1.Service) (string, string) {
 	return ServiceNameFor(service.Namespace, service.Name, service.Annotations[kubevip.ServiceLease])
