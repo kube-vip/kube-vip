@@ -252,3 +252,50 @@ func receive(t *testing.T, ch <-chan error) error {
 }
 
 var _ election = (*fakeElection)(nil)
+
+func TestCampaignSuccessKeepsElectionAliveAfterCallbackReturns(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	sessionDone := make(chan struct{})
+	e := successfulFakeElection(observe)
+	var started, stopped atomic.Int32
+	m := testMember(e)
+	m.leaderDelay = 0
+	m.callbacks.OnStartedLeading = func(context.Context) { started.Add(1) }
+	m.callbacks.OnStoppedLeading = func() { stopped.Add(1) }
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(context.Background(), sessionDone) }()
+	waitFor(t, &started, 1)
+	select {
+	case err := <-runDone:
+		t.Fatalf("run returned after callback success: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(sessionDone)
+	if err := receive(t, runDone); err == nil || !strings.Contains(err.Error(), "election session ended") {
+		t.Fatalf("run error = %v, want election session ended", err)
+	}
+	if stopped.Load() != 1 {
+		t.Fatalf("OnStoppedLeading calls = %d, want 1", stopped.Load())
+	}
+}
+
+func TestObserverFailureCancelsBlockingLeadershipCallback(t *testing.T) {
+	observe := make(chan *clientv3.GetResponse)
+	e := successfulFakeElection(observe)
+	var started, stopped atomic.Int32
+	m := testMember(e)
+	m.leaderDelay = 0
+	m.callbacks.OnStartedLeading = func(ctx context.Context) { started.Add(1); <-ctx.Done() }
+	m.callbacks.OnStoppedLeading = func() { stopped.Add(1) }
+	runDone := make(chan error, 1)
+	go func() { runDone <- m.run(context.Background(), make(chan struct{})) }()
+	waitFor(t, &started, 1)
+	close(observe)
+	err := receive(t, runDone)
+	if err == nil || !strings.Contains(err.Error(), "leader observation ended") {
+		t.Fatalf("run error = %v, want observer failure", err)
+	}
+	if stopped.Load() != 1 {
+		t.Fatalf("OnStoppedLeading calls = %d, want 1", stopped.Load())
+	}
+}
