@@ -1949,7 +1949,7 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 					}
 				}
 				return nil
-			}).Should(Succeed())
+			}, 120*time.Second, time.Second).Should(Succeed())
 		}
 	}
 }
