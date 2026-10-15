@@ -962,9 +962,8 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 	if err := setAPIServerReachable(leader, false); err != nil {
 		return err
 	}
-	time.Sleep(time.Second * 20)
-	// Checked before restoring, since the node may legitimately re-acquire the lease afterwards.
-	staleVIP := checkVIPAbsentOnNode(leader, lbAddress)
+	// Checked while cut off, since the node may legitimately re-acquire the lease afterwards.
+	staleVIP := waitForVIPAbsentOnNode(ctx, leader, lbAddress, time.Second*60)
 
 	slog.Infof("🔌 restoring API server access on node [%s]", leader)
 	if err := setAPIServerReachable(leader, true); err != nil {

@@ -2,11 +2,13 @@ package deployment
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gookit/slog"
 	"github.com/vishvananda/netlink"
@@ -336,24 +338,42 @@ func checkNodesForDuplicateAddresses(nodes []nodeAddresses, address string) erro
 	return nil
 }
 
-func checkVIPAbsentOnNode(node, address string) error {
-	nodes, err := getAddressesOnNodes()
-	if err != nil {
-		return err
-	}
+func waitForVIPAbsentOnNode(ctx context.Context, node, address string, timeout time.Duration) error {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	// Lease holders use the "-modified" hostname, Kind nodes the container name.
 	container := strings.TrimSuffix(node, "-modified")
+	for {
+		nodes, err := getAddressesOnNodes()
+		if err == nil && !nodeHasAddress(nodes, container, address) {
+			return nil
+		}
+		select {
+		case <-checkCtx.Done():
+			if err != nil {
+				return fmt.Errorf("listing node addresses: %w", err)
+			}
+			return fmt.Errorf("‼️ node [%s] still has address [%s] %s after losing API server access", node, address, timeout)
+		case <-ticker.C:
+		}
+	}
+}
+
+func nodeHasAddress(nodes []nodeAddresses, container, address string) bool {
 	for x := range nodes {
 		if nodes[x].node != container {
 			continue
 		}
 		for _, a := range nodes[x].addresses {
 			if strings.TrimSpace(a) == address {
-				return fmt.Errorf("‼️ node [%s] still has address [%s] after losing its lease", node, address)
+				return true
 			}
 		}
 	}
-	return nil
+	return false
 }
 
 // scrapeElectionLoops returns, per node, the value of the
