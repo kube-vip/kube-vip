@@ -60,9 +60,9 @@ func NewManager(config *kubevip.Config, k8sClientset, rwClientset *kubernetes.Cl
 func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 	switch c.LeaderElectionType {
 	case "kubernetes", "":
-		return runKubernetesLeaderElectionOrDie(ctx, run)
+		return runTrackedElection("kubernetes", func() error { return runKubernetesLeaderElectionOrDie(ctx, run) })
 	case "etcd":
-		if err := runEtcdLeaderElectionOrDie(ctx, run); err != nil {
+		if err := runTrackedElection("etcd", func() error { return runEtcdLeaderElectionOrDie(ctx, run) }); err != nil {
 			return err
 		}
 	default:
@@ -72,9 +72,13 @@ func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 	return nil
 }
 
-func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
-	stopTracking := metrics.TrackElectionLoop("kubernetes")
+func runTrackedElection(kind string, run func() error) error {
+	stopTracking := metrics.TrackElectionLoop(kind)
 	defer stopTracking()
+	return run()
+}
+
+func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
 	annotationProvider := func() (map[string]string, error) {
 		vips := run.VIPs
 		if run.VIPsProvider != nil {
@@ -120,8 +124,6 @@ func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error
 }
 
 func runEtcdLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
-	stopTracking := metrics.TrackElectionLoop("etcd")
-	defer stopTracking()
 	if err := etcd.RunElectionOrDie(ctx, &etcd.LeaderElectionConfig{
 		EtcdConfig:           etcd.ClientConfig{Client: run.Mgr.EtcdClient},
 		Name:                 run.LeaseID.NamespacedName(),
