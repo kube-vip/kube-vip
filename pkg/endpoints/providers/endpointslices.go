@@ -179,12 +179,10 @@ func (ep *Endpointslices) GetLabel() string {
 }
 
 func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
-	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+	return ResolvePortWithLookup(servicePort, func(_ string) int32 {
 		for _, eps := range ep.slices {
-			for _, p := range eps.Ports {
-				if p.Name != nil && *p.Name == name && p.Port != nil {
-					return *p.Port
-				}
+			if port := endpointSlicePort(eps.Ports, servicePort.Name, ""); port != 0 {
+				return port
 			}
 		}
 		return 0
@@ -199,13 +197,8 @@ func (ep *Endpointslices) GetBackends(servicePort v1.ServicePort, nodeName strin
 	seen := map[Backend]struct{}{}
 	backends := []Backend{}
 	for _, eps := range ep.slices {
-		targetPort := ResolvePortWithLookup(servicePort, func(name string) int32 {
-			for _, port := range eps.Ports {
-				if port.Name != nil && *port.Name == name && port.Port != nil && endpointPortProtocol(port) == serviceProtocol {
-					return *port.Port
-				}
-			}
-			return 0
+		targetPort := ResolvePortWithLookup(servicePort, func(_ string) int32 {
+			return endpointSlicePort(eps.Ports, servicePort.Name, serviceProtocol)
 		})
 		for _, endpoint := range eps.Endpoints {
 			if !isServing(endpoint.Conditions) || (local && !endpointIsLocal(endpoint, nodeName)) {
@@ -222,6 +215,16 @@ func (ep *Endpointslices) GetBackends(servicePort v1.ServicePort, nodeName strin
 		}
 	}
 	return backends, nil
+}
+
+func endpointSlicePort(ports []discoveryv1.EndpointPort, serviceName string, protocol v1.Protocol) int32 {
+	for _, port := range ports {
+		nameMatches := (port.Name == nil && serviceName == "") || (port.Name != nil && *port.Name == serviceName)
+		if nameMatches && port.Port != nil && (protocol == "" || endpointPortProtocol(port) == protocol) {
+			return *port.Port
+		}
+	}
+	return 0
 }
 
 func endpointIsLocal(endpoint discoveryv1.Endpoint, nodeName string) bool {

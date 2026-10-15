@@ -161,7 +161,7 @@ func TestResolvePortFromFakeClientObjects(t *testing.T) {
 		t.Fatalf("loading fake EndpointSlice: %v", err)
 	}
 
-	namedPort := v1.ServicePort{Port: 80, TargetPort: intstr.FromString("web")}
+	namedPort := v1.ServicePort{Name: "web", Port: 80, TargetPort: intstr.FromString("target")}
 	if got := legacy.ResolvePort(namedPort); got != 8080 {
 		t.Errorf("legacy ResolvePort() = %d, want 8080", got)
 	}
@@ -216,7 +216,7 @@ func TestResolvePortWithLookup(t *testing.T) {
 func TestEndpointSliceBackendsPreservePerSliceNamedPorts(t *testing.T) {
 	provider := NewEndpointslices()
 	portName := "web"
-	servicePort := v1.ServicePort{Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString(portName)}
+	servicePort := v1.ServicePort{Name: "web", Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("target")}
 	firstPort, secondPort := int32(8080), int32(9090)
 	first := &discoveryv1.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{Name: "slice-a"},
