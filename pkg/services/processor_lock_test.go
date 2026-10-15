@@ -374,18 +374,26 @@ func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
 	initializeTestElectionCoordinators(processor)
 	processor.svcMap.Store(uid, svcCtx)
 
-	start := make(chan struct{})
+	// Hold the UID lock while both deletion paths are admitted. This makes the
+	// overlap deterministic: both goroutines must contend for the same lock
+	// after the test releases it, rather than merely starting near each other.
+	processor.serviceLock.Lock(uid)
+	ready := make(chan struct{}, 2)
 	endpointDone := make(chan error, 1)
 	deleteDone := make(chan error, 1)
 	go func() {
-		<-start
+		ready <- struct{}{}
 		endpointDone <- processor.deleteServiceForContext(context.Background(), uid, svcCtx)
 	}()
 	go func() {
-		<-start
+		ready <- struct{}{}
 		deleteDone <- processor.Delete(watch.Event{Type: watch.Deleted, Object: service}, false)
 	}()
-	close(start)
+	<-ready
+	<-ready
+	if err := processor.serviceLock.Unlock(uid); err != nil {
+		t.Fatalf("unlock service UID: %v", err)
+	}
 
 	select {
 	case err := <-endpointDone:
