@@ -12,7 +12,7 @@ spec:
     args:
     - manager
     - --prometheusHTTPServer
-    - ""
+    - "{{ .PrometheusHTTPServer }}"
     env:
     - name: vip_loglevel
       value: "-4"
