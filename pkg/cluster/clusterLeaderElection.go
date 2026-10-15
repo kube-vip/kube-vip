@@ -104,9 +104,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.Started() {
 				return
 			}
-			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 			metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
 			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(1)
+			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
 			if !electionSession.IsCurrent() {
