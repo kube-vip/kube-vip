@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/arp"
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -74,6 +75,53 @@ func TestServicesWorkerStopAndWaitPreservingDrainsBeforeRestart(t *testing.T) {
 	}
 	serviceCluster.StopAndWait()
 	workers.Wait()
+}
+
+func TestServicesWorkerStopRemovesVIPUnlessPreserved(t *testing.T) {
+	tests := []struct {
+		name        string
+		arp         bool
+		preserve    bool
+		wantPresent bool
+	}{
+		{name: "stop removes the VIP"},
+		{name: "stop with ARP removes the VIP", arp: true},
+		{name: "preserving stop keeps the VIP", preserve: true, wantPresent: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := &kubevip.Config{EnableARP: test.arp, ArpBroadcastRate: 3000, VIPSubnet: "32"}
+			var arpMgr *arp.Manager
+			if test.arp {
+				arpMgr = arp.NewManager(config)
+			}
+			serviceCluster, err := cluster.InitCluster(config, true, nil, arpMgr, nil, nil)
+			if err != nil {
+				t.Fatalf("InitCluster() error = %v", err)
+			}
+			network := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32"}
+			serviceCluster.Network = []vip.Network{network}
+
+			var workers sync.WaitGroup
+			if err := serviceCluster.StartLoadBalancerService(context.Background(), config, nil, "service", &workers); err != nil {
+				t.Fatalf("StartLoadBalancerService() error = %v", err)
+			}
+			if !network.isPresent() {
+				t.Fatal("VIP was not added when the Service worker started")
+			}
+
+			if test.preserve {
+				serviceCluster.StopAndWaitPreserving(network.IP())
+			} else {
+				serviceCluster.StopAndWait()
+			}
+			workers.Wait()
+
+			if got := network.isPresent(); got != test.wantPresent {
+				t.Fatalf("VIP present after stop = %t, want %t", got, test.wantPresent)
+			}
+		})
+	}
 }
 
 func TestStartLoadBalancerServiceRollsBackEarlierNetwork(t *testing.T) {

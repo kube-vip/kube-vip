@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	kindconfigv1alpha4 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
@@ -22,7 +22,7 @@ import (
 	"github.com/kube-vip/kube-vip/testing/e2e"
 )
 
-var _ = Describe("kube-vip elected VIP failover", Ordered, func() {
+var _ = Describe("kube-vip elected VIP failover", Ordered, ContinueOnFailure, func() {
 	if Mode == ModeARP {
 		var (
 			kindCluster *e2e.Cluster

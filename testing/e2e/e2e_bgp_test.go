@@ -14,6 +14,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -259,6 +260,57 @@ var _ = Describe("kube-vip BGP mode", func() {
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 			)
 
+		})
+
+		Describe("kube-vip BGP multipath Service endpoint withdrawal", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv4Family, utils.IPv4Family,
+					[]string{utils.IPv4Family}, &gobgpPeers,
+					&gobgpClient, logger, 2, "", "bgp-local-endpoint-multipath", false, false, true, false)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			It("withdraws local paths for non-serving and removed endpoints", func(ctx context.Context) {
+				const serviceName = "test-svc-local-multipath"
+				serviceVIP := e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
+				createTestService(ctx, serviceName, dsNamespace, dsName, serviceVIP,
+					kindCluster.Client, corev1.IPFamilyPolicySingleStack,
+					[]corev1.IPFamily{corev1.IPv4Protocol}, corev1.ServiceExternalTrafficPolicyLocal,
+					"", 80, false, false)
+				DeferCleanup(func(ctx context.Context) {
+					_ = kindCluster.Client.CoreV1().Services(dsNamespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
+				})
+
+				firstNodeIP := e2e.NodeIPv4(kindCluster.Nodes[0])
+				secondNodeIP := e2e.NodeIPv4(kindCluster.Nodes[1])
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 2, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP, firstNodeIP, secondNodeIP)
+
+				targetNode := kindCluster.Nodes[0].String()
+				setServiceEndpointServing(ctx, kindCluster.Client, dsNamespace, serviceName, targetNode, false)
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 1, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP, secondNodeIP)
+
+				removeTestDS(ctx, kindCluster.Client, dsNamespace, dsName, 1)
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 0, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP)
+			})
 		})
 
 		Describe("kube-vip IPv4 services BGP mode functionality with mixed election", Ordered, func() {
@@ -1162,6 +1214,41 @@ func testControlPlaneBGP(ctx context.Context, gobgpClient api.GoBgpServiceClient
 		Expect(paths).ToNot(BeEmpty())
 		Expect(strings.Contains(paths[0].Prefix, addr)).To(BeTrue())
 	}
+}
+
+func setServiceEndpointServing(ctx context.Context, client kubernetes.Interface, namespace, serviceName, nodeName string, serving bool) {
+	Eventually(func() error {
+		endpointSlices, err := client.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: discoveryv1.LabelServiceName + "=" + serviceName,
+		})
+		if err != nil {
+			return err
+		}
+		for index := range endpointSlices.Items {
+			endpointSlice := &endpointSlices.Items[index]
+			for endpointIndex := range endpointSlice.Endpoints {
+				endpoint := &endpointSlice.Endpoints[endpointIndex]
+				if endpoint.NodeName == nil || *endpoint.NodeName != nodeName {
+					continue
+				}
+				ready := serving
+				servingCondition := serving
+				endpoint.Conditions.Ready = &ready
+				endpoint.Conditions.Serving = &servingCondition
+				_, err := client.DiscoveryV1().EndpointSlices(namespace).Update(ctx, endpointSlice, metav1.UpdateOptions{})
+				return err
+			}
+		}
+		return fmt.Errorf("no EndpointSlice endpoint for service %s/%s on node %s", namespace, serviceName, nodeName)
+	}, "60s", "1s").Should(Succeed())
+}
+
+func expectBGPNextHops(ctx context.Context, client api.GoBgpServiceClient, address string, expected ...string) {
+	Eventually(func() []string {
+		nextHops := bgp.ResolveVIP(ctx, client, address)
+		slices.Sort(nextHops)
+		return nextHops
+	}, 120*time.Second, time.Second).Should(ConsistOf(expected))
 }
 
 // annotateNodes adds BGP peer-0 configuration annotations (with the given

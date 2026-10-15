@@ -336,6 +336,26 @@ func checkNodesForDuplicateAddresses(nodes []nodeAddresses, address string) erro
 	return nil
 }
 
+func checkVIPAbsentOnNode(node, address string) error {
+	nodes, err := getAddressesOnNodes()
+	if err != nil {
+		return err
+	}
+	// Lease holders use the "-modified" hostname, Kind nodes the container name.
+	container := strings.TrimSuffix(node, "-modified")
+	for x := range nodes {
+		if nodes[x].node != container {
+			continue
+		}
+		for _, a := range nodes[x].addresses {
+			if strings.TrimSpace(a) == address {
+				return fmt.Errorf("‼️ node [%s] still has address [%s] after losing its lease", node, address)
+			}
+		}
+	}
+	return nil
+}
+
 // scrapeElectionLoops returns, per node, the value of the
 // kube_vip_service_election_loops gauge for a service. There has to be at most
 // one live election loop per service per node.

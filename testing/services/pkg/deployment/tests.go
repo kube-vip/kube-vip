@@ -963,10 +963,15 @@ func (config *TestConfig) ElectionFaults(ctx context.Context, clientset *kuberne
 		return err
 	}
 	time.Sleep(time.Second * 20)
+	// Checked before restoring, since the node may legitimately re-acquire the lease afterwards.
+	staleVIP := checkVIPAbsentOnNode(leader, lbAddress)
 
 	slog.Infof("🔌 restoring API server access on node [%s]", leader)
 	if err := setAPIServerReachable(leader, true); err != nil {
 		return err
+	}
+	if staleVIP != nil {
+		return staleVIP
 	}
 
 	if err := config.checkConverged(ctx, clientset, leaseName, lbAddress, "API server disruption"); err != nil {
