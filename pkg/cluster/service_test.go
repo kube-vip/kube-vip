@@ -435,6 +435,9 @@ type mockNetwork struct {
 	routePresent     bool
 	deleteRouteCalls int
 	deleteRouteErr   error
+	setMaskErr       error
+	addIPCalls       int
+	deleteIPCalls    int
 }
 
 func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
