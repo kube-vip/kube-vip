@@ -1938,7 +1938,17 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		} else {
 			Eventually(func() error {
 				currentLease, getErr := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
-				return e2e.CheckCommonLeaseRetired(currentLease, getErr)
+				if err := e2e.CheckCommonLeaseRetired(currentLease, getErr); err != nil {
+					return err
+				}
+				for _, node := range nodes.Items {
+					for _, address := range lbAddresses {
+						if !e2e.CheckIPAddressPresence(address, node.Name, false) {
+							return fmt.Errorf("VIP address %q remains on node %q after common lease retirement", address, node.Name)
+						}
+					}
+				}
+				return nil
 			}).Should(Succeed())
 		}
 	}
