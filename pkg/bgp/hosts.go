@@ -13,6 +13,10 @@ import (
 func (b *Server) AddHost(ctx context.Context, addr string, object string) error {
 	for {
 		b.mtx.Lock()
+		if b.closing {
+			b.mtx.Unlock()
+			return context.Canceled
+		}
 		if done := b.pending[addr]; done != nil {
 			b.mtx.Unlock()
 			select {
@@ -51,6 +55,10 @@ func (b *Server) AddHost(ctx context.Context, addr string, object string) error 
 func (b *Server) DelHost(ctx context.Context, addr string, object string) error {
 	for {
 		b.mtx.Lock()
+		if b.closing {
+			b.mtx.Unlock()
+			return context.Canceled
+		}
 		if done := b.pending[addr]; done != nil {
 			b.mtx.Unlock()
 			select {
