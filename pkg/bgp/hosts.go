@@ -97,10 +97,9 @@ func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest) 
 			return ctx.Err()
 		}
 	}
-	select {
-	case err := <-result:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Once queued, the withdrawal owns the serialized route operation. Wait for
+	// completion even if the caller context is canceled; returning early would
+	// release b.mtx while DeletePath is still pending and allow a new owner to
+	// advertise before the old deletion completes.
+	return <-result
 }
