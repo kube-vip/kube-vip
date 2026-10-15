@@ -378,6 +378,14 @@ func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
 	// overlap deterministic: both goroutines must contend for the same lock
 	// after the test releases it, rather than merely starting near each other.
 	processor.serviceLock.Lock(uid)
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			if err := processor.serviceLock.Unlock(uid); err != nil {
+				t.Errorf("unlock service UID during cleanup: %v", err)
+			}
+		}
+	}()
 	lockAttempts := make(chan types.UID, 2)
 	processor.serviceLock.beforeLock = func(attempted types.UID) {
 		if attempted == uid {
@@ -392,11 +400,19 @@ func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
 	go func() {
 		deleteDone <- processor.Delete(watch.Event{Type: watch.Deleted, Object: service}, false)
 	}()
-	<-lockAttempts
-	<-lockAttempts
+	waitForLockAttempt := func() {
+		select {
+		case <-lockAttempts:
+		case <-time.After(time.Second):
+			t.Fatal("deletion path did not attempt the held UID lock")
+		}
+	}
+	waitForLockAttempt()
+	waitForLockAttempt()
 	if err := processor.serviceLock.Unlock(uid); err != nil {
 		t.Fatalf("unlock service UID: %v", err)
 	}
+	lockReleased = true
 
 	select {
 	case err := <-endpointDone:
