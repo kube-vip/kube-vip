@@ -93,19 +93,22 @@ func TestRoutingTableLeaderContext_WithdrawsRouteOnLeadershipLoss(t *testing.T) 
 	}
 	c.Network = []vip.Network{network}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		c.OnStartedLeading(context.Background(), cfg, &election.Manager{}, nil, func() {})
+		c.OnStartedLeading(ctx, cfg, &election.Manager{}, nil, func() {})
 		close(done)
 	}()
 
 	expectEventually(t, network.isRoutePresent, "leader service should start")
-	c.OnStoppedLeading(cfg, nil)
+	cancel()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("leader service did not stop after leadership loss")
+		t.Fatal("leader service did not stop after context cancellation")
 	}
+	c.OnStoppedLeading(cfg, nil)
 	if network.isRoutePresent() {
 		t.Fatal("RT route remained after leadership loss")
 	}
