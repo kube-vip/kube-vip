@@ -15,7 +15,11 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-var errDefaultInterfaceSubscriptionClosed = errors.New("default interface subscription closed")
+var (
+	errDefaultInterfaceSubscriptionClosed = errors.New("default interface subscription closed")
+	errDefaultRouteDeleted                = errors.New("default route deleted")
+	errDefaultInterfaceDown               = errors.New("default interface down")
+)
 
 // getHostName return the hostname from the fqdn
 func getHostName(dnsName string) string {
@@ -97,6 +101,9 @@ func monitorDefaultInterfaceWithRetry(ctx context.Context, defaultIF *net.Interf
 		if ctx.Err() != nil {
 			return nil
 		}
+		if errors.Is(err, errDefaultRouteDeleted) || errors.Is(err, errDefaultInterfaceDown) {
+			return err
+		}
 		if err != nil && !errors.Is(err, errDefaultInterfaceSubscriptionClosed) {
 			log.Warn("default interface subscription failed, retrying", "err", err)
 		} else if err == nil {
@@ -140,7 +147,7 @@ func monitorDefaultInterface(ctx context.Context, defaultIF *net.Interface, rout
 			}
 			log.Debug(fmt.Sprintf("type: %d, route: %+v", r.Type, r.Route))
 			if r.Type == syscall.RTM_DELROUTE && isDefaultRoute(r.Dst) && r.LinkIndex == defaultIF.Index {
-				return fmt.Errorf("default route deleted and the default interface may be invalid")
+				return fmt.Errorf("%w and the default interface may be invalid", errDefaultRouteDeleted)
 			}
 		case update, ok := <-linkCh:
 			if !ok {
@@ -151,7 +158,7 @@ func monitorDefaultInterface(ctx context.Context, defaultIF *net.Interface, rout
 			}
 			attrs := update.Attrs()
 			if attrs != nil && attrs.Index == defaultIF.Index && attrs.Flags&net.FlagUp == 0 {
-				return fmt.Errorf("default interface %q is down", defaultIF.Name)
+				return fmt.Errorf("%w: %q", errDefaultInterfaceDown, defaultIF.Name)
 			}
 		case <-ctx.Done():
 			return nil
