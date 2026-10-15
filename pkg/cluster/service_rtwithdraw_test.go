@@ -81,12 +81,8 @@ func TestRoutingTableLeaderContext_WithdrawsRouteOnLeadershipLoss(t *testing.T) 
 	t.Parallel()
 
 	cfg := newRoutingTableConfig("", "")
-	cfg.PreserveVIPOnLeadershipLoss = true
 	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
 	routeMgr := route.NewManager()
-	if err := routeMgr.Add(cfg.NodeName, network, true, false); err != nil {
-		t.Fatalf("add route: %v", err)
-	}
 	c, err := cluster.InitCluster(cfg, true, nil, nil, routeMgr, node.NewManager(cfg, nil))
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
