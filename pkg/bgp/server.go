@@ -32,14 +32,16 @@ type Server struct {
 	withdrawStop      chan struct{}
 	withdrawDone      chan struct{}
 	deletePathFunc    func(apiutil.DeletePathRequest) error
+	pending           map[string]chan struct{}
 }
 
 const withdrawalQueueSize = 32
 
 type withdrawalRequest struct {
-	ctx    context.Context
-	req    apiutil.DeletePathRequest
-	result chan error
+	ctx      context.Context
+	req      apiutil.DeletePathRequest
+	result   chan error
+	complete func(error)
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -63,6 +65,7 @@ func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error
 		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
 		c:       &c,
 		tracker: make(map[string]map[string]bool),
+		pending: make(map[string]chan struct{}),
 	}
 	b.deletePathFunc = b.s.DeletePath
 	return
@@ -93,7 +96,11 @@ func (b *Server) withdrawalWorker() {
 		}
 		select {
 		case req := <-b.withdrawQueue:
-			req.result <- b.deletePathFunc(req.req)
+			err := b.deletePathFunc(req.req)
+			if req.complete != nil {
+				req.complete(err)
+			}
+			req.result <- err
 		case <-b.withdrawStop:
 			b.cancelQueuedWithdrawals()
 			return
@@ -105,6 +112,9 @@ func (b *Server) cancelQueuedWithdrawals() {
 	for {
 		select {
 		case req := <-b.withdrawQueue:
+			if req.complete != nil {
+				req.complete(context.Canceled)
+			}
 			req.result <- context.Canceled
 		default:
 			return
