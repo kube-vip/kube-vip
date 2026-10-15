@@ -166,12 +166,18 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 	wg.Go(func() { observerDone <- m.watchLeaderChanges(runCtx, elected) })
 
 	var result error
+	finish := func() {
+		cancel()
+		m.stop()
+		wg.Wait()
+		if m.wasStarted() {
+			m.callbacks.OnStoppedLeading()
+		}
+	}
 	for campaignDone != nil || observerDone != nil {
 		select {
 		case <-ctx.Done():
-			m.stop()
-			cancel()
-			wg.Wait()
+			finish()
 			return nil
 		case <-sessionDone:
 			if ctx.Err() != nil {
@@ -181,46 +187,34 @@ func (m *member) run(ctx context.Context, sessionDone <-chan struct{}) error {
 				return nil
 			}
 			result = errors.New("election session ended")
-			cancel()
-			m.stop()
-			wg.Wait()
+			finish()
 			return result
 		case err := <-campaignDone:
 			campaignDone = nil
 			if err != nil {
 				if ctx.Err() != nil {
-					cancel()
-					m.stop()
-					wg.Wait()
+					finish()
 					return nil
 				}
 				result = errors.Wrap(err, "campaigning for leadership")
-				cancel()
-				m.stop()
-				wg.Wait()
+				finish()
 				return result
 			}
 		case err := <-observerDone:
 			observerDone = nil
 			if err != nil {
 				if ctx.Err() != nil {
-					cancel()
-					m.stop()
-					wg.Wait()
+					finish()
 					return nil
 				}
 				result = errors.Wrap(err, "observing leader changes")
-				cancel()
-				m.stop()
-				wg.Wait()
+				finish()
 				return result
 			}
 		}
 	}
 
-	cancel()
-	m.stop()
-	wg.Wait()
+	finish()
 	return result
 }
 
@@ -228,12 +222,7 @@ func (m *member) watchLeaderChanges(ctx context.Context, elected <-chan campaign
 	changes := m.election.Observe(ctx)
 	var key, currentLeaderKey string
 	var isLeader bool
-	defer func() {
-		if isLeader && m.wasStarted() {
-			m.callbacks.OnStoppedLeading()
-		}
-		log.Debug("Exiting watcher", "id", m.memberID)
-	}()
+	defer log.Debug("Exiting watcher", "id", m.memberID)
 	for {
 		select {
 		case <-ctx.Done():
