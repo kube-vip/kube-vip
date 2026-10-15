@@ -555,22 +555,11 @@ func (s *controlPlaneFaultSuite) waitForMetrics(node string) {
 }
 
 func (s *controlPlaneFaultSuite) requireFaultMetricCapabilities() {
-	s.metrics = hasMetricCapabilityWithLabels(
-		s.ctx,
-		s.cluster.Name,
-		s.nodes,
-		faultElectionLoopsMetric,
-		map[string]string{"type": "kubernetes"},
-	)
-	if !s.metrics {
-		return
-	}
-	if Mode == ModeARP && !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, faultVIPAddressesMetric) {
-		s.metrics = false
-	}
-	if !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, s.operationMetric()) {
-		s.metrics = false
-	}
+	// The endpoint is a suite-wide prerequisite for metric snapshots. Individual
+	// metric families are optional across supported image versions and are gated
+	// at their own assertion sites below; one missing family must not suppress
+	// unrelated capabilities.
+	s.metrics = s.metricsAvailable()
 }
 
 func (s *controlPlaneFaultSuite) operationMetric() string {
@@ -764,7 +753,7 @@ func (s *controlPlaneFaultSuite) waitForNodeReady(nodeName string) {
 }
 
 func (s *controlPlaneFaultSuite) assertLeaderMetric(leader string) {
-	if !s.metrics {
+	if !s.metrics || !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, "kube_vip_is_leader") {
 		return
 	}
 	e2e.EventuallyMetric(
@@ -780,7 +769,7 @@ func (s *controlPlaneFaultSuite) assertLeaderMetric(leader string) {
 }
 
 func (s *controlPlaneFaultSuite) assertSteadyLeader(leader string) {
-	if !s.metrics {
+	if !s.metrics || !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, "kube_vip_is_leader") {
 		return
 	}
 	e2e.ConsistentlyMetric(
@@ -796,7 +785,7 @@ func (s *controlPlaneFaultSuite) assertSteadyLeader(leader string) {
 }
 
 func (s *controlPlaneFaultSuite) assertOneLeader(skipNodes ...string) {
-	if !s.metrics {
+	if !s.metrics || !hasMetricCapabilityOnAnyNode(s.ctx, s.cluster.Name, s.nodes, "kube_vip_is_leader") {
 		return
 	}
 	assertExactlyOneLeaderMetric(s.ctx, s.cluster.Name, s.client, skipNodes...)
