@@ -356,6 +356,58 @@ func TestDeleteServiceForContextRejectsStaleServiceContext(t *testing.T) {
 	}
 }
 
+// TestDeleteSerializesWithConcurrentEndpointCleanup exercises the public Delete
+// path while an endpoint callback is already queued for the same Service UID.
+// Both paths must serialize their instance removal and leave no stale instance.
+func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
+	uid := types.UID("service-delete-race")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service-delete-race", Namespace: "default", UID: uid,
+	}}
+	svcCtx := servicecontext.New(context.Background())
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{},
+		leaseMgr:         lease.NewManager(),
+		ServiceInstances: []*instance.Instance{{ServiceUID: uid, ServiceSnapshot: service}},
+	}
+	initializeTestElectionCoordinators(processor)
+	processor.svcMap.Store(uid, svcCtx)
+
+	start := make(chan struct{})
+	endpointDone := make(chan error, 1)
+	deleteDone := make(chan error, 1)
+	go func() {
+		<-start
+		endpointDone <- processor.deleteServiceForContext(context.Background(), uid, svcCtx)
+	}()
+	go func() {
+		<-start
+		deleteDone <- processor.Delete(watch.Event{Type: watch.Deleted, Object: service}, false)
+	}()
+	close(start)
+
+	select {
+	case err := <-endpointDone:
+		if err != nil {
+			t.Fatalf("endpoint cleanup returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("endpoint cleanup did not complete")
+	}
+	select {
+	case err := <-deleteDone:
+		if err != nil {
+			t.Fatalf("Delete returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Delete did not complete")
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("concurrent Delete left a stale Service instance")
+	}
+}
+
 func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
