@@ -147,13 +147,13 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			svcLease.Elected.Store(true)
 			svcLease.Unlock()
 			close(svcLease.Started)
+			metrics.LeaderTransitionsTotal.WithLabelValues(id.Name()).Inc()
+			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(1)
 			// Mark this service as active (as we've started leading)
 			// we run this in background as it's blocking
 			if err := p.onStartedLeading(svcCtx, service, &wg); err != nil {
 				leaderCancel()
 			}
-			metrics.LeaderTransitionsTotal.WithLabelValues(id.Name()).Inc()
-			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(1)
 		},
 		OnStoppedLeading: func() {
 			// we can do cleanup here
