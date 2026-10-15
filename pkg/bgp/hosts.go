@@ -118,6 +118,9 @@ func (b *Server) deletePath(ctx context.Context, req apiutil.DeletePathRequest, 
 		select {
 		case b.withdrawQueue <- request:
 		case <-ctx.Done():
+			if complete != nil {
+				complete(ctx.Err())
+			}
 			return ctx.Err()
 		}
 	}
