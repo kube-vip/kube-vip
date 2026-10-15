@@ -142,6 +142,15 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
+	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" {
+		// A forced watcher can retain a Service after its annotation is removed.
+		// Retire it before the ordinary watcher takes ownership, but only when the
+		// tracked context proves this UID was previously forced.
+		if p.wasForcedService(svc.UID) {
+			return p.deleteTrackedService(svc)
+		}
+		return nil
+	}
 	if !serviceMatchesWatcher(svc, forcedOnly) {
 		return nil
 	}
@@ -337,6 +346,22 @@ func serviceSnapshotNewer(watched, svc *v1.Service) bool {
 		return false
 	}
 	return watched.Generation > svc.Generation
+}
+
+// wasForcedService checks the watched snapshot under the same per-UID lock
+// used by reconciliation, avoiding teardown of a replacement context.
+func (p *Processor) wasForcedService(uid types.UID) bool {
+	p.serviceLock.Lock(uid)
+	defer func() { _ = p.serviceLock.Unlock(uid) }()
+	if value, ok := p.svcMap.Load(uid); ok {
+		if svcCtx, ok := value.(*servicecontext.Context); ok {
+			if watched := svcCtx.WatchedService(); watched != nil && watched.Annotations[kubevip.ForcePerServiceElection] == "true" {
+				return true
+			}
+		}
+	}
+	inst := p.findServiceInstance(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	return inst != nil && inst.ServiceSnapshot != nil && inst.ServiceSnapshot.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 // admitServiceInstance constructs and tracks a Service instance under its
