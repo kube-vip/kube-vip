@@ -159,11 +159,11 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// we can do cleanup here
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
+			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(0)
 			if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 				metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
 				leaderCancel()
 			}
-			metrics.IsLeader.WithLabelValues(p.config.NodeName, id.Name()).Set(0)
 			svcLease.Started = make(chan any)
 		},
 		OnNewLeader: func(identity string) {

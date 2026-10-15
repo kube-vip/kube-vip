@@ -137,6 +137,9 @@ func CounterDelta(before, after map[string]float64, name string, labels map[stri
 // EventuallyMetric retries a metric scrape until its value satisfies matcher.
 func EventuallyMetric(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
 	Eventually(func() (float64, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, StopTrying("metrics polling canceled").Wrap(err)
+		}
 		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
 			return 0, err
@@ -150,6 +153,9 @@ func EventuallyMetric(ctx context.Context, clusterName, node, name string, label
 // matcher.
 func ConsistentlyMetric(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
 	Consistently(func() (float64, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, StopTrying("metrics polling canceled").Wrap(err)
+		}
 		metrics, err := ScrapeMetrics(ctx, clusterName, node)
 		if err != nil {
 			return 0, err
