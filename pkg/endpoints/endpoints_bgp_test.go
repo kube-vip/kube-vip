@@ -3,13 +3,13 @@ package endpoints
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
-	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
@@ -33,19 +33,19 @@ func TestBGPWorkerRetriesAddAfterFailedWithdrawal(t *testing.T) {
 		},
 		bgpServer: manager,
 	}
-	svcCtx := servicecontext.New(context.Background())
+	configuredNetworks := &sync.Map{}
 
-	if err := worker.processInstance(svcCtx, service); err != nil {
+	if err := worker.processInstance(context.Background(), configuredNetworks, service, instances[0]); err != nil {
 		t.Fatalf("initial processInstance: %v", err)
 	}
 	manager.delErr = errors.New("withdrawal failed")
 	lastEndpoint := "10.0.0.2"
-	worker.clear(svcCtx, &lastEndpoint, service)
-	if svcCtx.IsNetworkConfigured(network.ip) {
+	worker.clear(context.Background(), configuredNetworks, &lastEndpoint, service, instances[0])
+	if _, configured := configuredNetworks.Load(network.ip); configured {
 		t.Fatal("network remained configured after failed withdrawal")
 	}
 
-	if err := worker.processInstance(svcCtx, service); err != nil {
+	if err := worker.processInstance(context.Background(), configuredNetworks, service, instances[0]); err != nil {
 		t.Fatalf("recovery processInstance: %v", err)
 	}
 	if manager.addCalls != 2 {
