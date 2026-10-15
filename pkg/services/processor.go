@@ -851,6 +851,10 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	}
 	if serviceInstance := p.findServiceInstance(svc); serviceInstance != nil {
 		serviceInstance.AddCalled = false
+		// Remove the canceled generation from membership before a replacement
+		// admission. Keeping it allows findServiceInstance to reuse a stale
+		// snapshot and skips construction of the replacement dataplane object.
+		p.detachServiceInstance(svc.UID)
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil
