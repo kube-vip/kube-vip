@@ -10,6 +10,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestServiceSnapshotNewerRejectsDelayedResourceVersion(t *testing.T) {
+	watched := &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 12, ResourceVersion: "opaque-new"}}
+	if !serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 11, ResourceVersion: "opaque-old"}}) {
+		t.Fatal("expected delayed generation to be rejected")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{Generation: 12, ResourceVersion: "opaque-other"}}) {
+		t.Fatal("equal generation should remain admissible")
+	}
+}
+
 // TestChangedSinceWatched is a regression test for a node that has lost (or never won) the
 // service election. Its instance has been removed from the manager, but its watchers still
 // run with the Service they were started with. A traffic policy change must still be detected
