@@ -70,6 +70,11 @@ func (w *wireguardWorker) processInstance(ctx context.Context, _ *sync.Map, serv
 		"vips", serviceIPs)
 
 	for _, port := range service.Spec.Ports {
+		// WireGuard DNAT supports TCP and UDP; skip unsupported protocols before
+		// resolving backends so providers are never consulted for SCTP services.
+		if port.Protocol == v1.ProtocolSCTP {
+			continue
+		}
 		targets, err := w.dnatTargets(service, port)
 		if err != nil {
 			return fmt.Errorf("failed to resolve backends for service port %d: %w", port.Port, err)

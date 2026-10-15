@@ -161,7 +161,7 @@ func TestResolvePortFromFakeClientObjects(t *testing.T) {
 		t.Fatalf("loading fake EndpointSlice: %v", err)
 	}
 
-	namedPort := v1.ServicePort{Name: "web", Port: 80, TargetPort: intstr.FromString("target")}
+	namedPort := v1.ServicePort{Port: 80, TargetPort: intstr.FromString("web")}
 	if got := legacy.ResolvePort(namedPort); got != 8080 {
 		t.Errorf("legacy ResolvePort() = %d, want 8080", got)
 	}
