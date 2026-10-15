@@ -8,6 +8,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
@@ -20,6 +21,24 @@ func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
 	}
 	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-b", Generation: 99, ResourceVersion: "opaque-recreated"}}) {
 		t.Fatal("a recreated Service UID must remain admissible")
+	}
+}
+
+func TestWasForcedServiceUsesWatchedGeneration(t *testing.T) {
+	uid := types.UID("forced-uid")
+	ctx := servicecontext.New(context.Background())
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID:         uid,
+		Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"},
+	}})
+	p := &Processor{serviceLock: NewServiceLock()}
+	p.svcMap.Store(uid, ctx)
+	if !p.wasForcedService(uid) {
+		t.Fatal("expected watched forced service to be recognized")
+	}
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	if p.wasForcedService(uid) {
+		t.Fatal("ordinary replacement must not be treated as forced ownership")
 	}
 }
 
