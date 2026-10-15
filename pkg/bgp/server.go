@@ -33,6 +33,9 @@ type Server struct {
 	withdrawDone      chan struct{}
 	deletePathFunc    func(apiutil.DeletePathRequest) error
 	pending           map[string]chan struct{}
+	closing           bool
+	closeOnce         sync.Once
+	closeDone         chan error
 }
 
 const withdrawalQueueSize = 32
@@ -169,13 +172,25 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
-	if b.withdrawDone != nil {
-		b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
-		<-b.withdrawDone
+	b.mtx.Lock()
+	b.closing = true
+	b.mtx.Unlock()
+	b.closeOnce.Do(func() {
+		b.closeDone = make(chan error, 1)
+		go func() {
+			if b.withdrawDone != nil {
+				b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
+				<-b.withdrawDone
+			}
+			b.closeDone <- b.s.StopBgp(context.Background(), &api.StopBgpRequest{})
+		}()
+	})
+	select {
+	case err := <-b.closeDone:
+		return err
+	case <-time.After(5 * time.Second):
+		return context.DeadlineExceeded
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return b.s.StopBgp(ctx, &api.StopBgpRequest{})
 }
 
 // ListAdvertisedRoutes retrieves all active routes inside GoBGP's local RIB.
