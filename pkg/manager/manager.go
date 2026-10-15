@@ -85,6 +85,7 @@ type Manager struct {
 
 // New will create a new managing object
 func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manager, error) {
+
 	// Instance identity should be the same as k8s node name to ensure better compatibility.
 	// By default k8s sets node name to `hostname -s`,
 	// so if node name is not provided in the config,
