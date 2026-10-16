@@ -38,3 +38,18 @@ func TestDHCPv4BackoffExhaustionDoesNotDeadlock(t *testing.T) {
 		t.Fatal("DHCPv4 backoff exhaustion deadlocked")
 	}
 }
+
+func TestDHCPv4StopCancelsAcquisitionWithoutErrorConsumer(t *testing.T) {
+	client := NewDHCPv4Client(&net.Interface{Name: "definitely-not-a-kube-vip-interface"}, false, "", 0, false)
+	done := make(chan struct{})
+	go func() {
+		_ = client.Start(context.Background())
+		close(done)
+	}()
+	client.Stop()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("DHCPv4 Stop did not cancel acquisition")
+	}
+}
