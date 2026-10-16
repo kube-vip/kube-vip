@@ -471,7 +471,7 @@ func (configurator *network) shouldSkipDAD(override bool) bool {
 	return override || configurator.dadSkip
 }
 
-func (configurator *network) accountVIPAddressAdd() {
+func (configurator *network) accountVIPAddressAdd(intf netlink.Link) {
 	if configurator.address == nil {
 		return
 	}
@@ -481,21 +481,21 @@ func (configurator *network) accountVIPAddressAdd() {
 		return
 	}
 	if configurator.trackedVIPAddress != "" {
-		configurator.accountVIPAddressDelete()
+		configurator.accountVIPAddressDelete(intf)
 	}
 
-	metrics.TrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(configurator.address), key)
+	metrics.TrackVIPAddress(intf.Attrs().Name, addressFamily(configurator.address), key)
 	configurator.trackedVIPAddress = key
 }
 
-func (configurator *network) accountVIPAddressDelete() {
+func (configurator *network) accountVIPAddressDelete(intf netlink.Link) {
 	if configurator.trackedVIPAddress == "" {
 		return
 	}
 
 	tracked, err := netlink.ParseAddr(configurator.trackedVIPAddress)
 	if err == nil {
-		metrics.UntrackVIPAddress(configurator.link.Intf.Attrs().Name, addressFamily(tracked), configurator.trackedVIPAddress)
+		metrics.UntrackVIPAddress(intf.Attrs().Name, addressFamily(tracked), configurator.trackedVIPAddress)
 	}
 	configurator.trackedVIPAddress = ""
 }
@@ -539,7 +539,7 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 	}
 
 	if existing != nil && existing.ValidLft > lifetime {
-		configurator.accountVIPAddressAdd()
+		configurator.accountVIPAddressAdd(intf)
 		metrics.VIPOperationsTotal.WithLabelValues("add", "ok").Inc()
 		return false, nil
 	}
@@ -565,7 +565,7 @@ func (configurator *network) addIP(intf netlink.Link, precheck bool, skipDAD boo
 		return false, errors.Wrap(err, fmt.Sprintf("could not add ip to device %q", intf.Attrs().Name))
 	}
 
-	configurator.accountVIPAddressAdd()
+	configurator.accountVIPAddressAdd(intf)
 
 	if configurator.nftables {
 		if err := configurator.configureNFTables(); err != nil {
@@ -1165,7 +1165,7 @@ func (configurator *network) deleteIP(intf netlink.Link) (bool, error) {
 
 	// Nothing to delete
 	if result == nil {
-		configurator.accountVIPAddressDelete()
+		configurator.accountVIPAddressDelete(intf)
 		metrics.VIPOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		return false, nil
 	}
@@ -1175,7 +1175,7 @@ func (configurator *network) deleteIP(intf netlink.Link) (bool, error) {
 		return false, errors.Wrap(err, "could not delete ip")
 	}
 
-	configurator.accountVIPAddressDelete()
+	configurator.accountVIPAddressDelete(intf)
 
 	if configurator.nftables {
 		vip := configurator.address.IP.String()

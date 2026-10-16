@@ -64,24 +64,20 @@ func TestVIPAddressGaugeRenewalDoesNotDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing test address: %v", err)
 	}
-	n := &network{
-		address: address,
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0"}},
-		},
-	}
+	n := &network{address: address}
+	intf := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0"}}
 	gauge := metrics.VIPAddresses.WithLabelValues("eth0", "IPv4")
 
 	// The first add creates the address; subsequent adds represent DNS renewals.
-	n.accountVIPAddressAdd()
-	n.accountVIPAddressAdd()
-	n.accountVIPAddressAdd()
+	n.accountVIPAddressAdd(intf)
+	n.accountVIPAddressAdd(intf)
+	n.accountVIPAddressAdd(intf)
 	if got := testutil.ToFloat64(gauge); got != 1 {
 		t.Fatalf("VIP address gauge after renewals is %v, want 1", got)
 	}
 
-	n.accountVIPAddressDelete()
-	n.accountVIPAddressDelete()
+	n.accountVIPAddressDelete(intf)
+	n.accountVIPAddressDelete(intf)
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(metrics.VIPAddresses)
 	families, err := registry.Gather()
@@ -105,17 +101,15 @@ func TestVIPAddressGaugeTransfersAcrossDNSChanges(t *testing.T) {
 		address:         address,
 		possibleSubnets: "32",
 		dnsName:         "vip.example.com",
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dns0"}},
-		},
 	}
+	intf := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dns0"}}
 	gauge := metrics.VIPAddresses.WithLabelValues("dns0", "IPv4")
 
-	n.accountVIPAddressAdd()
+	n.accountVIPAddressAdd(intf)
 	if err := n.SetIP("192.0.2.11"); err != nil {
 		t.Fatalf("changing DNS VIP: %v", err)
 	}
-	n.accountVIPAddressAdd()
+	n.accountVIPAddressAdd(intf)
 	if got := testutil.ToFloat64(gauge); got != 1 {
 		t.Fatalf("VIP address gauge after transfer is %v, want 1", got)
 	}
@@ -123,7 +117,7 @@ func TestVIPAddressGaugeTransfersAcrossDNSChanges(t *testing.T) {
 		t.Fatalf("tracked VIP = %q, want 192.0.2.11/32", n.trackedVIPAddress)
 	}
 
-	n.accountVIPAddressDelete()
+	n.accountVIPAddressDelete(intf)
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(metrics.VIPAddresses)
 	families, err := registry.Gather()
@@ -143,17 +137,13 @@ func TestVIPAddressGaugeCountsExistingAddressOnReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing test address: %v", err)
 	}
-	n := &network{
-		address: address,
-		link: &networkinterface.Link{
-			Intf: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "reclaim0"}},
-		},
-	}
+	n := &network{address: address}
+	intf := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "reclaim0"}}
 
-	n.accountVIPAddressAdd()
-	n.accountVIPAddressAdd()
+	n.accountVIPAddressAdd(intf)
+	n.accountVIPAddressAdd(intf)
 	if got := testutil.ToFloat64(metrics.VIPAddresses.WithLabelValues("reclaim0", "IPv4")); got != 1 {
 		t.Fatalf("reclaimed VIP address gauge = %v, want 1", got)
 	}
-	n.accountVIPAddressDelete()
+	n.accountVIPAddressDelete(intf)
 }
