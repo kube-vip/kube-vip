@@ -11,6 +11,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	v1 "k8s.io/api/core/v1"
@@ -19,6 +20,10 @@ import (
 
 func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, service *v1.Service,
 	provider providers.Provider, cancelWatcher context.CancelCauseFunc) error {
+	watcherLoops := metrics.WatcherLoops.WithLabelValues("endpoint")
+	watcherLoops.Inc()
+	defer watcherLoops.Dec()
+
 	log.Info("watching", "provider", provider.GetLabel(), "service_name", service.Name, "namespace", service.Namespace)
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 
@@ -104,6 +109,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 			if svcCtx.Ctx.Err() != nil {
 				return nil
 			}
+			metrics.WatcherFailuresTotal.WithLabelValues("endpoint", "watch_error").Inc()
 			watchErr := utils.WatchError(event.Object)
 			log.Error("watch error", "provider", provider.GetLabel(), "err", watchErr)
 			return utils.WrapPanicError(watchErr, "[%s] endpoint watch failed", provider.GetLabel())
@@ -112,6 +118,7 @@ func (p *Processor) watchEndpoint(svcCtx *servicecontext.Context, id string, ser
 	if svcCtx.Ctx.Err() != nil {
 		return nil
 	}
+	metrics.WatcherFailuresTotal.WithLabelValues("endpoint", "channel_closed").Inc()
 	log.Info("[endpoint watcher] stopping watching", "provider", provider.GetLabel(), "service name", service.Name, "namespace", service.Namespace)
 	return utils.NewPanicError("[%s] endpoint watch channel closed unexpectedly for service %s/%s", provider.GetLabel(), service.Namespace, service.Name)
 }
