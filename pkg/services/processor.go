@@ -142,6 +142,15 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
+	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" {
+		// A forced watcher can retain a Service after its annotation is removed.
+		// Retire it before the ordinary watcher takes ownership, but only when the
+		// tracked context proves this UID was previously forced.
+		if p.wasForcedService(svc.UID) {
+			return p.deleteTrackedService(svc)
+		}
+		return nil
+	}
 	if !serviceMatchesWatcher(svc, forcedOnly) {
 		return nil
 	}
@@ -210,6 +219,11 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
+		if event.Type != watch.Deleted && svcCtx != nil {
+			if watched := svcCtx.WatchedService(); serviceSnapshotNewer(watched, svc) {
+				return nil
+			}
+		}
 		if event.Type == watch.Modified {
 			shouldGarbageCollect = changedSinceWatched(svcInstance, svcCtx, svc)
 		}
@@ -230,6 +244,13 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				}
 				//Set it to inactive
 				svcCtx.Cancel()
+				// Join the old watcher before deleting its instance. Its service
+				// callback may still be unwinding dataplane state; publishing a
+				// replacement before it stops permits late cleanup to remove the
+				// replacement's VIP or routes.
+				if err := svcCtx.WaitForWatchingStopped(ctx); err != nil {
+					return fmt.Errorf("wait for service watcher shutdown: %w", err)
+				}
 
 				if err := p.deleteService(ctx, svc.UID, nil); err != nil {
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
@@ -263,6 +284,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 		if instanceAdded {
 			p.updateActiveServicesMetric()
 		}
+	}
+	// Keep the admission snapshot current for later watch events. Without this,
+	// a delayed event is compared with only the original watcher snapshot and
+	// can regress an already accepted Service generation.
+	if svcCtx.Ctx.Err() == nil {
+		svcCtx.SetWatchedService(svc)
 	}
 
 	// this goroutine starts service handling function (with or without leaderelection)
@@ -320,6 +347,34 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	}
 
 	return nil
+}
+
+// serviceSnapshotNewer reports whether watched represents a newer desired
+// Service generation. ResourceVersion is intentionally opaque in Kubernetes,
+// so it must not be parsed or ordered; Generation is the API's monotonic
+// revision for spec changes and is safe for this admission guard.
+func serviceSnapshotNewer(watched, svc *v1.Service) bool {
+	if watched == nil || svc == nil || watched.UID == "" || svc.UID == "" ||
+		watched.UID != svc.UID || watched.Generation == 0 || svc.Generation == 0 {
+		return false
+	}
+	return watched.Generation > svc.Generation
+}
+
+// wasForcedService checks the watched snapshot under the same per-UID lock
+// used by reconciliation, avoiding teardown of a replacement context.
+func (p *Processor) wasForcedService(uid types.UID) bool {
+	p.serviceLock.Lock(uid)
+	defer func() { _ = p.serviceLock.Unlock(uid) }()
+	if value, ok := p.svcMap.Load(uid); ok {
+		if svcCtx, ok := value.(*servicecontext.Context); ok {
+			if watched := svcCtx.WatchedService(); watched != nil && watched.Annotations[kubevip.ForcePerServiceElection] == "true" {
+				return true
+			}
+		}
+	}
+	inst := p.findServiceInstance(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	return inst != nil && inst.ServiceSnapshot != nil && inst.ServiceSnapshot.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 // admitServiceInstance constructs and tracks a Service instance under its
@@ -700,6 +755,11 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	if err != nil {
 		return err
 	}
+	if svcCtx != nil {
+		if err := svcCtx.WaitForWatchingStopped(context.Background()); err != nil {
+			return fmt.Errorf("wait for service watcher shutdown: %w", err)
+		}
+	}
 
 	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
 		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
@@ -878,6 +938,10 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	}
 	if serviceInstance := p.findServiceInstance(svc); serviceInstance != nil {
 		serviceInstance.AddCalled = false
+		// Remove the canceled generation from membership before a replacement
+		// admission. Keeping it allows findServiceInstance to reuse a stale
+		// snapshot and skips construction of the replacement dataplane object.
+		p.detachServiceInstance(svc.UID)
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil

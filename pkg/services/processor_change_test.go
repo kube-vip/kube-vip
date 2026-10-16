@@ -8,7 +8,39 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
+
+func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
+	watched := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-new"}}
+	if !serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 11, ResourceVersion: "opaque-old"}}) {
+		t.Fatal("expected delayed generation to be rejected")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-other"}}) {
+		t.Fatal("equal generation should remain admissible")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-b", Generation: 99, ResourceVersion: "opaque-recreated"}}) {
+		t.Fatal("a recreated Service UID must remain admissible")
+	}
+}
+
+func TestWasForcedServiceUsesWatchedGeneration(t *testing.T) {
+	uid := types.UID("forced-uid")
+	ctx := servicecontext.New(context.Background())
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID:         uid,
+		Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"},
+	}})
+	p := &Processor{serviceLock: NewServiceLock()}
+	p.svcMap.Store(uid, ctx)
+	if !p.wasForcedService(uid) {
+		t.Fatal("expected watched forced service to be recognized")
+	}
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	if p.wasForcedService(uid) {
+		t.Fatal("ordinary replacement must not be treated as forced ownership")
+	}
+}
 
 // TestChangedSinceWatched is a regression test for a node that has lost (or never won) the
 // service election. Its instance has been removed from the manager, but its watchers still
