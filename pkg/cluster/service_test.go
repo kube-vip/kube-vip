@@ -79,27 +79,31 @@ func TestServicesWorkerStopAndWaitPreservingDrainsBeforeRestart(t *testing.T) {
 
 func TestServicesWorkerStopRemovesVIPUnlessPreserved(t *testing.T) {
 	tests := []struct {
-		name        string
-		arp         bool
-		preserve    bool
-		wantPresent bool
+		name     string
+		arp      bool
+		preserve bool
 	}{
 		{name: "stop removes the VIP"},
 		{name: "stop with ARP removes the VIP", arp: true},
-		{name: "preserving stop keeps the VIP", preserve: true, wantPresent: true},
+		{name: "preserving stop keeps the VIP", preserve: true},
+		{name: "preserving stop with ARP keeps the VIP", arp: true, preserve: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := &kubevip.Config{EnableARP: test.arp, ArpBroadcastRate: 3000, VIPSubnet: "32"}
+			network := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32"}
 			var arpMgr *arp.Manager
 			if test.arp {
 				arpMgr = arp.NewManager(config)
+				if test.preserve {
+					// A preserved VIP is shared, so the sibling Service still holds an ARP claim.
+					arpMgr.Insert(arp.NewInstance(network, nil))
+				}
 			}
 			serviceCluster, err := cluster.InitCluster(config, true, nil, arpMgr, nil, nil)
 			if err != nil {
 				t.Fatalf("InitCluster() error = %v", err)
 			}
-			network := &mockNetwork{ip: "192.0.2.10", cidr: "192.0.2.10/32"}
 			serviceCluster.Network = []vip.Network{network}
 
 			var workers sync.WaitGroup
@@ -117,8 +121,8 @@ func TestServicesWorkerStopRemovesVIPUnlessPreserved(t *testing.T) {
 			}
 			workers.Wait()
 
-			if got := network.isPresent(); got != test.wantPresent {
-				t.Fatalf("VIP present after stop = %t, want %t", got, test.wantPresent)
+			if got := network.isPresent(); got != test.preserve {
+				t.Fatalf("VIP present after stop = %t, want %t", got, test.preserve)
 			}
 		})
 	}
