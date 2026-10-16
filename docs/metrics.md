@@ -60,7 +60,7 @@ sum by (result) (rate(kube_vip_ndp_advertisements_total[5m]))
 | `kube_vip_manager_all_services_events_total` | Counter | `type` | Events received by the service watcher. `type` is a Kubernetes watch event such as `ADDED`, `MODIFIED`, `DELETED`, `BOOKMARK`, or `ERROR`. |
 | `kube_vip_leader_election_transitions_total` | Counter | `lease_name` | Number of observed transitions into leadership for a lease. A high rate can indicate instability. |
 | `kube_vip_is_leader` | Gauge | `node`, `lease_name` | `1` when the labeled node currently holds the lease, otherwise `0`. |
-| `kube_vip_watcher_loops` | Gauge | `kind` | Number of live watcher goroutines. Current kinds are `service`, `endpoint`, `lease`, and `node`. Endpoint and lease watchers are per service. |
+| `kube_vip_watcher_loops` | Gauge | `kind` | Number of live watcher goroutines. Current kinds are `service`, `endpoint`, and `node`. Endpoint watchers are per service. |
 | `kube_vip_election_loops` | Gauge | `type` | Number of live leader-election loops. Current types are `kubernetes` and `etcd`. |
 | `kube_vip_service_election_loops` | Gauge | `namespace`, `name` | Live per-service leader-election restart loops on this node. A value greater than `1` indicates leaked loops. |
 | `kube_vip_service_election_attempts_total` | Counter | `namespace`, `name` | Attempts made by a per-service leader-election restart loop. |
