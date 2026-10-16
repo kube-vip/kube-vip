@@ -105,6 +105,12 @@ type DHCPv6Client struct {
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
 	stop            sync.Once
+	deleteOnce      sync.Once
+	started         chan struct{}
+	done            chan struct{}
+	lifecycleMu     sync.Mutex
+	stopRequested   bool
+	doneOnce        sync.Once
 	mtx             sync.RWMutex
 }
 
@@ -142,6 +148,8 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 		ipChan:          make(chan string),
 		ic:              client,
 		backoffAttempts: backoffAttempts,
+		started:         make(chan struct{}),
+		done:            make(chan struct{}),
 	}, nil
 }
 
@@ -152,7 +160,24 @@ func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 
 // Stop state-transition process and close dhcp client
 func (c *DHCPv6Client) Stop() {
+	c.lifecycleMu.Lock()
+	c.stopRequested = true
 	c.close()
+	started := channelClosed(c.started)
+	if !started {
+		if c.started != nil {
+			close(c.started)
+		}
+	}
+	c.lifecycleMu.Unlock()
+	if started {
+		<-c.done
+		return
+	}
+	c.releaseManager()
+	if c.done != nil {
+		c.doneOnce.Do(func() { close(c.done) })
+	}
 }
 
 // Close dhcp client channels
@@ -160,7 +185,10 @@ func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
 		close(c.stopChan)
 	})
-	dhcpv6ClientManager.Delete(c.managerKey)
+}
+
+func (c *DHCPv6Client) releaseManager() {
+	c.deleteOnce.Do(func() { dhcpv6ClientManager.Delete(c.managerKey) })
 }
 
 // Gets the IPChannel for consumption
@@ -174,6 +202,23 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
+	c.lifecycleMu.Lock()
+	if c.stopRequested {
+		if c.started != nil && !channelClosed(c.started) {
+			close(c.started)
+		}
+		c.lifecycleMu.Unlock()
+		if c.done != nil {
+			<-c.done
+		}
+		return nil
+	}
+	if c.started != nil && !channelClosed(c.started) {
+		close(c.started)
+	}
+	c.lifecycleMu.Unlock()
+	defer c.doneOnce.Do(func() { close(c.done) })
+	defer c.releaseManager()
 	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {
@@ -226,6 +271,7 @@ func (c *DHCPv6Client) Start(ctx context.Context) error {
 				addr, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv6] failed to reacquire lease", "err", backoffErr)
+					resetLeaseTimers(t1, t2, t1Timeout, t2Timeout)
 					continue
 				}
 				c.storeAddr(addr)
@@ -271,25 +317,38 @@ func (c *DHCPv6Client) requestWithBackoff(ctx context.Context) (*dhcpv6.OptIAAdd
 
 	var addr *dhcpv6.OptIAAddress
 	var err error
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopChan:
+			cancel()
+		case <-requestCtx.Done():
+		}
+	}()
 
 	log.Debug("[DHCPv6]", "attempts", c.backoffAttempts)
 
 RequestLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("[DHCPv6] context error: %w", ctx.Err())
+		case <-requestCtx.Done():
+			return nil, fmt.Errorf("[DHCPv6] context error: %w", requestCtx.Err())
 		default:
 			log.Debug("[DHCPv6] trying to get a new IP", "attempt", backoff.Attempt()+1)
 
-			addr, err = c.request(ctx, false)
+			addr, err = c.request(requestCtx, false)
 
 			if err != nil {
 				dur := backoff.Duration()
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv6 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					select {
+					case c.errorChan <- errMsg:
+					case <-c.stopChan:
+					case <-requestCtx.Done():
+					}
 					return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 				}
 				log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
@@ -297,7 +356,7 @@ RequestLoop:
 				select {
 				case <-t.C:
 					t.Stop()
-				case <-ctx.Done():
+				case <-requestCtx.Done():
 				}
 				continue RequestLoop
 			}
@@ -311,7 +370,7 @@ RequestLoop:
 		select {
 		case c.ipChan <- addr.IPv6Addr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}
 
