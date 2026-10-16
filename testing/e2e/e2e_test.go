@@ -1317,9 +1317,22 @@ func withTimestamp(text string) string {
 
 func createDS(ctx context.Context, name, namespace string, client kubernetes.Interface, port int) {
 	By(withTimestamp(fmt.Sprintf("createing test daemonset %s/%s", namespace, name)))
+	d := newTestDS(name, namespace, port)
+
+	Eventually(func() error {
+		_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, d, metav1.CreateOptions{})
+		return err
+	}, "60s").Should(Succeed())
+
+	Eventually(func() error {
+		return dsStarted(ctx, name, namespace, client)
+	}, "60s").Should(Succeed())
+}
+
+func newTestDS(name, namespace string, port int) *v1.DaemonSet {
 	labels := make(map[string]string)
 	labels["app"] = name
-	d := v1.DaemonSet{
+	return &v1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -1367,15 +1380,6 @@ func createDS(ctx context.Context, name, namespace string, client kubernetes.Int
 			},
 		},
 	}
-
-	Eventually(func() error {
-		_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &d, metav1.CreateOptions{})
-		return err
-	}, "60s").Should(Succeed())
-
-	Eventually(func() error {
-		return dsStarted(ctx, name, namespace, client)
-	}, "60s").Should(Succeed())
 }
 
 func createPod(ctx context.Context, client kubernetes.Interface, namespace, name string, port int) {

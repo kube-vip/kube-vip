@@ -170,7 +170,10 @@ func expectFailoverLeaseHolder(ctx context.Context, client kubernetes.Interface,
 }
 
 func stopKubeVipForFailover(node nodes.Node) {
-	DeferCleanup(func() { restoreKubeVipAfterFailover(node) })
+	// Best effort: AfterAll may already have deleted the cluster.
+	DeferCleanup(func() {
+		_ = node.Command("cp", "/tmp/kube-vip-failover.yaml", "/etc/kubernetes/manifests/kube-vip.yaml").Run()
+	})
 	By(fmt.Sprintf("stopping kube-vip on node %s", node.String()))
 	e2e.RunInNode(node, "bash", "-c",
 		"cp /etc/kubernetes/manifests/kube-vip.yaml /tmp/kube-vip-failover.yaml && truncate -s 0 /etc/kubernetes/manifests/kube-vip.yaml")

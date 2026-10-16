@@ -14,7 +14,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -287,9 +286,22 @@ var _ = Describe("kube-vip BGP mode", func() {
 			})
 
 			It("withdraws local paths for non-serving and removed endpoints", func(ctx context.Context) {
-				const serviceName = "test-svc-local-multipath"
+				const (
+					serviceName = "test-svc-local-multipath"
+					backend     = "multipath-backend"
+				)
+				backendDS := newTestDS(backend, dsNamespace, 80)
+				backendDS.Spec.Template.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: endpointGate}}
+				Eventually(func() error {
+					_, err := kindCluster.Client.AppsV1().DaemonSets(dsNamespace).Create(ctx, backendDS, metav1.CreateOptions{})
+					return err
+				}, "60s").Should(Succeed())
+				for _, node := range kindCluster.Nodes {
+					setEndpointGate(ctx, kindCluster.Client, dsNamespace, backend, node.String(), true)
+				}
+
 				serviceVIP := e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
-				createTestService(ctx, serviceName, dsNamespace, dsName, serviceVIP,
+				createTestService(ctx, serviceName, dsNamespace, backend, serviceVIP,
 					kindCluster.Client, corev1.IPFamilyPolicySingleStack,
 					[]corev1.IPFamily{corev1.IPv4Protocol}, corev1.ServiceExternalTrafficPolicyLocal,
 					"", 80, false, false)
@@ -303,11 +315,11 @@ var _ = Describe("kube-vip BGP mode", func() {
 				expectBGPNextHops(ctx, gobgpClient, serviceVIP, firstNodeIP, secondNodeIP)
 
 				targetNode := kindCluster.Nodes[0].String()
-				setServiceEndpointServing(ctx, kindCluster.Client, dsNamespace, serviceName, targetNode, false)
+				setEndpointGate(ctx, kindCluster.Client, dsNamespace, backend, targetNode, false)
 				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 1, 120*time.Second)
 				expectBGPNextHops(ctx, gobgpClient, serviceVIP, secondNodeIP)
 
-				removeTestDS(ctx, kindCluster.Client, dsNamespace, dsName, 1)
+				removeDS(ctx, kindCluster.Client, dsNamespace, backend)
 				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 0, 120*time.Second)
 				expectBGPNextHops(ctx, gobgpClient, serviceVIP)
 			})
@@ -1216,30 +1228,29 @@ func testControlPlaneBGP(ctx context.Context, gobgpClient api.GoBgpServiceClient
 	}
 }
 
-func setServiceEndpointServing(ctx context.Context, client kubernetes.Interface, namespace, serviceName, nodeName string, serving bool) {
+// endpointGate is a pod readiness gate the test flips to take one node's endpoint out of service.
+const endpointGate corev1.PodConditionType = "kube-vip.io/e2e-serving"
+
+func setEndpointGate(ctx context.Context, client kubernetes.Interface, namespace, app, nodeName string, ready bool) {
+	status := corev1.ConditionFalse
+	if ready {
+		status = corev1.ConditionTrue
+	}
+	patch := fmt.Sprintf(`{"status":{"conditions":[{"type":%q,"status":%q}]}}`, endpointGate, status)
 	Eventually(func() error {
-		endpointSlices, err := client.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: discoveryv1.LabelServiceName + "=" + serviceName,
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=" + app,
+			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
 			return err
 		}
-		for index := range endpointSlices.Items {
-			endpointSlice := &endpointSlices.Items[index]
-			for endpointIndex := range endpointSlice.Endpoints {
-				endpoint := &endpointSlice.Endpoints[endpointIndex]
-				if endpoint.NodeName == nil || *endpoint.NodeName != nodeName {
-					continue
-				}
-				ready := serving
-				servingCondition := serving
-				endpoint.Conditions.Ready = &ready
-				endpoint.Conditions.Serving = &servingCondition
-				_, err := client.DiscoveryV1().EndpointSlices(namespace).Update(ctx, endpointSlice, metav1.UpdateOptions{})
-				return err
-			}
+		if len(pods.Items) != 1 {
+			return fmt.Errorf("expected one %s pod on node %s, found %d", app, nodeName, len(pods.Items))
 		}
-		return fmt.Errorf("no EndpointSlice endpoint for service %s/%s on node %s", namespace, serviceName, nodeName)
+		_, err = client.CoreV1().Pods(namespace).Patch(ctx, pods.Items[0].Name, types.StrategicMergePatchType,
+			[]byte(patch), metav1.PatchOptions{}, "status")
+		return err
 	}, "60s", "1s").Should(Succeed())
 }
 
