@@ -80,7 +80,7 @@ sum by (kind, reason) (increase(kube_vip_watcher_failures_total[15m]))
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `kube_vip_watcher_failures_total` | Counter | `kind`, `reason` | Watcher failures that cause or request recovery. Current kinds include `service`, `endpoint`, `annotations`, `lease`, and `node`; current reasons include `watch_error`, `channel_closed`, and `leader_election_error`. |
+| `kube_vip_watcher_failures_total` | Counter | `kind`, `reason` | Watcher failures that cause or request recovery. Current kinds include `service`, `endpoint`, `annotations`, and `node`; current reasons include `watch_error` and `channel_closed`. |
 
 Use `kube_vip_watcher_loops` together with this counter: the counter shows
 that recovery was needed, while the gauge verifies that the replacement loop
