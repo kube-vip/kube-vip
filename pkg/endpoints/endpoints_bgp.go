@@ -13,10 +13,15 @@ import (
 
 type BGP struct {
 	generic
-	bgpServer *bgp.Server
+	bgpServer bgpRouteManager
 }
 
-func newBGP(generic generic, bgpServer *bgp.Server) endpointWorker {
+type bgpRouteManager interface {
+	AddHost(context.Context, string, string) error
+	DelHost(context.Context, string, string) error
+}
+
+func newBGP(generic generic, bgpServer bgpRouteManager) endpointWorker {
 	return &BGP{
 		generic:   generic,
 		bgpServer: bgpServer,
@@ -51,12 +56,12 @@ func (b *BGP) clear(ctx context.Context, configuredNetworks *sync.Map, lastKnown
 			for _, cluster := range inst.Clusters {
 				for i := range cluster.Network {
 					err := b.bgpServer.DelHost(ctx, cluster.Network[i].CIDR(), lease.ServiceNamespacedName(service))
+					configuredNetworks.Delete(cluster.Network[i].IP())
 					if err != nil {
 						log.Error("deleting BGP host", "provider", b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "err", err)
 					} else {
 						log.Info("deleted BGP host", "provider",
 							b.provider.GetLabel(), "ip", cluster.Network[i].IP(), "service name", service.Name, "namespace", service.Namespace)
-						configuredNetworks.Delete(cluster.Network[i].IP())
 					}
 				}
 			}
