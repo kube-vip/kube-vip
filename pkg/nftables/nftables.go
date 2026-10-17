@@ -1165,7 +1165,7 @@ func ApplyDNAT(
 	dnatMapElements := make([]nftables.SetElement, len(parsedTargets))
 	for i, t := range parsedTargets {
 		dnatMapElements[i] = nftables.SetElement{
-			Key: binaryutil.BigEndian.PutUint32(uint32(i)), //nolint:gosec
+			Key: binaryutil.NativeEndian.PutUint32(uint32(i)), //nolint:gosec
 			Val: ipToBytes(t.ip, IPv6),
 		}
 	}
