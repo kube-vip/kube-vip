@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/vip"
 	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func TestControlPlaneElectionVIPsPreservesConfigOrder(t *testing.T) {
@@ -196,5 +197,35 @@ func TestStopAndWaitPreservingUpgradesInProgressStop(t *testing.T) {
 	case <-returned:
 	case <-time.After(time.Second):
 		t.Fatal("preserving stop did not return after worker cleanup completed")
+	}
+}
+
+func TestGenerateLabelsFromConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		want    string
+	}{
+		{name: "ipv4", address: "192.0.2.20", want: "192.0.2.20"},
+		{name: "ipv6", address: "2001:db8::20", want: "20010db8000000000000000000000020"},
+		{name: "dual-stack", address: "192.0.2.20,2001:db8::20", want: "192.0.2.20_20010db8000000000000000000000020"},
+		{name: "dual-stack with spaces", address: "192.0.2.20, 2001:db8::20", want: "192.0.2.20_20010db8000000000000000000000020"},
+		{name: "dual-stack ipv6 first", address: "2001:db8::20,192.0.2.20", want: "20010db8000000000000000000000020_192.0.2.20"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			labels := generateLabelsFromConfig(tt.address, kubevip.HasIP)
+			got, ok := labels[kubevip.HasIP]
+			if !ok || len(labels) != 1 {
+				t.Fatalf("expected a single label %q, got %v", kubevip.HasIP, labels)
+			}
+			if got != tt.want {
+				t.Errorf("label value = %q, want %q", got, tt.want)
+			}
+			if errs := validation.IsValidLabelValue(got); len(errs) > 0 {
+				t.Errorf("label value %q is not a valid label value: %v", got, errs)
+			}
+		})
 	}
 }
