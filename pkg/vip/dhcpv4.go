@@ -32,6 +32,9 @@ type DHCPv4Client struct {
 	ipChan          chan string
 	backoffAttempts uint
 	stopOnce        sync.Once
+	startOnce       sync.Once
+	started         chan struct{}
+	done            chan struct{}
 	mtx             sync.RWMutex
 }
 
@@ -58,6 +61,8 @@ func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP stri
 		broadcastFlag:   broadcastFlag,
 		ipChan:          make(chan string),
 		backoffAttempts: backoffAttempts,
+		started:         make(chan struct{}),
+		done:            make(chan struct{}),
 	}
 }
 
@@ -69,6 +74,11 @@ func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 // Stop state-transition process and close dhcp client
 func (c *DHCPv4Client) Stop() {
 	c.close()
+	select {
+	case <-c.started:
+		<-c.done
+	default:
+	}
 }
 
 func (c *DHCPv4Client) close() {
@@ -142,6 +152,8 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
+	c.startOnce.Do(func() { close(c.started) })
+	defer close(c.done)
 	lease, err := c.requestWithBackoff(ctx)
 	if err != nil {
 		return fmt.Errorf("DHCPv4 client failed: %w", err)
@@ -196,6 +208,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 				lease, backoffErr := c.requestWithBackoff(ctx)
 				if backoffErr != nil {
 					log.Error("[DHCPv4] failed to reacquire lease", "err", backoffErr)
+					resetLeaseTimers(t1, t2, t1Timeout, t2Timeout)
 					continue
 				}
 				c.storeLease(lease)
@@ -205,6 +218,11 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			t2.Reset(t2Timeout)
 		}
 	}
+}
+
+func resetLeaseTimers(t1, t2 *time.Timer, t1Timeout, t2Timeout time.Duration) {
+	t1.Reset(t1Timeout)
+	t2.Reset(t2Timeout)
 }
 
 func getLeaseTimeouts(lease *nclient4.Lease) (time.Duration, time.Duration) {
@@ -248,24 +266,37 @@ func (c *DHCPv4Client) requestWithBackoff(ctx context.Context) (*nclient4.Lease,
 
 	var lease *nclient4.Lease
 	var err error
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopChan:
+			cancel()
+		case <-requestCtx.Done():
+		}
+	}()
 
 	log.Debug("[DHCPv4]", "attempts", c.backoffAttempts)
 
 RequestLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("[DHCPv4] context error: %w", ctx.Err())
+		case <-requestCtx.Done():
+			return nil, fmt.Errorf("[DHCPv4] context error: %w", requestCtx.Err())
 		default:
 			log.Debug("[DHCPv4] trying to get a new IP", "attempt", backoff.Attempt()+1)
-			lease, err = c.request(ctx, false)
+			lease, err = c.request(requestCtx, false)
 			if err != nil {
 				dur := backoff.Duration()
 
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					select {
+					case c.errorChan <- errMsg:
+					case <-c.stopChan:
+					case <-requestCtx.Done():
+					}
 					return nil, errMsg
 				}
 				log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
@@ -273,7 +304,7 @@ RequestLoop:
 				select {
 				case <-t.C:
 					t.Stop()
-				case <-ctx.Done():
+				case <-requestCtx.Done():
 				}
 				continue RequestLoop
 			}
@@ -287,7 +318,7 @@ RequestLoop:
 		select {
 		case c.ipChan <- lease.ACK.YourIPAddr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-requestCtx.Done():
 		}
 	}
 
