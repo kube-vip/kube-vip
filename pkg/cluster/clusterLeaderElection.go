@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
@@ -171,8 +172,17 @@ func (cluster *Cluster) OnNewLeader(identity string, c *kubevip.Config) {
 	log.Info("New leader", "leader", identity)
 }
 
+// generateLabelsFromConfig generates the node label for the control plane address(es).
+// A dual-stack configuration holds a comma-separated list of addresses, so each address
+// is sanitized separately and joined with "_" to produce a valid label value.
 func generateLabelsFromConfig(addr, labelKey string) map[string]string {
+	addresses := vip.Split(addr)
+	sanitized := make([]string, len(addresses))
+	for i, a := range addresses {
+		sanitized[i] = utils.SanitizeIPForLabel(a)
+	}
+
 	return map[string]string{
-		labelKey: utils.SanitizeIPForLabel(addr),
+		labelKey: strings.Join(sanitized, "_"),
 	}
 }
