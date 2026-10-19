@@ -195,8 +195,19 @@ func (p *Processor) ServicesWatcher(ctx context.Context, serviceFunc Callback, f
 	}
 
 	// Used for tracking an active endpoint / pod
+EventLoop:
 	for event := range ch {
 		metrics.CountServiceWatchEvent.With(prometheus.Labels{"type": string(event.Type)}).Add(1)
+
+		select {
+		case <-ctx.Done():
+			log.Info("global context done")
+			break EventLoop
+		case <-watcherCtx.Done():
+			log.Info("watcher context done")
+			break EventLoop
+		default:
+		}
 
 		switch event.Type {
 		case watch.Added, watch.Modified, watch.Deleted:
