@@ -723,6 +723,10 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 		}
 	} else {
 		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
+		// Mark the interface as owned so CleanupLinkAttachments will remove it
+		// on service deletion/leadership loss. Without this, stale macvlan
+		// interfaces are left behind after leader switchover (#1735).
+		instance.dhcpInterfaceOwned.Store(true)
 	}
 
 	var initRebootFlag bool
