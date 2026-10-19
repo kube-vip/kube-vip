@@ -520,6 +520,85 @@ func TestDeleteServiceForContextRejectsStaleServiceContext(t *testing.T) {
 	}
 }
 
+// TestDeleteSerializesWithConcurrentEndpointCleanup exercises the public Delete
+// path while an endpoint callback is already queued for the same Service UID.
+// Both paths must serialize their instance removal and leave no stale instance.
+func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
+	uid := types.UID("service-delete-race")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service-delete-race", Namespace: "default", UID: uid,
+	}}
+	svcCtx := servicecontext.New(context.Background())
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{},
+		leaseMgr:         lease.NewManager(),
+		ServiceInstances: []*instance.Instance{{ServiceUID: uid, ServiceSnapshot: service}},
+	}
+	initializeTestElectionCoordinators(processor)
+	processor.svcMap.Store(uid, svcCtx)
+
+	// Hold the UID lock while both deletion paths are admitted. This makes the
+	// overlap deterministic: both goroutines must contend for the same lock
+	// after the test releases it, rather than merely starting near each other.
+	processor.serviceLock.Lock(uid)
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			if err := processor.serviceLock.Unlock(uid); err != nil {
+				t.Errorf("unlock service UID during cleanup: %v", err)
+			}
+		}
+	}()
+	lockAttempts := make(chan types.UID, 2)
+	processor.serviceLock.beforeLock = func(attempted types.UID) {
+		if attempted == uid {
+			lockAttempts <- attempted
+		}
+	}
+	endpointDone := make(chan error, 1)
+	deleteDone := make(chan error, 1)
+	go func() {
+		endpointDone <- processor.deleteServiceForContext(context.Background(), uid, svcCtx)
+	}()
+	go func() {
+		deleteDone <- processor.Delete(watch.Event{Type: watch.Deleted, Object: service}, false)
+	}()
+	waitForLockAttempt := func() {
+		select {
+		case <-lockAttempts:
+		case <-time.After(time.Second):
+			t.Fatal("deletion path did not attempt the held UID lock")
+		}
+	}
+	waitForLockAttempt()
+	waitForLockAttempt()
+	if err := processor.serviceLock.Unlock(uid); err != nil {
+		t.Fatalf("unlock service UID: %v", err)
+	}
+	lockReleased = true
+
+	select {
+	case err := <-endpointDone:
+		if err != nil {
+			t.Fatalf("endpoint cleanup returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("endpoint cleanup did not complete")
+	}
+	select {
+	case err := <-deleteDone:
+		if err != nil {
+			t.Fatalf("Delete returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Delete did not complete")
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("concurrent Delete left a stale Service instance")
+	}
+}
+
 func TestAddServiceMarksPreTrackedInstanceAdded(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
