@@ -164,6 +164,12 @@ func checkCIDR(ip, cidr string) (string, error) {
 	return "", nil
 }
 
+// detectAPIServerEnabled reports whether the egress-detect-api-server annotation
+// value asks for API server detection. An explicit "false" turns it off.
+func detectAPIServerEnabled(value string) bool {
+	return value != "" && !strings.EqualFold(value, "false")
+}
+
 func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string, applied *bool) error {
 	if applied != nil {
 		*applied = false
@@ -181,7 +187,7 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	detectAPIServer := annotations[kubevip.EgressDetectAPIServer]
 
 	// If the user has requested that we detect the API server, then we will attempt to add it to the denied networks for egress
-	if detectAPIServer != "" || strings.ToLower(detectAPIServer) == "true" {
+	if detectAPIServerEnabled(detectAPIServer) {
 		apiServerHost := os.Getenv("KUBERNETES_SERVICE_HOST")
 		if apiServerHost == "" {
 			log.Warn("KUBERNETES_SERVICE_HOST is not set, unable to detect API server IP")
