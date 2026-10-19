@@ -473,6 +473,30 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: strconv.FormatBool(c.EnableRoutingTable),
 			},
 		}
+		if c.RoutingTableID > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingTableID,
+				Value: fmt.Sprintf("%d", c.RoutingTableID),
+			})
+		}
+		if c.RoutingTableType > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingTableType,
+				Value: fmt.Sprintf("%d", c.RoutingTableType),
+			})
+		}
+		if c.RoutingProtocol > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingProtocol,
+				Value: fmt.Sprintf("%d", c.RoutingProtocol),
+			})
+		}
+		if c.CleanRoutingTable {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipCleanRoutingTable,
+				Value: strconv.FormatBool(c.CleanRoutingTable),
+			})
+		}
 		newEnvironment = append(newEnvironment, routingtable...)
 	}
 	// If BGP
