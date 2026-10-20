@@ -136,6 +136,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -151,7 +152,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			})
 
 			It(clusterName+" provides an IPv4 VIP address for the Kubernetes control plane nodes", func() {
-				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client)
+				testControlPlaneVIPs(ctx, []string{cpVIP}, clusterName, client, func() {
+					assertExactlyOneLeaderMetric(ctx, clusterName, client)
+				})
 			})
 		})
 
@@ -181,6 +184,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 					EnableEndpoints:       "true",
 					EnableNodeLabeling:    "false",
 					EnableServiceSecurity: "true",
+					PrometheusHTTPServer:  ":2112",
 				}
 
 				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
@@ -200,7 +204,9 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor", func() {
 			DescribeTable("configures an IPv4 VIP address for service",
 				func(svcName string, currentOffset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					lbAddress := e2e.GenerateVIP(utils.IPv4Family, currentOffset, defaultNetwork)
-					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber)
+					testService(ctx, svcName, lbAddress, "plndr-svcs-lock", "kube-system", trafficPolicy, client, false, []corev1.IPFamily{corev1.IPv4Protocol}, 1, false, dsNumber, func(node string) {
+						e2e.EventuallyMetric(ctx, clusterName, node, "kube_vip_active_services", map[string]string{"namespace": dsNamespace}, BeNumerically(">=", float64(1)), 60*time.Second, 2*time.Second)
+					})
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -1471,45 +1477,8 @@ func removePod(ctx context.Context, name, namespace string, client kubernetes.In
 func createTestService(ctx context.Context, name, namespace, target, lbAddress string, client kubernetes.Interface, ipfPolicy corev1.IPFamilyPolicy,
 	ipFamiles []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
 ) {
-	svcAnnotations := make(map[string]string)
-	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
-	if leaseName != "" {
-		svcAnnotations[kubevip.ServiceLease] = leaseName
-	}
-	if dhcpBroadcast {
-		svcAnnotations[kubevip.DHCPBroadcast] = "true"
-	}
-
-	if forceElection {
-		svcAnnotations[kubevip.ForcePerServiceElection] = "true"
-	}
-
-	labels := make(map[string]string)
-	labels["app"] = target
-
+	s := *newTestService(name, namespace, target, lbAddress, ipfPolicy, ipFamiles, externalPolicy, leaseName, port, dhcpBroadcast, forceElection)
 	By(withTimestamp(fmt.Sprintf("creating service %s/%s", namespace, name)))
-
-	s := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   namespace,
-			Labels:      labels,
-			Annotations: svcAnnotations,
-		},
-		Spec: corev1.ServiceSpec{
-			IPFamilies:            ipFamiles,
-			IPFamilyPolicy:        &ipfPolicy,
-			Type:                  corev1.ServiceTypeLoadBalancer,
-			ExternalTrafficPolicy: externalPolicy,
-			Ports: []corev1.ServicePort{
-				{
-					Protocol: corev1.ProtocolTCP,
-					Port:     int32(port),
-				},
-			},
-			Selector: labels,
-		},
-	}
 
 	Eventually(func() error {
 		_, err := client.CoreV1().Services(namespace).Create(ctx, &s, metav1.CreateOptions{})
@@ -1695,12 +1664,12 @@ func cleanupCluster(clusterName, network string, configMtx *sync.Mutex, logger l
 	}
 }
 
-func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface) {
-	testControlPlaneVIPsWithTimeout(ctx, cpVIPs, clusterName, client, time.Duration(0), 20*time.Second)
+func testControlPlaneVIPs(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface, afterVIPConfirmed ...func()) {
+	testControlPlaneVIPsWithTimeout(ctx, cpVIPs, clusterName, client, time.Duration(0), 20*time.Second, afterVIPConfirmed...)
 }
 
 func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clusterName string, client kubernetes.Interface,
-	transportTimeout, eventuallyTimeout time.Duration) {
+	transportTimeout, eventuallyTimeout time.Duration, afterVIPConfirmed ...func()) {
 	Expect(cpVIPs).ToNot(BeEmpty())
 
 	By(withTimestamp("checking that the Kubernetes control plane nodes are accessible via the assigned VIP"))
@@ -1709,6 +1678,9 @@ func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clust
 	for _, cpVIP := range cpVIPs {
 		By(withTimestamp(fmt.Sprintf("testing connection to VIP: %s", cpVIP)))
 		assertControlPlaneIsRoutable(cpVIP, transportTimeout, eventuallyTimeout)
+	}
+	if len(afterVIPConfirmed) > 0 && afterVIPConfirmed[0] != nil {
+		afterVIPConfirmed[0]()
 	}
 
 	var leaderName string
@@ -1730,9 +1702,27 @@ func testControlPlaneVIPsWithTimeout(ctx context.Context, cpVIPs []string, clust
 	}
 }
 
+func assertExactlyOneLeaderMetric(ctx context.Context, clusterName string, client kubernetes.Interface) {
+	Eventually(func() (float64, error) {
+		nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return 0, err
+		}
+		var leaders float64
+		for _, node := range nodes.Items {
+			metrics, err := e2e.ScrapeMetrics(ctx, clusterName, node.Name)
+			if err != nil {
+				return 0, err
+			}
+			leaders += e2e.SumMetric(metrics, "kube_vip_is_leader", nil)
+		}
+		return leaders, nil
+	}, 60*time.Second, 2*time.Second).Should(Equal(float64(1)))
+}
+
 func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamespace string, trafficPolicy corev1.ServiceExternalTrafficPolicy,
 	client kubernetes.Interface, serviceElection bool, ipFamily []corev1.IPFamily, numberOfServices int, deleteDS bool, dsNumber int,
-) {
+	afterVIPConfirmed ...func(string)) {
 	lbAddresses := vip.Split(lbAddress)
 
 	services := []string{}
@@ -1759,6 +1749,9 @@ func testService(ctx context.Context, svcName, lbAddress, leaseName, leaseNamesp
 	}
 
 	container := e2e.GetLeaseHolder(ctx, leases[0], leaseNamespace, client)
+	if len(afterVIPConfirmed) > 0 && afterVIPConfirmed[0] != nil {
+		afterVIPConfirmed[0](container)
+	}
 
 	if deleteDS {
 		removeTestDS(ctx, client, dsNamespace, dsName, dsNumber)
@@ -1898,17 +1891,28 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 		}
 	}
 
-	container := e2e.GetLeaseHolder(ctx, lease, leaseNamespace, client)
-
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	Expect(err).ToNot(HaveOccurred())
-
+	nodeNames := make([]string, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
-		expected := node.Name == container
-		for _, addr := range lbAddresses {
-			Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
-		}
+		nodeNames = append(nodeNames, node.Name)
 	}
+	getHolder := func() (string, error) {
+		currentLease, err := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
+		if err != nil {
+			return "", err
+		}
+		if currentLease.Spec.HolderIdentity == nil {
+			return "", nil
+		}
+		return *currentLease.Spec.HolderIdentity, nil
+	}
+	Eventually(func() error {
+		_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, lbAddresses, func(address, node string) bool {
+			return e2e.CheckIPAddressPresence(address, node, true)
+		})
+		return err
+	}, 360*time.Second, time.Second).Should(Succeed())
 
 	for i := range numberOfServices {
 		expected := i < numberOfServices-1
@@ -1924,14 +1928,28 @@ func testServiceCommonLease(ctx context.Context, svcName, lbAddress, leaseNamesp
 			return err
 		}).ShouldNot(Succeed())
 
-		for _, addr := range lbAddresses {
-			for _, node := range nodes.Items {
-				if node.Name == container {
-					Expect(checkIPAddress(addr, node.Name, expected)).To(BeTrue())
-				} else {
-					Expect(checkIPAddress(addr, node.Name, false)).To(BeTrue())
+		if expected {
+			Eventually(func() error {
+				_, err := e2e.CheckCommonLeaseOwnership(getHolder, nodeNames, lbAddresses, func(address, node string) bool {
+					return e2e.CheckIPAddressPresence(address, node, true)
+				})
+				return err
+			}, 360*time.Second, time.Second).Should(Succeed())
+		} else {
+			Eventually(func() error {
+				currentLease, getErr := client.CoordinationV1().Leases(leaseNamespace).Get(ctx, lease, metav1.GetOptions{})
+				if err := e2e.CheckCommonLeaseRetired(currentLease, getErr); err != nil {
+					return err
 				}
-			}
+				for _, node := range nodes.Items {
+					for _, address := range lbAddresses {
+						if !e2e.CheckIPAddressPresence(address, node.Name, false) {
+							return fmt.Errorf("VIP address %q remains on node %q after common lease retirement", address, node.Name)
+						}
+					}
+				}
+				return nil
+			}, 120*time.Second, time.Second).Should(Succeed())
 		}
 	}
 }
@@ -1948,4 +1966,46 @@ func MustMkdirTemp(dir, prefix string) string {
 	tempDirPath, err := os.MkdirTemp(dir, prefix)
 	Expect(err).NotTo(HaveOccurred())
 	return tempDirPath
+}
+
+func newTestService(name, namespace, target, lbAddress string, ipfPolicy corev1.IPFamilyPolicy,
+	ipFamilies []corev1.IPFamily, externalPolicy corev1.ServiceExternalTrafficPolicy, leaseName string, port int, dhcpBroadcast bool, forceElection bool,
+) *corev1.Service {
+	svcAnnotations := make(map[string]string)
+	svcAnnotations[kubevip.LoadbalancerIPAnnotation] = lbAddress
+	if leaseName != "" {
+		svcAnnotations[kubevip.ServiceLease] = leaseName
+	}
+	if dhcpBroadcast {
+		svcAnnotations[kubevip.DHCPBroadcast] = "true"
+	}
+
+	if forceElection {
+		svcAnnotations[kubevip.ForcePerServiceElection] = "true"
+	}
+
+	labels := make(map[string]string)
+	labels["app"] = target
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: svcAnnotations,
+		},
+		Spec: corev1.ServiceSpec{
+			IPFamilies:            ipFamilies,
+			IPFamilyPolicy:        &ipfPolicy,
+			Type:                  corev1.ServiceTypeLoadBalancer,
+			ExternalTrafficPolicy: externalPolicy,
+			Ports: []corev1.ServicePort{
+				{
+					Protocol: corev1.ProtocolTCP,
+					Port:     int32(port),
+				},
+			},
+			Selector: labels,
+		},
+	}
 }
