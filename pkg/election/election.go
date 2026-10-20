@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/loadbalancer"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	v1 "k8s.io/api/core/v1"
@@ -59,9 +60,9 @@ func NewManager(config *kubevip.Config, k8sClientset, rwClientset *kubernetes.Cl
 func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 	switch c.LeaderElectionType {
 	case "kubernetes", "":
-		return runKubernetesLeaderElectionOrDie(ctx, run)
+		return runTrackedElection("kubernetes", func() error { return runKubernetesLeaderElectionOrDie(ctx, run) })
 	case "etcd":
-		if err := runEtcdLeaderElectionOrDie(ctx, run); err != nil {
+		if err := runTrackedElection("etcd", func() error { return runEtcdLeaderElectionOrDie(ctx, run) }); err != nil {
 			return err
 		}
 	default:
@@ -69,6 +70,12 @@ func RunOrDie(ctx context.Context, run *RunConfig, c *kubevip.Config) error {
 	}
 
 	return nil
+}
+
+func runTrackedElection(kind string, run func() error) error {
+	stopTracking := metrics.TrackElectionLoop(kind)
+	defer stopTracking()
+	return run()
 }
 
 func runKubernetesLeaderElectionOrDie(ctx context.Context, run *RunConfig) error {
@@ -158,6 +165,8 @@ type RunConfig struct {
 }
 
 func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBalancer, port uint16) error {
+	stopTracking := metrics.TrackWatcherLoop("node")
+	defer stopTracking()
 	// Use a restartable watcher, as this should help in the event of etcd or timeout issues
 	log.Info("Kube-Vip is watching nodes for control-plane labels")
 
