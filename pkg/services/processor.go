@@ -50,6 +50,8 @@ type serviceVIPClaim struct {
 }
 
 type Processor struct {
+	servicesMu    sync.Mutex
+	services      map[types.NamespacedName]types.UID
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
 	svcMap        sync.Map
@@ -264,6 +266,8 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			p.updateActiveServicesMetric()
 		}
 	}
+
+	p.trackService(svc)
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
@@ -707,9 +711,7 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	if svcCtx != nil {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	}
-	// Drop the per-service election series so a recreated service starts clean.
-	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-	p.updateActiveServicesMetric()
+	p.untrackService(svc)
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
@@ -880,6 +882,7 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 		serviceInstance.AddCalled = false
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+	p.untrackServiceUID(svc.UID)
 	return nil
 }
 
@@ -931,24 +934,52 @@ func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
 	return *first == *second
 }
 
-// updateActiveServicesMetric acquires each instance's Service lock before
-// reading its snapshot.
-func (p *Processor) updateActiveServicesMetric() {
+func (p *Processor) trackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	if p.services == nil {
+		p.services = make(map[types.NamespacedName]types.UID)
+	}
+	p.services[types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}] = svc.UID
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	key := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	if p.services[key] == svc.UID {
+		delete(p.services, key)
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackServiceUID(uid types.UID) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	for key, currentUID := range p.services {
+		if currentUID == uid {
+			delete(p.services, key)
+		}
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) updateActiveServicesMetricLocked() {
 	counts := map[string]int{}
-	for _, inst := range p.serviceInstances() {
-		uid := inst.UID()
-		p.serviceLock.Lock(uid)
-		if inst.ServiceSnapshot != nil {
-			counts[inst.ServiceSnapshot.Namespace]++
-		}
-		if err := p.serviceLock.Unlock(uid); err != nil {
-			log.Error("failed to release service lock", "uid", uid, "err", err)
-		}
+	for service := range p.services {
+		counts[service.Namespace]++
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
 		metrics.ActiveServices.WithLabelValues(ns).Set(float64(count))
 	}
+}
+
+func (p *Processor) updateActiveServicesMetric() {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	p.updateActiveServicesMetricLocked()
 }
 
 // findServiceInstance protects the collection lookup only. The caller must hold
