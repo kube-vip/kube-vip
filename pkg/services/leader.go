@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	log "log/slog"
 
@@ -53,9 +52,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return nil
 	}
 	defer p.electionLoops.Delete(svcCtx)
-	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
-	loops.Inc()
-	defer loops.Dec()
+	done := metrics.TrackServiceElectionLoop(service.Namespace, service.Name)
+	defer done()
 	p.electionCoordinators.Watch(svcCtx, service)
 	return nil
 }

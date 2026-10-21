@@ -103,8 +103,9 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	tmpDir, err := os.MkdirTemp("", "kube-vip-manifest")
 	Expect(err).NotTo(HaveOccurred())
+	manifestPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s.yaml", spec.Name))
+	Expect(renderKubeVipManifest(tmpl, manifestPath, spec.KubeVip)).To(Succeed())
 
-	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
 
 	// Build Kind cluster config
@@ -113,23 +114,20 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		Networking:                   spec.Networking,
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
-	appendNode := func(role kindconfigv1alpha4.NodeRole, manifest string) {
+	appendNode := func(role kindconfigv1alpha4.NodeRole, index int) {
 		node := kindconfigv1alpha4.Node{Role: role}
 		if !spec.UseDaemonSet {
 			values := spec.KubeVip
-			if i == 0 && v129 {
+			if role == kindconfigv1alpha4.WorkerRole {
+				values.ConfigPath = "/etc/kubernetes/kubelet.conf"
+				values.KubeletPKIPath = "/var/lib/kubelet/pki"
+			} else if index == 0 && v129 {
 				values.ConfigPath = "/etc/kubernetes/super-admin.conf"
 			}
-			// One file per node: a shared bind-mounted manifest would stop kube-vip on every node at once.
-			mPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-%d.yaml", spec.Name, i))
-			manifestFile, err := os.Create(mPath)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(tmpl.Execute(manifestFile, values)).To(Succeed())
-			Expect(manifestFile.Close()).To(Succeed())
-			node.ExtraMounts = []kindconfigv1alpha4.Mount{{
-				HostPath:      manifest,
-				ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml",
-			}}
+			// Fault injection must only remove the selected node's manifest.
+			path := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-%s-%d.yaml", spec.Name, role, index))
+			Expect(renderKubeVipManifest(tmpl, path, values)).To(Succeed())
+			node.ExtraMounts = []kindconfigv1alpha4.Mount{{HostPath: path, ContainerPath: "/etc/kubernetes/manifests/kube-vip.yaml"}}
 		}
 		if k8sImage != "" {
 			node.Image = k8sImage
@@ -137,14 +135,10 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		clusterConfig.Nodes = append(clusterConfig.Nodes, node)
 	}
 	for i := 0; i < spec.Nodes; i++ {
-		mPath := manifestPath
-		if i == 0 && v129 {
-			mPath = firstNodeManifestPath
-		}
-		appendNode(kindconfigv1alpha4.ControlPlaneRole, mPath)
+		appendNode(kindconfigv1alpha4.ControlPlaneRole, i)
 	}
 	for i := 0; i < spec.WorkerNodes; i++ {
-		appendNode(kindconfigv1alpha4.WorkerRole, workerManifestPath)
+		appendNode(kindconfigv1alpha4.WorkerRole, i)
 	}
 
 	// Create cluster

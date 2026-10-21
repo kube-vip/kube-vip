@@ -225,20 +225,3 @@ func (ctx *Context) WatchedService() *v1.Service {
 
 	return ctx.watchedService
 }
-
-func (ctx *Context) WaitForWatchingStopped(waitCtx context.Context) error {
-	ctx.mu.Lock()
-	if !ctx.IsWatched {
-		ctx.mu.Unlock()
-		return nil
-	}
-	stopped := ctx.watchingStopped
-	ctx.mu.Unlock()
-
-	select {
-	case <-waitCtx.Done():
-		return waitCtx.Err()
-	case <-stopped:
-		return nil
-	}
-}
