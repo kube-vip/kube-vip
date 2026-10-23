@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/election"
@@ -105,14 +104,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.Started() {
 				return
 			}
-			if c.EnableARP &&
-				c.EnableControlPlane &&
-				c.ControlPlaneHealthCheck.Address != "" {
-				go cluster.controlPlaneHealthCheckLoop(
-					ctx,
-					c,
-					cancelElection,
-				)
+
+			if c.EnableARP && c.EnableControlPlane && c.ControlPlaneHealthCheck.Address != "" {
+				go cluster.arpHealthCheckLoop(ctx, c, cancelElection)
 			}
 
 			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
@@ -134,62 +128,6 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 	}
 
 	return nil
-}
-
-func (cluster *Cluster) controlPlaneHealthCheckLoop(
-	ctx context.Context,
-	c *kubevip.Config,
-	onFailure func(),
-) {
-	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
-	threshold := c.ControlPlaneHealthCheck.FailureThreshold
-
-	if period <= 0 || threshold <= 0 {
-		log.Error("invalid control-plane health check configuration",
-			"period", period,
-			"threshold", threshold)
-		return
-	}
-
-	ticker := time.NewTicker(period)
-	defer ticker.Stop()
-
-	consecutiveFailures := 0
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		healthy, err := cluster.controlPlaneHealthCheck(ctx, c)
-
-		if ctx.Err() != nil {
-			return
-		}
-
-		if healthy {
-			consecutiveFailures = 0
-		} else {
-			consecutiveFailures++
-
-			log.Warn("control-plane health check failed",
-				"consecutive", consecutiveFailures,
-				"threshold", threshold,
-				"err", err)
-
-			if consecutiveFailures >= threshold {
-				log.Warn("control-plane health check threshold reached, relinquishing leadership")
-				onFailure()
-				return
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 func ControlPlaneElectionVIPs(config *kubevip.Config) []string {
@@ -242,4 +180,15 @@ func generateLabelsFromConfig(addr, labelKey string) map[string]string {
 	return map[string]string{
 		labelKey: utils.SanitizeIPForLabel(addr),
 	}
+}
+
+func (cluster *Cluster) arpHealthCheckLoop(ctx context.Context, c *kubevip.Config, cancelElection context.CancelFunc) {
+	onFailure := func(context.Context) bool {
+		log.Warn("control-plane health check threshold reached, relinquishing leadership")
+		cancelElection()
+		
+		return true
+	}
+
+	cluster.controlPlaneHealthCheckLoop(ctx, c, nil,onFailure,nil)
 }

@@ -283,6 +283,45 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	return nil
 }
 
+func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer bgp.BGPManager, vipCIDR string) {
+	routeAnnounced := false
+
+	withdrawRoute := func(ctx context.Context) {
+		if !routeAnnounced {
+			return
+		}
+		if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
+			log.Error("failed to withdraw BGP route", "cidr", vipCIDR, "err", err)
+			return
+		}
+		routeAnnounced = false
+	}
+
+	onHealthy := func(ctx context.Context) {
+		if routeAnnounced {
+			return
+		}
+		if err := bgpServer.AddHost(ctx, vipCIDR, c.NodeName); err != nil {
+			log.Error("failed to announce BGP route", "cidr", vipCIDR, "err", err)
+			return
+		}
+		routeAnnounced = true
+	}
+
+	onFailure := func(ctx context.Context) bool {
+		withdrawRoute(ctx)
+		return false
+	}
+
+	onStop := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		withdrawRoute(cleanupCtx)
+	}
+
+	cluster.controlPlaneHealthCheckLoop(ctx, c, onHealthy, onFailure, onStop)
+}
+
 func (cluster *Cluster) controlPlaneHealthCheck(ctx context.Context, c *kubevip.Config) (bool, error) {
 	statusCode := 0
 
@@ -304,56 +343,54 @@ func (cluster *Cluster) controlPlaneHealthCheck(ctx context.Context, c *kubevip.
 	return healthy, nil
 }
 
-func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer bgp.BGPManager, vipCIDR string) {
+func (cluster *Cluster) controlPlaneHealthCheckLoop(
+	ctx context.Context,
+	c *kubevip.Config,
+	onHealthy func(context.Context),
+	onFailure func(context.Context) bool,
+	onStop func(),
+) {
 	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
-
-	consecutiveFailures := 0
-	routeAnnounced := false
+	threshold := c.ControlPlaneHealthCheck.FailureThreshold
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
 
-	log.Info("Starting BGP health check",
+	if onStop != nil {
+		defer onStop()
+	}
+
+	consecutiveFailures := 0
+	log.Info("Starting control-plane health check",
 		"address", c.ControlPlaneHealthCheck.Address,
-		"cidr", vipCIDR,
 		"period", period,
-		"timeout", cluster.healthCheckHTTPClient.Timeout,
-		"threshold", c.ControlPlaneHealthCheck.FailureThreshold,
+		"threshold", threshold,
 	)
 
 	for {
-		healthy, healthErr := cluster.controlPlaneHealthCheck(ctx, c)
+		if ctx.Err() != nil {
+			return
+		}
+		healthy, err := cluster.controlPlaneHealthCheck(ctx, c)
+		if ctx.Err() != nil {
+			return
+		}
+
 		if healthy {
 			consecutiveFailures = 0
-			if !routeAnnounced {
-				log.Info("BGP health check passed, announcing route", "cidr", vipCIDR)
-				if err := bgpServer.AddHost(ctx, vipCIDR, c.NodeName); err != nil {
-					log.Error("BGP health check: failed to announce route", "cidr", vipCIDR, "err", err)
-				} else {
-					routeAnnounced = true
-				}
+			if onHealthy != nil {
+				onHealthy(ctx)
 			}
 		} else {
 			consecutiveFailures++
-			if healthErr != nil {
-				log.Warn("BGP health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures, "err", healthErr)
-			}
-			if consecutiveFailures >= c.ControlPlaneHealthCheck.FailureThreshold && routeAnnounced {
-				log.Warn("BGP health check threshold reached, withdrawing route", "failureThreshold", c.ControlPlaneHealthCheck.FailureThreshold, "cidr", vipCIDR)
-				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
-					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
-				} else {
-					routeAnnounced = false
-				}
+			log.Warn("control-plane health check failed", "consecutive", consecutiveFailures,
+				"threshold", threshold, "err", err)
+			if consecutiveFailures >= threshold && onFailure != nil && onFailure(ctx) {
+				return
 			}
 		}
 
 		select {
 		case <-ctx.Done():
-			if routeAnnounced {
-				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
-					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
-				}
-			}
 			return
 		case <-ticker.C:
 		}
