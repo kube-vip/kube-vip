@@ -104,6 +104,11 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.Started() {
 				return
 			}
+
+			if c.EnableARP && c.EnableControlPlane && c.ControlPlaneHealthCheck.Address != "" {
+				go cluster.arpHealthCheckLoop(ctx, c, cancelElection)
+			}
+
 			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
@@ -175,4 +180,15 @@ func generateLabelsFromConfig(addr, labelKey string) map[string]string {
 	return map[string]string{
 		labelKey: utils.SanitizeIPForLabel(addr),
 	}
+}
+
+func (cluster *Cluster) arpHealthCheckLoop(ctx context.Context, c *kubevip.Config, cancelElection context.CancelFunc) {
+	onFailure := func(context.Context) bool {
+		log.Warn("control-plane health check threshold reached, relinquishing leadership")
+		cancelElection()
+		
+		return true
+	}
+
+	cluster.controlPlaneHealthCheckLoop(ctx, c, nil,onFailure,nil)
 }
