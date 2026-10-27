@@ -9,6 +9,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/election"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/kube-vip/kube-vip/pkg/vip"
 
@@ -81,6 +82,9 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 
 			log.Debug("cluster waiting for shared election to finish", "lease", leaseName)
 			participation.Session.WaitForEnd(electionCtx)
+			// Publish the lost leadership before the potentially blocking
+			// cleanup so two nodes never report kube_vip_is_leader=1 at once.
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
 			cancelLeader()
 			leaderWG.Wait()
 
@@ -104,12 +108,15 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.Started() {
 				return
 			}
+			metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(1)
 			cluster.OnStartedLeading(ctx, c, em, bgpServer, killFunc)
 		},
 		OnStoppedLeading: func() {
 			if !electionSession.IsCurrent() {
 				return
 			}
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
 			cluster.OnStoppedLeading(c, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
