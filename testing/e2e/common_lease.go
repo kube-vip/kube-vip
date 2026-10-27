@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"slices"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,6 +16,9 @@ func CheckCommonLeaseOwnership(getHolder func() (string, error), nodes, addresse
 	}
 	if holder == "" {
 		return "", fmt.Errorf("common lease has no holder")
+	}
+	if !slices.Contains(nodes, holder) {
+		return "", fmt.Errorf("common lease holder %q is not one of %v", holder, nodes)
 	}
 
 	for _, node := range nodes {
