@@ -322,6 +322,16 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 	if c.EnableBGP {
 		<-ctx.Done()
+		if c.ControlPlaneHealthCheck.Address == "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			for i := range cluster.Network {
+				network := cluster.Network[i]
+				if err := bgpServer.DelHost(cleanupCtx, network.CIDR(), c.NodeName); err != nil {
+					log.Error("failed to withdraw route", "address", network.CIDR(), "error", err)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -423,9 +433,12 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		select {
 		case <-ctx.Done():
 			if routeAnnounced {
-				if err := bgpServer.DelHost(ctx, vipCIDR, c.NodeName); err != nil {
+				// ctx is already cancelled; withdraw with a bounded cleanup context.
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				if err := bgpServer.DelHost(cleanupCtx, vipCIDR, c.NodeName); err != nil {
 					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
 				}
+				cancel()
 			}
 			return
 		case <-ticker.C:
