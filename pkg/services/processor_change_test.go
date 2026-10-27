@@ -3,13 +3,16 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 )
 
 func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
@@ -120,5 +123,44 @@ func TestChangedSinceWatched(t *testing.T) {
 				t.Fatalf("changedSinceWatched() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestCurrentLeaseHolderIgnoresExpiredLease(t *testing.T) {
+	now := time.Now()
+	lease := func(renewed time.Time) *coordinationv1.Lease {
+		return &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       ptr.To("node-a"),
+			LeaseDurationSeconds: ptr.To(int32(15)),
+			RenewTime:            &metav1.MicroTime{Time: renewed},
+		}}
+	}
+	if got := currentLeaseHolder(lease(now), now); got != "node-a" {
+		t.Fatalf("current lease holder = %q, want node-a", got)
+	}
+	if got := currentLeaseHolder(lease(now.Add(-time.Minute)), now); got != "" {
+		t.Fatalf("expired lease holder = %q, want empty", got)
+	}
+	if got := currentLeaseHolder(&coordinationv1.Lease{}, now); got != "" {
+		t.Fatalf("lease without holder = %q, want empty", got)
+	}
+}
+
+func TestServiceSnapshotChangedDetectsForcedElectionToggle(t *testing.T) {
+	ordinary := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default", UID: "service-uid"},
+		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.10"},
+	}
+	forced := ordinary.DeepCopy()
+	forced.Annotations = map[string]string{kubevip.ForcePerServiceElection: "true"}
+
+	if !serviceSnapshotChanged(ordinary, forced) {
+		t.Fatal("enabling forced per-service election was not treated as a lifecycle change")
+	}
+	if !serviceSnapshotChanged(forced, ordinary) {
+		t.Fatal("disabling forced per-service election was not treated as a lifecycle change")
+	}
+	if serviceSnapshotChanged(forced, forced.DeepCopy()) {
+		t.Fatal("unchanged forced Service was treated as a lifecycle change")
 	}
 }

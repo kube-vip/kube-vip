@@ -142,7 +142,7 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
-	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" {
+	if forcedOnly && !forcedPerServiceElection(svc) {
 		// A forced watcher can retain a Service after its annotation is removed.
 		// Retire it before the ordinary watcher takes ownership, but only when the
 		// tracked context proves this UID was previously forced.
@@ -368,13 +368,13 @@ func (p *Processor) wasForcedService(uid types.UID) bool {
 	defer func() { _ = p.serviceLock.Unlock(uid) }()
 	if value, ok := p.svcMap.Load(uid); ok {
 		if svcCtx, ok := value.(*servicecontext.Context); ok {
-			if watched := svcCtx.WatchedService(); watched != nil && watched.Annotations[kubevip.ForcePerServiceElection] == "true" {
+			if watched := svcCtx.WatchedService(); forcedPerServiceElection(watched) {
 				return true
 			}
 		}
 	}
 	inst := p.findServiceInstance(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
-	return inst != nil && inst.ServiceSnapshot != nil && inst.ServiceSnapshot.Annotations[kubevip.ForcePerServiceElection] == "true"
+	return inst != nil && forcedPerServiceElection(inst.ServiceSnapshot)
 }
 
 // admitServiceInstance constructs and tracks a Service instance under its
@@ -575,13 +575,10 @@ func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[st
 	}
 	for index := range leaseList.Items {
 		resource := &leaseList.Items[index]
-		holder := ""
-		if resource.Spec.HolderIdentity != nil {
-			holder = *resource.Spec.HolderIdentity
-		}
+		holder := currentLeaseHolder(resource, time.Now())
 		holders[resource.Namespace+"/"+resource.Name] = holder
 		encoded := resource.Annotations[kubevip.LeaseVIPs]
-		if encoded == "" || holder != p.config.NodeName || !leaseOwnershipCurrent(resource, time.Now()) {
+		if encoded == "" || holder != p.config.NodeName {
 			continue
 		}
 		metadata, err := kubevip.ParseLeaseVIPs(encoded)
@@ -598,6 +595,16 @@ func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[st
 		}
 	}
 	return nil
+}
+
+// currentLeaseHolder returns the holder of a Lease that has not expired. An
+// expired Lease has no current owner, so callers must not treat its last
+// holder as active.
+func currentLeaseHolder(resource *coordinationv1.Lease, now time.Time) string {
+	if resource.Spec.HolderIdentity == nil || !leaseOwnershipCurrent(resource, now) {
+		return ""
+	}
+	return *resource.Spec.HolderIdentity
 }
 
 func leaseOwnershipCurrent(resource *coordinationv1.Lease, now time.Time) bool {
@@ -715,10 +722,7 @@ func (p *Processor) kubernetesLeaseHolder(ctx context.Context, id lease.ID, hold
 	if err != nil {
 		return "", err
 	}
-	holder := ""
-	if resource.Spec.HolderIdentity != nil {
-		holder = *resource.Spec.HolderIdentity
-	}
+	holder := currentLeaseHolder(resource, time.Now())
 	holders[key] = holder
 	return holder, nil
 }
@@ -744,8 +748,11 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 }
 
 func serviceMatchesWatcher(svc *v1.Service, forcedOnly bool) bool {
-	forced := svc.Annotations[kubevip.ForcePerServiceElection] == "true"
-	return forcedOnly == forced
+	return forcedOnly == forcedPerServiceElection(svc)
+}
+
+func forcedPerServiceElection(svc *v1.Service) bool {
+	return svc != nil && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
@@ -981,7 +988,10 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 		// DDNS was disabled/enabled
 		svc.Annotations[kubevip.ServiceDDNS] != original.Annotations[kubevip.ServiceDDNS] ||
 		// lease name was changed
-		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease]
+		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease] ||
+		// forced per-service election was toggled; the Service moves between
+		// the global and the per-service election lifecycle
+		forcedPerServiceElection(svc) != forcedPerServiceElection(original)
 }
 
 func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
@@ -1045,7 +1055,8 @@ func (p *Processor) ServiceSnapshots() []*v1.Service {
 	return snapshots
 }
 
-// OwnedServiceVIPs returns the VIPs whose Service datapath is currently active.
+// OwnedServiceVIPs returns the VIPs whose Service datapath is currently active
+// under the global services Lease.
 // It is safe to use as a dynamic provider for Lease ownership metadata.
 func (p *Processor) OwnedServiceVIPs() []string {
 	vips := p.ownedServiceVIPs.Load()
@@ -1067,7 +1078,10 @@ func (p *Processor) refreshOwnedServiceVIPs() {
 		}
 		uid := inst.UID()
 		p.serviceLock.Lock(uid)
-		if inst.AddCalled && inst.ServiceSnapshot != nil {
+		// Forced on-demand Services run their own per-service election, so
+		// their VIPs belong to the per-service Lease, not the global one.
+		forcedOnDemand := p.config != nil && p.config.PerServiceElectionOnDemand && forcedPerServiceElection(inst.ServiceSnapshot)
+		if inst.AddCalled && inst.ServiceSnapshot != nil && !forcedOnDemand {
 			addresses, _ := instance.FetchServiceAddresses(inst.ServiceSnapshot)
 			vips = append(vips, addresses...)
 		}
