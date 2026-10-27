@@ -903,8 +903,16 @@ func MergeConfigFromFile(config *Config, configFilePath string) error {
 	}
 
 	// Runtime BGP consumes BGPConfig.Peers. BGPPeerConfig is retained for CLI
-	// and environment compatibility and normalized when supplied by a file.
-	if config.BGPPeerConfig.Address != "" {
+	// and environment compatibility and normalized only when supplied by the
+	// file; a peer from flags (e.g. --peerAddress with the default --peerAS)
+	// must survive untouched.
+	var filePeer struct {
+		BGPPeerConfig *BGPPeer `yaml:"bgpPeerConfig"`
+	}
+	if err := yaml.Unmarshal(data, &filePeer); err != nil {
+		return fmt.Errorf("failed to parse bgpPeerConfig in config file %s: %w", configFilePath, err)
+	}
+	if filePeer.BGPPeerConfig != nil && config.BGPPeerConfig.Address != "" {
 		config.BGPConfig.Peers = append(config.BGPConfig.Peers, config.BGPPeerConfig)
 		config.BGPPeerConfig = BGPPeer{}
 	}
