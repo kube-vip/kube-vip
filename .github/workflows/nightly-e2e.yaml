@@ -4,12 +4,69 @@ on:
   schedule:
     - cron: '30 2 * * *'
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    name: Validate nightly contracts
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Validate Make targets
+        run: make -n unit-tests e2e-tests-faults e2e-tests-matrix e2e-tests-scale e2e-tests-etcd service-tests
+      - name: Validate selected specs and metrics
+        env:
+          REPORT: /tmp/kube-vip-preflight.json
+        run: |
+          set -eu
+          printf '{\n  "selections": {\n' > "$REPORT"
+          separator=
+          for selection in 'faults:arp' 'faults:rt' 'matrix:matrix' 'scale:arp'; do
+            label=${selection%%:*}
+            mode=${selection##*:}
+            output=$(mktemp)
+            TEST_MODE="$mode" go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e --dry-run --no-color --label-filter="$label" ./testing/e2e | tee "$output"
+            count=$(sed -nE 's/.*Will run ([0-9]+) of.*/\1/p' "$output" | tail -1)
+            test -n "$count" && test "$count" -gt 0
+            printf '%s    "%s-%s": %s' "$separator" "$label" "$mode" "$count" >> "$REPORT"
+            separator=',\n'
+          done
+          printf '\n  },\n  "metrics_enabled": true\n}\n' >> "$REPORT"
+          for template in testing/e2e/kube-vip.yaml.tmpl testing/e2e/kube-vip-routing-table.yaml.tmpl; do
+            grep -Fq -- '- "{{ .PrometheusHTTPServer }}"' "$template"
+          done
+          grep -q 'PrometheusHTTPServer:.*":2112"' testing/e2e/e2e_faults_cp_test.go
+          grep -q 'PrometheusHTTPServer:.*":2112"' testing/e2e/e2e_matrix_test.go
+          grep -q 'PrometheusHTTPServer:.*":2112"' testing/e2e/e2e_scale_test.go
+          {
+            echo '### Nightly preflight'
+            echo 'All Make targets exist, each selected suite has specs, and metrics are enabled.'
+            echo '```json'
+            cat "$REPORT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: nightly-preflight
+          path: /tmp/kube-vip-preflight.json
+          if-no-files-found: error
+
   unit-coverage:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
     runs-on: ubuntu-latest
     name: Unit tests with coverage
     timeout-minutes: 30
@@ -32,25 +89,211 @@ jobs:
             echo "### Unit coverage: report missing" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage
+        if: always()
         uses: actions/upload-artifact@v7
+        continue-on-error: true
         with:
           name: unit-coverage
           path: coverage.out
           if-no-files-found: error
-        if: always()
-  etcd-e2e:
+
+  faults-e2e:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
     runs-on: ubuntu-latest
-    name: Etcd E2E tests
-    timeout-minutes: 60
+    name: Fault E2E (${{ matrix.mode }})
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [arp, rt]
     steps:
-      - name: Ensure fs wont cause issues
-        run: sudo sysctl fs.inotify.max_user_instances=8192 && sudo sysctl fs.inotify.max_user_watches=524288
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Prepare runner
+        run: sudo sysctl fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
+      - name: Build image locally
+        run: make dockerx86Local
+      - name: Run fault tests
+        id: faults
+        continue-on-error: true
+        shell: bash
+        run: |
+          artifacts=/tmp/kube-vip-faults-${{ matrix.mode }}-artifacts
+          mkdir -p "$artifacts"
+          printf '[]\n' > "$artifacts/report.json"
+          set +e
+          set -o pipefail
+          DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true TEST_MODE=${{ matrix.mode }} \
+            GINKGO_ARGS="--json-report=report.json --output-dir=$artifacts" \
+            make e2e-tests-faults 2>&1 | tee "$artifacts/suite.log"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+      - name: Summarize result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.faults.outcome }}
+          EXIT_CODE: ${{ steps.faults.outputs.exit_code }}
+        run: |
+          echo "### Fault E2E (${{ matrix.mode }}): ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"
+          printf '{"outcome":"%s","exit_code":%s}\n' "${OUTCOME:-skipped}" "${EXIT_CODE:-null}" \
+            > /tmp/kube-vip-faults-${{ matrix.mode }}-artifacts/result.json
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: faults-e2e-${{ matrix.mode }}
+          path: |
+            /tmp/kube-vip-faults-${{ matrix.mode }}-artifacts
+            /tmp/kube-vip-test-faults-${{ matrix.mode }}-*
+          if-no-files-found: warn
+      - name: Enforce fault result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.faults.outcome }}
+        run: test "$OUTCOME" = success
+
+  matrix-e2e:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
+    runs-on: ubuntu-latest
+    name: Matrix E2E (shard ${{ matrix.shard }}/4)
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Prepare runner
+        run: sudo sysctl fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
+      - name: Build image locally
+        run: make dockerx86Local
+      - name: Run matrix tests
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        run: |
+          artifacts=/tmp/kube-vip-matrix-${{ matrix.shard }}-artifacts
+          mkdir -p "$artifacts"
+          printf '[]\n' > "$artifacts/report.json"
+          set +e
+          set -o pipefail
+          MATRIX_SHARD=${{ matrix.shard }}/4 DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true \
+            GINKGO_ARGS="--json-report=report.json --output-dir=$artifacts" \
+            make e2e-tests-matrix 2>&1 | tee "$artifacts/suite.log"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+      - name: Summarize result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.matrix.outcome }}
+          EXIT_CODE: ${{ steps.matrix.outputs.exit_code }}
+        run: |
+          echo "### Matrix E2E shard ${{ matrix.shard }}: ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"
+          printf '{"outcome":"%s","exit_code":%s}\n' "${OUTCOME:-skipped}" "${EXIT_CODE:-null}" \
+            > /tmp/kube-vip-matrix-${{ matrix.shard }}-artifacts/result.json
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: matrix-e2e-${{ matrix.shard }}
+          path: |
+            /tmp/kube-vip-matrix-${{ matrix.shard }}-artifacts
+            /tmp/kube-vip-matrix-logs*
+          if-no-files-found: warn
+      - name: Enforce matrix result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.matrix.outcome }}
+        run: test "$OUTCOME" = success
+
+  scale-e2e:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
+    runs-on: ubuntu-latest
+    name: Scale E2E
+    timeout-minutes: 180
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Prepare runner
+        run: sudo sysctl fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
+      - name: Build image locally
+        run: make dockerx86Local
+      - name: Run scale tests
+        id: scale
+        continue-on-error: true
+        shell: bash
+        run: |
+          artifacts=/tmp/kube-vip-scale-artifacts
+          mkdir -p "$artifacts"
+          printf '[]\n' > "$artifacts/report.json"
+          set +e
+          set -o pipefail
+          DOCKER_API_VERSION=1.48 E2E_KEEP_LOGS=true \
+            GINKGO_ARGS="--json-report=report.json --output-dir=$artifacts" \
+            make e2e-tests-scale 2>&1 | tee "$artifacts/suite.log"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+      - name: Summarize result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.scale.outcome }}
+          EXIT_CODE: ${{ steps.scale.outputs.exit_code }}
+        run: |
+          echo "### Scale E2E: ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"
+          printf '{"outcome":"%s","exit_code":%s}\n' "${OUTCOME:-skipped}" "${EXIT_CODE:-null}" \
+            > /tmp/kube-vip-scale-artifacts/result.json
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: scale-e2e
+          path: |
+            /tmp/kube-vip-scale-artifacts
+            /tmp/kube-vip-test-scale-*
+          if-no-files-found: warn
+      - name: Enforce scale result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.scale.outcome }}
+        run: test "$OUTCOME" = success
+
+  etcd-e2e:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
+    runs-on: ubuntu-latest
+    name: Etcd E2E tests
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Prepare runner
+        run: sudo sysctl fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
       - name: Build image locally
         run: make dockerx86Local
       - name: Prepare Etcd artifacts
@@ -61,8 +304,6 @@ jobs:
           printf '[]\n' > /tmp/kube-vip-etcd-artifacts/report.json
       - name: Run Etcd tests
         id: etcd
-        # Scheduled failures are tolerated only during the initial stabilization window.
-        # The enforcement step below makes manual runs and later schedules blocking.
         continue-on-error: true
         shell: bash
         run: |
@@ -109,3 +350,34 @@ jobs:
           fi
           echo "::error::etcd e2e suite outcome was ${OUTCOME:-skipped}; see the etcd-e2e-logs artifact"
           exit 1
+
+  service-e2e-tests:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full')
+    needs: preflight
+    runs-on: ubuntu-latest
+    name: E2E service tests
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Prepare runner
+        run: sudo sysctl fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
+      - name: Build image with iptables
+        run: make dockerx86ActionIPTables
+      - name: Run service tests
+        run: DOCKER_API_VERSION=1.48 DOCKERTAG=action E2E_KEEP_LOGS=true make service-tests
+      - name: Summarize result
+        if: always()
+        run: 'echo "### Service E2E: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"'
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: services-e2e
+          path: /tmp/kube-vip-services*
+          if-no-files-found: warn
