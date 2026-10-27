@@ -3,13 +3,16 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 )
 
 func TestServiceSnapshotChangedBGPForwardingNode(t *testing.T) {
@@ -230,5 +233,25 @@ func TestChangedSinceWatchedForcePerServiceElection(t *testing.T) {
 				t.Fatalf("changedSinceWatched() with watched Service = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestCurrentLeaseHolderIgnoresExpiredLease(t *testing.T) {
+	now := time.Now()
+	lease := func(renewed time.Time) *coordinationv1.Lease {
+		return &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       ptr.To("node-a"),
+			LeaseDurationSeconds: ptr.To(int32(15)),
+			RenewTime:            &metav1.MicroTime{Time: renewed},
+		}}
+	}
+	if got := currentLeaseHolder(lease(now), now); got != "node-a" {
+		t.Fatalf("current lease holder = %q, want node-a", got)
+	}
+	if got := currentLeaseHolder(lease(now.Add(-time.Minute)), now); got != "" {
+		t.Fatalf("expired lease holder = %q, want empty", got)
+	}
+	if got := currentLeaseHolder(&coordinationv1.Lease{}, now); got != "" {
+		t.Fatalf("lease without holder = %q, want empty", got)
 	}
 }
