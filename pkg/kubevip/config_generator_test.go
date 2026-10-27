@@ -243,3 +243,81 @@ func TestParseEnvironmentConfigFile(t *testing.T) {
 		})
 	}
 }
+
+func TestGeneratePodSpecRoutingTable(t *testing.T) {
+	routingTableEnv := []string{vipRoutingTable, vipRoutingTableID, vipRoutingTableType, vipRoutingProtocol, vipCleanRoutingTable}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "table mode emits its settings",
+			config: Config{
+				EnableRoutingTable: true,
+				RoutingTableID:     100,
+				RoutingTableType:   2,
+				RoutingProtocol:    250,
+				CleanRoutingTable:  true,
+			},
+			wantEnv: map[string]string{
+				vipRoutingTable:      "true",
+				vipRoutingTableID:    "100",
+				vipRoutingTableType:  "2",
+				vipRoutingProtocol:   "250",
+				vipCleanRoutingTable: "true",
+			},
+		},
+		{
+			name:    "table mode without settings emits only the mode",
+			config:  Config{EnableRoutingTable: true},
+			wantEnv: map[string]string{vipRoutingTable: "true"},
+		},
+		{
+			name: "table mode with the flag defaults",
+			config: Config{
+				EnableRoutingTable: true,
+				RoutingTableID:     198,
+				RoutingTableType:   1,
+				RoutingProtocol:    248,
+			},
+			wantEnv: map[string]string{
+				vipRoutingTable:     "true",
+				vipRoutingTableID:   "198",
+				vipRoutingTableType: "1",
+				vipRoutingProtocol:  "248",
+			},
+		},
+		{
+			name: "settings without table mode emit nothing",
+			config: Config{
+				RoutingTableID:    100,
+				RoutingTableType:  2,
+				RoutingProtocol:   250,
+				CleanRoutingTable: true,
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(routingTableEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("routing table pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fail fast in runtime `manager` and `service` paths when legacy `vip_address` is used without `vip_subnet` in control-plane ARP, BGP, or Routing Table mode.
 - Cancel the mode context on init or configuration failure before waiting on goroutines during shutdown.
 - Join dual-stack Service addresses with `_` instead of `,` in the `service-provided.kube-vip.io` node label so the label value is valid and node labeling no longer causes Service lease churn. Fixes #1793.
+- Write the `--tableID`, `--tableType`, `--routingProtocol` and `--cleanRoutingTable` settings into the generated manifest in routing table mode instead of leaving the defaults in place.
 
 
 ### Added
