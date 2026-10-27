@@ -66,6 +66,14 @@ func MetricValue(metrics map[string]float64, name string, labels map[string]stri
 	return values[0], len(values)
 }
 
+// MetricPresent reports whether at least one series for name exists. It is
+// intentionally independent of the series value: a zero-valued gauge is
+// still a supported metric capability.
+func MetricPresent(metrics map[string]float64, name string) bool {
+	_, matches := MetricValue(metrics, name, nil)
+	return matches > 0
+}
+
 // SumMetric returns the sum of all series whose labels contain all requested
 // labels. It returns zero when no series matches.
 func SumMetric(metrics map[string]float64, name string, labels map[string]string) float64 {
@@ -134,6 +142,18 @@ func CounterDelta(before, after map[string]float64, name string, labels map[stri
 	return afterValue - beforeValue, true
 }
 
+// CounterSumDelta returns the difference between the sums of two counter
+// samples. It is useful for counters with operation/result labels where a
+// single label selector intentionally matches more than one series.
+func CounterSumDelta(before, after map[string]float64, name string, labels map[string]string) (float64, bool) {
+	_, beforeMatches := MetricValue(before, name, labels)
+	_, afterMatches := MetricValue(after, name, labels)
+	if beforeMatches == 0 || afterMatches == 0 {
+		return 0, false
+	}
+	return SumMetric(after, name, labels) - SumMetric(before, name, labels), true
+}
+
 // EventuallyMetric retries a metric scrape until its value satisfies matcher.
 func EventuallyMetric(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval time.Duration) {
 	Eventually(func() (float64, error) {
@@ -146,6 +166,18 @@ func EventuallyMetric(ctx context.Context, clusterName, node, name string, label
 		}
 
 		return singleMetricValue(metrics, name, labels)
+	}, timeout, interval).Should(matcher)
+}
+
+// EventuallyMetricStable retries until a metric has the requested value in
+// two samples separated by gap. This catches leaked loops that briefly look
+// healthy immediately after a fault.
+func EventuallyMetricStable(ctx context.Context, clusterName, node, name string, labels map[string]string, matcher types.GomegaMatcher, timeout, interval, gap time.Duration) {
+	Eventually(func() (float64, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, StopTrying("metrics polling canceled").Wrap(err)
+		}
+		return MetricStable(ctx, clusterName, node, name, labels, 2, gap)
 	}, timeout, interval).Should(matcher)
 }
 
