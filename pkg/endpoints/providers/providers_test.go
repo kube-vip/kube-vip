@@ -253,6 +253,7 @@ func TestEndpointSliceBackendsPreservePerSliceNamedPorts(t *testing.T) {
 
 func TestLegacyEndpointsUnnamedServicePortUsesUnnamedEndpointPort(t *testing.T) {
 	provider := NewEndpoints()
+	//nolint:staticcheck // this test covers the deprecated legacy Endpoints provider on purpose
 	object := &v1.Endpoints{Subsets: []v1.EndpointSubset{{
 		Addresses: []v1.EndpointAddress{{IP: "10.0.0.2"}},
 		Ports:     []v1.EndpointPort{{Port: 8080, Protocol: v1.ProtocolTCP}},
