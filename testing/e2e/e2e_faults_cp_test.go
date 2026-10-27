@@ -213,7 +213,7 @@ var _ = Describe("kube-vip control-plane election and VIP failover faults", Labe
 		lease := suite.waitForLease(oldLeader)
 		By(withTimestamp(fmt.Sprintf("lease %s/%s is held by remaining node %q while %q is blackholed", faultLeaseNamespace, suite.election.leaseName, *lease.Spec.HolderIdentity, oldLeader)))
 		suite.assertLeaderMetric(newLeader)
-		suite.assertOneLeader(oldLeader)
+		suite.assertOneLeader()
 
 		By(withTimestamp(fmt.Sprintf("restoring the API server connection on %q", oldLeader)))
 		Expect(e2e.RestoreAPIServer(suite.cluster.Name, oldLeader)).To(Succeed())

@@ -74,6 +74,20 @@ func TestCheckCommonLeaseOwnershipRejectsMissingHolder(t *testing.T) {
 	}
 }
 
+func TestCheckCommonLeaseOwnershipRejectsUnknownHolder(t *testing.T) {
+	// No checked node has the address, which would match any holder outside
+	// the checked set unless the holder itself is validated.
+	_, err := CheckCommonLeaseOwnership(
+		func() (string, error) { return "node-c", nil },
+		[]string{"node-a", "node-b"},
+		[]string{"192.0.2.10"},
+		func(string, string) bool { return false },
+	)
+	if err == nil {
+		t.Fatal("checkCommonLeaseOwnership() accepted a holder outside the checked nodes")
+	}
+}
+
 func TestCheckCommonLeaseRetired(t *testing.T) {
 	getError := errors.New("get lease")
 	tests := []struct {
