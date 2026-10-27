@@ -7,6 +7,11 @@ import (
 )
 
 var (
+	serviceElectionLoopsMu sync.Mutex
+	serviceElectionLoops   = make(map[string]int)
+)
+
+var (
 	// Service / VIP Lifecycle
 	ActiveServices = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Name: "kube_vip_active_services", Help: "How many LB services are currently managed"},
@@ -93,4 +98,29 @@ func RegisterPrometheusMetrics() {
 			CountServiceWatchEvent,
 		)
 	})
+}
+
+// TrackServiceElectionLoop records one active per-service election loop and
+// removes its series after the final overlapping loop exits.
+func TrackServiceElectionLoop(namespace, name string) func() {
+	key := namespace + "\x00" + name
+	serviceElectionLoopsMu.Lock()
+	serviceElectionLoops[key]++
+	ServiceElectionLoops.WithLabelValues(namespace, name).Inc()
+	serviceElectionLoopsMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			serviceElectionLoopsMu.Lock()
+			defer serviceElectionLoopsMu.Unlock()
+
+			ServiceElectionLoops.WithLabelValues(namespace, name).Dec()
+			serviceElectionLoops[key]--
+			if serviceElectionLoops[key] == 0 {
+				delete(serviceElectionLoops, key)
+				ServiceElectionLoops.DeleteLabelValues(namespace, name)
+			}
+		})
+	}
 }
