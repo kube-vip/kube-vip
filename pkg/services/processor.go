@@ -50,6 +50,8 @@ type serviceVIPClaim struct {
 }
 
 type Processor struct {
+	servicesMu    sync.Mutex
+	services      map[types.NamespacedName]types.UID
 	config        *kubevip.Config
 	lbClassFilter func(svc *v1.Service, config *kubevip.Config) bool
 	svcMap        sync.Map
@@ -142,6 +144,15 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
 
+	if forcedOnly && !forcedPerServiceElection(svc) {
+		// A forced watcher can retain a Service after its annotation is removed.
+		// Retire it before the ordinary watcher takes ownership, but only when the
+		// tracked context proves this UID was previously forced.
+		if p.wasForcedService(svc.UID) {
+			return p.deleteTrackedService(svc)
+		}
+		return nil
+	}
 	if !serviceMatchesWatcher(svc, forcedOnly) {
 		return nil
 	}
@@ -210,6 +221,11 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
+		if event.Type != watch.Deleted && svcCtx != nil {
+			if watched := svcCtx.WatchedService(); serviceSnapshotNewer(watched, svc) {
+				return nil
+			}
+		}
 		if event.Type == watch.Modified {
 			shouldGarbageCollect = changedSinceWatched(svcInstance, svcCtx, svc)
 		}
@@ -230,6 +246,13 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 				}
 				//Set it to inactive
 				svcCtx.Cancel()
+				// Join the old watcher before deleting its instance. Its service
+				// callback may still be unwinding dataplane state; publishing a
+				// replacement before it stops permits late cleanup to remove the
+				// replacement's VIP or routes.
+				if err := svcCtx.WaitForWatchingStopped(ctx); err != nil {
+					return fmt.Errorf("wait for service watcher shutdown: %w", err)
+				}
 
 				if err := p.deleteService(ctx, svc.UID, nil); err != nil {
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
@@ -264,6 +287,14 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			p.updateActiveServicesMetric()
 		}
 	}
+	// Keep the admission snapshot current for later watch events. Without this,
+	// a delayed event is compared with only the original watcher snapshot and
+	// can regress an already accepted Service generation.
+	if svcCtx.Ctx.Err() == nil {
+		svcCtx.SetWatchedService(svc)
+	}
+
+	p.trackService(svc)
 
 	// this goroutine starts service handling function (with or without leaderelection)
 	if svcCtx.StartWatching() {
@@ -320,6 +351,34 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 	}
 
 	return nil
+}
+
+// serviceSnapshotNewer reports whether watched represents a newer desired
+// Service generation. ResourceVersion is intentionally opaque in Kubernetes,
+// so it must not be parsed or ordered; Generation is the API's monotonic
+// revision for spec changes and is safe for this admission guard.
+func serviceSnapshotNewer(watched, svc *v1.Service) bool {
+	if watched == nil || svc == nil || watched.UID == "" || svc.UID == "" ||
+		watched.UID != svc.UID || watched.Generation == 0 || svc.Generation == 0 {
+		return false
+	}
+	return watched.Generation > svc.Generation
+}
+
+// wasForcedService checks the watched snapshot under the same per-UID lock
+// used by reconciliation, avoiding teardown of a replacement context.
+func (p *Processor) wasForcedService(uid types.UID) bool {
+	p.serviceLock.Lock(uid)
+	defer func() { _ = p.serviceLock.Unlock(uid) }()
+	if value, ok := p.svcMap.Load(uid); ok {
+		if svcCtx, ok := value.(*servicecontext.Context); ok {
+			if watched := svcCtx.WatchedService(); forcedPerServiceElection(watched) {
+				return true
+			}
+		}
+	}
+	inst := p.findServiceInstance(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	return inst != nil && forcedPerServiceElection(inst.ServiceSnapshot)
 }
 
 // admitServiceInstance constructs and tracks a Service instance under its
@@ -520,13 +579,10 @@ func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[st
 	}
 	for index := range leaseList.Items {
 		resource := &leaseList.Items[index]
-		holder := ""
-		if resource.Spec.HolderIdentity != nil {
-			holder = *resource.Spec.HolderIdentity
-		}
+		holder := currentLeaseHolder(resource, time.Now())
 		holders[resource.Namespace+"/"+resource.Name] = holder
 		encoded := resource.Annotations[kubevip.LeaseVIPs]
-		if encoded == "" || holder != p.config.NodeName || !leaseOwnershipCurrent(resource, time.Now()) {
+		if encoded == "" || holder != p.config.NodeName {
 			continue
 		}
 		metadata, err := kubevip.ParseLeaseVIPs(encoded)
@@ -543,6 +599,16 @@ func (p *Processor) retainAnnotatedLeaseVIPs(ctx context.Context, holders map[st
 		}
 	}
 	return nil
+}
+
+// currentLeaseHolder returns the holder of a Lease that has not expired. An
+// expired Lease has no current owner, so callers must not treat its last
+// holder as active.
+func currentLeaseHolder(resource *coordinationv1.Lease, now time.Time) string {
+	if resource.Spec.HolderIdentity == nil || !leaseOwnershipCurrent(resource, now) {
+		return ""
+	}
+	return *resource.Spec.HolderIdentity
 }
 
 func leaseOwnershipCurrent(resource *coordinationv1.Lease, now time.Time) bool {
@@ -660,10 +726,7 @@ func (p *Processor) kubernetesLeaseHolder(ctx context.Context, id lease.ID, hold
 	if err != nil {
 		return "", err
 	}
-	holder := ""
-	if resource.Spec.HolderIdentity != nil {
-		holder = *resource.Spec.HolderIdentity
-	}
+	holder := currentLeaseHolder(resource, time.Now())
 	holders[key] = holder
 	return holder, nil
 }
@@ -689,8 +752,11 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 }
 
 func serviceMatchesWatcher(svc *v1.Service, forcedOnly bool) bool {
-	forced := svc.Annotations[kubevip.ForcePerServiceElection] == "true"
-	return forcedOnly == forced
+	return forcedOnly == forcedPerServiceElection(svc)
+}
+
+func forcedPerServiceElection(svc *v1.Service) bool {
+	return svc != nil && svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
@@ -700,6 +766,11 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	if err != nil {
 		return err
 	}
+	if svcCtx != nil {
+		if err := svcCtx.WaitForWatchingStopped(context.Background()); err != nil {
+			return fmt.Errorf("wait for service watcher shutdown: %w", err)
+		}
+	}
 
 	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
 		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
@@ -707,9 +778,7 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	if svcCtx != nil {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	}
-	// Drop the per-service election series so a recreated service starts clean.
-	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
-	p.updateActiveServicesMetric()
+	p.untrackService(svc)
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
@@ -880,6 +949,7 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 		serviceInstance.AddCalled = false
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
+	p.untrackServiceUID(svc.UID)
 	return nil
 }
 
@@ -921,7 +991,10 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 		// DDNS was disabled/enabled
 		svc.Annotations[kubevip.ServiceDDNS] != original.Annotations[kubevip.ServiceDDNS] ||
 		// lease name was changed
-		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease]
+		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease] ||
+		// forced per-service election was toggled; the Service moves between
+		// the global and the per-service election lifecycle
+		forcedPerServiceElection(svc) != forcedPerServiceElection(original)
 }
 
 func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
@@ -931,24 +1004,52 @@ func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
 	return *first == *second
 }
 
-// updateActiveServicesMetric acquires each instance's Service lock before
-// reading its snapshot.
-func (p *Processor) updateActiveServicesMetric() {
+func (p *Processor) trackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	if p.services == nil {
+		p.services = make(map[types.NamespacedName]types.UID)
+	}
+	p.services[types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}] = svc.UID
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackService(svc *v1.Service) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	key := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	if p.services[key] == svc.UID {
+		delete(p.services, key)
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) untrackServiceUID(uid types.UID) {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	for key, currentUID := range p.services {
+		if currentUID == uid {
+			delete(p.services, key)
+		}
+	}
+	p.updateActiveServicesMetricLocked()
+}
+
+func (p *Processor) updateActiveServicesMetricLocked() {
 	counts := map[string]int{}
-	for _, inst := range p.serviceInstances() {
-		uid := inst.UID()
-		p.serviceLock.Lock(uid)
-		if inst.ServiceSnapshot != nil {
-			counts[inst.ServiceSnapshot.Namespace]++
-		}
-		if err := p.serviceLock.Unlock(uid); err != nil {
-			log.Error("failed to release service lock", "uid", uid, "err", err)
-		}
+	for service := range p.services {
+		counts[service.Namespace]++
 	}
 	metrics.ActiveServices.Reset()
 	for ns, count := range counts {
 		metrics.ActiveServices.WithLabelValues(ns).Set(float64(count))
 	}
+}
+
+func (p *Processor) updateActiveServicesMetric() {
+	p.servicesMu.Lock()
+	defer p.servicesMu.Unlock()
+	p.updateActiveServicesMetricLocked()
 }
 
 // findServiceInstance protects the collection lookup only. The caller must hold
@@ -985,7 +1086,8 @@ func (p *Processor) ServiceSnapshots() []*v1.Service {
 	return snapshots
 }
 
-// OwnedServiceVIPs returns the VIPs whose Service datapath is currently active.
+// OwnedServiceVIPs returns the VIPs whose Service datapath is currently active
+// under the global services Lease.
 // It is safe to use as a dynamic provider for Lease ownership metadata.
 func (p *Processor) OwnedServiceVIPs() []string {
 	vips := p.ownedServiceVIPs.Load()
@@ -1007,7 +1109,10 @@ func (p *Processor) refreshOwnedServiceVIPs() {
 		}
 		uid := inst.UID()
 		p.serviceLock.Lock(uid)
-		if inst.AddCalled && inst.ServiceSnapshot != nil {
+		// Forced on-demand Services run their own per-service election, so
+		// their VIPs belong to the per-service Lease, not the global one.
+		forcedOnDemand := p.config != nil && p.config.PerServiceElectionOnDemand && forcedPerServiceElection(inst.ServiceSnapshot)
+		if inst.AddCalled && inst.ServiceSnapshot != nil && !forcedOnDemand {
 			addresses, _ := instance.FetchServiceAddresses(inst.ServiceSnapshot)
 			vips = append(vips, addresses...)
 		}
