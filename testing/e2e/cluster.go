@@ -100,6 +100,14 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	tmpDir, err := os.MkdirTemp("", "kube-vip-manifest")
 	Expect(err).NotTo(HaveOccurred())
+	// The DaemonSet path applies one shared manifest after the cluster is up.
+	manifestPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s.yaml", spec.Name))
+	if spec.UseDaemonSet {
+		manifestFile, err := os.Create(manifestPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tmpl.Execute(manifestFile, spec.KubeVip)).To(Succeed())
+		Expect(manifestFile.Close()).To(Succeed())
+	}
 
 	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
