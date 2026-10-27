@@ -86,6 +86,24 @@ func TestRuntimeCommandAbsentEnvironmentPreservesFile(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandDerivesDHCPFromFileDNSMode(t *testing.T) {
+	t.Setenv("dhcp_mode", "")
+	os.Unsetenv("dhcp_mode")
+	t.Setenv("dns_mode", "")
+	os.Unsetenv("dns_mode")
+	path := writeRuntimeConfig(t, "dnsDualStackMode: dual\n")
+	cmd := newRuntimeConfigTestCommand("manager")
+	if err := cmd.ParseFlags([]string{"--config-file=" + path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadRuntimeConfig(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if initConfig.DNSMode != "dual" || initConfig.DHCPMode != "dual" {
+		t.Fatalf("file DNS mode did not derive DHCP mode: DNS=%q DHCP=%q", initConfig.DNSMode, initConfig.DHCPMode)
+	}
+}
+
 func TestRuntimeCommandExplicitEmptyPeers(t *testing.T) {
 	path := writeRuntimeConfig(t, "bgpConfig:\n  peers:\n    - address: 192.0.2.1\n      as: 65001\n")
 	cmd := newRuntimeConfigTestCommand("manager")
