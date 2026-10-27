@@ -49,3 +49,24 @@ func TestLeaderMetricIsPublishedBeforeActionsRun(t *testing.T) {
 		t.Fatal("leadership actions did not stop")
 	}
 }
+
+type gaugeCheckingStopActions struct {
+	blockingElectionActions
+	nodeName, leaseName string
+	valueDuringStop     float64
+}
+
+func (a *gaugeCheckingStopActions) OnStoppedLeading() {
+	a.valueDuringStop = testutil.ToFloat64(metrics.IsLeader.WithLabelValues(a.nodeName, a.leaseName))
+}
+
+func TestLeaderMetricIsClearedBeforeStopActionsRun(t *testing.T) {
+	actions := &gaugeCheckingStopActions{nodeName: t.Name(), leaseName: "test-lease", valueDuringStop: -1}
+	metrics.IsLeader.WithLabelValues(actions.nodeName, actions.leaseName).Set(1)
+
+	onStoppedLeading(actions, actions.nodeName, actions.leaseName)
+
+	if actions.valueDuringStop != 0 {
+		t.Fatalf("leader metric = %v during stop actions, want 0", actions.valueDuringStop)
+	}
+}
