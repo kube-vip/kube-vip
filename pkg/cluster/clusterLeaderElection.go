@@ -82,11 +82,13 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 
 			log.Debug("cluster waiting for shared election to finish", "lease", leaseName)
 			participation.Session.WaitForEnd(electionCtx)
+			// Publish the lost leadership before the potentially blocking
+			// cleanup so two nodes never report kube_vip_is_leader=1 at once.
+			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
 			cancelLeader()
 			leaderWG.Wait()
 
 			cluster.OnStoppedLeading(c, bgpServer)
-			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
 
 			return nil
 		}
@@ -114,8 +116,8 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.IsCurrent() {
 				return
 			}
-			cluster.OnStoppedLeading(c, bgpServer)
 			metrics.IsLeader.WithLabelValues(c.NodeName, leaseID.Name()).Set(0)
+			cluster.OnStoppedLeading(c, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
 			cluster.OnNewLeader(identity, c)
