@@ -405,6 +405,23 @@ func (s *serviceFaultSuite) waitForActiveEndpoint(name string) string {
 }
 
 func (s *serviceFaultSuite) assertServiceVIP(vip string) {
+	if Mode == ModeRT {
+		// Routing-table mode only programs a host route on the owner; the VIP
+		// is not reachable from the test runner, so check the route instead.
+		Eventually(func() error {
+			for _, node := range s.nodes {
+				present, err := s.serviceVIPPresent(node, vip)
+				if err != nil {
+					return err
+				}
+				if present {
+					return nil
+				}
+			}
+			return fmt.Errorf("service VIP %q is not routed on any node", vip)
+		}, serviceFaultConvergenceTimeout, serviceFaultPollInterval).Should(Succeed())
+		return
+	}
 	assertConnection("http", vip, "80", "", 2*time.Second, serviceFaultConvergenceTimeout)
 }
 
@@ -663,7 +680,7 @@ func (s *serviceFaultSuite) assertEgressRules(serviceName, vip, leader, endpoint
 			return fmt.Errorf("active endpoint %q is missing from %s on %q", currentEndpoint, chainName, leader)
 		}
 		for _, cidr := range podCIDRs {
-			if !strings.Contains(chain, cidr) {
+			if !e2e.NftExcludesCIDR(chain, cidr) {
 				return fmt.Errorf("pod CIDR %q is not excluded from %s on %q", cidr, chainName, leader)
 			}
 		}
