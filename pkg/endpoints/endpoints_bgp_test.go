@@ -164,3 +164,57 @@ func TestBGPForwardingNodeAddressFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestBGPWorkerRetriesAddAfterFailedWithdrawal(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", UID: "uid"}}
+	network := &bgpTestNetwork{ip: "10.0.0.40", cidr: "10.0.0.40/32"}
+	instances := []*instance.Instance{{
+		ServiceSnapshot: service.DeepCopy(),
+		ServiceUID:      service.UID,
+		Clusters:        []*cluster.Cluster{{Network: []vip.Network{network}}},
+	}}
+	manager := &recordingBGPRouteManager{}
+	worker := &BGP{
+		generic: generic{
+			config:   &kubevip.Config{},
+			provider: providers.NewEndpointslices(),
+		},
+		bgpServer: manager,
+	}
+	configuredNetworks := &sync.Map{}
+
+	if err := worker.processInstance(context.Background(), configuredNetworks, service, instances[0]); err != nil {
+		t.Fatalf("initial processInstance: %v", err)
+	}
+	manager.delErr = errors.New("withdrawal failed")
+	lastEndpoint := ""
+	worker.clear(context.Background(), configuredNetworks, &lastEndpoint, service, instances[0])
+	if _, configured := configuredNetworks.Load(network.ip); configured {
+		t.Fatal("network remained configured after failed withdrawal")
+	}
+
+	if err := worker.processInstance(context.Background(), configuredNetworks, service, instances[0]); err != nil {
+		t.Fatalf("recovery processInstance: %v", err)
+	}
+	if manager.addCalls != 2 {
+		t.Fatalf("AddHost calls = %d, want 2", manager.addCalls)
+	}
+}
+
+type recordingBGPRouteManager struct {
+	addCalls int
+	delErr   error
+}
+
+func (m *recordingBGPRouteManager) AddHost(context.Context, string, string) error {
+	m.addCalls++
+	return nil
+}
+
+func (m *recordingBGPRouteManager) DelHost(context.Context, string, string) error {
+	return m.delErr
+}
+
+func (m *recordingBGPRouteManager) UpdateRoute(context.Context, bgp.Route) error {
+	return errors.New("unexpected forwarding-node advertisement")
+}
