@@ -1144,7 +1144,7 @@ func ApplyDNAT(
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 
-	// All targets should have the same port (resolved per service port)
+	// Port of the single-target fast path; multiple targets use a per-target port map.
 	targetPort := parsedTargets[0].port
 
 	// Create named DNAT map for load balancing (named so it can be updated)
@@ -1196,19 +1196,8 @@ func ApplyDNAT(
 	// Create DNAT rule for this port
 	var dnatExprs []expr.Any
 	if len(parsedTargets) > 1 {
-		// Multiple targets: use numgen + map for load balancing
-		dnatExprs = []expr.Any{
-			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
-			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
-			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
-			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(sourcePort)},
-			&expr.Numgen{Register: 1, Modulus: uint32(len(parsedTargets)), Type: unix.NFT_NG_RANDOM}, //nolint:gosec
-			&expr.Lookup{SourceRegister: 1, DestRegister: 1, IsDestRegSet: true, SetName: dnatMapName},
-			&expr.Lookup{SourceRegister: 1, DestRegister: 2, IsDestRegSet: true, SetName: dnatMapName + "_ports"},
-			&expr.NAT{Type: expr.NATTypeDestNAT, Family: ipFamily(IPv6), RegAddrMin: 1, RegAddrMax: 1, RegProtoMin: 2, RegProtoMax: 2, Specified: true},
-		}
+		// Multiple targets: use numgen + maps for load balancing
+		dnatExprs = multiTargetDNATExprs(wgIf, protoNum, sourcePort, len(parsedTargets), dnatMapName, IPv6)
 	} else {
 		// Single target: direct DNAT
 		dnatExprs = []expr.Any{
@@ -1288,6 +1277,24 @@ func ApplyDNAT(
 	}
 
 	return nil
+}
+
+// multiTargetDNATExprs builds a DNAT rule that picks a random target index and
+// resolves both the target address and its port from that index. The port is
+// looked up first: the address lookup overwrites register 1, which holds the index.
+func multiTargetDNATExprs(wgIf string, protoNum byte, sourcePort uint16, targets int, dnatMapName string, IPv6 bool) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(wgIf)},
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protoNum}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(sourcePort)},
+		&expr.Numgen{Register: 1, Modulus: uint32(targets), Type: unix.NFT_NG_RANDOM}, //nolint:gosec
+		&expr.Lookup{SourceRegister: 1, DestRegister: 2, IsDestRegSet: true, SetName: dnatMapName + "_ports"},
+		&expr.Lookup{SourceRegister: 1, DestRegister: 1, IsDestRegSet: true, SetName: dnatMapName},
+		&expr.NAT{Type: expr.NATTypeDestNAT, Family: ipFamily(IPv6), RegAddrMin: 1, RegAddrMax: 1, RegProtoMin: 2, RegProtoMax: 2, Specified: true},
+	}
 }
 
 // DeleteDNATRule removes the DNAT rule and map for a specific service
