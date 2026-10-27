@@ -107,12 +107,19 @@ func isUsable(conditions discoveryv1.EndpointConditions) bool {
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
+	seen := map[string]struct{}{}
 	for _, eps := range ep.slices {
 		for _, e := range eps.Endpoints {
 			if !isUsable(e.Conditions) {
 				continue
 			}
-			result = append(result, e.Addresses...)
+			for _, address := range e.Addresses {
+				if _, ok := seen[address]; ok {
+					continue
+				}
+				seen[address] = struct{}{}
+				result = append(result, address)
+			}
 		}
 	}
 	return result, nil
@@ -120,12 +127,16 @@ func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 
 func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]string, error) {
 	var localEndpoints []string
+	seen := map[string]struct{}{}
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
 			if !isUsable(endpoint.Conditions) {
 				continue
 			}
 			for _, address := range endpoint.Addresses {
+				if _, ok := seen[address]; ok {
+					continue
+				}
 				// 1. Compare the Nodename
 				if endpoint.NodeName != nil && id == *endpoint.NodeName {
 					if endpoint.Hostname != nil {
@@ -134,6 +145,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 						log.Debug("found endpoint", "provider", ep.label, "ip", address, "nodename", *endpoint.NodeName)
 					}
 					localEndpoints = append(localEndpoints, address)
+					seen[address] = struct{}{}
 					continue
 				}
 
@@ -141,6 +153,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 				if endpoint.NodeName == nil && endpoint.Hostname != nil && id == *endpoint.Hostname {
 					log.Debug("found endpoint", "provider", ep.label, "ip", address, "hostname", *endpoint.Hostname)
 					localEndpoints = append(localEndpoints, address)
+					seen[address] = struct{}{}
 				}
 			}
 		}
@@ -198,14 +211,64 @@ func (ep *Endpointslices) GetEndpointNodes() map[string][]string {
 }
 
 func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
-	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+	return ResolvePortWithLookup(servicePort, func(_ string) int32 {
 		for _, eps := range ep.slices {
-			for _, p := range eps.Ports {
-				if p.Name != nil && *p.Name == name && p.Port != nil {
-					return *p.Port
-				}
+			if port := endpointSlicePort(eps.Ports, servicePort.Name, ""); port != 0 {
+				return port
 			}
 		}
 		return 0
 	})
+}
+
+func (ep *Endpointslices) GetBackends(servicePort v1.ServicePort, nodeName string, local bool) ([]Backend, error) {
+	serviceProtocol := servicePort.Protocol
+	if serviceProtocol == "" {
+		serviceProtocol = v1.ProtocolTCP
+	}
+	seen := map[Backend]struct{}{}
+	backends := []Backend{}
+	for _, eps := range ep.slices {
+		targetPort := ResolvePortWithLookup(servicePort, func(_ string) int32 {
+			return endpointSlicePort(eps.Ports, servicePort.Name, serviceProtocol)
+		})
+		for _, endpoint := range eps.Endpoints {
+			if !isUsable(endpoint.Conditions) || (local && !endpointIsLocal(endpoint, nodeName)) {
+				continue
+			}
+			for _, address := range endpoint.Addresses {
+				backend := Backend{Address: address, Port: targetPort}
+				if _, ok := seen[backend]; ok {
+					continue
+				}
+				seen[backend] = struct{}{}
+				backends = append(backends, backend)
+			}
+		}
+	}
+	return backends, nil
+}
+
+func endpointSlicePort(ports []discoveryv1.EndpointPort, serviceName string, protocol v1.Protocol) int32 {
+	for _, port := range ports {
+		nameMatches := (port.Name == nil && serviceName == "") || (port.Name != nil && *port.Name == serviceName)
+		if nameMatches && port.Port != nil && (protocol == "" || endpointPortProtocol(port) == protocol) {
+			return *port.Port
+		}
+	}
+	return 0
+}
+
+func endpointIsLocal(endpoint discoveryv1.Endpoint, nodeName string) bool {
+	if endpoint.NodeName != nil {
+		return *endpoint.NodeName == nodeName
+	}
+	return endpoint.Hostname != nil && *endpoint.Hostname == nodeName
+}
+
+func endpointPortProtocol(port discoveryv1.EndpointPort) v1.Protocol {
+	if port.Protocol == nil {
+		return v1.ProtocolTCP
+	}
+	return *port.Protocol
 }

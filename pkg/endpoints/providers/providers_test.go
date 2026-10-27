@@ -161,7 +161,7 @@ func TestResolvePortFromFakeClientObjects(t *testing.T) {
 		t.Fatalf("loading fake EndpointSlice: %v", err)
 	}
 
-	namedPort := v1.ServicePort{Port: 80, TargetPort: intstr.FromString("web")}
+	namedPort := v1.ServicePort{Name: "web", Port: 80, TargetPort: intstr.FromString("target")}
 	if got := legacy.ResolvePort(namedPort); got != 8080 {
 		t.Errorf("legacy ResolvePort() = %d, want 8080", got)
 	}
@@ -210,6 +210,98 @@ func TestResolvePortWithLookup(t *testing.T) {
 				t.Errorf("ResolvePortWithLookup() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEndpointSliceBackendsPreservePerSliceNamedPorts(t *testing.T) {
+	provider := NewEndpointslices()
+	portName := "web"
+	servicePort := v1.ServicePort{Name: "web", Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("target")}
+	firstPort, secondPort := int32(8080), int32(9090)
+	first := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-a"},
+		Ports:      []discoveryv1.EndpointPort{{Name: &portName, Port: &firstPort}},
+		Endpoints:  []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}},
+	}
+	second := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-b"},
+		Ports:      []discoveryv1.EndpointPort{{Name: &portName, Port: &secondPort}},
+		Endpoints:  []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}},
+	}
+	for _, slice := range []*discoveryv1.EndpointSlice{first, second} {
+		if err := provider.LoadObject(slice, func() {}); err != nil {
+			t.Fatalf("LoadObject returned error: %v", err)
+		}
+	}
+
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.1", Port: 8080}, {Address: "10.0.0.1", Port: 9090}})
+
+	if err := provider.DeleteObject(first); err != nil {
+		t.Fatalf("DeleteObject returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.1", Port: 9090}})
+
+	replacement := second.DeepCopy()
+	replacementPort := int32(9091)
+	replacement.Ports[0].Port = &replacementPort
+	replacement.Endpoints[0].Addresses = []string{"10.0.0.3"}
+	if err := provider.LoadObject(replacement, func() {}); err != nil {
+		t.Fatalf("LoadObject replacement returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.3", Port: 9091}})
+}
+
+func TestLegacyEndpointsUnnamedServicePortUsesUnnamedEndpointPort(t *testing.T) {
+	provider := NewEndpoints()
+	object := &v1.Endpoints{Subsets: []v1.EndpointSubset{{
+		Addresses: []v1.EndpointAddress{{IP: "10.0.0.2"}},
+		Ports:     []v1.EndpointPort{{Port: 8080, Protocol: v1.ProtocolTCP}},
+	}}}
+	servicePort := v1.ServicePort{Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("web")}
+	if err := provider.LoadObject(object, func() {}); err != nil {
+		t.Fatalf("LoadObject returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.2", Port: 8080}})
+}
+
+func TestLegacyEndpointsDeleteClearsNamedPortBackends(t *testing.T) {
+	provider := NewEndpoints()
+	//nolint:staticcheck // legacy Endpoints cleanup is the subject under test
+	object := &v1.Endpoints{Subsets: []v1.EndpointSubset{{
+		Addresses: []v1.EndpointAddress{{IP: "10.0.0.1"}},
+		Ports:     []v1.EndpointPort{{Name: "web", Port: 8080, Protocol: v1.ProtocolTCP}},
+	}}}
+	servicePort := v1.ServicePort{Name: "web", Port: 80, Protocol: v1.ProtocolTCP, TargetPort: intstr.FromString("target")}
+	if err := provider.LoadObject(object, func() {}); err != nil {
+		t.Fatalf("LoadObject returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, []Backend{{Address: "10.0.0.1", Port: 8080}})
+	if err := provider.DeleteObject(object); err != nil {
+		t.Fatalf("DeleteObject returned error: %v", err)
+	}
+	assertBackends(t, provider, servicePort, nil)
+	if got := provider.ResolvePort(servicePort); got != servicePort.Port {
+		t.Fatalf("ResolvePort after delete = %d, want service port fallback %d", got, servicePort.Port)
+	}
+}
+
+func assertBackends(t *testing.T, provider Provider, servicePort v1.ServicePort, want []Backend) {
+	t.Helper()
+	got, err := provider.GetBackends(servicePort, "", false)
+	if err != nil {
+		t.Fatalf("GetBackends returned error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("GetBackends = %v (length %d), want %v (length %d)", got, len(got), want, len(want))
+	}
+	gotSet := make(map[Backend]struct{}, len(got))
+	for _, backend := range got {
+		gotSet[backend] = struct{}{}
+	}
+	for _, backend := range want {
+		if _, ok := gotSet[backend]; !ok {
+			t.Fatalf("GetBackends = %v, missing %v", got, backend)
+		}
 	}
 }
 

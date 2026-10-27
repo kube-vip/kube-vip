@@ -70,18 +70,14 @@ func (w *wireguardWorker) processInstance(ctx context.Context, _ *sync.Map, serv
 		"vips", serviceIPs)
 
 	for _, port := range service.Spec.Ports {
-		if port.Protocol != v1.ProtocolTCP && port.Protocol != v1.ProtocolUDP {
+		// WireGuard DNAT supports TCP and UDP; skip unsupported protocols before
+		// resolving backends so providers are never consulted for SCTP services.
+		if port.Protocol == v1.ProtocolSCTP {
 			continue
 		}
-		targetPort := w.provider.ResolvePort(port)
-		log.Info("[wireguard] resolved port", "service", service.Name, "servicePort", port.Port, "targetPort", targetPort, "targetPortName", port.TargetPort.StrVal)
-
-		targets := make([]nftables.DNATTarget, len(endpoints))
-		for index, endpoint := range endpoints {
-			targets[index] = nftables.DNATTarget{
-				IP:   endpoint,
-				Port: uint16(targetPort), //nolint:gosec // Port range validated by Kubernetes
-			}
+		targets, err := w.dnatTargets(service, port)
+		if err != nil {
+			return fmt.Errorf("failed to resolve backends for service port %d: %w", port.Port, err)
 		}
 		portServiceID, _ := wireguard.ServicePortIDs(service.Namespace, service.Name, port)
 
@@ -111,6 +107,21 @@ func (w *wireguardWorker) processInstance(ctx context.Context, _ *sync.Map, serv
 	}
 
 	return nil
+}
+
+func (w *wireguardWorker) dnatTargets(service *v1.Service, port v1.ServicePort) ([]nftables.DNATTarget, error) {
+	backends, err := w.provider.GetBackends(port, w.config.NodeName, service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]nftables.DNATTarget, len(backends))
+	for i, backend := range backends {
+		targets[i] = nftables.DNATTarget{
+			IP:   backend.Address,
+			Port: uint16(backend.Port), //nolint:gosec // Port range validated by Kubernetes
+		}
+	}
+	return targets, nil
 }
 
 // clear removes DNAT rules when no endpoints are available
