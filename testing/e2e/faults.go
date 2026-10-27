@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
 )
 
@@ -144,20 +145,23 @@ func StealLease(ctx context.Context, client kubernetes.Interface, namespace, nam
 	}
 
 	leases := client.CoordinationV1().Leases(namespace)
-	lease, err := leases.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("get lease %s/%s before stealing: %w", namespace, name, err)
-	}
+	// The current holder keeps renewing the lease, so retry the
+	// read-modify-write on resourceVersion conflicts.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		lease, err := leases.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get lease %s/%s before stealing: %w", namespace, name, err)
+		}
 
-	holder := newHolder
-	lease.Spec.HolderIdentity = &holder
-	renewTime := metav1.NowMicro()
-	lease.Spec.RenewTime = &renewTime
-	if _, err := leases.Update(ctx, lease, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("update stolen lease %s/%s: %w", namespace, name, err)
-	}
-
-	return nil
+		holder := newHolder
+		lease.Spec.HolderIdentity = &holder
+		renewTime := metav1.NowMicro()
+		lease.Spec.RenewTime = &renewTime
+		if _, err := leases.Update(ctx, lease, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("update stolen lease %s/%s: %w", namespace, name, err)
+		}
+		return nil
+	})
 }
 
 // StashPodManifest models a static-pod failure by moving a manifest out of
