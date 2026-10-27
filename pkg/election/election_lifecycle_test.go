@@ -1,9 +1,10 @@
 package election
 
 import (
+	"testing"
+
 	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	"testing"
 )
 
 func TestRunTrackedElectionLifecycleUpdatesGauge(t *testing.T) {
