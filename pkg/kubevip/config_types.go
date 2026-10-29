@@ -136,7 +136,7 @@ type Config struct {
 	// Routing Table Type, what sort of route should be added to the routing table
 	RoutingTableType int `yaml:"routingTableType"`
 
-	// Routing Protocol, value that will be used as protocol when creating rutes
+	// Routing Protocol, value that will be used as protocol when creating routes
 	RoutingProtocol int `yaml:"routingProtocol"`
 
 	// Clean routing table of redundant routes on start
