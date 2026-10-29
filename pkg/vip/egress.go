@@ -231,7 +231,7 @@ func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts
 			}
 			port, err := strconv.ParseUint(data[1], 10, 16)
 			if err != nil {
-				return fmt.Errorf("[egress] error parsing annotaion [%s]", destinationPorts)
+				return fmt.Errorf("[egress] error parsing annotation [%s]", destinationPorts)
 			}
 			switch data[0] {
 			case strings.ToLower("udp"):
@@ -257,7 +257,7 @@ func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts
 			}
 			port, err := strconv.ParseUint(data[1], 10, 16)
 			if err != nil {
-				return fmt.Errorf("[egress] error parsing annotaion [%s]", srcPorts)
+				return fmt.Errorf("[egress] error parsing annotation [%s]", srcPorts)
 			}
 			switch data[0] {
 			case strings.ToLower("udp"):
