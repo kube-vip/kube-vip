@@ -141,26 +141,29 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		backendMap := backend.Map{}
 		// only check localhost
 
+		var entry backend.Backend
+
 		// An explicitly configured Kubernetes API address (static-pod
 		// deployments point it at the local API server, whose loopback
 		// listener is often the only certificate-valid local endpoint)
 		// takes precedence over the Node object's addresses: the check
 		// answers "is the local API server healthy" for every VIP family,
 		// regardless of the transport family of the override itself.
-		entry, err := backend.New(&backend.Config{
-			Type:           backend.HTTP,
-			Address:        c.KubernetesAddr,
-			Port:           c.Port,
-			KubeConfigPath: c.K8sConfigFile,
-			Client:         cluster.healthCheckHTTPClient,
-			KeepAddress:    false,
-		})
-		if err != nil {
-			return fmt.Errorf("unable to create backend: %w", err)
+		if c.KubernetesAddr != "" {
+			entry, err = backend.New(&backend.Config{
+				Type:           backend.Discovery,
+				Address:        c.KubernetesAddr,
+				Port:           c.Port,
+				KubeConfigPath: c.K8sConfigFile,
+				Client:         cluster.healthCheckHTTPClient,
+			})
+			if err != nil {
+				return fmt.Errorf("unable to create backend: %w", err)
+			}
 		}
 		if entry != nil {
 			log.Info("using configured Kubernetes address for backend health checks", "address", c.KubernetesAddr)
-			backendMap[entry] = false
+			backendMap.Add(entry, false)
 		} else {
 			if c.ControlPlaneHealthCheck.Address != "" {
 				entry, err = backend.New(&backend.Config{
@@ -169,12 +172,11 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 					Port:           c.Port,
 					KubeConfigPath: c.K8sConfigFile,
 					Client:         cluster.healthCheckHTTPClient,
-					KeepAddress:    true,
 				})
 				if err != nil {
 					return fmt.Errorf("unable to create backend: %w", err)
 				}
-				backendMap[entry] = false
+				backendMap.Add(entry, false)
 			} else {
 				ips := []string{}
 				if c.NodeName != "" {
@@ -200,12 +202,12 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 						Port:           c.Port,
 						KubeConfigPath: c.K8sConfigFile,
 						Client:         nil,
-						KeepAddress:    false,
 					})
 					if err != nil {
 						return fmt.Errorf("failed to crate backend for address %q on port %d: %w", ip, c.Port, err)
 					}
-					backendMap[entry] = false
+
+					backendMap.Add(entry, false)
 				}
 			}
 		}
@@ -215,10 +217,16 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 				network := cluster.Network[i]
 				networkIP := network.IP()
 
+				family := backend.AddressFamilyIPv4
+				if utils.IsIPv6(networkIP) {
+					family = backend.AddressFamilyIPv6
+				}
+
 				log.Debug("current ip to process", "ip", networkIP)
 
-				for entry := range backendMap {
-					if !entry.IsSameFamily(networkIP) {
+				for _, status := range backendMap {
+					entry := status.Backend
+					if entry.Family() != backend.AddressFamilyHostname && entry.Family() != family {
 						continue
 					}
 					if entry.Check(ctx) {
@@ -227,14 +235,14 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 						if err != nil {
 							log.Error("error adding address", "err", err)
 						}
-						if !backendMap[entry] {
+						if !status.Healthy {
 							log.Info("added backend", "ip", network.IP())
 						}
 
 						err = cluster.routeMgr.Add(c.NodeName, network, true, false)
 						if err != nil && !errors.Is(err, fs.ErrExist) && !errors.Is(err, syscall.ESRCH) {
 							log.Warn(err.Error())
-						} else if err == nil && !backendMap[entry] {
+						} else if err == nil && !status.Healthy {
 							log.Info("added route", "route", network.PrepareRoute())
 						} else if err == nil || errors.Is(err, fs.ErrExist) {
 							// Re-assert the route on every healthy cycle: routing daemons
@@ -248,15 +256,20 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 							}
 						}
 
-						backendMap[entry] = true
+						status.Healthy = true
 						break
 					}
-					backendMap[entry] = false
+					status.Healthy = false
 				}
 
 				deleteAddress := true
-				for entry := range backendMap {
-					if backendMap[entry] {
+				for _, status := range backendMap {
+					entry := status.Backend
+					if entry.Family() != backend.AddressFamilyHostname && entry.Family() != family {
+						continue
+					}
+					log.Debug("entry", "value", entry, "healthy", status.Healthy)
+					if status.Healthy {
 						deleteAddress = false
 						break
 					}

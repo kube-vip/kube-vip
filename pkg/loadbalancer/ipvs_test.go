@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudflare/ipvs"
+	"github.com/kube-vip/kube-vip/pkg/backend"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
@@ -44,6 +45,56 @@ func Test_ipAndFamily(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got1, tt.want1) {
 				t.Errorf("ipAndFamily() got1 = %v, want %v", got1, tt.want1)
+			}
+		})
+	}
+}
+
+func TestBackendMapFindUsesCanonicalIdentity(t *testing.T) {
+	first, err := backend.New(&backend.Config{
+		Type:    backend.Discovery,
+		Address: "::1",
+		Port:    6443,
+	})
+	if err != nil {
+		t.Fatalf("creating first backend: %v", err)
+	}
+	backends := backend.Map{}
+	backends.Add(first, false)
+	if got := backends.Find(backend.Discovery, "[::1]", 6443); got == nil || got.Backend != first {
+		t.Fatalf("Find() = %v, want the existing backend", got)
+	}
+	if got := backends.Find(backend.Discovery, "::1", 6444); got != nil {
+		t.Errorf("Find() with a different port = %v, want nil", got)
+	}
+	if got := backends.Find(backend.HTTP, "::1", 6443); got != nil {
+		t.Errorf("Find() with a different backend type = %v, want nil", got)
+	}
+}
+
+func TestBackendKeyPreservesHostnameAndURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		address     string
+		wantAddress string
+	}{
+		{
+			name:        "hostname",
+			address:     "localhost",
+			wantAddress: "localhost",
+		},
+		{
+			name:        "URL with path",
+			address:     "https://localhost:6443/livez",
+			wantAddress: "https://localhost:6443/livez",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := backend.NewKey(backend.HTTP, tt.address, 0)
+			if key.Address != tt.wantAddress {
+				t.Errorf("key address = %q, want %q", key.Address, tt.wantAddress)
 			}
 		})
 	}

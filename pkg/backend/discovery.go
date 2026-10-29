@@ -17,8 +17,10 @@ type discoveryBackend struct {
 
 func newDiscoveryBackend(config *Config) *discoveryBackend {
 	return &discoveryBackend{generic{
+		backendType:    Discovery,
 		addr:           config.Address,
 		port:           config.Port,
+		family:         addressFamily(config.Address),
 		kubeConfigPath: config.KubeConfigPath,
 		isLocal:        config.IsLocal,
 	}}
