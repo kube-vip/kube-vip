@@ -164,12 +164,11 @@ func TestProcessConfig(t *testing.T) {
 
 func TestProcessAddress(t *testing.T) {
 	tests := []struct {
-		name       string
-		address    string
-		wantHost   string
-		wantPort   uint16
-		wantScheme string
-		wantErr    bool
+		name     string
+		address  string
+		wantHost string
+		wantPort uint16
+		wantErr  bool
 	}{
 		{
 			name:     "IPv4 literal",
@@ -188,18 +187,16 @@ func TestProcessAddress(t *testing.T) {
 			wantPort: 6443,
 		},
 		{
-			name:       "URL retains scheme and excludes path from host",
-			address:    "http://localhost:6443/livez",
-			wantHost:   "localhost",
-			wantPort:   6443,
-			wantScheme: "http",
+			name:     "URL retains scheme and excludes path from host",
+			address:  "http://localhost:6443/livez",
+			wantHost: "localhost",
+			wantPort: 6443,
 		},
 		{
-			name:       "IPv6 URL host and port",
-			address:    "https://[::1]:6443",
-			wantHost:   "::1",
-			wantPort:   6443,
-			wantScheme: "https",
+			name:     "IPv6 URL host and port",
+			address:  "https://[::1]:6443",
+			wantHost: "::1",
+			wantPort: 6443,
 		},
 		{
 			name:    "invalid URL",
@@ -222,9 +219,9 @@ func TestProcessAddress(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			if got.host != tt.wantHost || got.port != tt.wantPort || got.scheme != tt.wantScheme {
-				t.Errorf("processAddress() = {host:%q port:%d scheme:%q}, want {host:%q port:%d scheme:%q}",
-					got.host, got.port, got.scheme, tt.wantHost, tt.wantPort, tt.wantScheme)
+			if got.host != tt.wantHost || got.port != tt.wantPort {
+				t.Errorf("processAddress() = {host:%q port:%d}, want {host:%q port:%d}",
+					got.host, got.port, tt.wantHost, tt.wantPort)
 			}
 		})
 	}

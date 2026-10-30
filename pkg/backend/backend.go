@@ -71,9 +71,8 @@ type generic struct {
 }
 
 type addr struct {
-	host   string
-	port   uint16
-	scheme string
+	host string
+	port uint16
 }
 
 func (a *addr) Address() string {
@@ -81,10 +80,6 @@ func (a *addr) Address() string {
 	out = a.host
 	if utils.IsIPv6(a.host) {
 		out = fmt.Sprintf("[%s]", a.host)
-	}
-
-	if a.scheme != "" {
-		out = fmt.Sprintf("%s://%s", a.scheme, out)
 	}
 
 	return out
@@ -261,8 +256,6 @@ func processAddress(address string) (*addr, error) {
 		}
 		a.port = value
 	}
-
-	a.scheme = u.Scheme
 
 	return a, nil
 }
