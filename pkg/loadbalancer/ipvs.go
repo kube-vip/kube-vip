@@ -54,10 +54,11 @@ type IPVSLoadBalancer struct {
 	killFunc            func()
 	address             string
 	family              ipvs.AddressFamily
+	kubeConfigPath      string
 }
 
 func NewIPVSLB(ctx context.Context, network vip.Network, port uint16, forwardingMethod string, backendHealthCheckInterval int,
-	nftables bool, killFunc func(), wg *sync.WaitGroup) (*IPVSLoadBalancer, error) {
+	nftables bool, killFunc func(), wg *sync.WaitGroup, kubeConfigPath string) (*IPVSLoadBalancer, error) {
 	log.Info("Starting IPVS LoadBalancer", "network", network)
 
 	address := network.IP()
@@ -150,6 +151,7 @@ func NewIPVSLB(ctx context.Context, network vip.Network, port uint16, forwarding
 		killFunc:            killFunc,
 		address:             address,
 		family:              family,
+		kubeConfigPath:      kubeConfigPath,
 	}
 
 	wg.Go(func() {
@@ -198,25 +200,46 @@ func (lb *IPVSLoadBalancer) AddBackend(address string, port uint16) error {
 		log.Info("checked if backend is local", "addr", address, "local", isLocal)
 	}
 
-	backend := backend.Entry{Addr: address, Port: port, IsLocal: isLocal}
+	backendEntry, err := backend.New(&backend.Config{
+		Type:           backend.Discovery,
+		Address:        address,
+		Port:           port,
+		KubeConfigPath: lb.kubeConfigPath,
+		Client:         nil,
+		IsLocal:        isLocal,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create IPVS backend for address %q, port %d: %w", address, port, err)
+	}
 
 	lb.lock.Lock()
 	defer lb.lock.Unlock()
-	if _, ok := lb.backendMap[backend]; !ok {
-		isHealth := backend.Check()
-		if isHealth {
-			err := lb.addBackend(address, port)
-			if err != nil {
-				return err
-			}
-		}
-		lb.backendMap[backend] = isHealth
+	if lb.backendMap.Find(backend.Discovery, address, port) != nil {
+		return nil
 	}
+
+	isHealth := backendEntry.Check(context.Background())
+	if isHealth {
+		err := lb.addBackend(address, port)
+		if err != nil {
+			return err
+		}
+	}
+	lb.backendMap.Add(backendEntry, isHealth)
 	return nil
 }
 
 func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
-	backend := backend.Entry{Addr: address, Port: port}
+	backend, err := backend.New(&backend.Config{
+		Type:           backend.Discovery,
+		Address:        address,
+		Port:           port,
+		KubeConfigPath: lb.kubeConfigPath,
+		Client:         nil,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create IPVS backend for address %q, port %d: %w", address, port, err)
+	}
 	// Check if this is the first backend
 	backends, err := lb.client.Destinations(lb.loadBalancerService)
 	if err != nil && strings.Contains(err.Error(), "file does not exist") {
@@ -246,7 +269,7 @@ func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
 		log.Info("load-Balancer services created", "address", lb.addrString(), "port", lb.Port)
 	}
 
-	ip, family := ipAndFamily(backend.Addr)
+	ip, family := ipAndFamily(backend.Address())
 
 	// Ignore backends that use a different address family.
 	// Looks like different families could be supported in tunnel mode...
@@ -256,7 +279,7 @@ func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
 
 	dst := ipvs.Destination{
 		Address:   ip,
-		Port:      backend.Port,
+		Port:      backend.Port(),
 		Family:    family,
 		Weight:    1,
 		FwdMethod: lb.forwardingMethod,
@@ -272,23 +295,22 @@ func (lb *IPVSLoadBalancer) addBackend(address string, port uint16) error {
 		// file exists is fine, we will just return at this point
 		return nil
 	}
-	log.Info("backend added", "src addr", lb.addrString(), "src port", lb.Port, "dst addr", backend.Addr, "dst port", backend.Port)
+	log.Info("backend added", "src addr", lb.addrString(), "src port", lb.Port, "dst addr", backend.Address(), "dst port", backend.Port())
 
 	return nil
 }
 
 func (lb *IPVSLoadBalancer) RemoveBackend(address string, port uint16) error {
-	backend := backend.Entry{Addr: address, Port: port}
-
 	lb.lock.Lock()
 	defer lb.lock.Unlock()
 
-	if _, ok := lb.backendMap[backend]; ok {
+	entry := lb.backendMap.Find(backend.Discovery, address, port)
+	if entry != nil {
 		err := lb.removeBackend(address, port)
 		if err != nil {
 			return err
 		}
-		delete(lb.backendMap, backend)
+		delete(lb.backendMap, entry.Backend.Key())
 	}
 
 	return nil
@@ -329,26 +351,27 @@ func (lb *IPVSLoadBalancer) healthCheck(ctx context.Context) {
 	backend.Watch(ctx, lb.interval, func() {
 		lb.lock.Lock()
 		defer lb.lock.Unlock()
-		for backend, oldStatus := range lb.backendMap {
-			newStatus := backend.Check()
+		for _, entry := range lb.backendMap {
+			backend := entry.Backend
+			newStatus := backend.Check(ctx)
 			if newStatus {
 				// old status -> health
-				if !oldStatus {
-					err := lb.addBackend(backend.Addr, backend.Port)
+				if !entry.Healthy {
+					err := lb.addBackend(backend.Address(), backend.Port())
 					if err != nil {
 						log.Error("add backend", "err", err)
 					}
-					lb.backendMap[backend] = newStatus
+					entry.Healthy = newStatus
 				}
 			} else {
 				// old status -> not health
-				if oldStatus {
-					log.Info("healthCheck failed - removing backend", "address", backend.Addr, "port", backend.Port)
-					err := lb.removeBackend(backend.Addr, backend.Port)
+				if entry.Healthy {
+					log.Info("healthCheck failed - removing backend", "address", backend.Address(), "port", backend.Port())
+					err := lb.removeBackend(backend.Address(), backend.Port())
 					if err != nil {
-						log.Error("failed to remove backend", "address", backend.Addr, "port", backend.Port, "err", err)
+						log.Error("failed to remove backend", "address", backend.Address(), "port", backend.Port(), "err", err)
 					}
-					lb.backendMap[backend] = newStatus
+					entry.Healthy = newStatus
 				}
 				if lb.forwardingMethod == ipvs.Local && !lb.localBackendExists() {
 					if lb.killFunc != nil {
@@ -402,8 +425,8 @@ func (lb *IPVSLoadBalancer) isLocal(address string) (bool, error) {
 }
 
 func (lb *IPVSLoadBalancer) localBackendExists() bool {
-	for backend, isHealthy := range lb.backendMap {
-		if backend.IsLocal && isHealthy {
+	for _, entry := range lb.backendMap {
+		if entry.Backend.IsLocal() && entry.Healthy {
 			return true
 		}
 	}
