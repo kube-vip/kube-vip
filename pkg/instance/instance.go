@@ -681,9 +681,20 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 		interfaceName = fmt.Sprintf("vip-%s", instance.UID()[0:8])
 	}
 
-	// Check if the interface doesn't exist first
+	// Check if the interface exists first - delete stale interface from previous leader
 	iface, err := net.InterfaceByName(interfaceName)
-	if err != nil {
+	if err == nil {
+		log.Info("stale macvlan interface exists, removing before creating new one", "interface", interfaceName)
+		link, err := netlink.LinkByName(interfaceName)
+		if err != nil {
+			return fmt.Errorf("find existing DHCP interface %q: %w", interfaceName, err)
+		}
+		if err := netlink.LinkDel(link); err != nil {
+			return fmt.Errorf("delete stale DHCP interface %q: %w", interfaceName, err)
+		}
+		iface = nil
+	}
+	if iface == nil {
 		log.Info("creating new macvlan interface for DHCP", "interface", interfaceName)
 
 		hwaddr, err := net.ParseMAC(instance.DHCPInterfaceHwaddr)
