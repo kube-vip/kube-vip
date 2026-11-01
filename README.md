@@ -121,7 +121,7 @@ transitions, BGP session state and build info (version, build, node).
 #### pprof endpoints (debug only)
 
 Profiling can be enabled with `--enablePprof` CLI flag or `enable_pprof` env variable, and listens on
-`127.0.0.1:6060` by default. The addrees can be configured with `--pprofHTTPServer` or
+`127.0.0.1:6060` by default. The address can be configured with `--pprofHTTPServer` or
 `pprof_server`.
 
 ```yaml
@@ -170,7 +170,7 @@ Thanks for taking the time to join our community and start contributing! We welc
 
 :warning: This project has issue compiling on MacOS, please compile it on linux distribution
 
-Additionally it is now relatively easy and quick to develop with [skaffold](https://skaffold.dev/), and the `skaffold.yaml` exists within the root folder of the gir repository.
+Additionally it is now relatively easy and quick to develop with [skaffold](https://skaffold.dev/), and the `skaffold.yaml` exists within the root folder of the git repository.
 
 ### Set up a kind development environment
 
