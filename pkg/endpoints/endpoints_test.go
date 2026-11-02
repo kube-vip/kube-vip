@@ -585,3 +585,73 @@ func TestReconcileServicesElectionDoesNotStartElectionLoop(t *testing.T) {
 	default:
 	}
 }
+
+func TestReconcileOnDemandElectionLeavesDatapathToLeader(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantProcess bool
+	}{
+		{name: "annotated Service is left to its election", annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}},
+		{name: "unannotated Service is programmed locally", annotations: map[string]string{}, wantProcess: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			worker := &fakeWorker{endpoints: []string{"10.0.0.1"}}
+			p := &Processor{
+				config:       &kubevip.Config{PerServiceElectionOnDemand: true},
+				provider:     providers.NewEndpointslices(),
+				worker:       worker,
+				serviceLocks: noOpServiceLocker{},
+			}
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-svc", Namespace: "default", UID: "test-uid", Annotations: tt.annotations},
+				Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal},
+			}
+			svcCtx := servicecontext.New(context.Background())
+			defer svcCtx.Cancel()
+
+			if _, err := p.Reconcile(svcCtx, watch.Event{Type: watch.Modified, Object: &discoveryv1.EndpointSlice{}},
+				new(string), service, "node-1", &sync.WaitGroup{}, nil, nil); err != nil {
+				t.Fatalf("Reconcile returned error: %v", err)
+			}
+			if !svcCtx.IsReady() {
+				t.Fatal("endpoint reconciliation did not signal readiness")
+			}
+			if worker.processCalled != tt.wantProcess {
+				t.Fatalf("processCalled = %t, want %t", worker.processCalled, tt.wantProcess)
+			}
+		})
+	}
+}
+
+func TestUsesServiceElection(t *testing.T) {
+	t.Parallel()
+
+	forced := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}}}
+	plain := &v1.Service{}
+	tests := []struct {
+		name    string
+		config  kubevip.Config
+		service *v1.Service
+		want    bool
+	}{
+		{name: "svc_election covers every Service", config: kubevip.Config{EnableServicesElection: true}, service: plain, want: true},
+		{name: "on demand covers an annotated Service", config: kubevip.Config{PerServiceElectionOnDemand: true}, service: forced, want: true},
+		{name: "on demand skips an unannotated Service", config: kubevip.Config{PerServiceElectionOnDemand: true}, service: plain},
+		{name: "annotation alone is not election", config: kubevip.Config{}, service: forced},
+		{name: "nil Service", config: kubevip.Config{PerServiceElectionOnDemand: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := usesServiceElection(&tt.config, tt.service); got != tt.want {
+				t.Fatalf("usesServiceElection() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

@@ -164,7 +164,7 @@ func (p *Processor) makeServiceReady(svcCtx *servicecontext.Context, service *v1
 		return true, err
 	}
 	svcCtx.SignalReadiness()
-	if p.shouldProcessInstance() {
+	if p.shouldProcessInstance(service) {
 		if err := p.worker.processInstance(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, service, inst); err != nil {
 			return false, fmt.Errorf("failed to process %s instance: %w", endpointState, err)
 		}
@@ -202,8 +202,22 @@ func (p *Processor) applyEvent(svcCtx *servicecontext.Context, event watch.Event
 // shouldProcessInstance reports whether this node has to program the datapath
 // itself, rather than waiting to be told to by a leader election callback.
 // WireGuard always reprograms, because its DNAT rules are per-endpoint.
-func (p *Processor) shouldProcessInstance() bool {
-	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+func (p *Processor) shouldProcessInstance(service *v1.Service) bool {
+	return (!usesServiceElection(p.config, service) && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+}
+
+// usesServiceElection reports whether service is under per-service leader
+// election: for every Service with svc_election, or only for Services
+// annotated with kube-vip.io/forcePerServiceElection when
+// per_service_election_on_demand is set. Such a Service's datapath belongs to
+// the election winner, so the endpoint watcher must not program it on every
+// node with a local endpoint.
+func usesServiceElection(config *kubevip.Config, service *v1.Service) bool {
+	if config.EnableServicesElection {
+		return true
+	}
+	return config.PerServiceElectionOnDemand && service != nil &&
+		service.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 // handleNoEndpoints tears down everything backing a service that no longer has
@@ -211,7 +225,7 @@ func (p *Processor) shouldProcessInstance() bool {
 func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, inst *instance.Instance, lastKnownGoodEndpoint *string) {
 	p.worker.clear(svcCtx.Ctx, &svcCtx.ConfiguredNetworks, lastKnownGoodEndpoint, service, inst)
 	stopWorkers := p.config.EnableARP || (p.config.EnableRoutingTable && p.config.EnableLeaderElection)
-	if stopWorkers && !p.config.EnableServicesElection {
+	if stopWorkers && !usesServiceElection(p.config, service) {
 		if inst != nil {
 			for _, c := range inst.Clusters {
 				c.StopAndWait()
@@ -327,7 +341,7 @@ func (p *Processor) updateAnnotations(service *v1.Service, inst *instance.Instan
 
 func (p *Processor) startServiceHandlingIfNeeded(svcCtx *servicecontext.Context, service *v1.Service,
 	inst *instance.Instance, wg *sync.WaitGroup) error {
-	if p.config.EnableServicesElection {
+	if usesServiceElection(p.config, service) {
 		return nil
 	}
 
