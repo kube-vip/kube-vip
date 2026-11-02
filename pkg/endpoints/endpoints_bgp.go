@@ -45,7 +45,7 @@ func (b *BGP) processInstance(ctx context.Context, configuredNetworks *sync.Map,
 }
 
 func (b *BGP) clear(ctx context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
-	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
+	if !usesServiceElection(b.config, service) && !b.config.EnableLeaderElection {
 		// If BGP mode is enabled - routes should be deleted
 		if inst != nil {
 			for _, cluster := range inst.Clusters {
