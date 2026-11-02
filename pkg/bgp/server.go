@@ -2,8 +2,10 @@ package bgp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "log/slog"
@@ -22,10 +24,44 @@ type BGPManager interface {
 
 // Server manages a server object
 type Server struct {
-	s       *gobgp.BgpServer
-	c       *kubevip.BGPConfig
-	mtx     sync.Mutex
-	tracker map[string]map[string]bool
+	s                 *gobgp.BgpServer
+	c                 *kubevip.BGPConfig
+	mtx               sync.Mutex
+	stateMu           sync.Mutex
+	active            sync.WaitGroup
+	tracker           map[string]map[string]bool
+	withdrawOnce      sync.Once
+	withdrawCloseOnce sync.Once
+	withdrawQueue     chan withdrawalRequest
+	withdrawStop      chan struct{}
+	withdrawDone      chan struct{}
+	deletePathFunc    func(apiutil.DeletePathRequest) error
+	pending           map[string]chan struct{}
+	closing           atomic.Bool
+	closeOnce         sync.Once
+	closeDone         chan struct{}
+	closeErr          error
+}
+
+func (b *Server) begin() bool {
+	b.stateMu.Lock()
+	defer b.stateMu.Unlock()
+	if b.closing.Load() {
+		return false
+	}
+	b.active.Add(1)
+	return true
+}
+
+const withdrawalQueueSize = 32
+
+var errWithdrawalNotQueued = errors.New("withdrawal not queued")
+
+type withdrawalRequest struct {
+	ctx      context.Context
+	req      apiutil.DeletePathRequest
+	result   chan error
+	complete func(error)
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -49,8 +85,61 @@ func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error
 		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
 		c:       &c,
 		tracker: make(map[string]map[string]bool),
+		pending: make(map[string]chan struct{}),
 	}
+	b.deletePathFunc = b.s.DeletePath
 	return
+}
+
+func (b *Server) startWithdrawalWorker() {
+	b.withdrawOnce.Do(func() {
+		b.withdrawQueue = make(chan withdrawalRequest, withdrawalQueueSize)
+		b.withdrawStop = make(chan struct{})
+		b.withdrawDone = make(chan struct{})
+		go b.withdrawalWorker()
+	})
+}
+
+// withdrawalWorker serializes withdrawals so cancellation cannot create an
+// unbounded goroutine-per-call. GoBGP's embedded DeletePath has no context
+// parameter; a queued operation therefore remains non-cancellable once it
+// starts, but the caller can stop waiting and the bounded worker owns its
+// eventual completion.
+func (b *Server) withdrawalWorker() {
+	defer close(b.withdrawDone)
+	for {
+		select {
+		case <-b.withdrawStop:
+			b.cancelQueuedWithdrawals()
+			return
+		default:
+		}
+		select {
+		case req := <-b.withdrawQueue:
+			err := b.deletePathFunc(req.req)
+			if req.complete != nil {
+				req.complete(err)
+			}
+			req.result <- err
+		case <-b.withdrawStop:
+			b.cancelQueuedWithdrawals()
+			return
+		}
+	}
+}
+
+func (b *Server) cancelQueuedWithdrawals() {
+	for {
+		select {
+		case req := <-b.withdrawQueue:
+			if req.complete != nil {
+				req.complete(context.Canceled)
+			}
+			req.result <- context.Canceled
+		default:
+			return
+		}
+	}
 }
 
 // Start starts the BGP server
@@ -100,9 +189,27 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 
 // Close will stop a running BGP Server
 func (b *Server) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return b.s.StopBgp(ctx, &api.StopBgpRequest{})
+	b.stateMu.Lock()
+	b.closing.Store(true)
+	b.stateMu.Unlock()
+	b.closeOnce.Do(func() {
+		b.closeDone = make(chan struct{})
+		go func() {
+			b.active.Wait()
+			if b.withdrawDone != nil {
+				b.withdrawCloseOnce.Do(func() { close(b.withdrawStop) })
+				<-b.withdrawDone
+			}
+			b.closeErr = b.s.StopBgp(context.Background(), &api.StopBgpRequest{})
+			close(b.closeDone)
+		}()
+	})
+	select {
+	case <-b.closeDone:
+		return b.closeErr
+	case <-time.After(5 * time.Second):
+		return context.DeadlineExceeded
+	}
 }
 
 // ListAdvertisedRoutes retrieves all active routes inside GoBGP's local RIB.
