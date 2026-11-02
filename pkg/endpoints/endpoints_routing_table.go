@@ -49,7 +49,7 @@ func (rt *RoutingTable) processInstance(_ context.Context, configuredNetworks *s
 }
 
 func (rt *RoutingTable) clear(_ context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
-	if !rt.config.EnableServicesElection {
+	if !usesServiceElection(rt.config, service) {
 		if errs := ClearRoutesByInstance(service, inst, nil, rt.routeMgr); len(errs) == 0 {
 			configuredNetworks.Clear()
 		} else {
