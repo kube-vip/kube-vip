@@ -315,6 +315,30 @@ func TestServiceVIPSharingRequiresClusterPolicyAndElectionLease(t *testing.T) {
 	}
 }
 
+func TestServiceVIPAdmissionAllowsIndependentDHCPServices(t *testing.T) {
+	for _, address := range []string{"0.0.0.0", "::"} {
+		t.Run(address, func(t *testing.T) {
+			tracked := admissionTestService("tracked", "")
+			tracked.Annotations = map[string]string{kubevip.LoadbalancerIPAnnotation: address}
+			candidate := admissionTestService("candidate", "")
+			candidate.Namespace = "other"
+			candidate.Annotations = map[string]string{kubevip.LoadbalancerIPAnnotation: address}
+			processor := &Processor{
+				config:           &kubevip.Config{EnableServicesElection: true},
+				serviceLock:      newTestServiceLocks(),
+				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+			}
+			release, err := processor.reserveServiceAdmission(candidate)
+			if release != nil {
+				release()
+			}
+			if err != nil {
+				t.Fatalf("reserveServiceAdmission() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestAdmissionRejectsConflictWithPendingConstruction(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
