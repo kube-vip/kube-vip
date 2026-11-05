@@ -55,6 +55,8 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
 	loops.Inc()
 	defer loops.Dec()
+	stopWatcher := metrics.TrackWatcherLoop("lease")
+	defer stopWatcher()
 	p.electionCoordinators.Watch(svcCtx, service)
 	return nil
 }
