@@ -12,7 +12,8 @@ const concurrentServiceLocks = 128
 // ServiceLock serializes operations for a Service UID using a bounded pool of
 // keyed mutexes.
 type ServiceLock struct {
-	mutex keymutex.KeyMutex
+	mutex      keymutex.KeyMutex
+	beforeLock func(types.UID)
 }
 
 // NewServiceLock creates a lock striped across Service UIDs.
@@ -22,6 +23,9 @@ func NewServiceLock() *ServiceLock {
 
 // Lock acquires the mutex associated with uid.
 func (l *ServiceLock) Lock(uid types.UID) {
+	if l.beforeLock != nil {
+		l.beforeLock(uid)
+	}
 	l.mutex.LockKey(string(uid))
 }
 
