@@ -283,7 +283,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	return nil
 }
 
-func (cluster *Cluster) bgpHealthCheck(ctx context.Context, c *kubevip.Config) (bool, error) {
+func (cluster *Cluster) controlPlaneHealthCheck(ctx context.Context, c *kubevip.Config) (bool, error) {
 	statusCode := 0
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ControlPlaneHealthCheck.Address, nil)
@@ -321,7 +321,7 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 	)
 
 	for {
-		healthy, healthErr := cluster.bgpHealthCheck(ctx, c)
+		healthy, healthErr := cluster.controlPlaneHealthCheck(ctx, c)
 		if healthy {
 			consecutiveFailures = 0
 			if !routeAnnounced {
