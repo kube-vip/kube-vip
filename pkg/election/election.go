@@ -204,8 +204,11 @@ func (em *Manager) NodeWatcher(ctx context.Context, lb *loadbalancer.IPVSLoadBal
 			for x := range node.Status.Addresses {
 				if node.Status.Addresses[x].Type == v1.NodeInternalIP {
 					if checkIfNodeIsReady(node) {
-						err = lb.AddBackend(node.Status.Addresses[x].Address, port)
+						err = lb.AddBackend(watchCtx, node.Status.Addresses[x].Address, port)
 						if err != nil {
+							if watchCtx.Err() != nil {
+								return nil
+							}
 							log.Error("adding node to load balancer", "node", node.Name, "ip", node.Status.Addresses[x].Address, "err", err)
 							if utils.IsPanicError(err) {
 								return fmt.Errorf("add IPVS backend: %w", err)
