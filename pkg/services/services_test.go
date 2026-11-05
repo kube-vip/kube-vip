@@ -17,9 +17,11 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/vip"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type testDHCPClient struct {
@@ -326,6 +328,25 @@ func TestServiceSnapshotForEgressUsesCurrentInstanceState(t *testing.T) {
 	}
 	if got := serviceSnapshotForEgress(nil, captured); got != captured {
 		t.Fatal("egress configuration did not fall back to the captured Service")
+	}
+}
+
+func TestSetUPNPMappingSnapshotCountsMappingsNotGateways(t *testing.T) {
+	metrics.UPNPMappings.Set(0)
+	t.Cleanup(func() { metrics.UPNPMappings.Set(0) })
+
+	serviceInstance := &instance.Instance{UPNPGatewayIPs: []string{"192.0.2.1"}}
+	setUPNPMappingSnapshot(serviceInstance, 0, 3)
+	if got := testutil.ToFloat64(metrics.UPNPMappings); got != 3 {
+		t.Fatalf("UPnP mapping gauge = %v, want 3", got)
+	}
+	if serviceInstance.UPNPMappingCount != 3 {
+		t.Fatalf("tracked UPnP mappings = %d, want 3", serviceInstance.UPNPMappingCount)
+	}
+
+	setUPNPMappingSnapshot(serviceInstance, 3, 1)
+	if got := testutil.ToFloat64(metrics.UPNPMappings); got != 1 {
+		t.Fatalf("UPnP mapping gauge after refresh = %v, want 1", got)
 	}
 }
 
