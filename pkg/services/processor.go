@@ -689,8 +689,7 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 }
 
 func serviceMatchesWatcher(svc *v1.Service, forcedOnly bool) bool {
-	forced := svc.Annotations[kubevip.ForcePerServiceElection] == "true"
-	return forcedOnly == forced
+	return forcedOnly == forcesPerServiceElection(svc)
 }
 
 func (p *Processor) deleteTrackedService(svc *v1.Service) error {
@@ -921,7 +920,16 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 		// DDNS was disabled/enabled
 		svc.Annotations[kubevip.ServiceDDNS] != original.Annotations[kubevip.ServiceDDNS] ||
 		// lease name was changed
-		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease]
+		svc.Annotations[kubevip.ServiceLease] != original.Annotations[kubevip.ServiceLease] ||
+		// the Service moved between the regular and the on-demand election
+		// watcher. Both watchers share this processor, and the one that no
+		// longer matches ignores the Service, so the one that now matches
+		// must restart its lifecycle.
+		forcesPerServiceElection(svc) != forcesPerServiceElection(original)
+}
+
+func forcesPerServiceElection(svc *v1.Service) bool {
+	return svc.Annotations[kubevip.ForcePerServiceElection] == "true"
 }
 
 func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
