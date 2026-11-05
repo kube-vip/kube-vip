@@ -86,7 +86,10 @@ func TestEndpointslicesEndpointConditions(t *testing.T) {
 	}{
 		{"serving true", discoveryv1.EndpointConditions{Serving: &yes}, []string{"10.0.0.1"}},
 		{"serving false", discoveryv1.EndpointConditions{Serving: &no}, nil},
-		{"serving false overrides ready true", discoveryv1.EndpointConditions{Serving: &no, Ready: &yes}, nil},
+		{"published not ready endpoint", discoveryv1.EndpointConditions{Serving: &no, Ready: &yes, Terminating: &no}, []string{"10.0.0.1"}},
+		{"terminating serving endpoint", discoveryv1.EndpointConditions{Serving: &yes, Ready: &no, Terminating: &yes}, []string{"10.0.0.1"}},
+		{"terminating not serving endpoint", discoveryv1.EndpointConditions{Serving: &no, Ready: &no, Terminating: &yes}, nil},
+		{"not ready and not serving endpoint", discoveryv1.EndpointConditions{Serving: &no, Ready: &no, Terminating: &no}, nil},
 		{"nil serving defers to ready true", discoveryv1.EndpointConditions{Ready: &yes}, []string{"10.0.0.1"}},
 		{"nil serving defers to ready false", discoveryv1.EndpointConditions{Ready: &no}, nil},
 		{"both nil is treated as ready", discoveryv1.EndpointConditions{}, []string{"10.0.0.1"}},

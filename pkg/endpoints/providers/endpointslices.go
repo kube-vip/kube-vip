@@ -75,10 +75,21 @@ func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
 	return nil
 }
 
-// isServing reports whether an endpoint should receive traffic. Per the
-// EndpointConditions godoc a nil Serving defers to Ready, and a nil Ready is an
-// unknown state that consumers should interpret as ready.
-func isServing(conditions discoveryv1.EndpointConditions) bool {
+// isUsable reports whether an endpoint should receive traffic: it is either
+// ready or, like a terminating Pod that still passes its readiness probe,
+// serving.
+//
+// Ready alone is sufficient because, for a Service with publishNotReadyAddresses,
+// the EndpointSlice controller marks every endpoint ready while Serving keeps
+// tracking the Pod's readiness. Workloads that have to reach their peers
+// through the Service before they become ready depend on those endpoints.
+//
+// Per the EndpointConditions godoc a nil Serving defers to Ready, and a nil
+// Ready is an unknown state that consumers should interpret as ready.
+func isUsable(conditions discoveryv1.EndpointConditions) bool {
+	if conditions.Ready != nil && *conditions.Ready {
+		return true
+	}
 	serving := conditions.Serving
 	if serving == nil {
 		serving = conditions.Ready
@@ -90,7 +101,7 @@ func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for _, eps := range ep.slices {
 		for _, e := range eps.Endpoints {
-			if !isServing(e.Conditions) {
+			if !isUsable(e.Conditions) {
 				continue
 			}
 			result = append(result, e.Addresses...)
@@ -103,7 +114,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 	var localEndpoints []string
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
-			if !isServing(endpoint.Conditions) {
+			if !isUsable(endpoint.Conditions) {
 				continue
 			}
 			for _, address := range endpoint.Addresses {
