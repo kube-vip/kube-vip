@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Coordinate etcd election campaigns, leader observation, and sessions so failures stop sibling work, leadership callbacks cannot start after shutdown, and fixed-ID members can restart immediately.
 - Clear the active egress endpoint during a zero-endpoint transition so restoring the same endpoint triggers egress reconciliation. Fixes #1830.
 - Create distinct anonymous nftables destination-port sets for each egress allowed-network rule, preventing `EBUSY` when multiple allowed networks and destination ports are combined. Fixes #1804.
 - Use host scope for local routing-table routes so Linux accepts IPv4 `RTN_LOCAL` routes without assigning the VIP to an interface.

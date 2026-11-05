@@ -61,31 +61,57 @@ func TestRunElectionWithMemberIDCollision(t *testing.T) {
 		},
 	}
 
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
+	member1Result := make(chan error, 1)
+	go func() { member1Result <- etcd.RunElection(memberCtx, config) }()
 
-	go func() {
-		defer wg.Done()
-		g.Expect(etcd.RunElection(memberCtx, config)).To(Succeed())
-	}()
+	select {
+	case <-firstMemberObservedLeader:
+		// First member has created the lease, so a conflicting election can now be attempted.
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for first member to observe leader")
+	}
 
-	go func() {
-		defer wg.Done()
-		// Wait for the first member to observe a leader, which means the lease has been created
-		select {
-		case <-firstMemberObservedLeader:
-			// First member has created the lease, now try to create a conflicting one
-		case <-time.After(5 * time.Second):
-			t.Error("timeout waiting for first member to observe leader")
-			return
+	member2Ctx, cancelMember2 := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelMember2()
+	member2Result := make(chan error, 1)
+	go func() { member2Result <- etcd.RunElection(member2Ctx, config) }()
+
+	g.Expect(receiveElectionResult(t, member2Result)).To(MatchError(ContainSubstring("creating lease")))
+	g.Expect(receiveElectionResult(t, member1Result)).To(Succeed())
+}
+
+func TestRunElectionAllowsImmediateSameMemberRestart(t *testing.T) {
+	g := NewWithT(t)
+	cli := client(g)
+	defer cli.Close()
+
+	uniqueID := rand.Uint64()
+	config := &etcd.LeaderElectionConfig{
+		EtcdConfig:           etcd.ClientConfig{Client: cli},
+		Name:                 randomElectionNameForTest("same-member-restart"),
+		MemberID:             "same-member",
+		MemberUniqueID:       &uniqueID,
+		LeaseDurationSeconds: 1,
+	}
+
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		started := make(chan struct{})
+		config.Callbacks = baseCallbacksForName(config.MemberID)
+		config.Callbacks.OnStartedLeading = func(context.Context) {
+			close(started)
+			cancel()
 		}
-		// Use a cancellable context to prevent hanging if this goroutine unexpectedly succeeds
-		member2Ctx, cancelMember2 := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelMember2()
-		g.Expect(etcd.RunElection(member2Ctx, config)).Should(MatchError(ContainSubstring("creating lease")))
-	}()
 
-	wg.Wait()
+		done := make(chan error, 1)
+		go func() { done <- etcd.RunElection(ctx, config) }()
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("attempt %d did not become leader", i+1)
+		}
+		g.Expect(receiveElectionResult(t, done)).To(Succeed())
+	}
 }
 
 func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
@@ -108,7 +134,7 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 		LeaseDurationSeconds: 1,
 	}
 
-	member1Ctx, cancelMember1 := context.WithCancel(ctx)
+	member1Ctx := ctx
 	member2Ctx, cancelMember2 := context.WithCancel(ctx)
 
 	config1 := configBase
@@ -117,14 +143,15 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 	uniqueID := rand.Uint64()
 	config1.MemberUniqueID = &uniqueID
 	config1.Callbacks = baseCallbacksForName(config1.MemberID)
-	syncMembers := make(chan (any))
-	config1.Callbacks.OnStartedLeading = func(_ context.Context) {
+	syncMembers := make(chan struct{})
+	leaseCloseResult := make(chan error, 1)
+	config1.Callbacks.OnStartedLeading = func(ctx context.Context) {
 		log.Println("I'm my-host, the new leader!!!!")
 		close(syncMembers)
 		log.Println("Losing the leadership on purpose by stopping renewing the lease")
-		g.Expect(cliMember1.Lease.Close()).To(Succeed())
+		leaseCloseResult <- cliMember1.Lease.Close()
 		log.Println("Member1 leases closed")
-		cancelMember1()
+		<-ctx.Done()
 	}
 
 	config2 := configBase
@@ -136,24 +163,19 @@ func TestRunElectionWithTwoMembersAndReelection(t *testing.T) {
 		cancelMember2()
 	}
 
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-
+	member1Result := make(chan error, 1)
+	member2Result := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		g.Expect(etcd.RunElection(member1Ctx, &config1)).To(Succeed())
-		log.Printf("%s routine done\n", config1.MemberID)
+		member1Result <- etcd.RunElection(member1Ctx, &config1)
 	}()
-
 	go func() {
-		defer wg.Done()
 		<-syncMembers
-		g.Expect(etcd.RunElection(member2Ctx, &config2)).To(Succeed())
-		log.Printf("%s routine done\n", config2.MemberID)
+		member2Result <- etcd.RunElection(member2Ctx, &config2)
 	}()
 
-	wg.Wait()
-
+	g.Expect(receiveElectionResult(t, leaseCloseResult)).To(Succeed())
+	g.Expect(receiveElectionResult(t, member1Result)).To(MatchError("election session ended"))
+	g.Expect(receiveElectionResult(t, member2Result)).To(Succeed())
 }
 
 func baseCallbacksForName(name string) etcd.LeaderCallbacks {
@@ -176,12 +198,10 @@ func randomElectionNameForTest(name string) string {
 
 const charSet = "0123456789abcdefghijklmnopqrstuvwxyz"
 
-var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 func randomString(n int) string {
 	result := make([]byte, n)
 	for i := range result {
-		result[i] = charSet[rnd.Intn(len(charSet))]
+		result[i] = charSet[rand.Intn(len(charSet))]
 	}
 	return string(result)
 }
@@ -193,4 +213,15 @@ func client(g Gomega) *clientv3.Client {
 	})
 	g.Expect(err).NotTo(HaveOccurred())
 	return c
+}
+
+func receiveElectionResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for election to stop")
+		return nil
+	}
 }
