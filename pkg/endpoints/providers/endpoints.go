@@ -145,14 +145,58 @@ func (ep *Endpoints) GetLabel() string {
 }
 
 func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
-	return ResolvePortWithLookup(servicePort, func(name string) int32 {
+	lookupName := servicePort.Name
+	return ResolvePortWithLookup(servicePort, func(_ string) int32 {
 		for _, subset := range ep.endpoints.Subsets {
 			for _, p := range subset.Ports {
-				if p.Name == name {
+				if p.Name == lookupName {
 					return p.Port
 				}
 			}
 		}
 		return 0
 	})
+}
+
+func (ep *Endpoints) GetBackends(servicePort v1.ServicePort, nodeName string, local bool) ([]Backend, error) {
+	serviceProtocol := servicePort.Protocol
+	if serviceProtocol == "" {
+		serviceProtocol = v1.ProtocolTCP
+	}
+	seen := map[Backend]struct{}{}
+	backends := []Backend{}
+	for _, subset := range ep.endpoints.Subsets {
+		lookupName := servicePort.Name
+		targetPort := ResolvePortWithLookup(servicePort, func(_ string) int32 {
+			for _, port := range subset.Ports {
+				endpointProtocol := port.Protocol
+				if endpointProtocol == "" {
+					endpointProtocol = v1.ProtocolTCP
+				}
+				if port.Name == lookupName && endpointProtocol == serviceProtocol {
+					return port.Port
+				}
+			}
+			return 0
+		})
+		for _, address := range subset.Addresses {
+			if local && !legacyEndpointIsLocal(address, nodeName) {
+				continue
+			}
+			backend := Backend{Address: strings.Split(address.IP, "/")[0], Port: targetPort}
+			if _, ok := seen[backend]; ok {
+				continue
+			}
+			seen[backend] = struct{}{}
+			backends = append(backends, backend)
+		}
+	}
+	return backends, nil
+}
+
+func legacyEndpointIsLocal(address v1.EndpointAddress, nodeName string) bool {
+	if address.NodeName != nil {
+		return *address.NodeName == nodeName
+	}
+	return address.Hostname == nodeName
 }
