@@ -86,6 +86,24 @@ func TestRuntimeCommandAbsentEnvironmentPreservesFile(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandDerivesDHCPFromFileDNSMode(t *testing.T) {
+	t.Setenv("dhcp_mode", "")
+	os.Unsetenv("dhcp_mode")
+	t.Setenv("dns_mode", "")
+	os.Unsetenv("dns_mode")
+	path := writeRuntimeConfig(t, "dnsDualStackMode: dual\n")
+	cmd := newRuntimeConfigTestCommand("manager")
+	if err := cmd.ParseFlags([]string{"--config-file=" + path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadRuntimeConfig(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if initConfig.DNSMode != "dual" || initConfig.DHCPMode != "dual" {
+		t.Fatalf("file DNS mode did not derive DHCP mode: DNS=%q DHCP=%q", initConfig.DNSMode, initConfig.DHCPMode)
+	}
+}
+
 func TestRuntimeCommandExplicitEmptyPeers(t *testing.T) {
 	path := writeRuntimeConfig(t, "bgpConfig:\n  peers:\n    - address: 192.0.2.1\n      as: 65001\n")
 	cmd := newRuntimeConfigTestCommand("manager")
@@ -128,6 +146,8 @@ func newRuntimeConfigTestCommand(name string) *cobra.Command {
 	cmd.Flags().StringVar(&initConfig.LoadBalancerClassName, "lbClassName", kubevip.LBClassName, "")
 	cmd.Flags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "")
 	cmd.Flags().StringVar(&initConfig.ConfigFile, "config-file", "", "")
+	cmd.Flags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "")
+	cmd.Flags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "")
 	return cmd
 }
 
@@ -138,4 +158,21 @@ func writeRuntimeConfig(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestRuntimeCommandFilePreservesFlagPeerDefaults(t *testing.T) {
+	path := writeRuntimeConfig(t, "port: 1234\n")
+	cmd := newRuntimeConfigTestCommand("manager")
+	if err := cmd.ParseFlags([]string{"--config-file=" + path, "--peerAddress=192.0.2.10"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadRuntimeConfig(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if len(initConfig.BGPConfig.Peers) != 1 {
+		t.Fatalf("BGP peers = %#v, want one peer from --peerAddress", initConfig.BGPConfig.Peers)
+	}
+	if peer := initConfig.BGPConfig.Peers[0]; peer.Address != "192.0.2.10" || peer.AS != 65000 {
+		t.Fatalf("BGP peer = %#v, want address 192.0.2.10 with default AS 65000", peer)
+	}
 }
