@@ -76,25 +76,31 @@ func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
 }
 
 // isUsable reports whether an endpoint should receive traffic: it is either
-// ready or, like a terminating Pod that still passes its readiness probe,
-// serving.
+// serving or, unless its Pod is terminating, ready.
 //
-// Ready alone is sufficient because, for a Service with publishNotReadyAddresses,
-// the EndpointSlice controller marks every endpoint ready while Serving keeps
-// tracking the Pod's readiness. Workloads that have to reach their peers
-// through the Service before they become ready depend on those endpoints.
+// Serving keeps a terminating Pod that still passes its readiness probe usable.
+// Once such a Pod stops serving it is dropped, so its route goes away while the
+// Pod deals with the last traffic already sent to it.
 //
-// Per the EndpointConditions godoc a nil Serving defers to Ready, and a nil
-// Ready is an unknown state that consumers should interpret as ready.
+// Ready covers Services with publishNotReadyAddresses, where the EndpointSlice
+// controller marks every endpoint ready, terminating or not, while Serving keeps
+// tracking the Pod's readiness. Workloads that have to reach their peers through
+// the Service before they become ready depend on those endpoints.
+//
+// Per the EndpointConditions godoc a nil Serving defers to Ready, a nil Ready is
+// an unknown state that consumers should interpret as ready, and a nil
+// Terminating should be interpreted as false.
 func isUsable(conditions discoveryv1.EndpointConditions) bool {
-	if conditions.Ready != nil && *conditions.Ready {
-		return true
-	}
 	serving := conditions.Serving
 	if serving == nil {
 		serving = conditions.Ready
 	}
-	return serving == nil || *serving
+	if serving == nil || *serving {
+		return true
+	}
+	ready := conditions.Ready != nil && *conditions.Ready
+	terminating := conditions.Terminating != nil && *conditions.Terminating
+	return ready && !terminating
 }
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
