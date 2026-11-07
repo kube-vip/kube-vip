@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -224,5 +225,49 @@ func TestStartModeCancelsWorkersBeforeWaiting(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("startMode returned before its worker stopped")
+	}
+}
+
+func TestStartStopsHealthServerWhenModeExits(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &kubevip.Config{EnableControlPlane: true, HealthCheckPort: port}
+	processor, err := services.NewServicesProcessor(config, nil, nil, nil, nil, nil, noop.NewManager(), nil, lease.NewManager(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		config:           config,
+		svcProcessor:     processor,
+		nodeLabelManager: noop.NewManager(),
+		modeWorker: func() worker.Worker {
+			return &shutdownTestWorker{start: func(context.Context) {}}
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- manager.Start(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("Start did not return after the control plane exited; the health server kept it alive")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("Start relied on parent cancellation to stop the health server")
 	}
 }
