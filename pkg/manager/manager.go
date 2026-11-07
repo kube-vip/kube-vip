@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -290,10 +291,23 @@ func (sm *Manager) Start(ctx context.Context) error {
 			return fmt.Errorf("healthcheck port is using a port that is less than 1024 [%d]", sm.config.HealthCheckPort)
 		}
 		server := newHealthServer(sm.config.HealthCheckPort)
+		// Stop the server when Start returns, not only on parent cancellation:
+		// a lost leadership ends the mode without cancelling ctx, and a server
+		// left running would block wg.Wait and keep /healthz answering OK.
+		healthCtx, stopHealth := context.WithCancel(ctx)
+		defer stopHealth()
 		wg.Go(func() {
 			err := server.ListenAndServe()
-			if err != nil {
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("healthcheck", "unable to start", err)
+			}
+		})
+		wg.Go(func() {
+			<-healthCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				log.Error("healthcheck", "unable to shut down", err)
 			}
 		})
 	}
