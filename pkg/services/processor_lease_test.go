@@ -71,6 +71,36 @@ func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
 	}
 }
 
+func TestForcedWatcherRetiresOwnershipWhenAnnotationIsRemoved(t *testing.T) {
+	uid := types.UID("forced-service-uid")
+	forced := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "forced", Namespace: "default", UID: uid,
+		Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"},
+	}, Spec: v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.20"}}
+	ordinary := forced.DeepCopy()
+	ordinary.Annotations = nil
+
+	p := &Processor{
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		leaseMgr:    lease.NewManager(),
+	}
+	initializeTestElectionCoordinators(p)
+	svcCtx := servicecontext.New(context.Background())
+	svcCtx.SetWatchedService(forced)
+	p.svcMap.Store(uid, svcCtx)
+
+	if err := p.Reconcile(context.Background(), watch.Event{Type: watch.Modified, Object: ordinary}, nil, true, nil, nil); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if svcCtx.Ctx.Err() == nil {
+		t.Fatal("forced service context was not cancelled after annotation removal")
+	}
+	if _, ok := p.svcMap.Load(uid); ok {
+		t.Fatal("forced service context was not removed after annotation removal")
+	}
+}
+
 // TestDropCancelledServiceContext is a regression test for the lease/svcMap desync that
 // permanently stops a LoadBalancer VIP from being advertised.
 //

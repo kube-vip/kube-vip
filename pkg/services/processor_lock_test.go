@@ -1054,6 +1054,30 @@ func TestOwnedServiceVIPsIncludesOnlyActiveDatapathsAndReturnsCopy(t *testing.T)
 	}
 }
 
+func TestOwnedServiceVIPsExcludesForcedOnDemandServices(t *testing.T) {
+	service := func(uid, vip string, forced bool) *instance.Instance {
+		annotations := map[string]string{kubevip.LoadbalancerIPAnnotation: vip}
+		if forced {
+			annotations[kubevip.ForcePerServiceElection] = "true"
+		}
+		return &instance.Instance{
+			ServiceUID:      types.UID(uid),
+			ServiceSnapshot: &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid), Annotations: annotations}},
+			AddCalled:       true,
+		}
+	}
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{PerServiceElectionOnDemand: true},
+		ServiceInstances: []*instance.Instance{service("global", "192.0.2.10", false), service("forced", "192.0.2.20", true)},
+	}
+
+	processor.refreshOwnedServiceVIPs()
+	if got, want := processor.OwnedServiceVIPs(), []string{"192.0.2.10"}; !slices.Equal(got, want) {
+		t.Fatalf("OwnedServiceVIPs() = %v, want global-lease VIPs %v", got, want)
+	}
+}
+
 // TestEndpointReconcileWaitsForServiceLock pins the wiring that stops a late
 // endpoint event from reprogramming the datapath of a Service that is being torn
 // down. The endpoint processor must take the same per-UID lock as deletion, so a

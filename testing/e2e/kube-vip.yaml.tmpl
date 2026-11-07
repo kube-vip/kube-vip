@@ -12,7 +12,7 @@ spec:
     args:
     - manager
     - --prometheusHTTPServer
-    - ""
+    - "{{ .PrometheusHTTPServer }}"
     env:
     - name: vip_loglevel
       value: "-4"
@@ -20,18 +20,16 @@ spec:
     - name: lb_class_legacy_handling
       value: "false"
     - name: lb_class_name
-    - name: prometheus_server
-      value: :2112
     - name: disable_service_updates
       value: "false"
     - name: vip_arp
       value: "false"
     - name: port
       value: "6443"
-    - name: vip_cidr
-      value: "32"
+    - name: vip_subnet
+      value: "32,128"
     - name: vip_leaderelection
-      value: "false"
+      value: "{{ if .VipElectionEnable }}{{ .VipElectionEnable }}{{ else }}false{{ end }}"
     - name: vip_interface
       value: lo
     - name: bgp_enable
@@ -59,10 +57,12 @@ spec:
 {{- else }}
     - name: vip_arp
       value: "true"
+    - name: vip_subnet
+      value: "32,128"
     - name: vip_interface
       value: eth0
     - name: vip_leaderelection
-      value: "true"
+      value: "{{ if .VipElectionEnable }}{{ .VipElectionEnable }}{{ else }}true{{ end }}"
     - name: vip_leaseduration
       value: "5"
     - name: vip_renewdeadline
@@ -124,6 +124,11 @@ spec:
     volumeMounts:
     - mountPath: /etc/kubernetes/admin.conf
       name: kubeconfig
+{{- if .KubeletPKIPath }}
+    - mountPath: {{ .KubeletPKIPath }}
+      name: kubelet-pki
+      readOnly: true
+{{- end }}
 {{- if .ControlPlaneHealthCheckCAPath }}
     - mountPath: {{ .ControlPlaneHealthCheckCAPath }}
       name: health-check-ca
@@ -138,6 +143,12 @@ spec:
   - hostPath:
       path: "{{ .ConfigPath }}"
     name: kubeconfig
+{{- if .KubeletPKIPath }}
+  - hostPath:
+      path: {{ .KubeletPKIPath }}
+      type: Directory
+    name: kubelet-pki
+{{- end }}
 {{- if .ControlPlaneHealthCheckCAPath }}
   - hostPath:
       path: {{ .ControlPlaneHealthCheckCAPath }}
