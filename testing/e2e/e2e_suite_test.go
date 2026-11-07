@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	ModeEnv = "TEST_MODE"
-	ModeARP = "arp"
-	ModeRT  = "rt"
-	ModeBGP = "bgp"
+	ModeEnv    = "TEST_MODE"
+	ModeARP    = "arp"
+	ModeRT     = "rt"
+	ModeBGP    = "bgp"
+	ModeMatrix = "matrix"
 
 	parallelOffsetStride = 1000
 )
@@ -45,7 +46,7 @@ func TestE2E(t *testing.T) {
 	mode := os.Getenv(ModeEnv)
 	if mode == "" {
 		Mode = ModeARP
-	} else if mode != ModeARP && mode != ModeRT && mode != ModeBGP {
+	} else if mode != ModeARP && mode != ModeRT && mode != ModeBGP && mode != ModeMatrix {
 		log.Fatal("invalid", "mode", mode)
 		os.Exit(1)
 	} else {
@@ -69,7 +70,7 @@ var _ = SynchronizedBeforeSuite(
 	func() []byte {
 		e2e.EnsureKindNetwork()
 
-		if Mode != ModeBGP {
+		if Mode != ModeBGP && Mode != ModeMatrix {
 			return nil
 		}
 
@@ -89,7 +90,7 @@ var _ = SynchronizedBeforeSuite(
 	},
 	// All processes: connect to the shared GoBGP server.
 	func(data []byte) {
-		if Mode != ModeBGP || len(data) == 0 {
+		if (Mode != ModeBGP && Mode != ModeMatrix) || len(data) == 0 {
 			return
 		}
 
