@@ -93,24 +93,9 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 
 	tmpDir, err := os.MkdirTemp("", "kube-vip-manifest")
 	Expect(err).NotTo(HaveOccurred())
-	manifestPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s.yaml", spec.Name))
-	manifestFile, err := os.Create(manifestPath)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(tmpl.Execute(manifestFile, spec.KubeVip)).To(Succeed())
-	manifestFile.Close()
 
 	// Handle v1.29+ super-admin.conf for first node
 	_, v129 := os.LookupEnv("V129")
-	firstNodeManifestPath := manifestPath
-	if v129 {
-		firstNodeManifestPath = filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-first.yaml", spec.Name))
-		firstManifest, err := os.Create(firstNodeManifestPath)
-		Expect(err).NotTo(HaveOccurred())
-		firstNodeValues := spec.KubeVip
-		firstNodeValues.ConfigPath = "/etc/kubernetes/super-admin.conf"
-		Expect(tmpl.Execute(firstManifest, firstNodeValues)).To(Succeed())
-		firstManifest.Close()
-	}
 
 	// Build Kind cluster config
 	k8sImage := os.Getenv("K8S_IMAGE_PATH")
@@ -119,10 +104,16 @@ func CreateCluster(ctx context.Context, spec *ClusterSpec) *Cluster {
 		KubeadmConfigPatchesJSON6902: spec.KubeadmPatches,
 	}
 	for i := range spec.Nodes {
-		mPath := manifestPath
+		values := spec.KubeVip
 		if i == 0 && v129 {
-			mPath = firstNodeManifestPath
+			values.ConfigPath = "/etc/kubernetes/super-admin.conf"
 		}
+		// One file per node: a shared bind-mounted manifest would stop kube-vip on every node at once.
+		mPath := filepath.Join(tmpDir, fmt.Sprintf("kube-vip-%s-%d.yaml", spec.Name, i))
+		manifestFile, err := os.Create(mPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tmpl.Execute(manifestFile, values)).To(Succeed())
+		Expect(manifestFile.Close()).To(Succeed())
 		node := kindconfigv1alpha4.Node{
 			Role: kindconfigv1alpha4.ControlPlaneRole,
 			ExtraMounts: []kindconfigv1alpha4.Mount{{

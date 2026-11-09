@@ -257,8 +257,72 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
+		})
+
+		Describe("kube-vip BGP multipath Service endpoint withdrawal", Ordered, func() {
+			var (
+				cpVIP       string
+				kindCluster *e2e.Cluster
+				gobgpClient api.GoBgpServiceClient
+				gobgpPeers  []*e2e.BGPPeerValues
+				tempDirPath string
+			)
+
+			BeforeAll(func() {
+				tempDirPath = MustMkdirTemp(server.TempDir, testDirPrefix)
+				kindCluster, _, _ = setupEnv(ctx, &cpVIP,
+					server, utils.IPv4Family, utils.IPv4Family,
+					[]string{utils.IPv4Family}, &gobgpPeers,
+					&gobgpClient, logger, 2, "", "bgp-local-endpoint-multipath", false, false, true, false)
+			})
+
+			AfterAll(func() {
+				SaveLogsAndCleanup(ctx, kindCluster.Client, tempDirPath, kindCluster.Name, func() {
+					server.RemovePeers(ctx, gobgpPeers)
+					kindCluster.Delete()
+				})
+			})
+
+			It("withdraws local paths for non-serving and removed endpoints", func(ctx context.Context) {
+				const (
+					serviceName = "test-svc-local-multipath"
+					backend     = "multipath-backend"
+				)
+				backendDS := newTestDS(backend, dsNamespace, 80)
+				backendDS.Spec.Template.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: endpointGate}}
+				Eventually(func() error {
+					_, err := kindCluster.Client.AppsV1().DaemonSets(dsNamespace).Create(ctx, backendDS, metav1.CreateOptions{})
+					return err
+				}, "60s").Should(Succeed())
+				for _, node := range kindCluster.Nodes {
+					setEndpointGate(ctx, kindCluster.Client, dsNamespace, backend, node.String(), true)
+				}
+
+				serviceVIP := e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
+				createTestService(ctx, serviceName, dsNamespace, backend, serviceVIP,
+					kindCluster.Client, corev1.IPFamilyPolicySingleStack,
+					[]corev1.IPFamily{corev1.IPv4Protocol}, corev1.ServiceExternalTrafficPolicyLocal,
+					"", 80, false, false)
+				DeferCleanup(func(ctx context.Context) {
+					_ = kindCluster.Client.CoreV1().Services(dsNamespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
+				})
+
+				firstNodeIP := e2e.NodeIPv4(kindCluster.Nodes[0])
+				secondNodeIP := e2e.NodeIPv4(kindCluster.Nodes[1])
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 2, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP, firstNodeIP, secondNodeIP)
+
+				targetNode := kindCluster.Nodes[0].String()
+				setEndpointGate(ctx, kindCluster.Client, dsNamespace, backend, targetNode, false)
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 1, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP, secondNodeIP)
+
+				removeDS(ctx, kindCluster.Client, dsNamespace, backend)
+				bgp.CheckPathCount(ctx, gobgpClient, serviceVIP, 0, 120*time.Second)
+				expectBGPNextHops(ctx, gobgpClient, serviceVIP)
+			})
 		})
 
 		Describe("kube-vip IPv4 services BGP mode functionality with mixed election", Ordered, func() {
@@ -287,13 +351,13 @@ var _ = Describe("kube-vip BGP mode", func() {
 			})
 
 			DescribeTable("advertise IPv4 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGPMixedElection(ctx, offset, utils.IPv4Family, api.Family_AFI_IP,
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGPMixedElection(ctx, offsets, utils.IPv4Family, api.Family_AFI_IP,
 						[]corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, gobgpClient, "")
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -337,8 +401,8 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip IPv6 services BGP mode functionality with mixed election", Ordered, func() {
@@ -367,13 +431,13 @@ var _ = Describe("kube-vip BGP mode", func() {
 			})
 
 			DescribeTable("advertise IPv6 routes for services",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGPMixedElection(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6,
+				func(svcName string, offsets []uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
+					testBGPMixedElection(ctx, offsets, utils.IPv6Family, api.Family_AFI_IP6,
 						[]corev1.IPFamily{corev1.IPv6Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, gobgpClient, "")
 				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
+				Entry("with external traffic policy - cluster", "test-svc-cluster", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyCluster),
+				Entry("with external traffic policy - local", "test-svc-local", []uint{SOffset.Get(), SOffset.Get()}, corev1.ServiceExternalTrafficPolicyLocal),
 			)
 		})
 
@@ -417,8 +481,8 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, defaultFixedNexthopv6, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - fixed nexthop", Ordered, func() {
@@ -461,8 +525,8 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip IPv4 services BGP mode functionality with misconfigured MP-BGP", Ordered, func() {
@@ -541,8 +605,8 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip DualStack services BGP mode functionality with MP-BGP IPv4 over IPv6 - auto_sourceif nexthop, auto source interface", Ordered, func() {
@@ -586,8 +650,8 @@ var _ = Describe("kube-vip BGP mode", func() {
 						trafficPolicy, kindCluster.Client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
+
 		})
 
 		Describe("kube-vip IPv4 services BGP mode functionality, with service election", Ordered, func() {
@@ -619,15 +683,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, 1, gobgpClient, "", "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, "", "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -676,15 +731,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, "", "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
@@ -728,15 +774,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, defaultFixedNexthopv6, "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
@@ -775,15 +812,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, 1, gobgpClient, defaultFixedNexthopv4, "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, defaultFixedNexthopv4, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -833,15 +861,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
 			)
 
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, containerIP, "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
 			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted while using common lease",
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv6Family, api.Family_AFI_IP6, []corev1.IPFamily{corev1.IPv6Protocol}, svcName,
@@ -881,15 +900,6 @@ var _ = Describe("kube-vip BGP mode", func() {
 				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
 					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
 						trafficPolicy, kindCluster.Client, 1, gobgpClient, containerIP, "")
-				},
-				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
-				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
-			)
-
-			DescribeTable("only stops advertising route if it was referenced by multiple services and all of them were deleted",
-				func(svcName string, offset uint, trafficPolicy corev1.ServiceExternalTrafficPolicy) {
-					testBGP(ctx, offset, utils.IPv4Family, api.Family_AFI_IP, []corev1.IPFamily{corev1.IPv4Protocol}, svcName,
-						trafficPolicy, kindCluster.Client, 2, gobgpClient, containerIP, "")
 				},
 				Entry("with external traffic policy - cluster", "test-svc-cluster", SOffset.Get(), corev1.ServiceExternalTrafficPolicyCluster),
 				Entry("with external traffic policy - local", "test-svc-local", SOffset.Get(), corev1.ServiceExternalTrafficPolicyLocal),
@@ -970,12 +980,12 @@ func testBGP(ctx context.Context, offset uint, lbFamily string, afiFamily api.Fa
 	testServiceBGP(ctx, svcName, lbAddress, trafficPolicy, client, svcFamily, numberOfServices, gobgpClient, routeCheckFamily, expectedNexthop, serviceLease)
 }
 
-func testBGPMixedElection(ctx context.Context, offset uint, lbFamily string, afiFamily api.Family_Afi, svcFamily []corev1.IPFamily,
+func testBGPMixedElection(ctx context.Context, offsets []uint, lbFamily string, afiFamily api.Family_Afi, svcFamily []corev1.IPFamily,
 	svcName string, trafficPolicy corev1.ServiceExternalTrafficPolicy, client kubernetes.Interface,
 	gobgpClient api.GoBgpServiceClient, expectedNexthop string,
 ) {
 	lbAddresses := []string{}
-	for range 2 {
+	for _, offset := range offsets {
 		lbAddresses = append(lbAddresses, e2e.GenerateVIP(lbFamily, offset, defaultNetwork))
 	}
 	routeCheckFamily := &api.Family{
@@ -1187,26 +1197,15 @@ func testServiceBGPMixedElection(ctx context.Context, svcName string, lbAddress 
 		}
 	}
 
-	for i, svc := range services {
+	for _, svc := range services {
 		By(withTimestamp(fmt.Sprintf("deleting service '%s/%s'", dsNamespace, svc.name)))
 		err := client.CoreV1().Services(dsNamespace).Delete(ctx, svc.name, metav1.DeleteOptions{})
 		Expect(err).ToNot(HaveOccurred())
 		time.Sleep(time.Second)
 
 		for addr := range strings.SplitSeq(svc.lbAddress, ",") {
-			if i < len(services)-1 {
-				By(withTimestamp(fmt.Sprintf("checking bgp route for address %q", addr)))
-				paths := bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 1)
-				Expect(paths).ToNot(BeNil())
-				Expect(paths).ToNot(BeEmpty())
-				Expect(strings.Contains(paths[0].Prefix, addr)).To(BeTrue())
-				if expectedNexthop != "" {
-					Expect(strings.Contains(paths[0].String(), fmt.Sprintf("next_hop:\"%s\"", expectedNexthop)) || strings.Contains(paths[0].String(), fmt.Sprintf("next_hops:\"%s\"", expectedNexthop))).To(BeTrue())
-				}
-			} else {
-				By(withTimestamp(fmt.Sprintf("checking bgp route for address %q - should be deleted", addr)))
-				bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 0)
-			}
+			By(withTimestamp(fmt.Sprintf("checking bgp route for address %q - should be deleted", addr)))
+			bgp.CheckPaths(ctx, gobgpClient, gobgpFamily, []*api.TableLookupPrefix{{Prefix: addr}}, 0)
 		}
 	}
 }
@@ -1227,6 +1226,40 @@ func testControlPlaneBGP(ctx context.Context, gobgpClient api.GoBgpServiceClient
 		Expect(paths).ToNot(BeEmpty())
 		Expect(strings.Contains(paths[0].Prefix, addr)).To(BeTrue())
 	}
+}
+
+// endpointGate is a pod readiness gate the test flips to take one node's endpoint out of service.
+const endpointGate corev1.PodConditionType = "kube-vip.io/e2e-serving"
+
+func setEndpointGate(ctx context.Context, client kubernetes.Interface, namespace, app, nodeName string, ready bool) {
+	status := corev1.ConditionFalse
+	if ready {
+		status = corev1.ConditionTrue
+	}
+	patch := fmt.Sprintf(`{"status":{"conditions":[{"type":%q,"status":%q}]}}`, endpointGate, status)
+	Eventually(func() error {
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=" + app,
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return err
+		}
+		if len(pods.Items) != 1 {
+			return fmt.Errorf("expected one %s pod on node %s, found %d", app, nodeName, len(pods.Items))
+		}
+		_, err = client.CoreV1().Pods(namespace).Patch(ctx, pods.Items[0].Name, types.StrategicMergePatchType,
+			[]byte(patch), metav1.PatchOptions{}, "status")
+		return err
+	}, "60s", "1s").Should(Succeed())
+}
+
+func expectBGPNextHops(ctx context.Context, client api.GoBgpServiceClient, address string, expected ...string) {
+	Eventually(func() []string {
+		nextHops := bgp.ResolveVIP(ctx, client, address)
+		slices.Sort(nextHops)
+		return nextHops
+	}, 120*time.Second, time.Second).Should(ConsistOf(expected))
 }
 
 // annotateNodes adds BGP peer-0 configuration annotations (with the given

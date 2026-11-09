@@ -28,6 +28,28 @@ type testLabeler struct {
 	removeErr error
 }
 
+func TestServiceSnapshotsAreDetached(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service", Namespace: "default", UID: types.UID("service"),
+		Annotations: map[string]string{"example.test/value": "original"},
+	}}
+	processor := &Processor{
+		serviceLock: NewServiceLock(),
+		ServiceInstances: []*instance.Instance{
+			nil,
+			{ServiceUID: service.UID, ServiceSnapshot: service},
+		},
+	}
+	snapshots := processor.ServiceSnapshots()
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1", len(snapshots))
+	}
+	snapshots[0].Annotations["example.test/value"] = "changed"
+	if got := service.Annotations["example.test/value"]; got != "original" {
+		t.Fatalf("snapshot mutation changed tracked Service: %q", got)
+	}
+}
+
 func (l *testLabeler) AddLabel(map[string]string) error {
 	l.addCalls++
 	if len(l.addErrors) > 0 {
@@ -240,6 +262,172 @@ func admissionTestService(name, address string) *v1.Service {
 			LoadBalancerIP:        address,
 			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
 		},
+	}
+}
+
+func TestServiceVIPSharingRequiresClusterPolicyAndElectionLease(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		candidatePolicy    v1.ServiceExternalTrafficPolicy
+		trackedPolicy      v1.ServiceExternalTrafficPolicy
+		serviceElection    bool
+		candidateLease     string
+		trackedLease       string
+		candidateNamespace string
+		address            string
+		wantErr            bool
+	}{
+		{name: "cluster without election", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster},
+		{name: "same lease", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "shared", trackedLease: "shared"},
+		{name: "different lease", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "other", trackedLease: "shared", wantErr: true},
+		{name: "different namespace", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, serviceElection: true, candidateLease: "shared", trackedLease: "shared", candidateNamespace: "other", wantErr: true},
+		{name: "candidate local", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyCluster, wantErr: true},
+		{name: "tracked local", candidatePolicy: v1.ServiceExternalTrafficPolicyCluster, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, wantErr: true},
+		{name: "both local with same lease", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, serviceElection: true, candidateLease: "shared", trackedLease: "shared", wantErr: true},
+		{name: "different VIP", candidatePolicy: v1.ServiceExternalTrafficPolicyLocal, trackedPolicy: v1.ServiceExternalTrafficPolicyLocal, address: "192.0.2.20"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tracked := admissionTestService("tracked", "192.0.2.10")
+			tracked.Spec.ExternalTrafficPolicy = test.trackedPolicy
+			tracked.Annotations = map[string]string{kubevip.ServiceLease: test.trackedLease}
+			candidate := admissionTestService("candidate", "192.0.2.10")
+			candidate.Spec.ExternalTrafficPolicy = test.candidatePolicy
+			candidate.Annotations = map[string]string{kubevip.ServiceLease: test.candidateLease}
+			if test.candidateNamespace != "" {
+				candidate.Namespace = test.candidateNamespace
+			}
+			if test.address != "" {
+				candidate.Spec.LoadBalancerIP = test.address
+			}
+			processor := &Processor{
+				config:           &kubevip.Config{EnableServicesElection: test.serviceElection},
+				serviceLock:      newTestServiceLocks(),
+				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+			}
+			release, err := processor.reserveServiceAdmission(candidate)
+			if release != nil {
+				release()
+			}
+			if (err != nil) != test.wantErr {
+				t.Fatalf("reserveServiceAdmission() error = %v, want error %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestServiceVIPAdmissionAllowsIndependentDHCPServices(t *testing.T) {
+	for _, address := range []string{"0.0.0.0", "::"} {
+		t.Run(address, func(t *testing.T) {
+			tracked := admissionTestService("tracked", "")
+			tracked.Annotations = map[string]string{kubevip.LoadbalancerIPAnnotation: address}
+			candidate := admissionTestService("candidate", "")
+			candidate.Namespace = "other"
+			candidate.Annotations = map[string]string{kubevip.LoadbalancerIPAnnotation: address}
+			processor := &Processor{
+				config:           &kubevip.Config{EnableServicesElection: true},
+				serviceLock:      newTestServiceLocks(),
+				ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceSnapshot: tracked}},
+			}
+			release, err := processor.reserveServiceAdmission(candidate)
+			if release != nil {
+				release()
+			}
+			if err != nil {
+				t.Fatalf("reserveServiceAdmission() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestAdmissionRejectsConflictWithPendingConstruction(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	processor := &Processor{
+		config:      &kubevip.Config{},
+		serviceLock: newTestServiceLocks(),
+		instanceFactory: serviceInstanceFactoryFunc(func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			close(started)
+			<-release
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := processor.admitServiceInstance(context.Background(), admissionTestService("slow", "192.0.2.10"), &sync.WaitGroup{})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("instance construction did not start")
+	}
+	releaseAdmission, err := processor.reserveServiceAdmission(admissionTestService("conflicting", "192.0.2.10"))
+	if releaseAdmission != nil {
+		releaseAdmission()
+	}
+	if err == nil {
+		t.Fatal("conflicting admission ignored pending construction")
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("admission did not complete")
+	}
+}
+
+func TestAdmissionReleasesReservationAfterConstructionFailure(t *testing.T) {
+	processor := &Processor{
+		config:      &kubevip.Config{},
+		serviceLock: newTestServiceLocks(),
+		instanceFactory: serviceInstanceFactoryFunc(func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+			if svc.Name == "failed" {
+				return nil, errors.New("construction failed")
+			}
+			return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+		}),
+	}
+	if _, _, err := processor.admitServiceInstance(context.Background(), admissionTestService("failed", "192.0.2.10"), &sync.WaitGroup{}); err == nil {
+		t.Fatal("failed construction returned no error")
+	}
+	if _, added, err := processor.admitServiceInstance(context.Background(), admissionTestService("replacement", "192.0.2.10"), &sync.WaitGroup{}); err != nil || !added {
+		t.Fatalf("replacement admission = %t, %v", added, err)
+	}
+}
+
+func TestAdmissionDoesNotWaitForTrackedServiceLock(t *testing.T) {
+	tracked := admissionTestService("tracked", "192.0.2.10")
+	processor := &Processor{
+		config:           &kubevip.Config{},
+		serviceLock:      newTestServiceLocks(),
+		ServiceInstances: []*instance.Instance{{ServiceUID: tracked.UID, ServiceAddresses: []string{"192.0.2.10"}, ServiceSnapshot: tracked}},
+	}
+	processor.serviceLock.Lock(tracked.UID)
+	defer func() {
+		if err := processor.serviceLock.Unlock(tracked.UID); err != nil {
+			t.Error(err)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		release, err := processor.reserveServiceAdmission(admissionTestService("unrelated", "192.0.2.20"))
+		if release != nil {
+			release()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unrelated admission waited for the tracked Service lock")
 	}
 }
 

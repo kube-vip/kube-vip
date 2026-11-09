@@ -148,7 +148,13 @@ func (p *Processor) reconcileEndpointState(svcCtx *servicecontext.Context, event
 		result.invalidateReadiness = true
 	}
 
-	result.updatedService, result.annotationsChanged = p.updateAnnotations(service, result.instance, lastKnownGoodEndpoint, clientSet)
+	annotationEndpoint := *lastKnownGoodEndpoint
+	if result.invalidateReadiness {
+		// Preserve the old endpoint for teardown, but persist the empty desired
+		// endpoint before cleanup resets lastKnownGoodEndpoint.
+		annotationEndpoint = ""
+	}
+	result.updatedService, result.annotationsChanged = p.updateAnnotations(service, result.instance, &annotationEndpoint, clientSet)
 	return result, nil
 }
 

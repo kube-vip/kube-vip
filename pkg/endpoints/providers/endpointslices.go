@@ -75,22 +75,39 @@ func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
 	return nil
 }
 
-// isServing reports whether an endpoint should receive traffic. Per the
-// EndpointConditions godoc a nil Serving defers to Ready, and a nil Ready is an
-// unknown state that consumers should interpret as ready.
-func isServing(conditions discoveryv1.EndpointConditions) bool {
+// isUsable reports whether an endpoint should receive traffic: it is either
+// serving or, unless its Pod is terminating, ready.
+//
+// Serving keeps a terminating Pod that still passes its readiness probe usable.
+// Once such a Pod stops serving it is dropped, so its route goes away while the
+// Pod deals with the last traffic already sent to it.
+//
+// Ready covers Services with publishNotReadyAddresses, where the EndpointSlice
+// controller marks every endpoint ready, terminating or not, while Serving keeps
+// tracking the Pod's readiness. Workloads that have to reach their peers through
+// the Service before they become ready depend on those endpoints.
+//
+// Per the EndpointConditions godoc a nil Serving defers to Ready, a nil Ready is
+// an unknown state that consumers should interpret as ready, and a nil
+// Terminating should be interpreted as false.
+func isUsable(conditions discoveryv1.EndpointConditions) bool {
 	serving := conditions.Serving
 	if serving == nil {
 		serving = conditions.Ready
 	}
-	return serving == nil || *serving
+	if serving == nil || *serving {
+		return true
+	}
+	ready := conditions.Ready != nil && *conditions.Ready
+	terminating := conditions.Terminating != nil && *conditions.Terminating
+	return ready && !terminating
 }
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for _, eps := range ep.slices {
 		for _, e := range eps.Endpoints {
-			if !isServing(e.Conditions) {
+			if !isUsable(e.Conditions) {
 				continue
 			}
 			result = append(result, e.Addresses...)
@@ -103,7 +120,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 	var localEndpoints []string
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
-			if !isServing(endpoint.Conditions) {
+			if !isUsable(endpoint.Conditions) {
 				continue
 			}
 			for _, address := range endpoint.Addresses {
