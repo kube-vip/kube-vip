@@ -413,6 +413,10 @@ func (p *Processor) validateServiceVIPConflict(claim, other *serviceVIPClaim) er
 		return nil
 	}
 	for _, address := range claim.addresses {
+		// 0.0.0.0 and :: request a DHCP lease, so each Service gets its own address.
+		if ip := net.ParseIP(address); ip != nil && ip.IsUnspecified() {
+			continue
+		}
 		for _, otherAddress := range other.addresses {
 			if address == otherAddress {
 				return fmt.Errorf("VIP %q cannot be shared with service %s/%s", address, other.namespace, other.name)

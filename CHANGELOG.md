@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Use non-terminating EndpointSlice endpoints that are ready but not serving, so Services with `publishNotReadyAddresses` keep their endpoints under both `Local` and `Cluster` traffic policies instead of blocking workloads that need the Service to become ready. Fixes #1833.
+- Skip the shared-VIP admission check for DHCP placeholder addresses (`0.0.0.0` and `::`), so independent DHCP Services are no longer rejected as sharing a VIP. Fixes #1835.
 - Clear the active egress endpoint during a zero-endpoint transition so restoring the same endpoint triggers egress reconciliation. Fixes #1830.
 - Create distinct anonymous nftables destination-port sets for each egress allowed-network rule, preventing `EBUSY` when multiple allowed networks and destination ports are combined. Fixes #1804.
 - Use host scope for local routing-table routes so Linux accepts IPv4 `RTN_LOCAL` routes without assigning the VIP to an interface.
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cancel the mode context on init or configuration failure before waiting on goroutines during shutdown.
 - Join dual-stack Service addresses with `_` instead of `,` in the `service-provided.kube-vip.io` node label so the label value is valid and node labeling no longer causes Service lease churn. Fixes #1793.
 - Shut down the `health_check_port` server when the manager stops, so a node that loses leadership exits and restarts instead of hanging with `/healthz` still answering OK.
+- Write the `--tableID`, `--tableType`, `--routingProtocol` and `--cleanRoutingTable` settings into the generated manifest in routing table mode instead of leaving the defaults in place.
 
 
 ### Added
