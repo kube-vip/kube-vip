@@ -585,3 +585,63 @@ func TestReconcileServicesElectionDoesNotStartElectionLoop(t *testing.T) {
 	default:
 	}
 }
+
+// TestGetAllEndpointsPublishNotReadyAddresses asserts endpoints of a Service
+// with publishNotReadyAddresses are used under both traffic policies even when
+// their Pods are not serving yet, while Local policy still requires locality.
+func TestGetAllEndpointsPublishNotReadyAddresses(t *testing.T) {
+	ready, notServing, notTerminating := true, false, false
+	localNode, remoteNode := "worker-a", "worker-b"
+
+	tests := []struct {
+		name   string
+		policy v1.ServiceExternalTrafficPolicy
+		node   string
+		want   int
+	}{
+		{"Local policy with local endpoint", v1.ServiceExternalTrafficPolicyTypeLocal, localNode, 1},
+		{"Local policy with remote endpoint", v1.ServiceExternalTrafficPolicyTypeLocal, remoteNode, 0},
+		{"Cluster policy with local endpoint", v1.ServiceExternalTrafficPolicyTypeCluster, localNode, 1},
+		{"Cluster policy with remote endpoint", v1.ServiceExternalTrafficPolicyTypeCluster, remoteNode, 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "bootstrap", Namespace: "default"},
+				Spec: v1.ServiceSpec{
+					Type:                     v1.ServiceTypeLoadBalancer,
+					ExternalTrafficPolicy:    test.policy,
+					PublishNotReadyAddresses: true,
+				},
+			}
+			provider := providers.NewEndpointslices()
+			// The EndpointSlice controller reports ready for every endpoint of a
+			// Service with publishNotReadyAddresses, while serving follows the Pod.
+			if err := provider.LoadObject(&discoveryv1.EndpointSlice{
+				ObjectMeta:  metav1.ObjectMeta{Name: "bootstrap-1", Namespace: service.Namespace},
+				AddressType: discoveryv1.AddressTypeIPv6,
+				Endpoints: []discoveryv1.Endpoint{{
+					Addresses: []string{"2001:db8::10"},
+					NodeName:  &test.node,
+					Conditions: discoveryv1.EndpointConditions{
+						Ready:       &ready,
+						Serving:     &notServing,
+						Terminating: &notTerminating,
+					},
+				}},
+			}, func() {}); err != nil {
+				t.Fatalf("LoadObject returned error: %v", err)
+			}
+
+			worker := newGeneric(&kubevip.Config{}, provider)
+			endpoints, err := worker.getAllEndpoints(service, localNode)
+			if err != nil {
+				t.Fatalf("getAllEndpoints returned error: %v", err)
+			}
+			if len(endpoints) != test.want {
+				t.Fatalf("endpoints = %v, want %d endpoint(s)", endpoints, test.want)
+			}
+		})
+	}
+}

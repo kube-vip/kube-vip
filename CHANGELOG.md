@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Use non-terminating EndpointSlice endpoints that are ready but not serving, so Services with `publishNotReadyAddresses` keep their endpoints under both `Local` and `Cluster` traffic policies instead of blocking workloads that need the Service to become ready. Fixes #1833.
 - Skip the shared-VIP admission check for DHCP placeholder addresses (`0.0.0.0` and `::`), so independent DHCP Services are no longer rejected as sharing a VIP. Fixes #1835.
 - Clear the active egress endpoint during a zero-endpoint transition so restoring the same endpoint triggers egress reconciliation. Fixes #1830.
 - Create distinct anonymous nftables destination-port sets for each egress allowed-network rule, preventing `EBUSY` when multiple allowed networks and destination ports are combined. Fixes #1804.
