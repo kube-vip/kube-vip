@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Join dual-stack Service addresses with `_` instead of `,` in the `service-provided.kube-vip.io` node label so the label value is valid and node labeling no longer causes Service lease churn. Fixes #1793.
 - Shut down the `health_check_port` server when the manager stops, so a node that loses leadership exits and restarts instead of hanging with `/healthz` still answering OK.
 - Write the `--tableID`, `--tableType`, `--routingProtocol` and `--cleanRoutingTable` settings into the generated manifest in routing table mode instead of leaving the defaults in place.
+- Validate the Kubernetes leader election timings at startup and during manifest generation, so a `vip_leaseduration` that is not greater than `vip_renewdeadline`, a `vip_renewdeadline` that is not greater than `vip_retryperiod` * 1.2, or a value below one second fails with an error naming the setting instead of a client-go panic once the election starts. Fixes #924.
 
 
 ### Added
