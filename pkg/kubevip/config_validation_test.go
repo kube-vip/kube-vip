@@ -1,10 +1,14 @@
 package kubevip
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/metrics"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 func TestValidate_HealthCheckAddress(t *testing.T) {
@@ -109,6 +113,113 @@ func TestValidate_RoutingProtocol(t *testing.T) {
 				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidate_LeaderElectionTimings(t *testing.T) {
+	tests := []struct {
+		name          string
+		leaseDuration int
+		renewDeadline int
+		retryPeriod   int
+		wantErr       string
+	}{
+		{name: "client-go defaults", leaseDuration: 15, renewDeadline: 10, retryPeriod: 2},
+		{name: "e2e timings", leaseDuration: 5, renewDeadline: 3, retryPeriod: 1},
+		{name: "smallest valid timings", leaseDuration: 3, renewDeadline: 2, retryPeriod: 1},
+		{name: "all one second", leaseDuration: 1, renewDeadline: 1, retryPeriod: 1,
+			wantErr: "vip_leaseduration (1) must be greater than vip_renewdeadline (1)"},
+		{name: "lease duration below renew deadline", leaseDuration: 5, renewDeadline: 10, retryPeriod: 2,
+			wantErr: "vip_leaseduration (5) must be greater than vip_renewdeadline (10)"},
+		{name: "renew deadline equal to retry period", leaseDuration: 15, renewDeadline: 2, retryPeriod: 2,
+			wantErr: "vip_renewdeadline (2) must be greater than vip_retryperiod (2) * 1.2"},
+		{name: "renew deadline within jitter of retry period", leaseDuration: 15, renewDeadline: 6, retryPeriod: 5,
+			wantErr: "vip_renewdeadline (6) must be greater than vip_retryperiod (5) * 1.2"},
+		{name: "zero lease duration", leaseDuration: 0, renewDeadline: 10, retryPeriod: 2,
+			wantErr: "vip_leaseduration is 0, must be at least 1 second"},
+		{name: "zero renew deadline", leaseDuration: 15, renewDeadline: 0, retryPeriod: 2,
+			wantErr: "vip_renewdeadline is 0, must be at least 1 second"},
+		{name: "zero retry period", leaseDuration: 15, renewDeadline: 10, retryPeriod: 0,
+			wantErr: "vip_retryperiod is 0, must be at least 1 second"},
+		{name: "negative retry period", leaseDuration: 15, renewDeadline: 10, retryPeriod: -1,
+			wantErr: "vip_retryperiod is -1, must be at least 1 second"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{KubernetesLeaderElection: KubernetesLeaderElection{
+				EnableLeaderElection: true,
+				LeaseDuration:        tt.leaseDuration,
+				RenewDeadline:        tt.renewDeadline,
+				RetryPeriod:          tt.retryPeriod,
+			}}
+			err := config.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("Validate() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidate_LeaderElectionTimingsOnlyWhenKubernetesElectionMayRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantErr bool
+	}{
+		{name: "no election", config: Config{EnableControlPlane: true}},
+		{name: "control plane leader election", config: Config{KubernetesLeaderElection: KubernetesLeaderElection{EnableLeaderElection: true}}, wantErr: true},
+		{name: "service election", config: Config{EnableServicesElection: true}, wantErr: true},
+		{name: "services", config: Config{EnableServices: true}, wantErr: true},
+		{name: "explicit kubernetes backend", config: Config{EnableServices: true, LeaderElectionType: "kubernetes"}, wantErr: true},
+		{name: "etcd backend", config: Config{EnableControlPlane: true, LeaderElectionType: "etcd",
+			KubernetesLeaderElection: KubernetesLeaderElection{EnableLeaderElection: true}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The etcd e2e manifest uses these timings: etcd only uses the lease
+			// duration, but the Kubernetes leader elector refuses them.
+			tt.config.LeaseDuration = 2
+			tt.config.RenewDeadline = 3
+			tt.config.RetryPeriod = 1
+			if err := tt.config.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidate_LeaderElectionTimingsMatchClientGo makes sure every timing that
+// passes validation is accepted by the client-go leader elector, which panics
+// on the ones it refuses, and that every refused timing fails validation.
+func TestValidate_LeaderElectionTimingsMatchClientGo(t *testing.T) {
+	for leaseDuration := -1; leaseDuration <= 12; leaseDuration++ {
+		for renewDeadline := -1; renewDeadline <= 12; renewDeadline++ {
+			for retryPeriod := -1; retryPeriod <= 12; retryPeriod++ {
+				validateErr := validateLeaderElectionTimings(leaseDuration, renewDeadline, retryPeriod)
+				_, clientGoErr := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+					Lock:          &resourcelock.LeaseLock{LockConfig: resourcelock.ResourceLockConfig{Identity: "node"}},
+					LeaseDuration: time.Duration(leaseDuration) * time.Second,
+					RenewDeadline: time.Duration(renewDeadline) * time.Second,
+					RetryPeriod:   time.Duration(retryPeriod) * time.Second,
+					Callbacks: leaderelection.LeaderCallbacks{
+						OnStartedLeading: func(context.Context) {},
+						OnStoppedLeading: func() {},
+					},
+				})
+				if (validateErr == nil) != (clientGoErr == nil) {
+					t.Errorf("lease %d, renew %d, retry %d: validation error = %v, client-go error = %v",
+						leaseDuration, renewDeadline, retryPeriod, validateErr, clientGoErr)
+				}
+			}
+		}
 	}
 }
 
