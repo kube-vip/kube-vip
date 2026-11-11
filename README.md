@@ -20,6 +20,51 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 For upgrading an existing install in place (static Pod or DaemonSet), see the [upgrade guide](https://kube-vip.io/docs/upgrade/).
 
+### Running kube-vip as a binary
+
+[GitHub releases](https://github.com/kube-vip/kube-vip/releases) have
+statically linked Linux binaries attached for `amd64`, `arm64`, `arm` (ARMv7),
+`ppc64le` and `s390x`, named `kube-vip-linux-<arch>`, along with a
+`kube-vip-checksums.txt` file holding their SHA-256 checksums. They let
+kube-vip run directly on a host, for example as a systemd service next to
+control plane components that are themselves deployed as binaries.
+
+```shell
+VERSION=vX.Y.Z # the release to install
+ARCH=amd64
+curl -fsSLO "https://github.com/kube-vip/kube-vip/releases/download/${VERSION}/kube-vip-linux-${ARCH}"
+curl -fsSLO "https://github.com/kube-vip/kube-vip/releases/download/${VERSION}/kube-vip-checksums.txt"
+sha256sum --check --ignore-missing kube-vip-checksums.txt
+sudo install -m 0755 "kube-vip-linux-${ARCH}" /usr/local/bin/kube-vip
+```
+
+The binary accepts the same flags and environment variables as the container
+image. Run it as root (or with `CAP_NET_ADMIN` and `CAP_NET_RAW`) so it can
+manage addresses and send ARP. It reads `/etc/kubernetes/admin.conf` by
+default, and `--autodetectcp` makes it reach the API server running on the same
+host instead of the VIP it is about to bring up. To use a different kubeconfig,
+set `--k8sConfigPath` and put the local API server address in the
+`kubernetes_addr` environment variable. A minimal control plane VIP in ARP mode
+as a systemd unit:
+
+```ini
+[Unit]
+Description=kube-vip
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/kube-vip manager --interface eth0 --address 192.168.0.40 \
+    --controlplane --arp --leaderElection --autodetectcp
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`make release-binaries` builds the same set of binaries locally into `dist/`.
+
 ### Runtime configuration files
 
 The `manager` and `service` commands accept strict YAML or JSON configuration

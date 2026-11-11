@@ -22,8 +22,11 @@ GINKGO_ARGS ?=
 GINKGO_PROCS ?=
 GINKGO_PARALLEL := $(if $(GINKGO_PROCS),--procs=$(GINKGO_PROCS),-p)
 BUILDX_CACHE_FLAGS ?=
+# Platforms that release binaries are built for, matching the published container images (linux/arm is ARMv7)
+RELEASE_PLATFORMS ?= linux/amd64 linux/arm64 linux/arm linux/ppc64le linux/s390x
+RELEASE_DIR ?= dist
 
-.PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker e2e-tests-etcd
+.PHONY: all build clean install uninstall release-binaries simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker e2e-tests-etcd
 
 all: check install
 
@@ -35,6 +38,7 @@ build: $(TARGET)
 
 clean:
 	@rm -f $(TARGET)
+	@rm -rf $(RELEASE_DIR)
 
 install:
 	@echo Building and Installing project
@@ -42,6 +46,19 @@ install:
 
 uninstall: clean
 	@rm -f $$(which ${TARGET})
+
+# Build a static binary named $(TARGET)-<os>-<arch> for every platform in RELEASE_PLATFORMS,
+# plus a SHA-256 checksum file covering them, into RELEASE_DIR
+release-binaries:
+	@rm -rf $(RELEASE_DIR)
+	@mkdir -p $(RELEASE_DIR)
+	@for platform in $(RELEASE_PLATFORMS); do \
+		os=$${platform%%/*}; arch=$${platform#*/}; \
+		echo "Building $(TARGET) $(VERSION) for $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOARM=7 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/$(TARGET)-$$os-$$arch || exit 1; \
+	done
+	@cd $(RELEASE_DIR) && sha256sum $(TARGET)-* > $(TARGET)-checksums.txt
+	@echo Release binaries written to $(RELEASE_DIR)
 
 demo:
 	@cd demo
