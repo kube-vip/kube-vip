@@ -66,8 +66,12 @@ jobs:
         run: |
           set -euo pipefail
           for image in ghcr.io/kube-vip/kube-vip plndr/kube-vip; do
+            # Preferred: Sigstore bundle format (cosign v3 default, cosign v2.6+)
             cosign sign --yes "${image}@${DIGEST}"
             cosign attest --yes --type cyclonedx --predicate kube-vip.cdx.json "${image}@${DIGEST}"
+            # Compatibility: legacy format for cosign v2.5 and earlier
+            cosign sign --yes --use-signing-config=false --new-bundle-format=false "${image}@${DIGEST}"
+            cosign attest --yes --use-signing-config=false --new-bundle-format=false --type cyclonedx --predicate kube-vip.cdx.json "${image}@${DIGEST}"
           done
       - name: Attest kube-vip provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -101,8 +105,12 @@ jobs:
         run: |
           set -euo pipefail
           for image in ghcr.io/kube-vip/kube-vip-iptables plndr/kube-vip-iptables; do
+            # Preferred: Sigstore bundle format (cosign v3 default, cosign v2.6+)
             cosign sign --yes "${image}@${DIGEST}"
             cosign attest --yes --type cyclonedx --predicate kube-vip-iptables.cdx.json "${image}@${DIGEST}"
+            # Compatibility: legacy format for cosign v2.5 and earlier
+            cosign sign --yes --use-signing-config=false --new-bundle-format=false "${image}@${DIGEST}"
+            cosign attest --yes --use-signing-config=false --new-bundle-format=false --type cyclonedx --predicate kube-vip-iptables.cdx.json "${image}@${DIGEST}"
           done
       - name: Attest kube-vip-iptables provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

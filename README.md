@@ -73,6 +73,10 @@ OIDC identity. Release images and binaries also have a signed SLSA build
 provenance attestation available through the GitHub attestation API, and each
 image has a signed CycloneDX SBOM attestation in the registry.
 
+Signatures and SBOM attestations are attached in both the current Sigstore
+bundle format and the legacy cosign format, so cosign v3 (recommended) and
+cosign v2 can verify the same artifacts.
+
 For images published by a release (`ghcr.io/kube-vip/kube-vip:<version>`,
 `plndr/kube-vip:<version>`, and the corresponding `kube-vip-iptables` images):
 

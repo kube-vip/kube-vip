@@ -22,6 +22,12 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
+      - name: Validate release ref
+        run: |
+          if [ "${GITHUB_REF}" != "refs/tags/${RELEASE_TAG}" ]; then
+            echo "::error::Run this workflow from the ${RELEASE_TAG} tag so the signed provenance matches the checked-out release commit (got ${GITHUB_REF})."
+            exit 1
+          fi
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
