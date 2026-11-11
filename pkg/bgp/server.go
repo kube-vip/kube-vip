@@ -26,6 +26,10 @@ type Server struct {
 	c       *kubevip.BGPConfig
 	mtx     sync.Mutex
 	tracker map[string]map[string]bool
+
+	// communities and largeCommunities are attached to every advertised path
+	communities      []uint32
+	largeCommunities []*bgp.LargeCommunity
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -41,14 +45,27 @@ func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error
 	if len(c.Peers) == 0 {
 		return nil, fmt.Errorf("you need to provide at least one peer")
 	}
+
+	communities, err := kubevip.ParseBGPCommunities(c.Communities)
+	if err != nil {
+		return nil, err
+	}
+
+	largeCommunities, err := kubevip.ParseBGPLargeCommunities(c.LargeCommunities)
+	if err != nil {
+		return nil, err
+	}
+
 	bgpLogger := log.Default()
 	lvl := &log.LevelVar{}
 	lvl.Set(logLevel)
 
 	b = &Server{
-		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
-		c:       &c,
-		tracker: make(map[string]map[string]bool),
+		s:                gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
+		c:                &c,
+		tracker:          make(map[string]map[string]bool),
+		communities:      communities,
+		largeCommunities: largeCommunities,
 	}
 	return
 }

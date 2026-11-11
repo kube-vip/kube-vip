@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kube-vip/kube-vip/pkg/debouncer"
@@ -555,6 +556,22 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			bgpConfig = append(bgpConfig, corev1.EnvVar{
 				Name:  bgpSourceIP,
 				Value: c.BGPConfig.SourceIP,
+			},
+			)
+		}
+
+		if len(c.BGPConfig.Communities) != 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpCommunities,
+				Value: strings.Join(c.BGPConfig.Communities, ","),
+			},
+			)
+		}
+
+		if len(c.BGPConfig.LargeCommunities) != 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpLargeCommunities,
+				Value: strings.Join(c.BGPConfig.LargeCommunities, ","),
 			},
 			)
 		}

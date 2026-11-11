@@ -96,6 +96,116 @@ func TestParseEnvironmentBGPAttachIPToInterface(t *testing.T) {
 	}
 }
 
+func TestParseEnvironmentBGPCommunities(t *testing.T) {
+	tests := []struct {
+		name                 string
+		env                  map[string]string
+		wantCommunities      []string
+		wantLargeCommunities []string
+	}{
+		{
+			name:                 "unset preserves configured values",
+			wantCommunities:      []string{"65000:1"},
+			wantLargeCommunities: []string{"65000:1:1"},
+		},
+		{
+			name: "comma separated values replace configured values",
+			env: map[string]string{
+				bgpCommunities:      " 65000:100, no-export ,",
+				bgpLargeCommunities: "4200000000:1:2,4200000000:3:4",
+			},
+			wantCommunities:      []string{"65000:100", "no-export"},
+			wantLargeCommunities: []string{"4200000000:1:2", "4200000000:3:4"},
+		},
+		{
+			name: "empty values clear configured values",
+			env: map[string]string{
+				bgpCommunities:      "",
+				bgpLargeCommunities: "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for name, value := range tt.env {
+				t.Setenv(name, value)
+			}
+
+			config := &Config{BGPConfig: BGPConfig{
+				Communities:      []string{"65000:1"},
+				LargeCommunities: []string{"65000:1:1"},
+			}}
+			if err := ParseEnvironment(config); err != nil {
+				t.Fatalf("ParseEnvironment() error = %v", err)
+			}
+			if !slices.Equal(config.BGPConfig.Communities, tt.wantCommunities) {
+				t.Fatalf("Communities = %q, want %q", config.BGPConfig.Communities, tt.wantCommunities)
+			}
+			if !slices.Equal(config.BGPConfig.LargeCommunities, tt.wantLargeCommunities) {
+				t.Fatalf("LargeCommunities = %q, want %q", config.BGPConfig.LargeCommunities, tt.wantLargeCommunities)
+			}
+		})
+	}
+}
+
+func TestGeneratePodSpecBGPCommunities(t *testing.T) {
+	communityEnv := []string{bgpCommunities, bgpLargeCommunities}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "BGP mode emits configured communities",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					Communities:      []string{"65000:100", "no-export"},
+					LargeCommunities: []string{"4200000000:1:2"},
+				},
+			},
+			wantEnv: map[string]string{
+				bgpCommunities:      "65000:100,no-export",
+				bgpLargeCommunities: "4200000000:1:2",
+			},
+		},
+		{
+			name:    "BGP mode without communities emits nothing",
+			config:  Config{EnableBGP: true},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "communities without BGP mode emit nothing",
+			config: Config{BGPConfig: BGPConfig{
+				Communities:      []string{"65000:100"},
+				LargeCommunities: []string{"4200000000:1:2"},
+			}},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(communityEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("BGP community pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
 func TestGeneratePodSpecBGPAttachIPToInterface(t *testing.T) {
 	pod, err := generatePodSpec(&Config{
 		EnableBGP:              true,

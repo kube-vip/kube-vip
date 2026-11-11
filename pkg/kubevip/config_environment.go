@@ -595,6 +595,14 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.KeepaliveInterval = u64
 	}
 
+	// BGP communities, an explicitly empty value clears lower-priority sources
+	if env, ok := os.LookupEnv(bgpCommunities); ok {
+		c.BGPConfig.Communities = splitCommaSeparated(env)
+	}
+	if env, ok := os.LookupEnv(bgpLargeCommunities); ok {
+		c.BGPConfig.LargeCommunities = splitCommaSeparated(env)
+	}
+
 	// BGP health check options
 	env = os.Getenv(controlPlaneHealthCheckAddress)
 	if env != "" {
@@ -865,6 +873,18 @@ func ParseEnvironment(c *Config) error {
 	}
 
 	return nil
+}
+
+// splitCommaSeparated returns the non-empty, whitespace-trimmed elements of a
+// comma-separated list, or nil when there are none.
+func splitCommaSeparated(value string) []string {
+	var elements []string
+	for element := range strings.SplitSeq(value, ",") {
+		if element = strings.TrimSpace(element); element != "" {
+			elements = append(elements, element)
+		}
+	}
+	return elements
 }
 
 // LoadConfigFromFile loads runtime configuration from a JSON or YAML file.

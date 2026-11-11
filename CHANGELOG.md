@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- BGP communities for advertised routes
+  - Attaches standard ([RFC 1997](https://www.rfc-editor.org/rfc/rfc1997)) and large ([RFC 8092](https://www.rfc-editor.org/rfc/rfc8092)) BGP communities to every control plane and Service VIP route kube-vip advertises
+  - Standard communities are written as `<0-65535>:<0-65535>` or as a well-known community name (e.g. `no-export`), large communities as `<0-4294967295>:<0-4294967295>:<0-4294967295>`
+  - Invalid communities are rejected at startup
+  - Configuration via environment variables, CLI flags or the runtime configuration file:
+    - `bgp_communities` / `--bgpCommunities` / `bgpConfig.communities`: comma-separated standard communities
+    - `bgp_large_communities` / `--bgpLargeCommunities` / `bgpConfig.largeCommunities`: comma-separated large communities
 - Configurable control-plane health check for BGP mode without leader election
   - Polls a configurable HTTP(S) endpoint (e.g. `https://localhost:6443/livez`) to verify the exposed service is healthy (usually the local kube-apiserver)
   - Withdraws the BGP route after a configurable number of consecutive failures, removing the unhealthy node from the ECMP set

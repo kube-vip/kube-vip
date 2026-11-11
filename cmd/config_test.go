@@ -135,6 +135,27 @@ func TestRuntimeCommandSliceFlagPrecedence(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandBGPCommunitiesPrecedence(t *testing.T) {
+	path := writeRuntimeConfig(t, "bgpConfig:\n  communities: [\"65000:1\"]\n  largeCommunities: [\"65000:1:1\"]\n")
+	t.Setenv("bgp_communities", "65000:2")
+	t.Setenv("bgp_large_communities", "65000:2:2")
+	cmd := newRuntimeConfigTestCommand("manager")
+	cmd.Flags().StringSliceVar(&initConfig.BGPConfig.Communities, "bgpCommunities", []string{}, "")
+	cmd.Flags().StringSliceVar(&initConfig.BGPConfig.LargeCommunities, "bgpLargeCommunities", []string{}, "")
+	if err := cmd.ParseFlags([]string{"--config-file=" + path, "--bgpCommunities=65000:3,no-export"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadRuntimeConfig(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"65000:3", "no-export"}; !slices.Equal(initConfig.BGPConfig.Communities, want) {
+		t.Fatalf("BGPConfig.Communities = %#v, want %#v", initConfig.BGPConfig.Communities, want)
+	}
+	if want := []string{"65000:2:2"}; !slices.Equal(initConfig.BGPConfig.LargeCommunities, want) {
+		t.Fatalf("BGPConfig.LargeCommunities = %#v, want %#v", initConfig.BGPConfig.LargeCommunities, want)
+	}
+}
+
 func newRuntimeConfigTestCommand(name string) *cobra.Command {
 	initConfig = kubevip.Config{ArpBroadcastRate: 3000}
 	cmd := &cobra.Command{Use: name}

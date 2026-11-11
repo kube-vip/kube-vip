@@ -138,6 +138,36 @@ containers:
 Profiles available under `/debug/pprof/`: `profile` (CPU), `heap`, `allocs`,
 `goroutine`, `threadcreate`, `trace`, `cmdline` and `symbol`. 
 
+### BGP communities
+
+In BGP mode kube-vip can attach BGP communities to every route it advertises,
+covering both the control plane VIP and Service VIPs. Upstream routers can then
+match on them to apply routing policy, for example to set local preference or to
+keep VIP routes from being exported further.
+
+- `bgp_communities` / `--bgpCommunities`: comma-separated [RFC 1997](https://www.rfc-editor.org/rfc/rfc1997)
+  communities, each written as `<0-65535>:<0-65535>` or as a well-known community
+  name such as `no-export`, `no-advertise`, `no-export-subconfed`, `no-peer` or `blackhole`
+- `bgp_large_communities` / `--bgpLargeCommunities`: comma-separated [RFC 8092](https://www.rfc-editor.org/rfc/rfc8092)
+  large communities, each written as `<0-4294967295>:<0-4294967295>:<0-4294967295>`
+
+```yaml
+# Kubernetes manifest
+containers:
+  - name: kube-vip
+    env:
+      - name: bgp_enable
+        value: "true"
+      - name: bgp_communities
+        value: "65000:100,no-export"
+      - name: bgp_large_communities
+        value: "4200000000:1:2"
+```
+
+In a runtime configuration file, use the `bgpConfig.communities` and
+`bgpConfig.largeCommunities` lists. kube-vip refuses to start when a community
+cannot be parsed.
+
 ### Gateway API `LoadBalancer` services with no endpoints
 
 Some Gateway API controllers create `LoadBalancer` services that intentionally have no Endpoints/EndpointSlices backends.

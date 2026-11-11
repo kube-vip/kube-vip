@@ -181,10 +181,10 @@ func (b *Server) getPath(ip net.IP) *apiutil.Path {
 		return &apiutil.Path{
 			Family: bgp.RF_IPv4_UC,
 			Nlri:   prefix,
-			Attrs: []bgp.PathAttributeInterface{
+			Attrs: b.withCommunities(
 				bgp.NewPathAttributeOrigin(0),
 				nh,
-			},
+			),
 		}
 	}
 
@@ -207,12 +207,24 @@ func (b *Server) getPath(ip net.IP) *apiutil.Path {
 	return &apiutil.Path{
 		Family: bgp.RF_IPv6_UC,
 		Nlri:   prefix,
-		Attrs: []bgp.PathAttributeInterface{
+		Attrs: b.withCommunities(
 			bgp.NewPathAttributeOrigin(0),
 			mpReach,
-		},
+		),
 	}
 }
+
+// withCommunities appends the configured community attributes to attrs.
+func (b *Server) withCommunities(attrs ...bgp.PathAttributeInterface) []bgp.PathAttributeInterface {
+	if len(b.communities) != 0 {
+		attrs = append(attrs, bgp.NewPathAttributeCommunities(b.communities))
+	}
+	if len(b.largeCommunities) != 0 {
+		attrs = append(attrs, bgp.NewPathAttributeLargeCommunities(b.largeCommunities))
+	}
+	return attrs
+}
+
 func insertPolicy(ctx context.Context, s *server.BgpServer, address string, p *api.Peer, family api.Family_Afi) error {
 	familyType := "v4"
 	if family == api.Family_AFI_IP6 {

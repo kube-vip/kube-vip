@@ -102,6 +102,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPConfig.AS, "localAS", 65000, "The local AS number for the bgp server")
 	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.HoldTime, "bgpHoldTimer", 30, "The hold timer for all bgp peers (it defines the time a session is held)")
 	kubeVipCmd.PersistentFlags().Uint64Var(&initConfig.BGPConfig.KeepaliveInterval, "bgpKeepAliveInterval", 10, "The keepalive interval for all bgp peers (it defines the heartbeat of keepalive messages)")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPConfig.Communities, "bgpCommunities", []string{}, "Comma separated BGP communities attached to all advertised routes, format: <0-65535>:<0-65535> or a well-known community name such as no-export")
+	kubeVipCmd.PersistentFlags().StringSliceVar(&initConfig.BGPConfig.LargeCommunities, "bgpLargeCommunities", []string{}, "Comma separated BGP large communities attached to all advertised routes, format: <0-4294967295>:<0-4294967295>:<0-4294967295>")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "The address of a BGP peer")
 	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "The AS number for a BGP peer")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.BGPPeerConfig.Password, "peerPass", "", "The md5 password for a BGP peer")
