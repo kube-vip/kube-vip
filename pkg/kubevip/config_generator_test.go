@@ -321,3 +321,135 @@ func TestGeneratePodSpecRoutingTable(t *testing.T) {
 		})
 	}
 }
+
+func TestGeneratePodSpecBGPSettings(t *testing.T) {
+	bgpSettingsEnv := []string{bgpMultiHop, bgpHoldTime, bgpKeepaliveInterval, zebraEnable, zebraURL, zebraVersion, zebraSoftwareName}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "BGP mode emits multihop, timer and Zebra settings",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					HoldTime:          9,
+					KeepaliveInterval: 3,
+					Zebra: ZebraConfig{
+						Enabled:      true,
+						URL:          "unix:/run/frr/zserv.api",
+						Version:      6,
+						SoftwareName: "frr10.1",
+					},
+				},
+				BGPPeerConfig: BGPPeer{Address: "192.0.2.1", AS: 65001, MultiHop: true},
+			},
+			wantEnv: map[string]string{
+				bgpMultiHop:          "true",
+				bgpHoldTime:          "9",
+				bgpKeepaliveInterval: "3",
+				zebraEnable:          "true",
+				zebraURL:             "unix:/run/frr/zserv.api",
+				zebraVersion:         "6",
+				zebraSoftwareName:    "frr10.1",
+			},
+		},
+		{
+			name:    "BGP mode without settings emits none of them",
+			config:  Config{EnableBGP: true},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "Zebra connection settings are left out while Zebra is disabled",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					Zebra: ZebraConfig{
+						URL:          "unix:/var/run/frr/zserv.api",
+						Version:      6,
+						SoftwareName: "frr8.3",
+					},
+				},
+			},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "settings without BGP mode emit nothing",
+			config: Config{
+				BGPConfig: BGPConfig{
+					HoldTime:          9,
+					KeepaliveInterval: 3,
+					Zebra:             ZebraConfig{Enabled: true, URL: "unix:/run/frr/zserv.api"},
+				},
+				BGPPeerConfig: BGPPeer{MultiHop: true},
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(bgpSettingsEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("BGP pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestGeneratedBGPSettingsRoundTrip(t *testing.T) {
+	config := Config{
+		EnableBGP: true,
+		BGPConfig: BGPConfig{
+			AS:                65000,
+			HoldTime:          9,
+			KeepaliveInterval: 3,
+			Zebra: ZebraConfig{
+				Enabled:      true,
+				URL:          "unix:/run/frr/zserv.api",
+				Version:      6,
+				SoftwareName: "frr10.1",
+			},
+		},
+		BGPPeerConfig: BGPPeer{Address: "192.0.2.1", AS: 65001, MultiHop: true},
+	}
+
+	pod, err := generatePodSpec(&config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+	if err != nil {
+		t.Fatalf("generatePodSpec() error = %v", err)
+	}
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.ValueFrom == nil {
+			t.Setenv(env.Name, env.Value)
+		}
+	}
+
+	got := &Config{}
+	if err := ParseEnvironment(got); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+
+	if len(got.BGPConfig.Peers) != 1 || !got.BGPConfig.Peers[0].MultiHop {
+		t.Fatalf("BGP peers = %+v, want a single multihop peer", got.BGPConfig.Peers)
+	}
+	if got.BGPConfig.HoldTime != config.BGPConfig.HoldTime || got.BGPConfig.KeepaliveInterval != config.BGPConfig.KeepaliveInterval {
+		t.Fatalf("BGP timers = hold %d keepalive %d, want hold %d keepalive %d",
+			got.BGPConfig.HoldTime, got.BGPConfig.KeepaliveInterval, config.BGPConfig.HoldTime, config.BGPConfig.KeepaliveInterval)
+	}
+	if got.BGPConfig.Zebra != config.BGPConfig.Zebra {
+		t.Fatalf("Zebra config = %+v, want %+v", got.BGPConfig.Zebra, config.BGPConfig.Zebra)
+	}
+}

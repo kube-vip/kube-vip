@@ -559,6 +559,54 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			)
 		}
 
+		// Detect if the peer is more than one hop away
+		if c.BGPPeerConfig.MultiHop {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpMultiHop,
+				Value: strconv.FormatBool(c.BGPPeerConfig.MultiHop),
+			})
+		}
+
+		// BGP timers for all peers
+		if c.BGPConfig.HoldTime > 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpHoldTime,
+				Value: strconv.FormatUint(c.BGPConfig.HoldTime, 10),
+			})
+		}
+		if c.BGPConfig.KeepaliveInterval > 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpKeepaliveInterval,
+				Value: strconv.FormatUint(c.BGPConfig.KeepaliveInterval, 10),
+			})
+		}
+
+		// Zebra integration
+		if c.BGPConfig.Zebra.Enabled {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  zebraEnable,
+				Value: strconv.FormatBool(c.BGPConfig.Zebra.Enabled),
+			})
+			if c.BGPConfig.Zebra.URL != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraURL,
+					Value: c.BGPConfig.Zebra.URL,
+				})
+			}
+			if c.BGPConfig.Zebra.Version > 0 {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraVersion,
+					Value: strconv.FormatUint(uint64(c.BGPConfig.Zebra.Version), 10),
+				})
+			}
+			if c.BGPConfig.Zebra.SoftwareName != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraSoftwareName,
+					Value: c.BGPConfig.Zebra.SoftwareName,
+				})
+			}
+		}
+
 		var peers string
 		if len(c.BGPPeers) != 0 {
 			for x := range c.BGPPeers {
