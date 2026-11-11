@@ -93,6 +93,15 @@ gh attestation verify "oci://ghcr.io/kube-vip/kube-vip:${VERSION}" --repo kube-v
 The same cosign commands work with the Docker Hub names (`plndr/kube-vip`,
 `plndr/kube-vip-iptables`).
 
+Nightly images built from `main` are signed by `.github/workflows/main.yaml`;
+use the same commands with the `main` tag and this identity:
+
+```shell
+cosign verify ghcr.io/kube-vip/kube-vip:main \
+  --certificate-identity https://github.com/kube-vip/kube-vip/.github/workflows/main.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 Release binaries are covered by `kube-vip-checksums.txt`. Verify the checksums
 signature before trusting the hashes, then check the provenance of an
 individual binary:
