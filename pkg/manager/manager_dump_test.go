@@ -128,8 +128,10 @@ func TestDumpBGPSection(t *testing.T) {
 		config := &kubevip.Config{
 			EnableBGP: true,
 			BGPConfig: kubevip.BGPConfig{
-				RouterID: "192.168.1.1",
-				AS:       65000,
+				RouterID:         "192.168.1.1",
+				AS:               65000,
+				Communities:      []string{"65000:100", "no-export"},
+				LargeCommunities: []string{"4200000000:1:2"},
 				Peers: []kubevip.BGPPeer{
 					{Address: "192.168.1.2", AS: 65001},
 					{Address: "192.168.1.3", AS: 65002},
@@ -156,6 +158,8 @@ func TestDumpBGPSection(t *testing.T) {
 		assert.Contains(t, output, "BGP Router ID: 192.168.1.1")
 		assert.Contains(t, output, "BGP AS: 65000")
 		assert.Contains(t, output, "BGP Peers: 2")
+		assert.Contains(t, output, "BGP Communities: 65000:100,no-export")
+		assert.Contains(t, output, "BGP Large Communities: 4200000000:1:2")
 
 		assert.Contains(t, output, "--- ACTIVE BGP RIB STATE ---")
 		assert.Contains(t, output, "BGP Server instance is inactive or uninitialized")

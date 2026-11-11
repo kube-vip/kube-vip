@@ -131,6 +131,10 @@ const (
 	bgpHoldTime = "bgp_hold_time"
 	// bgpKeepaliveInterval defines bgp timers keepalive interval
 	bgpKeepaliveInterval = "bgp_keepalive_interval"
+	// bgpCommunities defines the comma-separated BGP communities attached to advertised routes
+	bgpCommunities = "bgp_communities"
+	// bgpLargeCommunities defines the comma-separated BGP large communities attached to advertised routes
+	bgpLargeCommunities = "bgp_large_communities"
 	// controlPlaneHealthCheckAddress defines the URL for control-plane health checks (BGP route withdrawal)
 	controlPlaneHealthCheckAddress = "control_plane_health_check_address"
 	// controlPlaneHealthCheckPeriodSeconds defines the period between control-plane health checks

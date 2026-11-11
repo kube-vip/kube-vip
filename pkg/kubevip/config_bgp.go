@@ -7,6 +7,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	api "github.com/osrg/gobgp/v4/api"
+	bgp "github.com/osrg/gobgp/v4/pkg/packet/bgp"
 
 	"github.com/vishvananda/netlink"
 )
@@ -43,6 +44,11 @@ type BGPConfig struct {
 	HoldTime          uint64 `yaml:"holdTime"`
 	KeepaliveInterval uint64 `yaml:"keepaliveInterval"`
 
+	// Communities are BGP communities (RFC 1997) attached to every advertised route
+	Communities []string `yaml:"communities"`
+	// LargeCommunities are BGP large communities (RFC 8092) attached to every advertised route
+	LargeCommunities []string `yaml:"largeCommunities"`
+
 	Peers []BGPPeer `yaml:"peers"`
 
 	Zebra ZebraConfig `yaml:"zebra"`
@@ -54,6 +60,57 @@ type ZebraConfig struct {
 	URL          string `yaml:"url"`
 	Version      uint32 `yaml:"version"`
 	SoftwareName string `yaml:"softwareName"`
+}
+
+// ParseBGPCommunities converts BGP communities (RFC 1997) into their 32-bit
+// values. Each community is either <0-65535>:<0-65535> (e.g. 65000:100) or a
+// well-known community name (e.g. no-export). Surrounding whitespace is ignored.
+func ParseBGPCommunities(communities []string) ([]uint32, error) {
+	values := make([]uint32, 0, len(communities))
+	for _, community := range communities {
+		value, err := parseBGPCommunity(strings.TrimSpace(community))
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func parseBGPCommunity(community string) (uint32, error) {
+	if wellKnown, ok := bgp.WellKnownCommunityValueMap[strings.ToLower(community)]; ok {
+		return uint32(wellKnown), nil
+	}
+
+	high, low, found := strings.Cut(community, ":")
+	if !found {
+		return 0, fmt.Errorf("BGP community %q is invalid, expected <0-65535>:<0-65535> or a well-known community name", community)
+	}
+	asn, err := strconv.ParseUint(high, 10, 16)
+	if err != nil {
+		return 0, fmt.Errorf("BGP community %q is invalid, %q is not a number between 0 and 65535", community, high)
+	}
+	value, err := strconv.ParseUint(low, 10, 16)
+	if err != nil {
+		return 0, fmt.Errorf("BGP community %q is invalid, %q is not a number between 0 and 65535", community, low)
+	}
+	return uint32(asn)<<16 | uint32(value), nil
+}
+
+// ParseBGPLargeCommunities converts BGP large communities (RFC 8092) written as
+// <0-4294967295>:<0-4294967295>:<0-4294967295> (e.g. 4200000000:1:2).
+// Surrounding whitespace is ignored.
+func ParseBGPLargeCommunities(communities []string) ([]*bgp.LargeCommunity, error) {
+	values := make([]*bgp.LargeCommunity, 0, len(communities))
+	for _, community := range communities {
+		community = strings.TrimSpace(community)
+		value, err := bgp.ParseLargeCommunity(community)
+		if err != nil {
+			return nil, fmt.Errorf("BGP large community %q is invalid, expected <0-4294967295>:<0-4294967295>:<0-4294967295>", community)
+		}
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 // BGP Peer layout is as follows:

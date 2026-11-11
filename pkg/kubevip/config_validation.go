@@ -31,7 +31,23 @@ func (c *Config) Validate() error {
 	if err := validatePprof(c.EnablePprof, c.PprofHTTPServer); err != nil {
 		return err
 	}
+	if err := validateBGPCommunities(c.BGPConfig); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// validateBGPCommunities rejects communities that cannot be attached to
+// advertised routes, so a typo is reported before any manifest is generated or
+// the manager connects to the cluster.
+func validateBGPCommunities(c BGPConfig) error {
+	if _, err := ParseBGPCommunities(c.Communities); err != nil {
+		return err
+	}
+	if _, err := ParseBGPLargeCommunities(c.LargeCommunities); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/nftables"
@@ -65,6 +66,8 @@ func (sm *Manager) dumpBGPSection(ctx context.Context) {
 		fmt.Printf("BGP Source Interface: %s\n", sm.config.BGPConfig.SourceIF)
 		fmt.Printf("BGP Hold Time: %d\n", sm.config.BGPConfig.HoldTime)
 		fmt.Printf("BGP Keepalive Interval: %d\n", sm.config.BGPConfig.KeepaliveInterval)
+		fmt.Printf("BGP Communities: %s\n", strings.Join(sm.config.BGPConfig.Communities, ","))
+		fmt.Printf("BGP Large Communities: %s\n", strings.Join(sm.config.BGPConfig.LargeCommunities, ","))
 		fmt.Printf("BGP Peers: %d\n", len(sm.config.BGPConfig.Peers))
 		for i, peer := range sm.config.BGPConfig.Peers {
 			fmt.Printf("  Peer %d: %s:%d (AS: %d, MultiHop: %t)\n",

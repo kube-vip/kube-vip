@@ -112,6 +112,36 @@ func TestValidate_RoutingProtocol(t *testing.T) {
 	}
 }
 
+func TestValidate_BGPCommunities(t *testing.T) {
+	tests := []struct {
+		name             string
+		communities      []string
+		largeCommunities []string
+		wantErr          string
+	}{
+		{name: "unset"},
+		{name: "valid", communities: []string{"65000:100", "no-export"}, largeCommunities: []string{"4200000000:1:2"}},
+		{name: "invalid community", communities: []string{"65000:100", "65536:1"}, wantErr: `BGP community "65536:1" is invalid`},
+		{name: "invalid large community", largeCommunities: []string{"65000:100"}, wantErr: `BGP large community "65000:100" is invalid`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{BGPConfig: BGPConfig{Communities: tt.communities, LargeCommunities: tt.largeCommunities}}
+			err := config.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestInstanceNameLimitReservesNftablesPrefixAndFamilySuffix(t *testing.T) {
 	name := strings.Repeat("a", instanceNameMaxLength)
 	if got := len(egressNftablesTablePrefix + name + egressNftablesTableSuffix); got != nftablesNameMaxLength {
