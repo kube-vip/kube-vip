@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- `kube-vip.io/dhcp-vendor-class` Service annotation to send a vendor class identifier (DHCP option 60) when kube-vip requests a DHCPv4 address for the Service, so the DHCP server can hand out LoadBalancer addresses from a dedicated pool. Fixes #411.
+  - The vendor class, and the host name and client identifier set by `kube-vip.io/loadbalancerHostname`, are also sent when the lease is renewed, so servers that match leases by client identifier or pools by vendor class keep renewing the same address
 - Static Linux binaries attached to GitHub releases for running kube-vip outside a container. Fixes #706.
   - A new `Attach binaries to GitHub releases` workflow runs when a release is published (or manually for an existing tag) and uploads `kube-vip-linux-<arch>` for `amd64`, `arm64`, `arm` (ARMv7), `ppc64le` and `s390x`, plus a `kube-vip-checksums.txt` SHA-256 file
   - The binaries are built by the new `make release-binaries` target, which writes them to `dist/` and stamps them with the release tag

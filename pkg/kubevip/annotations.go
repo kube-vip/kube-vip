@@ -94,4 +94,8 @@ const (
 
 	// Set the BROADCAST flag in DHCP DISCOVER/REQUEST packets
 	DHCPBroadcast = "kube-vip.io/dhcp-broadcast"
+
+	// Vendor class identifier (DHCP option 60) sent by the DHCPv4 client, so the
+	// DHCP server can assign the LoadBalancer address from a specific pool
+	DHCPVendorClass = "kube-vip.io/dhcp-vendor-class"
 )
