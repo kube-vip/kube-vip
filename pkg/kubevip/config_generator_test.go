@@ -453,3 +453,105 @@ func TestGeneratedBGPSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("Zebra config = %+v, want %+v", got.BGPConfig.Zebra, config.BGPConfig.Zebra)
 	}
 }
+
+func TestGeneratePodSpecLoadBalancerClass(t *testing.T) {
+	lbClassEnv := []string{lbClassName, lbClassLegacyHandling}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "default class and legacy handling emit nothing",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           LBClassName,
+				LoadBalancerClassLegacyHandling: true,
+			},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "custom class name and disabled legacy handling are emitted",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+				LoadBalancerClassLegacyHandling: false,
+			},
+			wantEnv: map[string]string{
+				lbClassName:           "kube-vip.io/kube-vip-class-b",
+				lbClassLegacyHandling: "false",
+			},
+		},
+		{
+			name: "empty class name is emitted",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           "",
+				LoadBalancerClassLegacyHandling: true,
+			},
+			wantEnv: map[string]string{
+				lbClassName: "",
+			},
+		},
+		{
+			name: "class settings without services emit nothing",
+			config: Config{
+				LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+				LoadBalancerClassLegacyHandling: false,
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(lbClassEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("load balancer class pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestGeneratedLoadBalancerClassRoundTrip(t *testing.T) {
+	config := Config{
+		EnableServices:                  true,
+		LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+		LoadBalancerClassLegacyHandling: false,
+	}
+
+	pod, err := generatePodSpec(&config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+	if err != nil {
+		t.Fatalf("generatePodSpec() error = %v", err)
+	}
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.ValueFrom == nil {
+			t.Setenv(env.Name, env.Value)
+		}
+	}
+
+	// Start from the flag defaults the pod would otherwise run with
+	got := &Config{LoadBalancerClassName: LBClassName, LoadBalancerClassLegacyHandling: true}
+	if err := ParseEnvironment(got); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+
+	if got.LoadBalancerClassName != config.LoadBalancerClassName {
+		t.Fatalf("LoadBalancerClassName = %q, want %q", got.LoadBalancerClassName, config.LoadBalancerClassName)
+	}
+	if got.LoadBalancerClassLegacyHandling != config.LoadBalancerClassLegacyHandling {
+		t.Fatalf("LoadBalancerClassLegacyHandling = %t, want %t", got.LoadBalancerClassLegacyHandling, config.LoadBalancerClassLegacyHandling)
+	}
+}

@@ -360,6 +360,20 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			}
 			newEnvironment = append(newEnvironment, lbClassOnlyVar...)
 		}
+		// An empty class name is meaningful (it matches Services without a class), so only the default is left out
+		if c.LoadBalancerClassName != LBClassName {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  lbClassName,
+				Value: c.LoadBalancerClassName,
+			})
+		}
+		// Legacy class handling is enabled by default, so it only needs writing when it has been turned off
+		if !c.LoadBalancerClassLegacyHandling {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  lbClassLegacyHandling,
+				Value: strconv.FormatBool(c.LoadBalancerClassLegacyHandling),
+			})
+		}
 		if c.EnableServiceSecurity {
 			EnableServiceSecurityVar := []corev1.EnvVar{
 				{

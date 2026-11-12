@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func TestRuntimeCommandConfigPrecedence(t *testing.T) {
@@ -174,5 +176,38 @@ func TestRuntimeCommandFilePreservesFlagPeerDefaults(t *testing.T) {
 	}
 	if peer := initConfig.BGPConfig.Peers[0]; peer.Address != "192.0.2.10" || peer.AS != 65000 {
 		t.Fatalf("BGP peer = %#v, want address 192.0.2.10 with default AS 65000", peer)
+	}
+}
+
+func TestLoseLeadershipTimeoutFlagNames(t *testing.T) {
+	const flagName, deprecatedName = "loseLeadershipTimeoutSeconds", "loseLeadershiptTimeoutSeconds"
+
+	deprecated := kubeVipCmd.PersistentFlags().Lookup(deprecatedName)
+	if deprecated == nil || deprecated.Deprecated == "" {
+		t.Fatalf("--%s should remain available as a deprecated flag", deprecatedName)
+	}
+
+	for _, name := range []string{flagName, deprecatedName} {
+		t.Run(name, func(t *testing.T) {
+			flag := kubeVipCmd.PersistentFlags().Lookup(name)
+			if flag == nil {
+				t.Fatalf("--%s is not registered", name)
+			}
+			original := initConfig.LoseLeadershipTimeoutSeconds
+			t.Cleanup(func() {
+				initConfig.LoseLeadershipTimeoutSeconds = original
+				flag.Changed = false
+			})
+
+			flags := pflag.NewFlagSet(name, pflag.ContinueOnError)
+			flags.SetOutput(io.Discard)
+			flags.AddFlag(flag)
+			if err := flags.Parse([]string{"--" + name + "=10"}); err != nil {
+				t.Fatal(err)
+			}
+			if initConfig.LoseLeadershipTimeoutSeconds != 10 {
+				t.Fatalf("LoseLeadershipTimeoutSeconds = %d, want 10", initConfig.LoseLeadershipTimeoutSeconds)
+			}
+		})
 	}
 }

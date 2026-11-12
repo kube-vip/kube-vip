@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shut down the `health_check_port` server when the manager stops, so a node that loses leadership exits and restarts instead of hanging with `/healthz` still answering OK.
 - Write the `--tableID`, `--tableType`, `--routingProtocol` and `--cleanRoutingTable` settings into the generated manifest in routing table mode instead of leaving the defaults in place.
 - Write the `--multihop`, `--bgpHoldTimer`, `--bgpKeepAliveInterval` and Zebra (`--zebra`, `--zebraUrl`, `--zebraVersion`, `--zebraSoftwareName`) settings into the generated manifest in BGP mode instead of dropping them, which left the pod peering single-hop with the default timers and without Zebra. Fixes #1844.
+- Write the `--lbClassName` and `--lbClassNameLegacyHandling` settings into the generated manifest in services mode instead of dropping them, which left the pod watching Services of the default load balancer class with legacy class handling. Rename the misspelled `--loseLeadershiptTimeoutSeconds` flag to `--loseLeadershipTimeoutSeconds`, keeping the old name as a deprecated alias.
 
 
 ### Added
