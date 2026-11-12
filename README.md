@@ -122,6 +122,63 @@ All of these would require a separate level of configuration and in some infrast
 
 ## Troubleshooting and Feedback
 
+### Log format
+
+kube-vip writes text logs by default. To use JSON with `manager` or `service`,
+set `vip_logformat` in the container's environment:
+
+```yaml
+env:
+  - name: vip_logformat
+    value: "json"
+```
+
+You can also pass `--logFormat=json` or set `logFormat: json` in a runtime
+configuration file. The usual configuration precedence applies: explicit flags
+override environment variables, which override the file. Use `text` or an empty
+value to select text output; other format names are rejected.
+
+Each JSON log entry is written to stderr on a single line, with `time`, `level`
+and `msg` followed by any attributes supplied by the logging call. For example:
+
+```json
+{"time":"2026-10-30T12:00:00Z","level":"INFO","msg":"kube-vip.io","version":"...","build":"..."}
+```
+
+Timestamps use RFC3339 strings, including fractional seconds when present. If
+you need milliseconds since the Unix epoch instead, add this to the same `env`
+section:
+
+```yaml
+  - name: vip_logtimestampformat
+    value: "unix-ms"
+```
+
+The equivalent flag is `--logTimestampFormat=unix-ms`, or you can set
+`logTimestampFormat: unix-ms` in the configuration file. This writes `time` as
+an integer JSON number. Set the option to `rfc3339`, or leave it empty, to use
+the default format. Other timestamp formats are rejected. This option only
+affects top-level time-valued `time` fields in JSON logs; time attributes with
+other names or inside groups keep their original representation.
+
+Log verbosity is still controlled by `--log` or `vip_loglevel`: `-4` for debug,
+`0` for info, `4` for warnings and `8` for errors. In JSON mode, Go's standard
+`log` calls are assigned INFO because they carry no severity information.
+Kubernetes library logs from `klog`, including `client-go`, use the same JSON
+handler. The klog adapter also maps legacy `klog.Warning*` calls to INFO, so
+both kinds of messages are filtered out at WARN or ERROR thresholds. Existing
+klog verbosity settings and text-mode logging are unchanged.
+
+When generating a Pod or DaemonSet manifest, the JSON and Unix-millisecond
+options are carried into the container's environment. Default manifests stay
+the same.
+
+Logging is configured after the runtime configuration has been loaded, so
+errors reading that configuration can still appear as text. Manifest YAML,
+`version` output and the SIGUSR1 diagnostic dump keep their existing formats.
+Panic/fatal stack traces and independent library loggers other than klog also
+keep their existing output.
+
 ### SELinux and IPVS kernel modules
 
 When using IPVS load balancing on nodes with SELinux enforcing, kube-vip may be
