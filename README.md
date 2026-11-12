@@ -65,6 +65,61 @@ WantedBy=multi-user.target
 
 `make release-binaries` builds the same set of binaries locally into `dist/`.
 
+### Verifying release artifacts
+
+Container images and release binaries are signed keylessly with
+[cosign](https://docs.sigstore.dev/cosign/overview/) using the GitHub Actions
+OIDC identity. Release images and binaries also have a signed SLSA build
+provenance attestation available through the GitHub attestation API, and each
+image has a signed CycloneDX SBOM attestation in the registry.
+
+Signatures and SBOM attestations are attached in both the current Sigstore
+bundle format and the legacy cosign format, so cosign v3 (recommended) and
+cosign v2 can verify the same artifacts.
+
+For images published by a release (`ghcr.io/kube-vip/kube-vip:<version>`,
+`plndr/kube-vip:<version>`, and the corresponding `kube-vip-iptables` images):
+
+```shell
+VERSION=vX.Y.Z # the release to verify
+
+cosign verify "ghcr.io/kube-vip/kube-vip:${VERSION}" \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation --type cyclonedx "ghcr.io/kube-vip/kube-vip:${VERSION}" \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+gh attestation verify "oci://ghcr.io/kube-vip/kube-vip:${VERSION}" --repo kube-vip/kube-vip
+```
+
+The same cosign commands work with the Docker Hub names (`plndr/kube-vip`,
+`plndr/kube-vip-iptables`).
+
+Nightly images built from `main` are signed by `.github/workflows/main.yaml`;
+use the same commands with the `main` tag and this identity:
+
+```shell
+cosign verify ghcr.io/kube-vip/kube-vip:main \
+  --certificate-identity https://github.com/kube-vip/kube-vip/.github/workflows/main.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Release binaries are covered by `kube-vip-checksums.txt`. Verify the checksums
+signature before trusting the hashes, then check the provenance of an
+individual binary:
+
+```shell
+cosign verify-blob kube-vip-checksums.txt \
+  --bundle kube-vip-checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release-binaries\.yaml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum --check --ignore-missing kube-vip-checksums.txt
+
+gh attestation verify kube-vip-linux-amd64 --repo kube-vip/kube-vip
+```
+
 ### Runtime configuration files
 
 The `manager` and `service` commands accept strict YAML or JSON configuration

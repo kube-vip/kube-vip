@@ -6,6 +6,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
@@ -31,9 +34,11 @@ jobs:
       - name: Ensure fs wont cause issues
         run: sudo sysctl fs.inotify.max_user_instances=8192 &&  sudo sysctl fs.inotify.max_user_watches=524288
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Build image locally
@@ -57,7 +62,7 @@ jobs:
         run: sudo chmod -R 755 /tmp/kube-vip-test*
         if: matrix.mode == 'bgp' && always()
       - name: Save logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-test-logs-${{ matrix.mode }}-${{ steps.date.outputs.date }}
           path: /tmp/kube-vip-test*
@@ -71,9 +76,11 @@ jobs:
         id: date
         run: echo "date=$(date +'%Y-%m-%d-%H-%M')" >> "$GITHUB_OUTPUT"
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Build image with iptables
@@ -81,7 +88,7 @@ jobs:
       - name: Run tests
         run: DOCKER_API_VERSION=1.48 DOCKERTAG=action E2E_KEEP_LOGS=true make service-tests
       - name: Save logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: services-test-logs-${{ steps.date.outputs.date }}
           path: /tmp/kube-vip-services*

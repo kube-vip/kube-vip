@@ -12,23 +12,57 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   binaries:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
+      - name: Validate release ref
+        run: |
+          if [ "${GITHUB_REF}" != "refs/tags/${RELEASE_TAG}" ]; then
+            echo "::error::Run this workflow from the ${RELEASE_TAG} tag so the signed provenance matches the checked-out release commit (got ${GITHUB_REF})."
+            exit 1
+          fi
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
       - name: Install Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - name: Build binaries
         run: make release-binaries VERSION="${RELEASE_TAG}"
+      - name: Generate SBOM for binaries
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: dist
+          format: cyclonedx-json
+          output-file: dist/kube-vip-binaries.cdx.json
+          syft-version: v1.57.1
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Attest binary provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/kube-vip-checksums.txt
+      - name: Sign checksums and SBOM
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle dist/kube-vip-checksums.txt.sigstore.json dist/kube-vip-checksums.txt
+          cosign sign-blob --yes --bundle dist/kube-vip-binaries.cdx.json.sigstore.json dist/kube-vip-binaries.cdx.json
       - name: Upload binaries to the release
         env:
           GH_TOKEN: ${{ github.token }}

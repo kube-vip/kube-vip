@@ -6,36 +6,49 @@ on:
       - '*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
 jobs:
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Login to DockerHub
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Login to Github Packages
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
       - name: Generate Metadata
-        uses: docker/metadata-action@v6.2.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: metadata
         with:
           labels: |
             org.opencontainers.image.documentation=https://kube-vip.io/docs/
       - name: Build and push main branch
         id: docker_build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x
@@ -46,9 +59,37 @@ jobs:
             plndr/kube-vip:latest,
             ghcr.io/kube-vip/kube-vip:${{ github.ref_name }},
             ghcr.io/kube-vip/kube-vip:latest
+      - name: Generate SBOM for kube-vip
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ghcr.io/kube-vip/kube-vip@${{ steps.docker_build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: kube-vip.cdx.json
+          syft-version: v1.57.1
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Sign and attest kube-vip
+        env:
+          DIGEST: ${{ steps.docker_build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for image in ghcr.io/kube-vip/kube-vip plndr/kube-vip; do
+            # Preferred: Sigstore bundle format (cosign v3 default, cosign v2.6+)
+            cosign sign --yes "${image}@${DIGEST}"
+            cosign attest --yes --type cyclonedx --predicate kube-vip.cdx.json "${image}@${DIGEST}"
+            # Compatibility: legacy format for cosign v2.5 and earlier
+            cosign sign --yes --use-signing-config=false --new-bundle-format=false "${image}@${DIGEST}"
+            cosign attest --yes --use-signing-config=false --new-bundle-format=false --type cyclonedx --predicate kube-vip.cdx.json "${image}@${DIGEST}"
+          done
+      - name: Attest kube-vip provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/kube-vip/kube-vip
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
       - name: Build iptables version and push main branch
         id: docker_build_iptables
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile_iptables
@@ -60,5 +101,35 @@ jobs:
             plndr/kube-vip-iptables:latest,
             ghcr.io/kube-vip/kube-vip-iptables:${{ github.ref_name }},
             ghcr.io/kube-vip/kube-vip-iptables:latest
+      - name: Generate SBOM for kube-vip-iptables
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ghcr.io/kube-vip/kube-vip-iptables@${{ steps.docker_build_iptables.outputs.digest }}
+          format: cyclonedx-json
+          output-file: kube-vip-iptables.cdx.json
+          syft-version: v1.57.1
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Sign and attest kube-vip-iptables
+        env:
+          DIGEST: ${{ steps.docker_build_iptables.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for image in ghcr.io/kube-vip/kube-vip-iptables plndr/kube-vip-iptables; do
+            # Preferred: Sigstore bundle format (cosign v3 default, cosign v2.6+)
+            cosign sign --yes "${image}@${DIGEST}"
+            cosign attest --yes --type cyclonedx --predicate kube-vip-iptables.cdx.json "${image}@${DIGEST}"
+            # Compatibility: legacy format for cosign v2.5 and earlier
+            cosign sign --yes --use-signing-config=false --new-bundle-format=false "${image}@${DIGEST}"
+            cosign attest --yes --use-signing-config=false --new-bundle-format=false --type cyclonedx --predicate kube-vip-iptables.cdx.json "${image}@${DIGEST}"
+          done
+      - name: Attest kube-vip-iptables provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/kube-vip/kube-vip-iptables
+          subject-digest: ${{ steps.docker_build_iptables.outputs.digest }}
       - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        env:
+          DIGEST: ${{ steps.docker_build.outputs.digest }}
+        run: echo "$DIGEST"
