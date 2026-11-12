@@ -49,6 +49,7 @@ type Instance struct {
 	DHCPv6Client        vip.DHCPClient
 	macvlanName         string
 	dhcpBroadcast       bool
+	dhcpVendorClass     string
 	dhcpInterfaceOwned  atomic.Bool
 
 	// Service use Vlan
@@ -367,6 +368,11 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 		instance.macvlanName = svc.Annotations[kubevip.MacvlanName]
 		instance.dhcpBroadcast = svc.Annotations[kubevip.DHCPBroadcast] == "true"
+		instance.dhcpVendorClass = svc.Annotations[kubevip.DHCPVendorClass]
+		// DHCP option lengths are encoded in a single byte
+		if len(instance.dhcpVendorClass) > 255 {
+			return fmt.Errorf("annotation %q cannot be longer than 255 bytes", kubevip.DHCPVendorClass)
+		}
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -757,7 +763,8 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 			initRebootFlag = true
 		}
 
-		client = vip.NewDHCPv4Client(iface, initRebootFlag, instance.DHCPInterfaceIPv4, backoffAttempts, instance.dhcpBroadcast)
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, instance.DHCPInterfaceIPv4, backoffAttempts, instance.dhcpBroadcast).
+			WithVendorClass(instance.dhcpVendorClass)
 
 		// Add the client so that we can call it to stop function
 		instance.DHCPv4Client = client
@@ -767,6 +774,10 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 	} else {
 		if instance.DHCPInterfaceIPv6 != "" {
 			initRebootFlag = true
+		}
+
+		if instance.dhcpVendorClass != "" {
+			log.Warn("[DHCP] vendor class is only sent by the DHCPv4 client, ignoring it for DHCPv6", "interface", interfaceName, "annotation", kubevip.DHCPVendorClass)
 		}
 
 		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
