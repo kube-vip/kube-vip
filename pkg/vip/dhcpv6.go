@@ -5,8 +5,10 @@ import (
 	"fmt"
 	log "log/slog"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv6"
@@ -79,8 +81,44 @@ type DHCPv6InternalClient struct {
 }
 
 func NewDHCPv6InternalClient(iface string) (*DHCPv6InternalClient, error) {
-	client, err := nclient6.New(iface)
+	native, err := net.InterfaceByName(iface)
 	if err != nil {
+		return nil, fmt.Errorf("failed to create DHCPv6 client for interface %q: %w", iface, err)
+	}
+	ip, err := dhcpv6.GetLinkLocalAddr(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DHCPv6 client for interface %q: %w", iface, err)
+	}
+	// Interface names can retain an obsolete IPv6 zone index after recreation.
+	conn, err := net.ListenUDP("udp6", &net.UDPAddr{IP: ip, Port: dhcpv6.DefaultClientPort, Zone: strconv.Itoa(native.Index)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DHCPv6 client for interface %q: %w", iface, err)
+	}
+	raw, err := conn.SyscallConn()
+	var socketErr error
+	if err == nil {
+		err = raw.Control(func(fd uintptr) {
+			bound, err := syscall.Getsockname(int(fd))
+			if err != nil {
+				socketErr = err
+				return
+			}
+			addr, ok := bound.(*syscall.SockaddrInet6)
+			if !ok || addr.ZoneId != uint32(native.Index) {
+				socketErr = fmt.Errorf("DHCPv6 socket did not bind native interface index %d", native.Index)
+			}
+		})
+	}
+	if err != nil {
+		socketErr = err
+	}
+	if socketErr != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to create DHCPv6 client for interface %q: %w", iface, socketErr)
+	}
+	client, err := nclient6.NewWithConn(conn, native.HardwareAddr)
+	if err != nil {
+		_ = conn.Close()
 		return nil, fmt.Errorf("failed to create DHCPv6 client for interface %q: %w", iface, err)
 	}
 
@@ -104,6 +142,7 @@ type DHCPv6Client struct {
 	ic              *DHCPv6InternalClient
 	addr            *dhcpv6.OptIAAddress
 	backoffAttempts uint
+	startCancel     context.CancelFunc
 	stop            sync.Once
 	mtx             sync.RWMutex
 }
@@ -158,9 +197,15 @@ func (c *DHCPv6Client) Stop() {
 // Close dhcp client channels
 func (c *DHCPv6Client) close() {
 	c.stop.Do(func() {
+		c.mtx.Lock()
+		defer c.mtx.Unlock()
 		close(c.stopChan)
+		if c.startCancel != nil {
+			c.startCancel()
+		} else {
+			dhcpv6ClientManager.Delete(c.managerKey)
+		}
 	})
-	dhcpv6ClientManager.Delete(c.managerKey)
 }
 
 // Gets the IPChannel for consumption
@@ -174,6 +219,26 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 }
 
 func (c *DHCPv6Client) Start(ctx context.Context) error {
+	c.mtx.Lock()
+	select {
+	case <-c.stopChan:
+		c.mtx.Unlock()
+		return fmt.Errorf("DHCPv6 client stopped before Start")
+	default:
+	}
+	if c.startCancel != nil {
+		c.mtx.Unlock()
+		return fmt.Errorf("DHCPv6 client already started")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	c.startCancel = cancel
+	c.mtx.Unlock()
+	defer func() {
+		c.close()
+		// Keep this owner's shared socket reference until RELEASE has finished.
+		dhcpv6ClientManager.Delete(c.managerKey)
+	}()
+
 	addr, err := c.requestWithBackoff(ctx)
 
 	if err != nil {

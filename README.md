@@ -137,6 +137,135 @@ generator-only `loadBalancers`, `bgpPeers`, `singleNode`, `startAsLeader`, and
 Use `bgpConfig.peers` for BGP peers; the legacy single `bgpPeerConfig` form is
 also accepted and normalized into the runtime peer list.
 
+### DHCPv4 Service lease safety
+
+DHCPv4 lease deadlines are measured from receipt of the ACK, not from delivery
+of an address to a consumer. `Stop` is latched and cancels acquisition, retries
+and renewal; await the client's `Start` completion before relinquishing its
+interface. A renewal or rebind ACK for another address is rejected without
+refreshing the bound address's expiry. Fresh DORA acquisition after a NAK can
+still allocate and publish a new address.
+
+Service supervision uses actual client completion to cancel its captured
+Service generation, including when status publication is stalled. Address
+changes retire old local workers before API publication and use canonical
+Service generation replacement after matching status/watch feedback. This can
+interrupt traffic and release/re-request DHCP; it is not an in-place or
+zero-downtime address swap.
+
+Instance-managed DHCP macvlans carry the native alias
+`kube-vip:dhcp:v1:<full Service UID>:<canonical MAC>`. Adoption requires matching
+UID, type, parent, mode, MAC and marker; unmarked or foreign same-name links are
+refused before link changes or DHCP. An omitted MAC annotation can reuse the
+validated persisted MAC. Explicit MACs must be six-byte, nonzero unicast values;
+Service UIDs must contain 8–128 ASCII letters, digits, `-`, `_` or `.`. Selected
+DHCP interface names must be 1–15 bytes, not `.` or `..`, with no `/`, `:`,
+whitespace or NUL. With a recorded DHCPv4 completion signal, attachment cleanup
+signals `Stop` and waits for actual `Start` completion before ownership transfer
+or link deletion. There is no timeout-delete fallback: the attachment is retained
+while completion is pending. Cleanup still validates captured native identity;
+client transports check the original index/name/MAC/alias rather than reopening
+a reused name. These checks do not
+provide atomic validate-and-operate or authenticate concurrent privileged
+identity forging/index reuse.
+
+### Isolated DHCPv4 lifecycle checks
+
+The [client](pkg/vip/dhcpv4_backoff_test.go) and
+[Service](pkg/services/dhcpv4_lifecycle_linux_test.go) integration checks exercise
+real public lifecycle APIs, native interfaces and packets with synthetic
+external DHCP/Kubernetes peers, not mocked product methods. Compile on Linux or
+cross-compile the public test binaries:
+
+```shell
+test_dir="$(mktemp -d /tmp/kube-vip-dhcp-tests.XXXXXX)"
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c -mod=readonly -o "$test_dir/vip.test" ./pkg/vip
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c -mod=readonly -o "$test_dir/services.test" ./pkg/services
+```
+
+Run them only in a dedicated network-none Linux namespace initially containing
+only loopback. Use a read-only root filesystem, mount only the public binary
+read-only, drop all capabilities and add only `NET_ADMIN`, `NET_RAW` and
+`NET_BIND_SERVICE`. Inside that namespace set `KUBE_VIP_ISOLATED_DHCP_TEST=1` and
+run `vip.test -test.run '^TestDHCPv4' -test.v` or `services.test -test.v`.
+Never use host networking or add `SYS_ADMIN` to remove namespace-related skips.
+
+These traces are not a complete shared-address, VLAN, IPv6, BGP/election,
+late-event, rollback or live-deployment certification. Preserve explicit skips
+and unexercised cases as coverage gaps rather than treating a passing suite as
+proof of every lease-ownership mode.
+
+### Scoped DHCPv6 lifecycle checks
+
+Each DHCPv6 client accepts one `Start`. `Stop` before `Start` releases its reserved
+manager reference; during `Start`, it cancels only that owner's operation. The
+reference is retained until actual `Start` completion, after active-lease RELEASE
+cleanup has been attempted. `Stop` is a signal, not a completion join: await
+`Start` before retiring its interface. `Instance.CleanupLinkAttachments` stops
+both families and waits for their actual `Start` completion before transferring
+or deleting attachments, including an owned VLAN used as the IPv6 transport
+parent. Its IPv6 signal closes only after `Start` and its deferred manager-reference
+cleanup return; no timer or forced socket-close override is added. A failed remote
+RELEASE is still an error, not a guarantee that a server has released the lease.
+
+Managed IPv6 sockets bind the current native interface index rather than a
+cached interface-name zone. The constructor verifies the actual bound native
+scope and closes its owned socket on failure. This is not atomic protection
+against concurrent privileged interface replacement or index reuse.
+
+The [Linux client checks](pkg/vip/dhcpv6_lifecycle_linux_test.go) exercise real
+public acquisition, matching active-lease RELEASE and same-name interface
+reconstruction, including consecutive cases in one process. They use the same
+binary compilation and isolated three-capability network boundary above. Select
+`TestDHCPv6PublicStartAcquiresLease`, `TestDHCPv6StopReleasesActiveLease` and
+`TestDHCPv6PublicConstructorRecreatesInterfaceWithSameName`. The additional
+`TestDHCPv6StopPreservesOtherActiveClientOnSharedParent` covers two active clients
+with distinct explicit hostname-derived DUIDs and leases: stopping one releases
+only its lease, while the other renews past its original expiry before its own
+matching RELEASE and completed `Start`. Both callers and native interfaces stay
+live. The synthetic peer receives raw IPv6 packets and replies through native
+UDP6; a separate raw socket observes the wire. Product client methods are not
+mocked. The decoder self-check `TestDHCPv6WireObserverRecognizesRelease` needs no
+added capabilities.
+
+The Service fixture also includes
+`TestDHCPDualStackServiceWatchDeleteStopsClientsAndReleasesLeases`: a real external
+Kubernetes Deleted event retires one no-VLAN dual-stack Service. Both leases,
+kernel VIPs and statuses are established first; independent matching IPv4/IPv6
+wire RELEASEs, actual client Start completion readback, IPv6 socket closure,
+indexed attachment/instance removal and endpoint-watch cancellation are checked
+with the root watcher, caller and original parent/peer live before T1.
+
+The public Instance checks also create an owned VLAN through a static Service
+constructor and transfer it to a real DHCPv6 Service using public cleanup.
+Normal Stop and immediate Cleanup traces check the original lease's matching
+SOLICIT/RELEASE wire/peer sequence, actual Start worker completion, indexed
+VLAN/macvlan deletion and live original base/peer/caller before T1. Those responsive
+8-second cases remain unchanged. The separate
+`TestDHCPv6InstanceDelayedStopReleasesLeaseBeforeOwnedVLANRemoval` and
+`TestDHCPv6InstanceDelayedCleanupWaitsBeforeOwnedVLANRemoval` use a 16-second
+synthetic lease and withhold only the first terminal SOLICIT's ADVERTISE. The
+normal Stop control observes the library's actual unchanged 5-second retry and
+matching RELEASE with the parent retained. Cleanup during the independently
+observed hold must complete actual Start before native indexed VLAN retirement;
+raw/peer identity, actual worker, base/peer/caller and pre-T1 controls remain
+required. Only the new fixture window changes; existing cases and all product,
+library and runtime timers are unchanged.
+
+The standalone IPv6-only watched-deletion case uses only an IPv6 Service family,
+client and endpoint, with no IPv4 client, completion wait or DHCP wire traffic.
+It checks the real lease, kernel VIP/status, raw/peer RELEASE correlation, actual
+IPv6 Start completion/socket closure and owned attachment/instance removal with
+the endpoint watch cancelled and original parent/peer/root watcher/caller live
+before T1.
+
+These checks do not certify unannotated/shared-identity cases, other peer-delay
+or late-event schedules, concurrent VLAN replacement, rollback, all ownership
+modes or live deployment. Keep those gaps and historical skips explicit; unit
+reference-count checks alone are not shared-wire proof. The implemented actual
+Start join and the bounded held-peer trace are not a general atomic ownership
+or interface-index-reuse guarantee.
+
 ## Features
 
 Kube-Vip was originally created to provide a HA solution for the Kubernetes control plane, over time it has evolved to incorporate that same functionality into Kubernetes service type [load-balancers](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).

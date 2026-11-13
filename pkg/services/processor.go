@@ -905,7 +905,55 @@ func changedSinceWatched(i *instance.Instance, svcCtx *servicecontext.Context, s
 // serviceChanged compares a tracked instance to the current Service. The caller
 // must hold the Service lock for i.UID().
 func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
-	return serviceSnapshotChanged(i.ServiceSnapshot, svc)
+	if serviceSnapshotChanged(i.ServiceSnapshot, svc) {
+		return true
+	}
+	// DHCP updates its lease/config before status feedback, not the constructed network.
+	// ponytail: reuse generation replacement; lease-preserving swaps need their own lifecycle.
+	for index, address := range i.Addresses() {
+		ipv4 := address == "0.0.0.0"
+		if (!ipv4 && address != "::") || (ipv4 && !i.IsDHCPv4) || (!ipv4 && !i.IsDHCPv6) {
+			continue
+		}
+		if index >= len(i.VIPConfigs) || i.VIPConfigs[index] == nil || index >= len(i.Clusters) || i.Clusters[index] == nil {
+			continue
+		}
+		leaseAddress := i.DHCPInterfaceIPv4
+		if !ipv4 {
+			leaseAddress = i.DHCPInterfaceIPv6
+		}
+		leaseIP := net.ParseIP(leaseAddress)
+		if leaseIP == nil || leaseIP.IsUnspecified() || (leaseIP.To4() != nil) != ipv4 || !leaseIP.Equal(net.ParseIP(i.VIPConfigs[index].VIP)) {
+			continue
+		}
+		published := false
+		for _, ingress := range svc.Status.LoadBalancer.Ingress {
+			if leaseIP.Equal(net.ParseIP(ingress.IP)) {
+				published = true
+				break
+			}
+		}
+		if !published {
+			continue
+		}
+		var constructedIP net.IP
+		networks := 0
+		for _, network := range i.Clusters[index].Network {
+			if network == nil {
+				continue
+			}
+			ip := net.ParseIP(network.IP())
+			if ip == nil || ip.IsUnspecified() || (ip.To4() != nil) != ipv4 {
+				continue
+			}
+			constructedIP = ip
+			networks++
+		}
+		if networks == 1 && !leaseIP.Equal(constructedIP) {
+			return true
+		}
+	}
+	return false
 }
 
 func serviceSnapshotChanged(original, svc *v1.Service) bool {
