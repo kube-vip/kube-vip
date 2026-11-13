@@ -90,6 +90,51 @@ func TestNewInstanceDHCPVendorClass(t *testing.T) {
 	}
 }
 
+func TestNewInstanceDHCPVendorClassEnterpriseNumber(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		vendorClass      string
+		enterpriseNumber string
+		want             uint32
+		wantErr          bool
+	}{
+		{name: "not annotated", vendorClass: "kube-vip"},
+		{name: "annotated", vendorClass: "kube-vip", enterpriseNumber: "32473", want: 32473},
+		{name: "largest enterprise number", vendorClass: "kube-vip", enterpriseNumber: "4294967295", want: 4294967295},
+		{name: "reserved enterprise number", vendorClass: "kube-vip", enterpriseNumber: "0", wantErr: true},
+		{name: "enterprise number too large", vendorClass: "kube-vip", enterpriseNumber: "4294967296", wantErr: true},
+		{name: "enterprise number not a number", vendorClass: "kube-vip", enterpriseNumber: "kube-vip", wantErr: true},
+		{name: "enterprise number without vendor class", enterpriseNumber: "32473", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := &kubevip.Config{Interface: "lo", VIPSubnet: "32", EnableBGP: true}
+			annotations := map[string]string{kubevip.LoadbalancerIPAnnotation: "192.0.2.10"}
+			if test.vendorClass != "" {
+				annotations[kubevip.DHCPVendorClass] = test.vendorClass
+			}
+			if test.enterpriseNumber != "" {
+				annotations[kubevip.DHCPVendorClassEnterpriseNumber] = test.enterpriseNumber
+			}
+			svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default", Annotations: annotations}}
+
+			instance, err := NewInstance(context.Background(), svc, config,
+				networkinterface.NewManager(), arp.NewManager(config), route.NewManager(), nil, &sync.WaitGroup{})
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), kubevip.DHCPVendorClassEnterpriseNumber) {
+					t.Fatalf("NewInstance() error = %v, want an error about %q", err, kubevip.DHCPVendorClassEnterpriseNumber)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewInstance() error = %v", err)
+			}
+			if instance.dhcpEnterpriseNum != test.want {
+				t.Fatalf("dhcpEnterpriseNum = %d, want %d", instance.dhcpEnterpriseNum, test.want)
+			}
+		})
+	}
+}
+
 func TestTransferLinkAttachmentOwnershipConcurrent(t *testing.T) {
 	target := &Instance{IsVLAN: true, VLANInterface: "eth0.42"}
 	var wg sync.WaitGroup
