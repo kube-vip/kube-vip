@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skip the shared-VIP admission check for DHCP placeholder addresses (`0.0.0.0` and `::`), so independent DHCP Services are no longer rejected as sharing a VIP. Fixes #1835.
 - Clear the active egress endpoint during a zero-endpoint transition so restoring the same endpoint triggers egress reconciliation. Fixes #1830.
 - Treat `kube-vip.io/egress-detect-api-server: "false"` as disabled instead of adding the API server address to the egress denied networks.
+- Expire DHCPv4 leases independently of consumer/API backpressure and reconcile fresh leases through Service watches.
+- Validate retained DHCPv4 interface identity and drain DHCPv4/IPv6 clients before retiring owned attachments.
 - Create distinct anonymous nftables destination-port sets for each egress allowed-network rule, preventing `EBUSY` when multiple allowed networks and destination ports are combined. Fixes #1804.
 - Use host scope for local routing-table routes so Linux accepts IPv4 `RTN_LOCAL` routes without assigning the VIP to an interface.
 - Make `manager` and `service` runtime configuration presence-aware, with explicit CLI flags taking precedence over environment variables, configuration files, and defaults. Strict YAML/JSON loading now preserves explicit false, zero, and empty values and normalizes standalone BGP peer configuration for runtime use.

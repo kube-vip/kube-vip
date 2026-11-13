@@ -47,10 +47,15 @@ type Instance struct {
 	DHCPHostname        string
 	DHCPv4Client        vip.DHCPClient
 	DHCPv6Client        vip.DHCPClient
-	macvlanName         string
-	dhcpBroadcast       bool
-	dhcpVendorClass     string
-	dhcpInterfaceOwned  atomic.Bool
+	// DHCPServiceCancel is set and called under the Service lock, before normal DHCP teardown.
+	DHCPServiceCancel  context.CancelFunc
+	dhcpv4Done         <-chan struct{}
+	dhcpv6Done         <-chan struct{}
+	macvlanName        string
+	dhcpBroadcast      bool
+	dhcpVendorClass    string
+	dhcpInterfaceOwned atomic.Bool
+	dhcpLinkIdentity   *netlink.Macvlan
 
 	// Service use Vlan
 	IsVLAN        bool
@@ -76,6 +81,11 @@ type Instance struct {
 
 func (instance *Instance) UID() types.UID {
 	return instance.ServiceUID
+}
+
+// DHCPv4Done closes when the real DHCPv4 client returns from Start; it is nil without DHCPv4.
+func (instance *Instance) DHCPv4Done() <-chan struct{} {
+	return instance.dhcpv4Done
 }
 
 func (instance *Instance) Addresses() []string {
@@ -601,9 +611,9 @@ func (instance *Instance) addVLAN(parentInterface string, tag int) error {
 	return nil
 }
 
-// CleanupLinkAttachments stops this instance's DHCP clients and removes only
-// VLAN or macvlan links created by this instance that are not used by a
-// remaining Service instance.
+// CleanupLinkAttachments stops this instance's DHCP clients and removes its owned
+// VLAN links or DHCP macvlans matching their captured identity, unless a remaining
+// Service instance uses the attachment.
 func (instance *Instance) CleanupLinkAttachments(remaining ...*Instance) error {
 	var errs []error
 	if instance.DHCPv4Client != nil {
@@ -612,10 +622,18 @@ func (instance *Instance) CleanupLinkAttachments(remaining ...*Instance) error {
 	if instance.DHCPv6Client != nil {
 		instance.DHCPv6Client.Stop()
 	}
+	// Keep the attachment available until real Start finishes its RELEASE.
+	if done := instance.DHCPv4Done(); done != nil {
+		<-done
+	}
+	// IPv6 retains its managed parent-socket reference through terminal cleanup.
+	if instance.dhcpv6Done != nil {
+		<-instance.dhcpv6Done
+	}
 	if instance.dhcpInterfaceOwned.Load() {
 		if transferLinkAttachmentOwnership(instance.DHCPInterface, remaining, false) {
 			instance.dhcpInterfaceOwned.Store(false)
-		} else if err := deleteOwnedLink(instance.DHCPInterface, "DHCP"); err != nil {
+		} else if err := instance.deleteDHCPLink(); err != nil {
 			errs = append(errs, err)
 		} else {
 			instance.dhcpInterfaceOwned.Store(false)
@@ -631,6 +649,32 @@ func (instance *Instance) CleanupLinkAttachments(remaining ...*Instance) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (instance *Instance) deleteDHCPLink() error {
+	identity := instance.dhcpLinkIdentity
+	if identity == nil || identity.Attrs().Index <= 0 {
+		return fmt.Errorf("missing captured DHCP interface identity")
+	}
+	// Never follow a reused name after the constructor-validated indexed link is gone.
+	link, err := netlink.LinkByIndex(identity.Attrs().Index)
+	if err != nil {
+		var notFound netlink.LinkNotFoundError
+		if errors.As(err, &notFound) {
+			return nil
+		}
+		return fmt.Errorf("inspect captured DHCP interface: %w", err)
+	}
+	mac, ok := link.(*netlink.Macvlan)
+	attrs, expected := link.Attrs(), identity.Attrs()
+	if !ok || attrs.Index != expected.Index || attrs.Name != expected.Name || attrs.ParentIndex != expected.ParentIndex ||
+		attrs.HardwareAddr.String() != expected.HardwareAddr.String() || attrs.Alias != expected.Alias || mac.Mode != identity.Mode {
+		return fmt.Errorf("refusing cleanup of changed DHCP interface %q", expected.Name)
+	}
+	if err := netlink.LinkDel(mac); err != nil {
+		return fmt.Errorf("delete captured DHCP interface %q: %w", expected.Name, err)
+	}
+	return nil
 }
 
 func transferLinkAttachmentOwnership(name string, instances []*Instance, vlan bool) bool {
@@ -671,70 +715,138 @@ func deleteOwnedLink(name, kind string) error {
 	return nil
 }
 
-func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint, wg *sync.WaitGroup) error {
+func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttempts uint, wg *sync.WaitGroup) (startErr error) {
 	if len(instance.VIPConfigs) > 2 {
 		return fmt.Errorf("DHCP can be used with 2 VIP config maximally, got: %v", len(instance.VIPConfigs))
 	}
+	if index < 0 || index >= len(instance.VIPConfigs) || instance.VIPConfigs[index] == nil {
+		return fmt.Errorf("missing DHCP VIP configuration")
+	}
+	uid := string(instance.UID())
+	if len(uid) < 8 || len(uid) > 128 {
+		return fmt.Errorf("invalid DHCP Service UID length")
+	}
+	for _, char := range uid {
+		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-' || char == '_' || char == '.') {
+			return fmt.Errorf("invalid DHCP Service UID")
+		}
+	}
+	interfaceName := instance.macvlanName
+	if interfaceName == "" {
+		interfaceName = "vip-" + uid[:8]
+	}
+	if len(interfaceName) > 15 || interfaceName == "." || interfaceName == ".." || strings.ContainsAny(interfaceName, "/: \t\r\n\x00") {
+		return fmt.Errorf("invalid DHCP interface name")
+	}
 	parent, err := netlink.LinkByName(instance.VIPConfigs[index].Interface)
 	if err != nil {
-		return fmt.Errorf("error finding VIP Interface, for building DHCP Link : %v", err)
+		return fmt.Errorf("find DHCP parent interface: %w", err)
 	}
-
-	interfaceName := instance.macvlanName
-
-	if interfaceName == "" {
-		// Generate name from UID
-		interfaceName = fmt.Sprintf("vip-%s", instance.UID()[0:8])
+	var requestedMAC net.HardwareAddr
+	if instance.DHCPInterfaceHwaddr != "" {
+		requestedMAC, err = net.ParseMAC(instance.DHCPInterfaceHwaddr)
+		if err != nil || len(requestedMAC) != 6 || requestedMAC[0]&1 != 0 || requestedMAC.String() == "00:00:00:00:00:00" {
+			return fmt.Errorf("invalid explicit DHCP Ethernet MAC")
+		}
 	}
+	ownerPrefix := "kube-vip:dhcp:v1:" + uid + ":"
+	var created *netlink.Macvlan
+	var createdAlias string
+	defer func() {
+		if startErr == nil || created == nil {
+			return
+		}
+		// Never let generic error cleanup delete an unchecked same-name replacement.
+		instance.dhcpInterfaceOwned.Store(false)
+		instance.DHCPInterface = ""
+		if created.Attrs().Index <= 0 {
+			startErr = errors.Join(startErr, fmt.Errorf("created DHCP interface has no captured index; preserving it"))
+			return
+		}
+		current, err := netlink.LinkByIndex(created.Attrs().Index)
+		if err != nil {
+			var notFound netlink.LinkNotFoundError
+			if !errors.As(err, &notFound) {
+				startErr = errors.Join(startErr, fmt.Errorf("inspect created DHCP interface rollback: %w", err))
+			}
+			return
+		}
+		mac, ok := current.(*netlink.Macvlan)
+		if !ok || mac.Attrs().Name != interfaceName || mac.Attrs().Index != created.Attrs().Index ||
+			mac.Attrs().ParentIndex != parent.Attrs().Index || mac.Attrs().HardwareAddr.String() != created.Attrs().HardwareAddr.String() ||
+			(mac.Mode != netlink.MACVLAN_MODE_DEFAULT && mac.Mode != netlink.MACVLAN_MODE_VEPA) ||
+			(mac.Attrs().Alias != "" && mac.Attrs().Alias != createdAlias) {
+			startErr = errors.Join(startErr, fmt.Errorf("created DHCP interface identity changed; preserving it"))
+			return
+		}
+		startErr = errors.Join(startErr, netlink.LinkDel(mac))
+	}()
 
-	// Check if the interface doesn't exist first
-	iface, err := net.InterfaceByName(interfaceName)
+	link, err := netlink.LinkByName(interfaceName)
 	if err != nil {
-		log.Info("creating new macvlan interface for DHCP", "interface", interfaceName)
-
-		hwaddr, err := net.ParseMAC(instance.DHCPInterfaceHwaddr)
-		if instance.DHCPInterfaceHwaddr != "" && err != nil {
-			return err
-		} else if hwaddr == nil {
+		var notFound netlink.LinkNotFoundError
+		if !errors.As(err, &notFound) {
+			return fmt.Errorf("find DHCP interface %q: %w", interfaceName, err)
+		}
+		hwaddr := requestedMAC
+		if hwaddr == nil {
 			hwaddr, err = net.ParseMAC(vip.GenerateMac())
-			if err != nil {
-				return err
+			if err != nil || len(hwaddr) != 6 || hwaddr[0]&1 != 0 || hwaddr.String() == "00:00:00:00:00:00" {
+				return fmt.Errorf("invalid generated DHCP Ethernet MAC")
 			}
 		}
-
-		log.Info("new macvlan interface", "interface", interfaceName, "hardware address", hwaddr)
 		mac := &netlink.Macvlan{
 			LinkAttrs: netlink.LinkAttrs{
-				Name:         interfaceName,
-				ParentIndex:  parent.Attrs().Index,
-				HardwareAddr: hwaddr,
+				Name: interfaceName, ParentIndex: parent.Attrs().Index, HardwareAddr: hwaddr,
 			},
 			Mode: netlink.MACVLAN_MODE_DEFAULT,
 		}
-
-		err = netlink.LinkAdd(mac)
-		if err != nil {
-			return fmt.Errorf("could not add %s: %v", interfaceName, err)
+		if err := netlink.LinkAdd(mac); err != nil {
+			return fmt.Errorf("create DHCP interface %q: %w", interfaceName, err)
 		}
-		instance.dhcpInterfaceOwned.Store(true)
-
-		err = netlink.LinkSetUp(mac)
-		if err != nil {
-			return fmt.Errorf("could not bring up interface [%s] : %v", interfaceName, err)
+		created, createdAlias = mac, ownerPrefix+hwaddr.String()
+		if err := netlink.LinkSetAlias(mac, createdAlias); err != nil {
+			return fmt.Errorf("mark created DHCP interface: %w", err)
 		}
-
-		iface, err = net.InterfaceByName(interfaceName)
+		link, err = netlink.LinkByName(interfaceName)
 		if err != nil {
-			return fmt.Errorf("error finding new DHCP interface by name [%v]", err)
+			return fmt.Errorf("read back created DHCP interface: %w", err)
 		}
-	} else {
-		log.Info("Using existing macvlan interface for DHCP", "interface", interfaceName)
 	}
+
+	mac, ok := link.(*netlink.Macvlan)
+	if !ok || mac.Attrs().ParentIndex != parent.Attrs().Index ||
+		(mac.Mode != netlink.MACVLAN_MODE_DEFAULT && mac.Mode != netlink.MACVLAN_MODE_VEPA) ||
+		!strings.HasPrefix(mac.Attrs().Alias, ownerPrefix) {
+		return fmt.Errorf("refusing unowned or incompatible DHCP interface %q", interfaceName)
+	}
+	persistedMAC, err := net.ParseMAC(strings.TrimPrefix(mac.Attrs().Alias, ownerPrefix))
+	if err != nil || len(persistedMAC) != 6 || persistedMAC[0]&1 != 0 || persistedMAC.String() == "00:00:00:00:00:00" ||
+		mac.Attrs().Alias != ownerPrefix+persistedMAC.String() || mac.Attrs().HardwareAddr.String() != persistedMAC.String() ||
+		(requestedMAC != nil && requestedMAC.String() != persistedMAC.String()) {
+		return fmt.Errorf("refusing DHCP interface %q with mismatched ownership MAC", interfaceName)
+	}
+	if created != nil && mac.Attrs().Index != created.Attrs().Index {
+		return fmt.Errorf("created DHCP interface index changed")
+	}
+	if err := netlink.LinkSetUp(mac); err != nil {
+		return fmt.Errorf("bring up owned DHCP interface %q: %w", interfaceName, err)
+	}
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil || iface.Index != mac.Attrs().Index || iface.HardwareAddr.String() != persistedMAC.String() {
+		return fmt.Errorf("owned DHCP interface identity changed before client construction")
+	}
+	// ponytail: native metadata proves constructor reuse; transport/teardown identity has separate gates.
+	instance.DHCPInterface = interfaceName
+	instance.DHCPInterfaceHwaddr = persistedMAC.String()
+	instance.dhcpLinkIdentity = mac
+	instance.dhcpInterfaceOwned.Store(true)
 
 	var initRebootFlag bool
 	ip := net.ParseIP(instance.VIPConfigs[index].VIP)
 
 	var client vip.DHCPClient
+	var clientDone chan struct{}
 	if ip.To4() != nil {
 		// Default rp_filter setting (https://github.com/kube-vip/kube-vip/issues/1170)
 		rpfilterSetting := "0"
@@ -771,6 +883,8 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 
 		// Set that DHCPv4 is enabled
 		instance.IsDHCPv4 = true
+		clientDone = make(chan struct{})
+		instance.dhcpv4Done = clientDone
 	} else {
 		if instance.DHCPInterfaceIPv6 != "" {
 			initRebootFlag = true
@@ -790,6 +904,8 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 
 		// Set that DHCPv6 is enabled
 		instance.IsDHCPv6 = true
+		clientDone = make(chan struct{})
+		instance.dhcpv6Done = clientDone
 	}
 
 	// Add hostname to dhcp client if annotated
@@ -799,7 +915,11 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 	}
 
 	wg.Go(func() {
-		if err := client.Start(ctx); err != nil {
+		err := client.Start(ctx)
+		if clientDone != nil {
+			close(clientDone)
+		}
+		if err != nil {
 			log.Error("[instance] DHCP client", "error", err)
 			client.Stop()
 		}
