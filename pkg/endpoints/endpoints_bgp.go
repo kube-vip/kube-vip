@@ -7,6 +7,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	v1 "k8s.io/api/core/v1"
 )
@@ -45,7 +46,7 @@ func (b *BGP) processInstance(ctx context.Context, configuredNetworks *sync.Map,
 }
 
 func (b *BGP) clear(ctx context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
-	if !usesServiceElection(b.config, service) && !b.config.EnableLeaderElection {
+	if !kubevip.UsesServiceElection(b.config, service) && !b.config.EnableLeaderElection {
 		// If BGP mode is enabled - routes should be deleted
 		if inst != nil {
 			for _, cluster := range inst.Clusters {

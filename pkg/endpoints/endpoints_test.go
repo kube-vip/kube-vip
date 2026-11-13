@@ -688,30 +688,3 @@ func TestReconcileOnDemandElectionLeavesDatapathToLeader(t *testing.T) {
 		})
 	}
 }
-
-func TestUsesServiceElection(t *testing.T) {
-	t.Parallel()
-
-	forced := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"}}}
-	plain := &v1.Service{}
-	tests := []struct {
-		name    string
-		config  kubevip.Config
-		service *v1.Service
-		want    bool
-	}{
-		{name: "svc_election covers every Service", config: kubevip.Config{EnableServicesElection: true}, service: plain, want: true},
-		{name: "on demand covers an annotated Service", config: kubevip.Config{PerServiceElectionOnDemand: true}, service: forced, want: true},
-		{name: "on demand skips an unannotated Service", config: kubevip.Config{PerServiceElectionOnDemand: true}, service: plain},
-		{name: "annotation alone is not election", config: kubevip.Config{}, service: forced},
-		{name: "nil Service", config: kubevip.Config{PerServiceElectionOnDemand: true}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := usesServiceElection(&tt.config, tt.service); got != tt.want {
-				t.Fatalf("usesServiceElection() = %t, want %t", got, tt.want)
-			}
-		})
-	}
-}

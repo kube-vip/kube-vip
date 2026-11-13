@@ -10,6 +10,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	v1 "k8s.io/api/core/v1"
@@ -49,7 +50,7 @@ func (rt *RoutingTable) processInstance(_ context.Context, configuredNetworks *s
 }
 
 func (rt *RoutingTable) clear(_ context.Context, configuredNetworks *sync.Map, lastKnownGoodEndpoint *string, service *v1.Service, inst *instance.Instance) {
-	if !usesServiceElection(rt.config, service) {
+	if !kubevip.UsesServiceElection(rt.config, service) {
 		if errs := ClearRoutesByInstance(service, inst, nil, rt.routeMgr); len(errs) == 0 {
 			configuredNetworks.Clear()
 		} else {
