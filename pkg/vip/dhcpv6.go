@@ -218,6 +218,14 @@ func (c *DHCPv6Client) ErrorChannel() chan error {
 	return c.errorChan
 }
 
+func (c *DHCPv6Client) reportError(ctx context.Context, err error) {
+	select {
+	case c.errorChan <- err:
+	case <-c.stopChan:
+	case <-ctx.Done():
+	}
+}
+
 func (c *DHCPv6Client) Start(ctx context.Context) error {
 	c.mtx.Lock()
 	select {
@@ -354,7 +362,7 @@ RequestLoop:
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv6 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv6] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					c.reportError(ctx, errMsg)
 					return nil, fmt.Errorf("failed to get IPv6 address: %w", err)
 				}
 				log.Error("[DHCPv6] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
