@@ -50,6 +50,7 @@ type Instance struct {
 	macvlanName         string
 	dhcpBroadcast       bool
 	dhcpVendorClass     string
+	dhcpEnterpriseNum   uint32
 	dhcpInterfaceOwned  atomic.Bool
 
 	// Service use Vlan
@@ -372,6 +373,17 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		// DHCP option lengths are encoded in a single byte
 		if len(instance.dhcpVendorClass) > 255 {
 			return fmt.Errorf("annotation %q cannot be longer than 255 bytes", kubevip.DHCPVendorClass)
+		}
+		if enterpriseNumber := svc.Annotations[kubevip.DHCPVendorClassEnterpriseNumber]; enterpriseNumber != "" {
+			if instance.dhcpVendorClass == "" {
+				return fmt.Errorf("annotation %q requires annotation %q", kubevip.DHCPVendorClassEnterpriseNumber, kubevip.DHCPVendorClass)
+			}
+			// IANA reserves enterprise number 0, so it also marks the number as unset
+			number, err := strconv.ParseUint(enterpriseNumber, 10, 32)
+			if err != nil || number == 0 {
+				return fmt.Errorf("annotation %q must be an enterprise number between 1 and 4294967295, got %q", kubevip.DHCPVendorClassEnterpriseNumber, enterpriseNumber)
+			}
+			instance.dhcpEnterpriseNum = uint32(number)
 		}
 	}
 
@@ -776,14 +788,19 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 			initRebootFlag = true
 		}
 
-		if instance.dhcpVendorClass != "" {
-			log.Warn("[DHCP] vendor class is only sent by the DHCPv4 client, ignoring it for DHCPv6", "interface", interfaceName, "annotation", kubevip.DHCPVendorClass)
-		}
-
-		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
+		dhcpv6Client, err := vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
 		if err != nil {
 			return fmt.Errorf("unable to create client: %w", err)
 		}
+
+		if instance.dhcpVendorClass != "" {
+			if instance.dhcpEnterpriseNum == 0 {
+				log.Warn("[DHCP] no enterprise number set for the vendor class, ignoring it for DHCPv6", "interface", interfaceName, "annotation", kubevip.DHCPVendorClassEnterpriseNumber)
+			} else {
+				dhcpv6Client.WithVendorClass(instance.dhcpEnterpriseNum, instance.dhcpVendorClass)
+			}
+		}
+		client = dhcpv6Client
 
 		// Add the client so that we can call it to stop function
 		instance.DHCPv6Client = client

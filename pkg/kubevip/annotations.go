@@ -96,6 +96,12 @@ const (
 	DHCPBroadcast = "kube-vip.io/dhcp-broadcast"
 
 	// Vendor class identifier (DHCP option 60) sent by the DHCPv4 client, so the
-	// DHCP server can assign the LoadBalancer address from a specific pool
+	// DHCP server can assign the LoadBalancer address from a specific pool. The
+	// DHCPv6 client sends it in the Vendor Class option (16) when
+	// DHCPVendorClassEnterpriseNumber is also set
 	DHCPVendorClass = "kube-vip.io/dhcp-vendor-class"
+
+	// IANA Private Enterprise Number that the DHCPv6 client sends with the
+	// vendor class in the Vendor Class option (16)
+	DHCPVendorClassEnterpriseNumber = "kube-vip.io/dhcp-vendor-class-enterprise-number"
 )
