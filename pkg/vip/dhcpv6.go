@@ -96,6 +96,7 @@ type DHCPv6Client struct {
 	iface           *net.Interface
 	managerKey      string
 	ddnsHostName    string
+	vendorClass     *dhcpv6.OptVendorClass
 	initRebootFlag  bool
 	requestedIP     net.IP
 	stopChan        chan struct{} // used as a signal to release the IP and stop the dhcp client daemon
@@ -147,6 +148,20 @@ func NewDHCPv6Client(iface *net.Interface, parent netlink.Link, initRebootFlag b
 
 func (c *DHCPv6Client) WithHostName(hostname string) DHCPClient {
 	c.ddnsHostName = hostname
+	return c
+}
+
+// WithVendorClass sets the Vendor Class option (16) that the client sends when
+// it requests, renews and rebinds its lease. RFC 8415 qualifies the vendor
+// class with the IANA Private Enterprise Number of the vendor.
+func (c *DHCPv6Client) WithVendorClass(enterpriseNumber uint32, vendorClass string) *DHCPv6Client {
+	c.vendorClass = nil
+	if vendorClass != "" {
+		c.vendorClass = &dhcpv6.OptVendorClass{
+			EnterpriseNumber: enterpriseNumber,
+			Data:             [][]byte{[]byte(vendorClass)},
+		}
+	}
 	return c
 }
 
@@ -319,9 +334,7 @@ RequestLoop:
 }
 
 func (c *DHCPv6Client) request(ctx context.Context, rebind bool) (*dhcpv6.OptIAAddress, error) {
-	modifiers := []dhcpv6.Modifier{}
-	modifiers = append(modifiers, dhcpv6.WithClientID(&dhcpv6.DUIDEN{EnterpriseNumber: 1, EnterpriseIdentifier: []byte(c.ddnsHostName)}))
-	modifiers = append(modifiers, dhcpv6.WithFQDN(4, c.ddnsHostName))
+	modifiers := c.requestOptions()
 
 	// if initRebootFlag is set, this means we have an IP already set on c.requestedIP that should be used
 	if c.initRebootFlag {
@@ -378,9 +391,7 @@ func (c *DHCPv6Client) request(ctx context.Context, rebind bool) (*dhcpv6.OptIAA
 }
 
 func (c *DHCPv6Client) renew(ctx context.Context) (*dhcpv6.OptIAAddress, error) {
-	modifiers := []dhcpv6.Modifier{}
-	modifiers = append(modifiers, dhcpv6.WithClientID(&dhcpv6.DUIDEN{EnterpriseNumber: 1, EnterpriseIdentifier: []byte(c.ddnsHostName)}))
-	modifiers = append(modifiers, dhcpv6.WithFQDN(4, c.ddnsHostName))
+	modifiers := c.requestOptions()
 	modifiers = append(modifiers, dhcpv6.WithOption(&dhcpv6.OptionGeneric{OptionCode: dhcpv6.OptionUnicast}))
 
 	adv, err := c.ic.client.Solicit(ctx, modifiers...)
@@ -388,7 +399,7 @@ func (c *DHCPv6Client) renew(ctx context.Context) (*dhcpv6.OptIAAddress, error) 
 		return nil, fmt.Errorf("solicit error: %w", err)
 	}
 
-	request, err := dhcpv6.NewRequestFromAdvertise(adv)
+	request, err := dhcpv6.NewRequestFromAdvertise(adv, c.requestOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request message: %w", err)
 	}
@@ -401,6 +412,21 @@ func (c *DHCPv6Client) renew(ctx context.Context) (*dhcpv6.OptIAAddress, error) 
 	}
 
 	return getAddress(reply.Options.IANA())
+}
+
+// requestOptions returns the options that identify the client in a Solicit,
+// Request, Renew or Rebind. Servers that select the address pool by vendor
+// class evaluate the class on every one of them, so a Renew without it could
+// fall outside the pool.
+func (c *DHCPv6Client) requestOptions() []dhcpv6.Modifier {
+	modifiers := []dhcpv6.Modifier{
+		dhcpv6.WithClientID(&dhcpv6.DUIDEN{EnterpriseNumber: 1, EnterpriseIdentifier: []byte(c.ddnsHostName)}),
+		dhcpv6.WithFQDN(4, c.ddnsHostName),
+	}
+	if c.vendorClass != nil {
+		modifiers = append(modifiers, dhcpv6.WithOption(c.vendorClass))
+	}
+	return modifiers
 }
 
 func (c *DHCPv6Client) release(ctx context.Context) error {

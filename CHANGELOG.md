@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- `kube-vip.io/dhcp-vendor-class-enterprise-number` Service annotation to send the `kube-vip.io/dhcp-vendor-class` vendor class in the DHCPv6 Vendor Class option (16) when kube-vip requests a DHCPv6 address for the Service. RFC 8415 qualifies the vendor class with an IANA Private Enterprise Number, so the DHCPv6 client only sends the vendor class when this annotation is set as well.
+  - The vendor class is sent in the Solicit and Request messages and again when the lease is renewed or rebound, so servers that pick the address pool by vendor class keep renewing the same address
+  - The DHCPv6 Renew message now also carries the client FQDN set by `kube-vip.io/loadbalancerHostname`, which was only sent with the Solicit that precedes it
 - `kube-vip.io/dhcp-vendor-class` Service annotation to send a vendor class identifier (DHCP option 60) when kube-vip requests a DHCPv4 address for the Service, so the DHCP server can hand out LoadBalancer addresses from a dedicated pool. Fixes #411.
   - The vendor class, and the host name and client identifier set by `kube-vip.io/loadbalancerHostname`, are also sent when the lease is renewed, so servers that match leases by client identifier or pools by vendor class keep renewing the same address
 - Static Linux binaries attached to GitHub releases for running kube-vip outside a container. Fixes #706.
