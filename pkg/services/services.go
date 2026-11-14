@@ -304,7 +304,7 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 	}
 
 	// is not a global leader election mode
-	if p.config.EnableServicesElection || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
+	if kubevip.UsesServiceElection(p.config, svc) || (!p.config.EnableARP && !p.config.EnableLeaderElection) || (!p.config.EnableARP && !p.config.EnableRoutingTable) {
 		if err := endpoints.StartService(ctx, svc, inst, p.bgpServer, wg); err != nil {
 			return fmt.Errorf("start service datapath: %w", err)
 		}

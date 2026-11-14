@@ -144,6 +144,10 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup, instanceAddresses, instanceHostnames []string) error {
 	var newVips []*kubevip.Config
+	// The VIP's datapath is programmed by whoever activates it. With
+	// per-service election, on demand included, that is only the election
+	// winner, which must then advertise the route itself.
+	servicesElection := kubevip.UsesServiceElection(config, svc)
 	var link netlink.Link
 	var err error
 
@@ -274,7 +278,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DHCPMode:               config.DHCPMode,
 			DHCPBackoffAttempts:    config.DHCPBackoffAttempts,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: servicesElection,
 			// cleanupVIPs reads this from the per-VIP config, so Service VIPs need it too.
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
@@ -341,7 +345,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DNSMode:                config.DNSMode,
 			DHCPMode:               config.DHCPMode,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: servicesElection,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
