@@ -57,7 +57,7 @@ func InitCluster(c *kubevip.Config, disableVIP bool, intfMgr *networkinterface.M
 	if c.ControlPlaneHealthCheck.Address != "" {
 		healthCheckHTTPClient, err = newHealthCheckHTTPClient(c)
 		if err != nil {
-			return nil, fmt.Errorf("initializing BGP health check client: %w", err)
+			return nil, fmt.Errorf("initializing control-plane health check client: %w", err)
 		}
 	}
 
