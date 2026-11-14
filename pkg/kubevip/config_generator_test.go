@@ -555,3 +555,65 @@ func TestGeneratedLoadBalancerClassRoundTrip(t *testing.T) {
 		t.Fatalf("LoadBalancerClassLegacyHandling = %t, want %t", got.LoadBalancerClassLegacyHandling, config.LoadBalancerClassLegacyHandling)
 	}
 }
+
+func TestGeneratePodSpecWritesManagerFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name:    "defaults emit none",
+			config:  Config{EnableServices: true, EgressWithNftables: true},
+			wantEnv: map[string]string{},
+		},
+		{
+			name:    "log level",
+			config:  Config{Logging: 5, EgressWithNftables: true},
+			wantEnv: map[string]string{vipLogLevel: "5"},
+		},
+		{
+			name:    "per-service election on demand",
+			config:  Config{EnableServices: true, PerServiceElectionOnDemand: true, EgressWithNftables: true},
+			wantEnv: map[string]string{perServiceElectionOnDemand: "true"},
+		},
+		{
+			name:    "iptables egress",
+			config:  Config{EnableServices: true, EgressWithNftables: false},
+			wantEnv: map[string]string{egressWithNftables: "false"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if env.Name == vipLogLevel || env.Name == perServiceElectionOnDemand || env.Name == egressWithNftables {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("pod environment = %v, want %v", got, tt.wantEnv)
+			}
+
+			for name, value := range got {
+				t.Setenv(name, value)
+			}
+			parsed := Config{EgressWithNftables: true}
+			if err := ParseEnvironment(&parsed); err != nil {
+				t.Fatalf("ParseEnvironment() error = %v", err)
+			}
+			if parsed.Logging != tt.config.Logging || parsed.PerServiceElectionOnDemand != tt.config.PerServiceElectionOnDemand || parsed.EgressWithNftables != tt.config.EgressWithNftables {
+				t.Fatalf("manager config from the manifest = {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}, want {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}",
+					parsed.Logging, parsed.PerServiceElectionOnDemand, parsed.EgressWithNftables,
+					tt.config.Logging, tt.config.PerServiceElectionOnDemand, tt.config.EgressWithNftables)
+			}
+		})
+	}
+}
