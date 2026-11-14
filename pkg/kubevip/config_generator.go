@@ -209,6 +209,12 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			},
 		},
 	}
+	if c.Logging != 0 {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogLevel,
+			Value: strconv.FormatInt(int64(c.Logging), 10),
+		})
+	}
 	if c.InstanceName != "" {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{
 			Name:  instanceName,
@@ -350,6 +356,19 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				},
 			}
 			newEnvironment = append(newEnvironment, svcElection...)
+		}
+		if c.PerServiceElectionOnDemand {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  perServiceElectionOnDemand,
+				Value: strconv.FormatBool(c.PerServiceElectionOnDemand),
+			})
+		}
+		// The nftables egress implementation is the default, so it only needs writing when it has been turned off
+		if !c.EgressWithNftables {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  egressWithNftables,
+				Value: strconv.FormatBool(c.EgressWithNftables),
+			})
 		}
 		if c.LoadBalancerClassOnly {
 			lbClassOnlyVar := []corev1.EnvVar{
