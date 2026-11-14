@@ -19,6 +19,12 @@ const (
 // Validate runs configuration checks that are independent of host state.
 // This should be called after all config sources (flags, file, env vars) are merged.
 func (c *Config) Validate() error {
+	if c.LogFormat != "" && c.LogFormat != "text" && c.LogFormat != "json" {
+		return fmt.Errorf("logFormat %q is invalid, expected text or json", c.LogFormat)
+	}
+	if c.LogTimestampFormat != "" && c.LogTimestampFormat != "rfc3339" && c.LogTimestampFormat != "unix-ms" {
+		return fmt.Errorf("logTimestampFormat %q is invalid, expected rfc3339 or unix-ms", c.LogTimestampFormat)
+	}
 	if err := validateHealthCheckAddress(c.ControlPlaneHealthCheck.Address); err != nil {
 		return err
 	}

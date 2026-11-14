@@ -127,6 +127,8 @@ func init() {
 
 	// Manage logging
 	kubeVipCmd.PersistentFlags().Int32Var(&initConfig.Logging, "log", 0, "Set the level of logging")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LogFormat, "logFormat", "text", "Log output format (text or json)")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.LogTimestampFormat, "logTimestampFormat", "rfc3339", "JSON log timestamp format (rfc3339 or unix-ms; ignored for text logs)")
 
 	// Service flags
 	kubeVipService.Flags().StringVarP(&configMap, "configMap", "c", "plndr", "The configuration map defined within the cluster")
@@ -237,6 +239,7 @@ var kubeVipService = &cobra.Command{
 		if err := loadRuntimeConfig(cmd); err != nil {
 			return err
 		}
+		configureLogging(&initConfig)
 		var err error
 		if err := initConfig.Validate(); err != nil {
 			return fmt.Errorf("validating configuration: %w", err)
@@ -246,9 +249,6 @@ var kubeVipService = &cobra.Command{
 		if initConfig.RoutingProtocol == unix.RTN_UNSPEC {
 			initConfig.RoutingProtocol = unix.RTN_UNICAST
 		}
-
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		if err := initConfig.CheckInterface(); err != nil {
 			return fmt.Errorf("checking interface: %w", err)
@@ -303,6 +303,7 @@ var kubeVipManager = &cobra.Command{
 		if err := loadRuntimeConfig(cmd); err != nil {
 			return err
 		}
+		configureLogging(&initConfig)
 		var err error
 		if err := initConfig.Validate(); err != nil {
 			return fmt.Errorf("validating configuration: %w", err)
@@ -312,9 +313,6 @@ var kubeVipManager = &cobra.Command{
 		if initConfig.RoutingProtocol == unix.RTN_UNSPEC {
 			initConfig.RoutingProtocol = unix.RTN_UNICAST
 		}
-
-		// Set the logging level for all subsequent functions
-		log.SetLogLoggerLevel(log.Level(initConfig.Logging))
 
 		// Legacy vip_address requires vip_subnet for control-plane ARP, BGP, and Routing Table modes.
 		if initConfig.EnableControlPlane &&

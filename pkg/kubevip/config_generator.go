@@ -215,6 +215,18 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			Value: c.InstanceName,
 		})
 	}
+	if c.LogFormat != "" && c.LogFormat != "text" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogFormat,
+			Value: c.LogFormat,
+		})
+	}
+	if c.LogTimestampFormat != "" && c.LogTimestampFormat != "rfc3339" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogTimestampFormat,
+			Value: c.LogTimestampFormat,
+		})
+	}
 
 	// If we're specifically saying which interface to use then add it to the manifest
 	if c.Interface != "" {
