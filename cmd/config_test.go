@@ -137,6 +137,31 @@ func TestRuntimeCommandSliceFlagPrecedence(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandBMPPrecedence(t *testing.T) {
+	path := writeRuntimeConfig(t, "bgpConfig:\n  bmp:\n    servers: [\"192.0.2.1\"]\n    policy: pre-policy\n    statisticsTimeout: 30\n")
+	t.Setenv("bgp_bmp_servers", "192.0.2.2")
+	t.Setenv("bgp_bmp_policy", "post-policy")
+	cmd := newRuntimeConfigTestCommand("manager")
+	cmd.Flags().StringSliceVar(&initConfig.BGPConfig.BMP.Servers, "bgpBmpServers", []string{}, "")
+	cmd.Flags().StringVar(&initConfig.BGPConfig.BMP.Policy, "bgpBmpPolicy", kubevip.BMPPolicyLocalRIB, "")
+	cmd.Flags().Uint16Var(&initConfig.BGPConfig.BMP.StatisticsTimeout, "bgpBmpStatisticsTimeout", 0, "")
+	if err := cmd.ParseFlags([]string{"--config-file=" + path, "--bgpBmpServers=192.0.2.3,[2001:db8::3]:5000"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadRuntimeConfig(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"192.0.2.3", "[2001:db8::3]:5000"}; !slices.Equal(initConfig.BGPConfig.BMP.Servers, want) {
+		t.Fatalf("BGPConfig.BMP.Servers = %#v, want %#v", initConfig.BGPConfig.BMP.Servers, want)
+	}
+	if initConfig.BGPConfig.BMP.Policy != kubevip.BMPPolicyPostPolicy {
+		t.Fatalf("BGPConfig.BMP.Policy = %q, want %q", initConfig.BGPConfig.BMP.Policy, kubevip.BMPPolicyPostPolicy)
+	}
+	if initConfig.BGPConfig.BMP.StatisticsTimeout != 30 {
+		t.Fatalf("BGPConfig.BMP.StatisticsTimeout = %d, want 30", initConfig.BGPConfig.BMP.StatisticsTimeout)
+	}
+}
+
 func newRuntimeConfigTestCommand(name string) *cobra.Command {
 	initConfig = kubevip.Config{ArpBroadcastRate: 3000}
 	cmd := &cobra.Command{Use: name}

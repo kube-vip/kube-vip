@@ -218,6 +218,44 @@ server.
 Exposed metrics cover service reconciliation events and errors, leader election
 transitions, BGP session state and build info (version, build, node).
 
+#### BGP Monitoring Protocol (BMP)
+
+In BGP mode kube-vip can report its BGP sessions and routes to one or more
+[BMP (RFC 7854)](https://www.rfc-editor.org/rfc/rfc7854) stations, such as
+[pmacct](https://www.pmacct.net/) or [OpenBMP](https://www.openbmp.org/). kube-vip
+connects to each station, retries with a backoff while it is unreachable, and
+sends Peer Up and Peer Down notifications for every BGP session.
+
+- `bgp_bmp_servers` / `--bgpBmpServers` / `bgpConfig.bmp.servers`: comma-separated
+  stations, each written as `<IPv4 address>[:<port>]` or `[<IPv6 address>][:<port>]`.
+  The port defaults to `11019`.
+- `bgp_bmp_policy` / `--bgpBmpPolicy` / `bgpConfig.bmp.policy`: the routes sent in
+  Route Monitoring messages (default `local-rib`)
+  - `local-rib`: the best routes in kube-vip's RIB ([RFC 9069](https://www.rfc-editor.org/rfc/rfc9069)),
+    including the control plane and Service VIP routes kube-vip advertises
+  - `pre-policy` / `post-policy`: the routes received from each peer, before or
+    after import policy
+  - `all`: all of the above
+- `bgp_bmp_statistics_timeout` / `--bgpBmpStatisticsTimeout` / `bgpConfig.bmp.statisticsTimeout`:
+  the interval in seconds between Statistics Reports for each established session,
+  between `15` and `65535`. The default `0` sends none.
+
+```yaml
+# Kubernetes manifest
+containers:
+  - name: kube-vip
+    env:
+      - name: bgp_enable
+        value: "true"
+      - name: bgp_bmp_servers
+        value: "192.168.0.10,[fd00::10]:5000"
+      - name: bgp_bmp_statistics_timeout
+        value: "60"
+```
+
+kube-vip refuses to start when a station is not an IP address, is listed twice,
+or when the policy or statistics interval is invalid.
+
 #### pprof endpoints (debug only)
 
 Profiling can be enabled with `--enablePprof` CLI flag or `enable_pprof` env variable, and listens on

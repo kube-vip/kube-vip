@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- BGP Monitoring Protocol (BMP, [RFC 7854](https://www.rfc-editor.org/rfc/rfc7854)) support in BGP mode, so BGP sessions and routes can be monitored from a BMP station. Fixes #1605.
+  - Reports Peer Up and Peer Down notifications for every BGP session and, by default, the control plane and Service VIP routes kube-vip advertises (`local-rib`, [RFC 9069](https://www.rfc-editor.org/rfc/rfc9069))
+  - Optional periodic Statistics Reports for each established session
+  - Invalid stations, policies or statistics intervals are rejected at startup
+  - Configuration via environment variables, CLI flags or the runtime configuration file:
+    - `bgp_bmp_servers` / `--bgpBmpServers` / `bgpConfig.bmp.servers`: comma-separated stations, `<IPv4 address>[:<port>]` or `[<IPv6 address>][:<port>]` (default port: 11019)
+    - `bgp_bmp_policy` / `--bgpBmpPolicy` / `bgpConfig.bmp.policy`: `pre-policy`, `post-policy`, `local-rib` or `all` (default: `local-rib`)
+    - `bgp_bmp_statistics_timeout` / `--bgpBmpStatisticsTimeout` / `bgpConfig.bmp.statisticsTimeout`: seconds between Statistics Reports, 15-65535 (default: 0, disabled)
 - `kube-vip.io/dhcp-vendor-class` Service annotation to send a vendor class identifier (DHCP option 60) when kube-vip requests a DHCPv4 address for the Service, so the DHCP server can hand out LoadBalancer addresses from a dedicated pool. Fixes #411.
   - The vendor class, and the host name and client identifier set by `kube-vip.io/loadbalancerHostname`, are also sent when the lease is renewed, so servers that match leases by client identifier or pools by vendor class keep renewing the same address
 - Static Linux binaries attached to GitHub releases for running kube-vip outside a container. Fixes #706.

@@ -151,6 +151,13 @@ const (
 	// zebraSoftwareName specifies Software Name for Zebra
 	zebraSoftwareName = "zebra_software_name"
 
+	// bgpBMPServers defines the comma-separated BGP Monitoring Protocol stations
+	bgpBMPServers = "bgp_bmp_servers"
+	// bgpBMPPolicy defines the BMP route monitoring policy
+	bgpBMPPolicy = "bgp_bmp_policy"
+	// bgpBMPStatisticsTimeout defines the interval in seconds between BMP Statistics Reports
+	bgpBMPStatisticsTimeout = "bgp_bmp_statistics_timeout"
+
 	// mpbgpNexthop defines MPBGP mode
 	mpbgpNexthop = "mpbgp_nexthop"
 	// mpbgpIPv4 defines fixed IPv4 to be used with MPBGP

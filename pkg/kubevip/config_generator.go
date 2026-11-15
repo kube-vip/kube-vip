@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kube-vip/kube-vip/pkg/debouncer"
@@ -617,6 +618,26 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				bgpConfig = append(bgpConfig, corev1.EnvVar{
 					Name:  zebraSoftwareName,
 					Value: c.BGPConfig.Zebra.SoftwareName,
+				})
+			}
+		}
+
+		// BGP Monitoring Protocol stations
+		if len(c.BGPConfig.BMP.Servers) != 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpBMPServers,
+				Value: strings.Join(c.BGPConfig.BMP.Servers, ","),
+			})
+			if c.BGPConfig.BMP.Policy != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  bgpBMPPolicy,
+					Value: c.BGPConfig.BMP.Policy,
+				})
+			}
+			if c.BGPConfig.BMP.StatisticsTimeout > 0 {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  bgpBMPStatisticsTimeout,
+					Value: strconv.FormatUint(uint64(c.BGPConfig.BMP.StatisticsTimeout), 10),
 				})
 			}
 		}

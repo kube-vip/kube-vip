@@ -3,6 +3,7 @@ package kubevip
 import (
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -93,6 +94,41 @@ func TestParseEnvironmentBGPAttachIPToInterface(t *testing.T) {
 	}
 	if !config.BGPAttachIPToInterface {
 		t.Fatal("BGPAttachIPToInterface = false, want true")
+	}
+}
+
+func TestParseEnvironmentBMP(t *testing.T) {
+	t.Setenv(bgpBMPServers, " 192.0.2.20 ,,[2001:db8::20]:5000")
+	t.Setenv(bgpBMPPolicy, BMPPolicyAll)
+	t.Setenv(bgpBMPStatisticsTimeout, "60")
+
+	config := &Config{}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	want := BMPConfig{Servers: []string{"192.0.2.20", "[2001:db8::20]:5000"}, Policy: BMPPolicyAll, StatisticsTimeout: 60}
+	if !reflect.DeepEqual(config.BGPConfig.BMP, want) {
+		t.Fatalf("BMP config = %+v, want %+v", config.BGPConfig.BMP, want)
+	}
+}
+
+func TestParseEnvironmentBMPEmptyServersClearFile(t *testing.T) {
+	t.Setenv(bgpBMPServers, "")
+
+	config := &Config{BGPConfig: BGPConfig{BMP: BMPConfig{Servers: []string{"192.0.2.20"}}}}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	if len(config.BGPConfig.BMP.Servers) != 0 {
+		t.Fatalf("BMP servers = %v, want them cleared by the empty environment variable", config.BGPConfig.BMP.Servers)
+	}
+}
+
+func TestParseEnvironmentBMPStatisticsTimeoutOutOfRange(t *testing.T) {
+	t.Setenv(bgpBMPStatisticsTimeout, "65536")
+
+	if err := ParseEnvironment(&Config{}); err == nil || !strings.Contains(err.Error(), bgpBMPStatisticsTimeout) {
+		t.Fatalf("ParseEnvironment() error = %v, want an error naming %s", err, bgpBMPStatisticsTimeout)
 	}
 }
 
@@ -323,7 +359,8 @@ func TestGeneratePodSpecRoutingTable(t *testing.T) {
 }
 
 func TestGeneratePodSpecBGPSettings(t *testing.T) {
-	bgpSettingsEnv := []string{bgpMultiHop, bgpHoldTime, bgpKeepaliveInterval, zebraEnable, zebraURL, zebraVersion, zebraSoftwareName}
+	bgpSettingsEnv := []string{bgpMultiHop, bgpHoldTime, bgpKeepaliveInterval, zebraEnable, zebraURL, zebraVersion, zebraSoftwareName,
+		bgpBMPServers, bgpBMPPolicy, bgpBMPStatisticsTimeout}
 
 	tests := []struct {
 		name    string
@@ -355,6 +392,34 @@ func TestGeneratePodSpecBGPSettings(t *testing.T) {
 				zebraVersion:         "6",
 				zebraSoftwareName:    "frr10.1",
 			},
+		},
+		{
+			name: "BGP mode emits BMP settings",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					BMP: BMPConfig{
+						Servers:           []string{"192.0.2.20", "[2001:db8::20]:5000"},
+						Policy:            BMPPolicyAll,
+						StatisticsTimeout: 60,
+					},
+				},
+			},
+			wantEnv: map[string]string{
+				bgpBMPServers:           "192.0.2.20,[2001:db8::20]:5000",
+				bgpBMPPolicy:            BMPPolicyAll,
+				bgpBMPStatisticsTimeout: "60",
+			},
+		},
+		{
+			name: "BMP policy and statistics timeout are left out without BMP servers",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					BMP: BMPConfig{Policy: BMPPolicyLocalRIB, StatisticsTimeout: 60},
+				},
+			},
+			wantEnv: map[string]string{},
 		},
 		{
 			name:    "BGP mode without settings emits none of them",
@@ -423,6 +488,11 @@ func TestGeneratedBGPSettingsRoundTrip(t *testing.T) {
 				Version:      6,
 				SoftwareName: "frr10.1",
 			},
+			BMP: BMPConfig{
+				Servers:           []string{"192.0.2.20", "[2001:db8::20]:5000"},
+				Policy:            BMPPolicyPostPolicy,
+				StatisticsTimeout: 3600,
+			},
 		},
 		BGPPeerConfig: BGPPeer{Address: "192.0.2.1", AS: 65001, MultiHop: true},
 	}
@@ -451,6 +521,9 @@ func TestGeneratedBGPSettingsRoundTrip(t *testing.T) {
 	}
 	if got.BGPConfig.Zebra != config.BGPConfig.Zebra {
 		t.Fatalf("Zebra config = %+v, want %+v", got.BGPConfig.Zebra, config.BGPConfig.Zebra)
+	}
+	if !reflect.DeepEqual(got.BGPConfig.BMP, config.BGPConfig.BMP) {
+		t.Fatalf("BMP config = %+v, want %+v", got.BGPConfig.BMP, config.BGPConfig.BMP)
 	}
 }
 

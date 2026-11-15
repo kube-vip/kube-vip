@@ -31,6 +31,9 @@ func (c *Config) Validate() error {
 	if err := validatePprof(c.EnablePprof, c.PprofHTTPServer); err != nil {
 		return err
 	}
+	if _, _, err := c.BGPConfig.BMP.Parse(); err != nil {
+		return err
+	}
 
 	return nil
 }
