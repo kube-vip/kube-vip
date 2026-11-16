@@ -35,12 +35,14 @@ func (ep *Endpointslices) CreateRetryWatcher(ctx context.Context, clientSet *kub
 	service *v1.Service) (*watchtools.RetryWatcher, error) {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": service.Name}}
 
-	opts := metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
-	}
+	labelSelectorString := labels.Set(labelSelector.MatchLabels).String()
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFuncWithContext: func(watchCtx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, retryWatcherInitialResourceVersion, &cache.ListWatch{
+		WatchFuncWithContext: func(watchCtx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			if opts.ResourceVersion == retryWatcherInitialResourceVersion {
+				opts.ResourceVersion = ""
+			}
+			opts.LabelSelector = labelSelectorString
 			return clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(watchCtx, opts)
 		},
 	})
