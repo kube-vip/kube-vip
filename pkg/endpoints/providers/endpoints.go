@@ -33,12 +33,14 @@ func NewEndpoints() Provider {
 
 func (ep *Endpoints) CreateRetryWatcher(ctx context.Context, clientSet *kubernetes.Clientset,
 	service *v1.Service) (*watchtools.RetryWatcher, error) {
-	opts := metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", service.Name).String(),
-	}
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", service.Name).String()
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFuncWithContext: func(watchCtx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, retryWatcherInitialResourceVersion, &cache.ListWatch{
+		WatchFuncWithContext: func(watchCtx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			if opts.ResourceVersion == retryWatcherInitialResourceVersion {
+				opts.ResourceVersion = ""
+			}
+			opts.FieldSelector = fieldSelector
 			return clientSet.CoreV1().Endpoints(service.Namespace).Watch(watchCtx, opts)
 		},
 	})
