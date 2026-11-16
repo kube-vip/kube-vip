@@ -217,59 +217,13 @@ func DeleteExistingSessions(sessionIP string, destination bool, destinationPorts
 		log.Error("could not dump sessions", "err", err)
 		return err
 	}
-	destPortProtocol := make(map[uint16]uint8)
-	srcPortProtocol := make(map[uint16]uint8)
-
-	if destinationPorts != "" {
-		fixedPorts := strings.Split(destinationPorts, ",")
-
-		for _, fixedPort := range fixedPorts {
-
-			data := strings.Split(fixedPort, ":")
-			if len(data) == 0 {
-				continue
-			}
-			port, err := strconv.ParseUint(data[1], 10, 16)
-			if err != nil {
-				return fmt.Errorf("[egress] error parsing annotation [%s]", destinationPorts)
-			}
-			switch data[0] {
-			case strings.ToLower("udp"):
-				destPortProtocol[uint16(port)] = ProtocolUDP
-			case strings.ToLower("tcp"):
-				destPortProtocol[uint16(port)] = ProtocolTCP
-			case strings.ToLower("sctp"):
-				destPortProtocol[uint16(port)] = ProtocolSCTP
-			default:
-				log.Error("[egress] annotation protocol isn't supported", "protocol ID", data[0])
-			}
-		}
+	destPortProtocol, err := parsePortProtocols(destinationPorts)
+	if err != nil {
+		return err
 	}
-
-	if srcPorts != "" {
-		fixedPorts := strings.Split(srcPorts, ",")
-
-		for _, fixedPort := range fixedPorts {
-
-			data := strings.Split(fixedPort, ":")
-			if len(data) == 0 {
-				continue
-			}
-			port, err := strconv.ParseUint(data[1], 10, 16)
-			if err != nil {
-				return fmt.Errorf("[egress] error parsing annotation [%s]", srcPorts)
-			}
-			switch data[0] {
-			case strings.ToLower("udp"):
-				srcPortProtocol[uint16(port)] = ProtocolUDP
-			case strings.ToLower("tcp"):
-				srcPortProtocol[uint16(port)] = ProtocolTCP
-			case strings.ToLower("sctp"):
-				srcPortProtocol[uint16(port)] = ProtocolSCTP
-			default:
-				log.Error("[egress] annotation protocol isn't supported", "protocol ID", data[0])
-			}
-		}
+	srcPortProtocol, err := parsePortProtocols(srcPorts)
+	if err != nil {
+		return err
 	}
 
 	// by default we only clear source (i.e. connections going from the vip (egress))
@@ -405,6 +359,50 @@ func (e *Egress) findExistingVIP(rules []string, vip string) [][]string {
 	}
 
 	return foundRules
+}
+
+// parsePortProtocols turns a comma separated list of "protocol:port" entries
+// (for example "tcp:80,udp:53") into a map of port number to protocol number.
+// Empty entries, such as those produced by a stray or trailing comma, and
+// entries that are not in protocol:port form are skipped rather than treated as
+// a fatal error, which keeps a malformed annotation from taking down egress
+// session cleanup. A present but non-numeric port is reported as an error.
+func parsePortProtocols(ports string) (map[uint16]uint8, error) {
+	portProtocol := make(map[uint16]uint8)
+	if ports == "" {
+		return portProtocol, nil
+	}
+
+	for _, entry := range strings.Split(ports, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+
+		data := strings.Split(entry, ":")
+		if len(data) != 2 {
+			log.Error("[egress] annotation entry is not in protocol:port form", "entry", entry)
+			continue
+		}
+
+		port, err := strconv.ParseUint(data[1], 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("[egress] error parsing annotation [%s]", ports)
+		}
+
+		switch data[0] {
+		case "udp":
+			portProtocol[uint16(port)] = ProtocolUDP
+		case "tcp":
+			portProtocol[uint16(port)] = ProtocolTCP
+		case "sctp":
+			portProtocol[uint16(port)] = ProtocolSCTP
+		default:
+			log.Error("[egress] annotation protocol isn't supported", "protocol ID", data[0])
+		}
+	}
+
+	return portProtocol, nil
 }
 
 func ClearIPTables(useNftables bool, namespace string, protocol iptables.Protocol) error {

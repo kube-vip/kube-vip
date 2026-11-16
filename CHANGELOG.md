@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Parse egress destination and source port annotations without panicking on entries that are not in `protocol:port` form, such as a bare port or a trailing comma. These entries are now skipped instead of crashing egress session cleanup with an index out of range.
 - Create WireGuard Services without requiring their tunnel interface to exist before acquisition, allowing the documented `wg0` configuration to work after startup cleanup and after the last Service releases the tunnel. Fixes #1863.
 - Use non-terminating EndpointSlice endpoints that are ready but not serving, so Services with `publishNotReadyAddresses` keep their endpoints under both `Local` and `Cluster` traffic policies instead of blocking workloads that need the Service to become ready. Fixes #1833.
 - Skip the shared-VIP admission check for DHCP placeholder addresses (`0.0.0.0` and `::`), so independent DHCP Services are no longer rejected as sharing a VIP. Fixes #1835.
