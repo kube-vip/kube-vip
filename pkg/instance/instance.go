@@ -151,19 +151,25 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		// Detect if we're using a specific interface for services
 		var svcInterface string
 
-		svcInterface = svc.Annotations[kubevip.ServiceVlan]
-		if svcInterface != "" {
-			parent, tag, err := utils.ParseVLANInterface(svcInterface)
-			if err != nil {
-				log.Error("failed to validate VLAN", "err", err)
-			}
-
-			if err := instance.addVLAN(parent, tag); err != nil {
-				log.Error("failed to create VLAN", "err", err)
-			}
+		if config.EnableWireguard {
+			// Tunnel ownership controls the real interface and VIP. The Service
+			// network must also exist before acquisition and after release.
+			svcInterface = "lo"
 		} else {
-			// If no vlan defined use specific interface from annotation
-			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			svcInterface = svc.Annotations[kubevip.ServiceVlan]
+			if svcInterface != "" {
+				parent, tag, err := utils.ParseVLANInterface(svcInterface)
+				if err != nil {
+					log.Error("failed to validate VLAN", "err", err)
+				}
+
+				if err := instance.addVLAN(parent, tag); err != nil {
+					log.Error("failed to create VLAN", "err", err)
+				}
+			} else {
+				// If no vlan defined use specific interface from annotation
+				svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			}
 		}
 
 		if svcInterface == kubevip.Auto {
@@ -260,6 +266,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			Interface:              svcInterface,
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
+			EnableWireguard:        config.EnableWireguard,
 			EnableBGP:              config.EnableBGP,
 			BGPAttachIPToInterface: config.BGPAttachIPToInterface,
 			VIPSubnet:              subnet,
@@ -288,19 +295,25 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		// Detect if we're using a specific interface for services
 		var svcInterface string
 
-		svcInterface = svc.Annotations[kubevip.ServiceVlan]
-		if svcInterface != "" {
-			parent, tag, err := utils.ParseVLANInterface(svcInterface)
-			if err != nil {
-				log.Error("failed to validate VLAN", "err", err)
-			}
-
-			if err := instance.addVLAN(parent, tag); err != nil {
-				log.Error("failed to create VLAN", "err", err)
-			}
+		if config.EnableWireguard {
+			// Tunnel ownership controls the real interface and VIP. The Service
+			// network must also exist before acquisition and after release.
+			svcInterface = "lo"
 		} else {
-			// If no vlan defined use specific interface from annotation
-			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			svcInterface = svc.Annotations[kubevip.ServiceVlan]
+			if svcInterface != "" {
+				parent, tag, err := utils.ParseVLANInterface(svcInterface)
+				if err != nil {
+					log.Error("failed to validate VLAN", "err", err)
+				}
+
+				if err := instance.addVLAN(parent, tag); err != nil {
+					log.Error("failed to create VLAN", "err", err)
+				}
+			} else {
+				// If no vlan defined use specific interface from annotation
+				svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			}
 		}
 
 		// If it is still blank then use the
@@ -328,6 +341,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			Interface:              svcInterface,
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
+			EnableWireguard:        config.EnableWireguard,
 			EnableBGP:              config.EnableBGP,
 			BGPAttachIPToInterface: config.BGPAttachIPToInterface,
 			VIPSubnet:              config.VIPSubnet,
