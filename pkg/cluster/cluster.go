@@ -262,6 +262,10 @@ func (cluster *Cluster) cleanupVIPs(c *kubevip.Config) {
 // drained. layer2Update already removed this instance's own claim by then, so
 // any remaining claim belongs to another service sharing the VIP.
 func (cluster *Cluster) cleanupServiceVIPs(c *kubevip.Config, done chan struct{}) {
+	if c.EnableWireguard {
+		// Only the tunnel manager owns WireGuard VIP addresses.
+		return
+	}
 	for i := range cluster.Network {
 		if cluster.preserveServiceVIP(done, cluster.Network[i].IP()) {
 			continue

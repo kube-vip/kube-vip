@@ -450,7 +450,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 		startedNetworks = append(startedNetworks, startedNetwork{network: network})
 		started := &startedNetworks[len(startedNetworks)-1]
 
-		if network.IsDDNS() {
+		if !c.EnableWireguard && network.IsDDNS() {
 			ddnsReady := make(chan struct{})
 			lbWg.Go(func() {
 				// start the DDNS if requested
@@ -525,7 +525,7 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			network := cluster.Network[i]
 
 			// start the dns updater if address is dns
-			if network.IsDNS() {
+			if !c.EnableWireguard && network.IsDNS() {
 				log.Info("(svcs) starting the DNS updater", "address", network.DNSName(), "ip", network.IP())
 				ipUpdater := vip.NewIPUpdater(network)
 				wg.Go(func() {
