@@ -110,6 +110,79 @@ func TestWatchWithAuthRetry(t *testing.T) {
 	}
 }
 
+func TestServiceRetryWatcherPreservesResumeResourceVersion(t *testing.T) {
+	requests := make(chan string, 2)
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests <- request.URL.Query().Get("resourceVersion")
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusOK)
+		if requestCount.Add(1) == 1 {
+			_, _ = fmt.Fprintln(writer, `{"type":"BOOKMARK","object":{"apiVersion":"v1","kind":"Service","metadata":{"name":"snf","namespace":"default","resourceVersion":"42"}}}`)
+			if flusher, ok := writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			return
+		}
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+
+	clientSet, err := kubernetes.NewForConfig(&rest.Config{
+		Host: server.URL,
+		ContentConfig: rest.ContentConfig{
+			ContentType: "application/json",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create Kubernetes client: %v", err)
+	}
+
+	processor := &Processor{
+		config:      &kubevip.Config{DebounceTime: "0s"},
+		clientSet:   clientSet,
+		rwClientSet: clientSet,
+		serviceLock: newTestServiceLocks(),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.ServicesWatcher(ctx, func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error {
+			return nil
+		}, false)
+	}()
+
+	first := receiveServiceWatchResourceVersion(t, requests)
+	second := receiveServiceWatchResourceVersion(t, requests)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ServicesWatcher() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServicesWatcher did not stop")
+	}
+
+	if first != "" {
+		t.Fatalf("first Service watch resourceVersion = %q, want empty", first)
+	}
+	if second != "42" {
+		t.Fatalf("resumed Service watch resourceVersion = %q, want 42", second)
+	}
+}
+
+func receiveServiceWatchResourceVersion(t *testing.T, requests <-chan string) string {
+	t.Helper()
+	select {
+	case resourceVersion := <-requests:
+		return resourceVersion
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Service watch request")
+		return ""
+	}
+}
+
 func TestServiceEventQueuePreservesOrderPerUID(t *testing.T) {
 	queue := newServiceEventQueue(context.Background(), 2)
 	key := types.NamespacedName{Namespace: "default", Name: "service"}
