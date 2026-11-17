@@ -467,7 +467,7 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 		}
 	}
 
-	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
+	labels := generateLabelsFromService(svc)
 	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
 		return fmt.Errorf("error adding label to node: %w", err)
 	}
@@ -649,7 +649,7 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	}
 
 	if serviceInstance.LabelAdded && serviceInstance.ServiceSnapshot != nil && p.nodeLabelManager != nil {
-		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot)
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
@@ -1178,8 +1178,8 @@ func (p *Processor) refreshUPNPForward(ctx context.Context, serviceInstance *ins
 	}
 }
 
-// GenerateLabelFromService generates a label key and value for the given service
-func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]string {
+// generateLabelsFromService generates the service-provided node label for svc.
+func generateLabelsFromService(svc *v1.Service) map[string]string {
 	addresses, _ := instance.FetchServiceAddresses(svc)
 
 	sanitized := make([]string, len(addresses))
@@ -1188,6 +1188,6 @@ func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]stri
 	}
 
 	return map[string]string{
-		fmt.Sprintf("%s/%s.%s", labelKey, svc.Name, svc.Namespace): strings.Join(sanitized, "_"),
+		fmt.Sprintf("%s/%s.%s", kubevip.ServiceProvided, svc.Name, svc.Namespace): strings.Join(sanitized, "_"),
 	}
 }

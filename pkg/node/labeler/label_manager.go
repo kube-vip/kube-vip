@@ -45,18 +45,48 @@ type Manager struct {
 // AddLabel a new label to the node
 func (m *Manager) AddLabel(labels map[string]string) error {
 	log.Debug("add labels to node", "node", m.nodeName)
-	return m.patchNode(labelOperationAdd, labels)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	return m.patchNode(ctx, labelOperationAdd, labels)
 }
 
 // RemoveLabel a label from the node
 func (m *Manager) RemoveLabel(labels map[string]string) error {
 	log.Debug("delete label from node")
-	return m.patchNode(labelOperationRemove, labels)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	return m.RemoveLabelWithContext(ctx, labels)
+}
+
+// RemoveLabelWithContext removes labels from the node using ctx.
+func (m *Manager) RemoveLabelWithContext(ctx context.Context, labels map[string]string) error {
+	return m.patchNode(ctx, labelOperationRemove, labels)
+}
+
+// Labels returns the node labels whose key starts with prefix
+func (m *Manager) Labels(ctx context.Context, prefix string) (map[string]string, error) {
+	if m.clientSet == nil {
+		return nil, errors.New("kubernetes client is not initialized")
+	}
+	node, err := m.clientSet.CoreV1().Nodes().Get(ctx, m.nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get node %s", m.nodeName)
+	}
+	labels := map[string]string{}
+	for key, value := range node.Labels {
+		if strings.HasPrefix(key, prefix) {
+			labels[key] = value
+		}
+	}
+	return labels, nil
 }
 
 // CleanUpLabels purges the node labels
 func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	log.Debug("cleaning up labels for node", "node", m.nodeName, "timeout", timeout)
+	if m.clientSet == nil {
+		return errors.New("kubernetes client is not initialized")
+	}
 
 	// create new context for labels cleanup (independent)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -82,19 +112,19 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	}
 
 	// patch the node with the labels to remove
-	return m.patchNode(labelOperationRemove, labels)
+	return m.patchNode(ctx, labelOperationRemove, labels)
 }
 
 // patchNode patches the node with the given labels
-func (m *Manager) patchNode(operation labelOperation, labels map[string]string) error {
+func (m *Manager) patchNode(ctx context.Context, operation labelOperation, labels map[string]string) error {
+	if len(labels) == 0 {
+		return nil
+	}
 	type patchStringLabel struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
 		Value string `json:"value"`
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
 
 	patchLabels := []patchStringLabel{}
 	// generate the patch

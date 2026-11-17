@@ -818,6 +818,9 @@ func (p *Processor) Stop() {
 // WaitForElectionCampaigns blocks until all Service election campaigns have
 // stopped. Callers must first stop the watchers that can start new campaigns.
 func (p *Processor) WaitForElectionCampaigns() {
+	if p == nil || p.electionCoordinators == nil {
+		return
+	}
 	p.electionCoordinators.Wait()
 }
 

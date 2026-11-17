@@ -320,8 +320,10 @@ func (sm *Manager) Start(ctx context.Context) error {
 
 	// on exit, clean up the node labels
 	defer func() {
-		if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
-			log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
+		if sm.nodeLabelManager != nil {
+			if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
+				log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
+			}
 		}
 	}()
 
@@ -361,7 +363,12 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	defer func() {
 		cancel()
 		wg.Wait()
-		sm.svcProcessor.WaitForElectionCampaigns()
+		if sm.svcProcessor != nil {
+			sm.svcProcessor.WaitForElectionCampaigns()
+			if sm.config != nil && sm.config.EnableServices {
+				sm.removeStaleServiceNodeLabels()
+			}
+		}
 		w.Cleanup()
 		log.Info("Shutting down Kube-Vip")
 	}()
@@ -444,6 +451,10 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		}
 		w.ConfigureServices()
 
+		wg.Go(func() {
+			sm.svcProcessor.RunNodeLabelReconcile(modeCtx, sm.nodeLabelManager)
+		})
+
 		for {
 			select {
 			case <-modeCtx.Done():
@@ -470,6 +481,14 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		<-modeCtx.Done()
 	}
 	return nil
+}
+
+func (sm *Manager) removeStaleServiceNodeLabels() {
+	labelCtx, cancelLabels := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelLabels()
+	if err := sm.svcProcessor.RemoveStaleNodeLabels(labelCtx, sm.nodeLabelManager); err != nil {
+		log.Error("unable to remove service node labels", "err", err)
+	}
 }
 
 func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
