@@ -150,8 +150,8 @@ type Config struct {
 	BGPPeerConfig BGPPeer   `yaml:"bgpPeerConfig"`
 	BGPPeers      []string  `yaml:"-"`
 
-	// ControlPlaneHealthCheck configures HTTP polling of the control plane when using BGP without
-	// leader election. If the health check fails, the BGP route will be withdrawn.
+	// ControlPlaneHealthCheck configures HTTP polling of the control plane.
+	// Failed checks trigger BGP route withdrawal or ARP leadership loss.
 	ControlPlaneHealthCheck HealthCheck `yaml:"controlPlaneHealthCheck,omitempty"`
 
 	// LoadBalancers are the various services we can load balance over
@@ -273,18 +273,17 @@ type Etcd struct {
 	Endpoints      []string `yaml:"endpoints"`
 }
 
-// HealthCheck defines HTTP health-check settings for control-plane polling when using BGP
-// without leader election.
+// HealthCheck defines HTTP health-check settings for control-plane polling.
 type HealthCheck struct {
-	// Address is the URL to poll to check the health of the control-plane. If the health
-	// check fails, the BGP route will be withdrawn.
+	// Address is the URL to poll to check the health of the control plane.
 	Address string `yaml:"address"`
 	// PeriodSeconds is the interval in seconds between health checks.
 	PeriodSeconds int `yaml:"periodSeconds"`
 	// TimeoutSeconds is the timeout per health check request. If a request takes longer
 	// than this timeout, the health check is considered failed.
 	TimeoutSeconds int `yaml:"timeoutSeconds"`
-	// FailureThreshold is the number of consecutive failures before route withdrawal.
+	// FailureThreshold is the number of consecutive failures before
+	// BGP route withdrawal or ARP leadership loss.
 	FailureThreshold int `yaml:"failureThreshold"`
 	// CAPath is the CA certificate path used for TLS verification when Address is an HTTPS URL.
 	CAPath string `yaml:"caPath"`
