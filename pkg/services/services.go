@@ -611,29 +611,42 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 	return p.deleteCurrentService(ctx, expected)
 }
 
+// releaseServiceDatapath detaches serviceInstance and stops its datapath. It
+// reports whether serviceInstance was still tracked.
+func (p *Processor) releaseServiceDatapath(ctx context.Context, serviceInstance *instance.Instance) (bool, error) {
+	p.serviceCleanupMu.Lock()
+	defer p.serviceCleanupMu.Unlock()
+	removed, updatedInstances := p.detachServiceInstance(serviceInstance.UID())
+	if removed != serviceInstance {
+		return false, nil
+	}
+	if err := endpoints.CleanupService(ctx, p.config, p.bgpServer, p.routeMgr, p.TunnelMgr, serviceInstance, updatedInstances); err != nil {
+		p.appendServiceInstance(serviceInstance)
+		return false, fmt.Errorf("cleanup service datapath: %w", err)
+	}
+
+	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
+
+	return true, nil
+}
+
 // deleteCurrentService removes the supplied tracked instance. The caller must
 // hold the Service lock for serviceInstance.UID().
+//
+// The node label is removed after the datapath, so an unreachable API server
+// cannot keep the VIP on this node.
 func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
+	removed, err := p.releaseServiceDatapath(ctx, serviceInstance)
+	if err != nil || !removed {
+		return err
+	}
+
 	if serviceInstance.LabelAdded {
 		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
 	}
-
-	p.serviceCleanupMu.Lock()
-	defer p.serviceCleanupMu.Unlock()
-	removed, updatedInstances := p.detachServiceInstance(serviceInstance.UID())
-	if removed != serviceInstance {
-		return nil
-	}
-	if err := endpoints.CleanupService(ctx, p.config, p.bgpServer, p.routeMgr, p.TunnelMgr, serviceInstance, updatedInstances); err != nil {
-		p.appendServiceInstance(serviceInstance)
-		return fmt.Errorf("cleanup service datapath: %w", err)
-	}
-
-	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
-
 	return nil
 }
 
