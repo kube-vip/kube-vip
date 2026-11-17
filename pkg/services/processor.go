@@ -711,8 +711,15 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		return err
 	}
 
-	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
-		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
+	deleteErr := p.deleteService(cleanupCtx, svc.UID, svcCtx)
+	if deleteErr != nil {
+		tracked, lockErr := p.hasTrackedServiceInstance(svc)
+		if lockErr != nil {
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, errors.Join(deleteErr, lockErr))
+		}
+		if tracked {
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deleteErr)
+		}
 	}
 	if svcCtx != nil {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
@@ -720,9 +727,23 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	// Drop the per-service election series so a recreated service starts clean.
 	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 	p.updateActiveServicesMetric()
+	if deleteErr != nil {
+		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deleteErr)
+	}
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
+}
+
+func (p *Processor) hasTrackedServiceInstance(svc *v1.Service) (tracked bool, retErr error) {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+			retErr = errors.Join(retErr, err)
+		}
+	}()
+	return p.findServiceInstance(svc) != nil, nil
 }
 
 // retireServiceContext preemptively cancels the published Service context before
