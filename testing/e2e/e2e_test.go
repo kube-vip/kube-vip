@@ -1253,7 +1253,7 @@ func assertConnection(protocol, ip, port, suffix string, transportTimeout, event
 		return resp.StatusCode
 	}, eventuallyTimeout, transportTimeout).Should(BeElementOf([]int{http.StatusOK, http.StatusInternalServerError}), fmt.Sprintf("Failed to connect to %s", ip))
 
-	By(withTimestamp(fmt.Sprintf("estabilished connection to %s://%s:%s/%s", protocol, ip, port, suffix)))
+	By(withTimestamp(fmt.Sprintf("established connection to %s://%s:%s/%s", protocol, ip, port, suffix)))
 }
 
 // Assume connection to the provided address is possible
@@ -1316,7 +1316,7 @@ func withTimestamp(text string) string {
 }
 
 func createDS(ctx context.Context, name, namespace string, client kubernetes.Interface, port int) {
-	By(withTimestamp(fmt.Sprintf("createing test daemonset %s/%s", namespace, name)))
+	By(withTimestamp(fmt.Sprintf("creating test daemonset %s/%s", namespace, name)))
 	d := newTestDS(name, namespace, port)
 
 	Eventually(func() error {
@@ -1383,7 +1383,7 @@ func newTestDS(name, namespace string, port int) *v1.DaemonSet {
 }
 
 func createPod(ctx context.Context, client kubernetes.Interface, namespace, name string, port int) {
-	By(withTimestamp(fmt.Sprintf("createing test pod %s/%s", namespace, name)))
+	By(withTimestamp(fmt.Sprintf("creating test pod %s/%s", namespace, name)))
 	labels := make(map[string]string)
 	labels["app"] = name
 	p := corev1.Pod{
@@ -1621,7 +1621,7 @@ func prepareCluster(ctx context.Context, tempDirPath, clusterNameSuffix, k8sImag
 	Expect(kubeVIPManifestTemplate.Execute(manifestFile, *manifestValues)).To(Succeed())
 
 	if v129 {
-		// create a seperate manifest
+		// create a separate manifest
 		manifestPath2 := filepath.Join(tempDirPath, fmt.Sprintf("kube-vip-%s-first.yaml", clusterNameSuffix))
 
 		// change the path of the mount to the new file

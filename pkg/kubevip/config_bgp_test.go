@@ -81,7 +81,7 @@ func TestParseBGPPeerConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "Completely empty config (but with the seperators)",
+			name:    "Completely empty config (but with the separators)",
 			args:    args{config: ":::::::"},
 			wantErr: true,
 		},
