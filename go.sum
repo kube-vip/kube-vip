@@ -299,10 +299,10 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 go.etcd.io/etcd/api/v3 v3.7.3 h1:2tumepXe+wi7Wab64uUO71K7ISQyUWLGC1DJbbc59sY=
 go.etcd.io/etcd/api/v3 v3.7.3/go.mod h1:HOR9Qn4gb/1/hVAmYprmlLpvTe6ZgfgNS9Z/+Ty65po=
-go.etcd.io/etcd/client/pkg/v3 v3.7.2 h1:SVtlR7tiSVAYOQ4nWPIyFXb4RMgEcnzeAG9RQ8MoNDU=
-go.etcd.io/etcd/client/pkg/v3 v3.7.2/go.mod h1:HsSux/B3ahgyw/D5+d4YbZqicOi0mEbuxm6lIUdjAoI=
-go.etcd.io/etcd/client/v3 v3.7.2 h1:Z66GqDQDI7zPDfVSsIBqGSK4mJYLtv8ESwXa4mPf+wY=
-go.etcd.io/etcd/client/v3 v3.7.2/go.mod h1:x03t1qMs4tGZirCDJlMuzPBJdQffXJImIyEjLhNBCsY=
+go.etcd.io/etcd/client/pkg/v3 v3.7.3 h1:5zMwNu3ycrzCeA5NwOfQbxFRhqq974chq1DrYMua4QI=
+go.etcd.io/etcd/client/pkg/v3 v3.7.3/go.mod h1:/OhzqYrF0U7d1NOk55VMyUQGbYD1WoIe4bJwxb47wOk=
+go.etcd.io/etcd/client/v3 v3.7.3 h1:UrXcetgkuSEocaBlQlulQRJlXLEnUAHuBRbHh0lue1Q=
+go.etcd.io/etcd/client/v3 v3.7.3/go.mod h1:DcPxpqcpV8WIaRi/2waPCx0/Uq8rQUweDJaDYZk1gEE=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 h1:8tvICD4vSTOOsNrsI4Ljf6C+6UKvpTEH5XY3JMoyPoo=
