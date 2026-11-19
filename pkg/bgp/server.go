@@ -23,10 +23,11 @@ type BGPManager interface {
 
 // Server manages a server object
 type Server struct {
-	s       *gobgp.BgpServer
-	c       *kubevip.BGPConfig
-	mtx     sync.Mutex
-	tracker map[string]map[string]bool
+	s        *gobgp.BgpServer
+	c        *kubevip.BGPConfig
+	mtx      sync.Mutex
+	tracker  map[string]map[string]bool
+	nextHops map[string]string
 
 	// bmpServers are the BGP Monitoring Protocol stations the server reports to
 	bmpServers []netip.AddrPort

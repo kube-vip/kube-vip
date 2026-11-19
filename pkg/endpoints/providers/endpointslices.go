@@ -184,6 +184,19 @@ func (ep *Endpointslices) GetLabel() string {
 	return ep.label
 }
 
+func (ep *Endpointslices) GetEndpointNodes() map[string][]string {
+	nodes := make(map[string][]string)
+	for _, slice := range ep.slices {
+		for _, endpoint := range slice.Endpoints {
+			if !isUsable(endpoint.Conditions) || endpoint.NodeName == nil || *endpoint.NodeName == "" {
+				continue
+			}
+			nodes[*endpoint.NodeName] = append(nodes[*endpoint.NodeName], endpoint.Addresses...)
+		}
+	}
+	return nodes
+}
+
 func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {
 	return ResolvePortWithLookup(servicePort, func(name string) int32 {
 		for _, eps := range ep.slices {

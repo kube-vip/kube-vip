@@ -20,6 +20,30 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 For upgrading an existing install in place (static Pod or DaemonSet), see the [upgrade guide](https://kube-vip.io/docs/upgrade/).
 
+### BGP forwarding-node advertisements
+
+Set the Service annotation `kube-vip.io/bgp-forwarding-node: "true"` to have
+every kube-vip BGP speaker advertise the Service VIP with a ready endpoint's
+**node InternalIP** as its next hop, rather than the advertising speaker itself.
+This works with both `externalTrafficPolicy: Local` and `Cluster`; use `Local`
+to keep traffic on the selected endpoint node and preserve client source IPs.
+The destination node still needs kube-proxy or an equivalent Service datapath
+to deliver VIP traffic to the endpoint.
+
+Speakers choose the first eligible node in sorted node-name order, independently
+for each VIP address family. EndpointSlice and legacy Endpoints watches both
+support this mode. Endpoints without a node name are excluded. When endpoints
+change, kube-vip replaces the next hop; when none remain, it withdraws the route.
+The endpointless-Service opt-in does not override this withdrawal behavior.
+
+This mode requires BGP with Service and global leader election disabled, and
+cannot be combined with MP-BGP next-hop rewriting. The Kubernetes credentials
+must permit `get` on Nodes. Each selected node must expose an InternalIP in the
+VIP's address family, and that IP must be reachable from the upstream router.
+Configure the router to accept third-party next hops without rewriting them.
+Services sharing a VIP must agree on its next hop; conflicting next hops are
+rejected rather than silently replacing another Service's route.
+
 ### Running kube-vip as a binary
 
 [GitHub releases](https://github.com/kube-vip/kube-vip/releases) have

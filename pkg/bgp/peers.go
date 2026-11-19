@@ -163,7 +163,17 @@ func (b *Server) setPeerSource(p *api.Peer) {
 }
 
 func (b *Server) getPath(ip net.IP) *apiutil.Path {
+	return b.getPathWithNextHop(ip, "")
+}
+
+func (b *Server) getPathWithNextHop(ip net.IP, nextHop string) *apiutil.Path {
 	isV6 := ip.To4() == nil
+	if nextHop == "" {
+		nextHop = "0.0.0.0"
+		if isV6 {
+			nextHop = "::"
+		}
+	}
 
 	if !isV6 {
 		prefix, err := bgp.NewIPAddrPrefix(netip.MustParsePrefix(
@@ -173,7 +183,7 @@ func (b *Server) getPath(ip net.IP) *apiutil.Path {
 			return nil
 		}
 
-		nh, err := bgp.NewPathAttributeNextHop(netip.MustParseAddr("0.0.0.0"))
+		nh, err := bgp.NewPathAttributeNextHop(netip.MustParseAddr(nextHop))
 		if err != nil {
 			return nil
 		}
@@ -198,7 +208,7 @@ func (b *Server) getPath(ip net.IP) *apiutil.Path {
 	mpReach, err := bgp.NewPathAttributeMpReachNLRI(
 		bgp.RF_IPv6_UC,
 		[]bgp.PathNLRI{{NLRI: prefix}},
-		netip.MustParseAddr("::"),
+		netip.MustParseAddr(nextHop),
 	)
 	if err != nil {
 		return nil
