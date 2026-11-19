@@ -146,6 +146,21 @@ func (ep *Endpoints) GetLabel() string {
 	return ep.label
 }
 
+func (ep *Endpoints) GetEndpointNodes() map[string][]string {
+	nodes := make(map[string][]string)
+	if ep.endpoints == nil {
+		return nodes
+	}
+	for _, subset := range ep.endpoints.Subsets {
+		for _, address := range subset.Addresses {
+			if address.NodeName != nil && *address.NodeName != "" {
+				nodes[*address.NodeName] = append(nodes[*address.NodeName], address.IP)
+			}
+		}
+	}
+	return nodes
+}
+
 func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {
 	return ResolvePortWithLookup(servicePort, func(name string) int32 {
 		for _, subset := range ep.endpoints.Subsets {

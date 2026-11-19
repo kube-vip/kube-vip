@@ -198,6 +198,9 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 		}()
 
 		svcInstance = p.findServiceInstance(svc)
+		if err := validateBGPForwardingNode(p.config, svc); err != nil {
+			return err
+		}
 		_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 		if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
 			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "invalid_config").Inc()
@@ -918,6 +921,8 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 		!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
 		// ExternalTrafficPolicy changed
 		svc.Spec.ExternalTrafficPolicy != original.Spec.ExternalTrafficPolicy ||
+		// BGP forwarding mode changes require a fresh endpoint watcher.
+		svc.Annotations[kubevip.BGPForwardingNode] != original.Annotations[kubevip.BGPForwardingNode] ||
 		// IP stack configuration changed
 		!reflect.DeepEqual(svc.Spec.IPFamilies, original.Spec.IPFamilies) ||
 		!ipFamilyPolicyEqual(svc.Spec.IPFamilyPolicy, original.Spec.IPFamilyPolicy) ||
@@ -934,6 +939,25 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 
 func forcesPerServiceElection(svc *v1.Service) bool {
 	return svc.Annotations[kubevip.ForcePerServiceElection] == "true"
+}
+
+func validateBGPForwardingNode(config *kubevip.Config, svc *v1.Service) error {
+	if svc.Annotations[kubevip.BGPForwardingNode] != "true" {
+		return nil
+	}
+	if !config.EnableBGP || config.EnableARP || config.EnableRoutingTable || config.EnableWireguard ||
+		config.EnableLeaderElection || kubevip.UsesServiceElection(config, svc) {
+		return fmt.Errorf("annotation %q requires BGP mode without leader election", kubevip.BGPForwardingNode)
+	}
+	if config.BGPConfig.MpbgpNexthop != "" {
+		return fmt.Errorf("annotation %q cannot be combined with MP-BGP next-hop rewriting", kubevip.BGPForwardingNode)
+	}
+	for _, peer := range config.BGPConfig.Peers {
+		if peer.MpbgpNexthop != "" {
+			return fmt.Errorf("annotation %q cannot be combined with MP-BGP next-hop rewriting", kubevip.BGPForwardingNode)
+		}
+	}
+	return nil
 }
 
 func ipFamilyPolicyEqual(first, second *v1.IPFamilyPolicy) bool {
