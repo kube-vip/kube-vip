@@ -1,8 +1,12 @@
 package kubevip
 
 import (
+	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
+
+	api "github.com/osrg/gobgp/v4/api"
 )
 
 func TestParseBGPPeerConfig(t *testing.T) {
@@ -110,6 +114,77 @@ func TestParseBGPPeerConfig(t *testing.T) {
 			}
 			if !reflect.DeepEqual(gotBgpPeers, tt.wantBgpPeers) {
 				t.Errorf("ParseBGPPeerConfig() = \n%v, want \n%v", gotBgpPeers, tt.wantBgpPeers)
+			}
+		})
+	}
+}
+
+func TestParseBMPServers(t *testing.T) {
+	tests := []struct {
+		name    string
+		servers []string
+		want    []netip.AddrPort
+		wantErr string
+	}{
+		{name: "none", servers: nil, want: []netip.AddrPort{}},
+		{name: "IPv4 with default port", servers: []string{"192.0.2.20"}, want: []netip.AddrPort{netip.MustParseAddrPort("192.0.2.20:11019")}},
+		{name: "IPv4 with port", servers: []string{"192.0.2.20:5000"}, want: []netip.AddrPort{netip.MustParseAddrPort("192.0.2.20:5000")}},
+		{name: "IPv6 with default port", servers: []string{"[2001:db8::20]"}, want: []netip.AddrPort{netip.MustParseAddrPort("[2001:db8::20]:11019")}},
+		{name: "IPv6 with port", servers: []string{"[2001:db8::20]:5000"}, want: []netip.AddrPort{netip.MustParseAddrPort("[2001:db8::20]:5000")}},
+		{name: "surrounding whitespace", servers: []string{" 192.0.2.20 "}, want: []netip.AddrPort{netip.MustParseAddrPort("192.0.2.20:11019")}},
+		{name: "same address on different ports", servers: []string{"192.0.2.20", "192.0.2.20:5000"}, want: []netip.AddrPort{
+			netip.MustParseAddrPort("192.0.2.20:11019"), netip.MustParseAddrPort("192.0.2.20:5000"),
+		}},
+		{name: "empty", servers: []string{""}, wantErr: `BMP server "" is invalid`},
+		{name: "host name", servers: []string{"bmp.example.com:11019"}, wantErr: `BMP server "bmp.example.com:11019" is invalid`},
+		{name: "IPv6 without brackets", servers: []string{"2001:db8::20"}, wantErr: "must be enclosed in square brackets"},
+		{name: "IPv4 in brackets", servers: []string{"[192.0.2.20]"}, wantErr: "must be enclosed in square brackets"},
+		{name: "port zero", servers: []string{"192.0.2.20:0"}, wantErr: "port must be between 1 and 65535"},
+		{name: "port out of range", servers: []string{"192.0.2.20:65536"}, wantErr: `BMP server "192.0.2.20:65536" is invalid`},
+		{name: "duplicate", servers: []string{"192.0.2.20", "192.0.2.20:11019"}, wantErr: "BMP server 192.0.2.20:11019 is configured more than once"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseBMPServers(tt.servers)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ParseBMPServers() error = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBMPServers() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ParseBMPServers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseBMPPolicy(t *testing.T) {
+	tests := []struct {
+		policy  string
+		want    api.AddBmpRequest_MonitoringPolicy
+		wantErr bool
+	}{
+		{policy: "", want: api.AddBmpRequest_MONITORING_POLICY_LOCAL},
+		{policy: BMPPolicyPrePolicy, want: api.AddBmpRequest_MONITORING_POLICY_PRE},
+		{policy: BMPPolicyPostPolicy, want: api.AddBmpRequest_MONITORING_POLICY_POST},
+		{policy: BMPPolicyLocalRIB, want: api.AddBmpRequest_MONITORING_POLICY_LOCAL},
+		{policy: BMPPolicyAll, want: api.AddBmpRequest_MONITORING_POLICY_ALL},
+		{policy: " Local-RIB ", want: api.AddBmpRequest_MONITORING_POLICY_LOCAL},
+		{policy: "both", wantErr: true},
+		{policy: "local", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.policy, func(t *testing.T) {
+			got, err := ParseBMPPolicy(tt.policy)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseBMPPolicy(%q) error = %v, wantErr %t", tt.policy, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Fatalf("ParseBMPPolicy(%q) = %v, want %v", tt.policy, got, tt.want)
 			}
 		})
 	}

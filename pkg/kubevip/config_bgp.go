@@ -2,11 +2,13 @@ package kubevip
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	api "github.com/osrg/gobgp/v4/api"
+	"github.com/osrg/gobgp/v4/pkg/packet/bmp"
 
 	"github.com/vishvananda/netlink"
 )
@@ -46,6 +48,8 @@ type BGPConfig struct {
 	Peers []BGPPeer `yaml:"peers"`
 
 	Zebra ZebraConfig `yaml:"zebra"`
+
+	BMP BMPConfig `yaml:"bmp"`
 }
 
 // Defines Zebra connection configuration. More on the topic - https://github.com/osrg/gobgp/blob/master/docs/sources/zebra.md#configuration
@@ -54,6 +58,116 @@ type ZebraConfig struct {
 	URL          string `yaml:"url"`
 	Version      uint32 `yaml:"version"`
 	SoftwareName string `yaml:"softwareName"`
+}
+
+// BMPConfig defines the BGP Monitoring Protocol (RFC 7854) stations that the
+// BGP server reports its peers and routes to.
+type BMPConfig struct {
+	// Servers are the BMP stations, each written as <IPv4 address>[:<port>] or
+	// [<IPv6 address>][:<port>]. The port defaults to 11019.
+	Servers []string `yaml:"servers"`
+	// Policy selects the routes reported in Route Monitoring messages, one of
+	// pre-policy, post-policy, local-rib or all. Defaults to local-rib.
+	Policy string `yaml:"policy"`
+	// StatisticsTimeout is the interval in seconds between Statistics Reports,
+	// 0 disables them. Other values must be between 15 and 65535.
+	StatisticsTimeout uint16 `yaml:"statisticsTimeout"`
+}
+
+const (
+	// BMPPolicyPrePolicy reports the routes received from each peer before import policy is applied
+	BMPPolicyPrePolicy = "pre-policy"
+	// BMPPolicyPostPolicy reports the routes received from each peer after import policy is applied
+	BMPPolicyPostPolicy = "post-policy"
+	// BMPPolicyLocalRIB reports the best routes in the local RIB, including the VIP routes kube-vip advertises
+	BMPPolicyLocalRIB = "local-rib"
+	// BMPPolicyAll reports pre-policy, post-policy and local-rib routes
+	BMPPolicyAll = "all"
+
+	// bmpMinStatisticsTimeout is the shortest Statistics Report interval GoBGP accepts
+	bmpMinStatisticsTimeout = 15
+)
+
+var bmpPolicies = map[string]api.AddBmpRequest_MonitoringPolicy{
+	BMPPolicyPrePolicy:  api.AddBmpRequest_MONITORING_POLICY_PRE,
+	BMPPolicyPostPolicy: api.AddBmpRequest_MONITORING_POLICY_POST,
+	BMPPolicyLocalRIB:   api.AddBmpRequest_MONITORING_POLICY_LOCAL,
+	BMPPolicyAll:        api.AddBmpRequest_MONITORING_POLICY_ALL,
+}
+
+// ParseBMPServers converts BMP stations written as <IPv4 address>[:<port>] or
+// [<IPv6 address>][:<port>] into their addresses, using port 11019 when none
+// is given. Surrounding whitespace is ignored and duplicates are rejected.
+func ParseBMPServers(servers []string) ([]netip.AddrPort, error) {
+	addresses := make([]netip.AddrPort, 0, len(servers))
+	for _, server := range servers {
+		address, err := parseBMPServer(strings.TrimSpace(server))
+		if err != nil {
+			return nil, err
+		}
+		for _, existing := range addresses {
+			if existing == address {
+				return nil, fmt.Errorf("BMP server %s is configured more than once", address)
+			}
+		}
+		addresses = append(addresses, address)
+	}
+	return addresses, nil
+}
+
+func parseBMPServer(server string) (netip.AddrPort, error) {
+	if address, err := netip.ParseAddrPort(server); err == nil {
+		if address.Port() == 0 {
+			return netip.AddrPort{}, fmt.Errorf("BMP server %q is invalid, the port must be between 1 and 65535", server)
+		}
+		return address, nil
+	}
+
+	host := server
+	bracketed := strings.HasPrefix(server, "[") && strings.HasSuffix(server, "]")
+	if bracketed {
+		host = server[1 : len(server)-1]
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.AddrPort{}, fmt.Errorf("BMP server %q is invalid, expected <IPv4 address>[:<port>] or [<IPv6 address>][:<port>]", server)
+	}
+	if address.Is6() != bracketed {
+		return netip.AddrPort{}, fmt.Errorf("BMP server %q is invalid, IPv6 addresses must be enclosed in square brackets and IPv4 addresses must not", server)
+	}
+	return netip.AddrPortFrom(address, bmp.BMP_DEFAULT_PORT), nil
+}
+
+// ParseBMPPolicy converts a BMP route monitoring policy name into its GoBGP
+// value. An empty policy selects local-rib.
+func ParseBMPPolicy(policy string) (api.AddBmpRequest_MonitoringPolicy, error) {
+	if policy == "" {
+		policy = BMPPolicyLocalRIB
+	}
+	value, ok := bmpPolicies[strings.ToLower(strings.TrimSpace(policy))]
+	if !ok {
+		return 0, fmt.Errorf("BMP route monitoring policy %q is invalid, expected one of %s, %s, %s or %s",
+			policy, BMPPolicyPrePolicy, BMPPolicyPostPolicy, BMPPolicyLocalRIB, BMPPolicyAll)
+	}
+	return value, nil
+}
+
+// Parse validates the BMP settings and returns the stations and the route
+// monitoring policy to configure the BGP server with.
+func (c BMPConfig) Parse() ([]netip.AddrPort, api.AddBmpRequest_MonitoringPolicy, error) {
+	servers, err := ParseBMPServers(c.Servers)
+	if err != nil {
+		return nil, 0, err
+	}
+	policy, err := ParseBMPPolicy(c.Policy)
+	if err != nil {
+		return nil, 0, err
+	}
+	if c.StatisticsTimeout != 0 && c.StatisticsTimeout < bmpMinStatisticsTimeout {
+		return nil, 0, fmt.Errorf("BMP statistics timeout %d is invalid, it must be 0 to disable Statistics Reports or between %d and 65535 seconds",
+			c.StatisticsTimeout, bmpMinStatisticsTimeout)
+	}
+	return servers, policy, nil
 }
 
 // BGP Peer layout is as follows:

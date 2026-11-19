@@ -134,6 +134,11 @@ func TestDumpBGPSection(t *testing.T) {
 					{Address: "192.168.1.2", AS: 65001},
 					{Address: "192.168.1.3", AS: 65002},
 				},
+				BMP: kubevip.BMPConfig{
+					Servers:           []string{"192.168.1.10", "[2001:db8::10]:5000"},
+					Policy:            kubevip.BMPPolicyAll,
+					StatisticsTimeout: 60,
+				},
 			},
 		}
 		mgr := &Manager{config: config}
@@ -156,6 +161,11 @@ func TestDumpBGPSection(t *testing.T) {
 		assert.Contains(t, output, "BGP Router ID: 192.168.1.1")
 		assert.Contains(t, output, "BGP AS: 65000")
 		assert.Contains(t, output, "BGP Peers: 2")
+		assert.Contains(t, output, "BMP Servers: 2")
+		assert.Contains(t, output, "BMP Server 1: 192.168.1.10")
+		assert.Contains(t, output, "BMP Server 2: [2001:db8::10]:5000")
+		assert.Contains(t, output, "BMP Policy: all")
+		assert.Contains(t, output, "BMP Statistics Timeout: 60")
 
 		assert.Contains(t, output, "--- ACTIVE BGP RIB STATE ---")
 		assert.Contains(t, output, "BGP Server instance is inactive or uninitialized")

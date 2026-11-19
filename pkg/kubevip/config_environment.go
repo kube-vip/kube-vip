@@ -657,6 +657,25 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Zebra.SoftwareName = env
 	}
 
+	// BGP Monitoring Protocol stations, an explicitly empty value clears lower-priority sources
+	if env, ok := os.LookupEnv(bgpBMPServers); ok {
+		c.BGPConfig.BMP.Servers = nil
+		for server := range strings.SplitSeq(env, ",") {
+			if server = strings.TrimSpace(server); server != "" {
+				c.BGPConfig.BMP.Servers = append(c.BGPConfig.BMP.Servers, server)
+			}
+		}
+	}
+
+	env = os.Getenv(bgpBMPStatisticsTimeout)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 16)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", bgpBMPStatisticsTimeout, env, err)
+		}
+		c.BGPConfig.BMP.StatisticsTimeout = uint16(u64)
+	}
+
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
@@ -853,7 +872,7 @@ func ParseEnvironment(c *Config) error {
 		prometheusServer: &c.PrometheusHTTPServer, egressPodCidr: &c.EgressPodCidr,
 		egressServiceCidr: &c.EgressServiceCidr, k8sConfigFile: &c.K8sConfigFile,
 		mirrorDestInterface: &c.MirrorDestInterface, iptablesBackend: &c.IptablesBackend,
-		configFile: &c.ConfigFile, debounceTime: &c.DebounceTime,
+		configFile: &c.ConfigFile, debounceTime: &c.DebounceTime, bgpBMPPolicy: &c.BGPConfig.BMP.Policy,
 	}
 	for name, destination := range stringEnvironment {
 		if value, ok := os.LookupEnv(name); ok {

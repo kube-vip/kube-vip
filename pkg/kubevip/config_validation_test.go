@@ -112,6 +112,37 @@ func TestValidate_RoutingProtocol(t *testing.T) {
 	}
 }
 
+func TestValidate_BMP(t *testing.T) {
+	tests := []struct {
+		name    string
+		bmp     BMPConfig
+		wantErr string
+	}{
+		{name: "unset"},
+		{name: "valid", bmp: BMPConfig{Servers: []string{"192.0.2.20", "[2001:db8::20]:5000"}, Policy: BMPPolicyAll, StatisticsTimeout: 15}},
+		{name: "longest statistics timeout", bmp: BMPConfig{Servers: []string{"192.0.2.20"}, StatisticsTimeout: 65535}},
+		{name: "invalid server", bmp: BMPConfig{Servers: []string{"192.0.2.20:x"}}, wantErr: `BMP server "192.0.2.20:x" is invalid`},
+		{name: "invalid policy", bmp: BMPConfig{Policy: "both"}, wantErr: `BMP route monitoring policy "both" is invalid`},
+		{name: "statistics timeout too short", bmp: BMPConfig{StatisticsTimeout: 14}, wantErr: "BMP statistics timeout 14 is invalid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{BGPConfig: BGPConfig{BMP: tt.bmp}}
+			err := config.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestInstanceNameLimitReservesNftablesPrefixAndFamilySuffix(t *testing.T) {
 	name := strings.Repeat("a", instanceNameMaxLength)
 	if got := len(egressNftablesTablePrefix + name + egressNftablesTableSuffix); got != nftablesNameMaxLength {

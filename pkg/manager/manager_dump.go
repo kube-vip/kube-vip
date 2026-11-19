@@ -70,6 +70,14 @@ func (sm *Manager) dumpBGPSection(ctx context.Context) {
 			fmt.Printf("  Peer %d: %s:%d (AS: %d, MultiHop: %t)\n",
 				i+1, peer.Address, peer.Port, peer.AS, peer.MultiHop)
 		}
+		fmt.Printf("BMP Servers: %d\n", len(sm.config.BGPConfig.BMP.Servers))
+		for i, server := range sm.config.BGPConfig.BMP.Servers {
+			fmt.Printf("  BMP Server %d: %s\n", i+1, server)
+		}
+		if len(sm.config.BGPConfig.BMP.Servers) != 0 {
+			fmt.Printf("BMP Policy: %s\n", sm.config.BGPConfig.BMP.Policy)
+			fmt.Printf("BMP Statistics Timeout: %d\n", sm.config.BGPConfig.BMP.StatisticsTimeout)
+		}
 		fmt.Printf("\n--- ACTIVE BGP RIB STATE ---\n")
 		sm.dumpBGPRoutes(ctx)
 	}
