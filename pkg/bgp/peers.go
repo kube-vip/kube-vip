@@ -162,10 +162,6 @@ func (b *Server) setPeerSource(p *api.Peer) {
 	}
 }
 
-func (b *Server) getPath(ip net.IP) *apiutil.Path {
-	return b.getPathWithNextHop(ip, "")
-}
-
 func (b *Server) getPathWithNextHop(ip net.IP, nextHop string) *apiutil.Path {
 	isV6 := ip.To4() == nil
 	if nextHop == "" {
