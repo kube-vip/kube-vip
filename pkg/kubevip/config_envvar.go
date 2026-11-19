@@ -32,6 +32,10 @@ const (
 
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
+	// vipLogFormat selects the log output format: text or json.
+	vipLogFormat = "vip_logformat"
+	// vipLogTimestampFormat selects the JSON timestamp encoding: rfc3339 or unix-ms.
+	vipLogTimestampFormat = "vip_logtimestampformat"
 
 	// instanceName identifies this kube-vip deployment when naming host-global resources
 	instanceName = "instance_name"

@@ -150,7 +150,100 @@ func newRuntimeConfigTestCommand(name string) *cobra.Command {
 	cmd.Flags().StringVar(&initConfig.ConfigFile, "config-file", "", "")
 	cmd.Flags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "")
 	cmd.Flags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "")
+	cmd.Flags().Int32Var(&initConfig.Logging, "log", 0, "")
+	cmd.Flags().StringVar(&initConfig.LogFormat, "logFormat", "text", "")
+	cmd.Flags().StringVar(&initConfig.LogTimestampFormat, "logTimestampFormat", "rfc3339", "")
 	return cmd
+}
+
+func TestRuntimeLoggingConfigPrecedence(t *testing.T) {
+	tests := []struct {
+		name       string
+		file       string
+		env        map[string]string
+		flags      []string
+		wantFormat string
+		wantLevel  int32
+	}{
+		{name: "defaults", wantFormat: "text"},
+		{name: "file", file: "logFormat: json\nlogging: -4\n", wantFormat: "json", wantLevel: -4},
+		{name: "environment", file: "logFormat: text\nlogging: 8\n", env: map[string]string{"vip_logformat": "json", "vip_loglevel": "-4"}, wantFormat: "json", wantLevel: -4},
+		{name: "flags", file: "logFormat: json\nlogging: -4\n", env: map[string]string{"vip_logformat": "json", "vip_loglevel": "8"}, flags: []string{"--logFormat=text", "--log=0"}, wantFormat: "text"},
+		{name: "JSON flag", env: map[string]string{"vip_logformat": "text"}, flags: []string{"--logFormat=json"}, wantFormat: "json"},
+		{name: "empty environment", file: "logFormat: json\n", env: map[string]string{"vip_logformat": ""}},
+		{name: "empty flag", env: map[string]string{"vip_logformat": "json"}, flags: []string{"--logFormat="}},
+		{name: "overridden invalid file", file: "logFormat: invalid\n", env: map[string]string{"vip_logformat": "json"}, wantFormat: "json"},
+		{name: "overridden invalid environment", env: map[string]string{"vip_logformat": "invalid"}, flags: []string{"--logFormat=json"}, wantFormat: "json"},
+	}
+	for _, commandName := range []string{"manager", "service"} {
+		for _, tt := range tests {
+			t.Run(commandName+"/"+tt.name, func(t *testing.T) {
+				cmd := newRuntimeConfigTestCommand(commandName)
+				if tt.file != "" {
+					t.Setenv("config_file", writeRuntimeConfig(t, tt.file))
+				}
+				for name, value := range tt.env {
+					t.Setenv(name, value)
+				}
+				if err := cmd.ParseFlags(tt.flags); err != nil {
+					t.Fatal(err)
+				}
+				if err := loadRuntimeConfig(cmd); err != nil {
+					t.Fatal(err)
+				}
+				if err := initConfig.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if initConfig.LogFormat != tt.wantFormat || initConfig.Logging != tt.wantLevel {
+					t.Fatalf("logging = (%q, %d), want (%q, %d)", initConfig.LogFormat, initConfig.Logging, tt.wantFormat, tt.wantLevel)
+				}
+			})
+		}
+	}
+}
+
+func TestRuntimeLogTimestampConfigPrecedence(t *testing.T) {
+	tests := []struct {
+		name  string
+		file  string
+		env   map[string]string
+		flags []string
+		want  string
+	}{
+		{name: "default", want: "rfc3339"},
+		{name: "file", file: "logTimestampFormat: unix-ms\n", want: "unix-ms"},
+		{name: "environment", file: "logTimestampFormat: rfc3339\n", env: map[string]string{"vip_logtimestampformat": "unix-ms"}, want: "unix-ms"},
+		{name: "flag", file: "logTimestampFormat: unix-ms\n", env: map[string]string{"vip_logtimestampformat": "unix-ms"}, flags: []string{"--logTimestampFormat=rfc3339"}, want: "rfc3339"},
+		{name: "empty environment", file: "logTimestampFormat: unix-ms\n", env: map[string]string{"vip_logtimestampformat": ""}},
+		{name: "empty flag", env: map[string]string{"vip_logtimestampformat": "unix-ms"}, flags: []string{"--logTimestampFormat="}},
+		{name: "invalid file overridden", file: "logTimestampFormat: invalid\n", env: map[string]string{"vip_logtimestampformat": "unix-ms"}, want: "unix-ms"},
+		{name: "invalid environment overridden", env: map[string]string{"vip_logtimestampformat": "invalid"}, flags: []string{"--logTimestampFormat=unix-ms"}, want: "unix-ms"},
+	}
+	for _, commandName := range []string{"manager", "service"} {
+		for _, tt := range tests {
+			t.Run(commandName+"/"+tt.name, func(t *testing.T) {
+				cmd := newRuntimeConfigTestCommand(commandName)
+				if tt.file != "" {
+					t.Setenv("config_file", writeRuntimeConfig(t, tt.file))
+				}
+				for name, value := range tt.env {
+					t.Setenv(name, value)
+				}
+				if err := cmd.ParseFlags(tt.flags); err != nil {
+					t.Fatal(err)
+				}
+				if err := loadRuntimeConfig(cmd); err != nil {
+					t.Fatal(err)
+				}
+				if err := initConfig.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if initConfig.LogTimestampFormat != tt.want {
+					t.Fatalf("LogTimestampFormat = %q, want %q", initConfig.LogTimestampFormat, tt.want)
+				}
+			})
+		}
+	}
 }
 
 func writeRuntimeConfig(t *testing.T, content string) string {

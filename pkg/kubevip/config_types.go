@@ -4,6 +4,10 @@ package kubevip
 type Config struct {
 	// Logging, settings
 	Logging int32 `yaml:"logging"`
+	// LogFormat selects text (the default) or JSON log output.
+	LogFormat string `yaml:"logFormat"`
+	// LogTimestampFormat selects RFC3339 (the default) or Unix milliseconds in JSON logs.
+	LogTimestampFormat string `yaml:"logTimestampFormat"`
 
 	// EnableARP, will use ARP to advertise the VIP address
 	EnableARP bool `yaml:"enableARP"`

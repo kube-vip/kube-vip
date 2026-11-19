@@ -837,7 +837,9 @@ func ParseEnvironment(c *Config) error {
 
 	// Explicitly empty string variables clear lower-priority file values.
 	stringEnvironment := map[string]*string{
-		vipInterface: &c.Interface, vipServicesInterface: &c.ServicesInterface,
+		vipLogFormat:          &c.LogFormat,
+		vipLogTimestampFormat: &c.LogTimestampFormat,
+		vipInterface:          &c.Interface, vipServicesInterface: &c.ServicesInterface,
 		vipLeaseName: &c.LeaseName, nodeName: &c.NodeName, vipAddress: &c.VIP, address: &c.Address,
 		cpNamespace: &c.Namespace, kubernetesAddr: &c.KubernetesAddr, svcNamespace: &c.ServiceNamespace,
 		svcLeaseName: &c.ServicesLeaseName, lbClassName: &c.LoadBalancerClassName, vipSubnet: &c.VIPSubnet,
