@@ -453,6 +453,9 @@ func (sm *Manager) startMode(ctx context.Context) error {
 				}
 			}
 		}
+	} else {
+		// If services weren't enabled we wait for the other functions to return before shutting down
+		wg.Wait()
 	}
 
 	if sm.config.EnableControlPlane {
