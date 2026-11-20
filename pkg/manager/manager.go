@@ -379,6 +379,13 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		cancel()
 		wg.Wait()
 		sm.svcProcessor.WaitForElectionCampaigns()
+		if sm.config.EnableServices && sm.svcProcessor != nil {
+			labelCtx, cancelLabels := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := sm.svcProcessor.RemoveStaleNodeLabels(labelCtx, sm.nodeLabelManager); err != nil {
+				log.Error("unable to remove service node labels", "err", err)
+			}
+			cancelLabels()
+		}
 		w.Cleanup()
 		log.Info("Shutting down Kube-Vip")
 	}()
@@ -432,6 +439,10 @@ func (sm *Manager) startMode(ctx context.Context) error {
 			}
 		}
 		w.ConfigureServices()
+
+		wg.Go(func() {
+			sm.svcProcessor.RunNodeLabelReconcile(modeCtx, sm.nodeLabelManager)
+		})
 
 		for {
 			select {
