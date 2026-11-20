@@ -31,6 +31,9 @@ func (c *Config) Validate() error {
 	if err := validateHealthCheckClientCertificate(c.ControlPlaneHealthCheck); err != nil {
 		return err
 	}
+	if err := c.validateHealthCheckGateVIP(); err != nil {
+		return err
+	}
 	if err := validateInstanceName(c.InstanceName); err != nil {
 		return err
 	}
@@ -113,5 +116,17 @@ func validateHealthCheckAddress(address string) error {
 		return fmt.Errorf("control_plane_health_check_address %q has unsupported scheme %q, expected http or https", address, parsedURL.Scheme)
 	}
 
+	return nil
+}
+
+func (c *Config) validateHealthCheckGateVIP() error {
+	hc := c.ControlPlaneHealthCheck
+	if !hc.GateVIP {
+		return nil
+	}
+	// With leader election, the election already decides who holds the VIP.
+	if !c.EnableBGP || c.EnableLeaderElection || hc.Address == "" {
+		return fmt.Errorf("control_plane_health_check_gate_vip requires bgp_enable and control_plane_health_check_address, without vip_leaderelection")
+	}
 	return nil
 }

@@ -636,6 +636,14 @@ func ParseEnvironment(c *Config) error {
 	if env != "" {
 		c.ControlPlaneHealthCheck.ClientKeyPath = env
 	}
+	env = os.Getenv(controlPlaneHealthCheckGateVIP)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", controlPlaneHealthCheckGateVIP, env, err)
+		}
+		c.ControlPlaneHealthCheck.GateVIP = b
+	}
 
 	env = os.Getenv(zebraEnable)
 	if env != "" {

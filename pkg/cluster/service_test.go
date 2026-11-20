@@ -340,6 +340,77 @@ func TestBGPHealthCheckLoop_RetriesDelHostOnFailure(t *testing.T) {
 		"route should be withdrawn after clearing DelHost error")
 }
 
+func TestBGPHealthCheckLoop_GateVIPAddsVIPBeforeAnnouncing(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusServiceUnavailable)
+	t.Cleanup(healthcheck.server.Close)
+
+	bgpManager := newMockBGPRouteManager()
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
+	network.setAddIPErr(errTestAddIP)
+	cancelContext, vipServiceDone := startVipServiceWithNetwork(t, newGateVIPConfig(healthcheck), bgpManager, network)
+
+	expectConsistently(t, func() bool { return network.addIPCount() == 0 && !bgpManager.isAnnounced() },
+		1500*time.Millisecond, "VIP should not be added while unhealthy")
+
+	healthcheck.setStatus(http.StatusOK)
+	expectEventually(t, func() bool { return network.addIPCount() > 0 },
+		"VIP should be added once healthy")
+	expectConsistently(t, func() bool { return !bgpManager.isAnnounced() },
+		1500*time.Millisecond, "route should not be announced while AddIP errors")
+
+	network.setAddIPErr(nil)
+	expectEventually(t, func() bool { return network.isPresent() && bgpManager.isAnnounced() },
+		"VIP should be added and route announced after clearing AddIP error")
+
+	cancelContext()
+	<-vipServiceDone
+	if bgpManager.isAnnounced() || !network.isPresent() {
+		t.Fatal("shutdown should withdraw the route and keep the VIP")
+	}
+}
+
+func TestBGPHealthCheckLoop_GateVIPRemovesVIPOnlyAfterWithdrawingRoute(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusOK)
+	t.Cleanup(healthcheck.server.Close)
+
+	bgpManager := newMockBGPRouteManager()
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR}
+	startVipServiceWithNetwork(t, newGateVIPConfig(healthcheck), bgpManager, network)
+
+	expectEventually(t, func() bool { return network.isPresent() && bgpManager.isAnnounced() },
+		"VIP should be added and route announced")
+
+	bgpManager.setDelErr(errTestDelHost)
+	healthcheck.setStatus(http.StatusServiceUnavailable)
+
+	expectConsistently(t, func() bool { return network.isPresent() },
+		1500*time.Millisecond, "VIP should stay while DelHost errors")
+
+	bgpManager.setDelErr(nil)
+	expectEventually(t, func() bool { return !bgpManager.isAnnounced() && !network.isPresent() },
+		"route should be withdrawn and VIP removed after clearing DelHost error")
+}
+
+func TestBGPHealthCheckLoop_GateVIPRemovesStaleVIPOnFirstFailure(t *testing.T) {
+	t.Parallel()
+	healthcheck := newTestHealthServer(t, http.StatusServiceUnavailable)
+	t.Cleanup(healthcheck.server.Close)
+
+	bgpManager := newMockBGPRouteManager()
+	// Left on the interface by a previous run.
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR, present: true}
+	cfg := newGateVIPConfig(healthcheck)
+	// Only the first check runs during the test, and it must not wait for the threshold.
+	cfg.ControlPlaneHealthCheck.PeriodSeconds = 60
+	cfg.ControlPlaneHealthCheck.FailureThreshold = 3
+	startVipServiceWithNetwork(t, cfg, bgpManager, network)
+
+	expectEventually(t, func() bool { return !network.isPresent() },
+		"stale VIP should be removed on the first failed check")
+}
+
 func TestRoutingTableHealthCheck_AddsVIPWhenHealthy(t *testing.T) {
 	t.Parallel()
 	healthcheck := newTestHealthServer(t, http.StatusOK)
@@ -551,6 +622,7 @@ func TestRoutingTableInvalidNodeAddressFallsBackToLocalhost(t *testing.T) {
 var (
 	errTestAddHost = &testError{msg: "mock AddHost error"}
 	errTestDelHost = &testError{msg: "mock DelHost error"}
+	errTestAddIP   = &testError{msg: "mock AddIP error"}
 )
 
 type testError struct{ msg string }
@@ -562,11 +634,16 @@ func (e *testError) Error() string { return e.msg }
 // Uses InitCluster so the real code parses certs for the BGP health check client.
 func startVipService(t *testing.T, cfg *kubevip.Config, bgpServer bgp.BGPManager) (context.CancelFunc, <-chan struct{}) {
 	t.Helper()
+	return startVipServiceWithNetwork(t, cfg, bgpServer, &mockNetwork{ip: "10.0.0.1", cidr: testCIDR})
+}
+
+func startVipServiceWithNetwork(t *testing.T, cfg *kubevip.Config, bgpServer bgp.BGPManager, network *mockNetwork) (context.CancelFunc, <-chan struct{}) {
+	t.Helper()
 	c, err := cluster.InitCluster(cfg, true, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InitCluster: %v", err)
 	}
-	c.Network = []vip.Network{&mockNetwork{ip: "10.0.0.1", cidr: testCIDR}}
+	c.Network = []vip.Network{network}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -690,6 +767,7 @@ type mockNetwork struct {
 	mu            sync.Mutex
 	present       bool
 	setMaskErr    error
+	addIPErr      error
 	addIPCalls    int
 	deleteIPCalls int
 }
@@ -698,9 +776,25 @@ func (m *mockNetwork) AddIP(bool, bool, ...int) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.addIPCalls++
+	if m.addIPErr != nil {
+		return false, m.addIPErr
+	}
 	m.present = true
 	return true, nil
 }
+
+func (m *mockNetwork) addIPCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.addIPCalls
+}
+
+func (m *mockNetwork) setAddIPErr(err error) {
+	m.mu.Lock()
+	m.addIPErr = err
+	m.mu.Unlock()
+}
+
 func (m *mockNetwork) DeleteIP() (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -709,6 +803,7 @@ func (m *mockNetwork) DeleteIP() (bool, error) {
 	m.present = false
 	return deleted, nil
 }
+
 func (m *mockNetwork) isPresent() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -856,4 +951,10 @@ func expectEventually(t *testing.T, condition func() bool, msg string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("timeout: %s", msg)
+}
+
+func newGateVIPConfig(healthcheck *testHealthServer) *kubevip.Config {
+	cfg := newBGPConfig(healthcheck.server.URL, healthcheck.caPath)
+	cfg.ControlPlaneHealthCheck.GateVIP = true
+	return cfg
 }
