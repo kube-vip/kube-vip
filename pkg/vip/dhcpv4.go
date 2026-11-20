@@ -3,7 +3,9 @@ package vip
 // DHCP client implementation that refers to https://www.rfc-editor.org/rfc/rfc2131.html
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -14,6 +16,10 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/jpillora/backoff"
+	"github.com/mdlayher/packet"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/sys/unix"
 )
 
 const dhcpClientPort = "68"
@@ -22,6 +28,7 @@ const defaultDHCPRenew = time.Hour
 // DHCPv4Client is responsible for maintaining ipv4 lease for one specified interface
 type DHCPv4Client struct {
 	iface           *net.Interface
+	interfaceAlias  *string
 	ddnsHostName    string
 	vendorClass     string
 	lease           *nclient4.Lease
@@ -150,6 +157,21 @@ func (c *DHCPv4Client) ErrorChannel() chan error {
 //	                           ----------
 //	        Figure: State-transition diagram for DHCP clients
 func (c *DHCPv4Client) Start(ctx context.Context) error {
+	select {
+	case <-c.stopChan:
+		return nil
+	default:
+	}
+	stopCtx, cancelStop := context.WithCancel(ctx)
+	defer cancelStop()
+	go func() {
+		select {
+		case <-c.stopChan:
+			cancelStop()
+		case <-stopCtx.Done():
+		}
+	}()
+	ctx = stopCtx
 	lease, err := c.requestWithBackoff(ctx)
 	if err != nil {
 		return fmt.Errorf("DHCPv4 client failed: %w", err)
@@ -158,6 +180,13 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 	c.initRebootFlag = false
 
 	c.storeLease(lease)
+	parentCtx := ctx
+	ctx, cancelLease := context.WithDeadline(parentCtx, lease.CreationTime.Add(lease.ACK.IPAddressLeaseTime(defaultDHCPRenew)))
+	defer func() { cancelLease() }()
+	resetLeaseDeadline := func(lease *nclient4.Lease) {
+		cancelLease()
+		ctx, cancelLease = context.WithDeadline(parentCtx, lease.CreationTime.Add(lease.ACK.IPAddressLeaseTime(defaultDHCPRenew)))
+	}
 
 	// Set up two timers to renew/rebind regularly
 	t1Timeout, t2Timeout := getLeaseTimeouts(lease)
@@ -169,8 +198,13 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 		case <-c.stopChan:
 			return c.killProcessing(t1, t2)
 		case <-ctx.Done():
+			leaseExpired := parentCtx.Err() == nil
 			c.close()
-			return c.killProcessing(t1, t2)
+			cleanupErr := c.killProcessing(t1, t2)
+			if leaseExpired {
+				return errors.Join(fmt.Errorf("DHCPv4 active lease expired: %w", ctx.Err()), cleanupErr)
+			}
+			return cleanupErr
 		case <-t1.C:
 			// renew is a unicast request of the IP renewal
 			// A point on renew is: the library does not return the right message (NAK)
@@ -180,6 +214,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			lease, err := c.renew(ctx)
 			if err == nil {
 				c.storeLease(lease)
+				resetLeaseDeadline(lease)
 				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 				log.Info("[DHCPv4] renew", "lease", lease)
 				t2.Reset(t2Timeout)
@@ -192,6 +227,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 			lease, err := c.request(ctx, true)
 			if err == nil {
 				c.storeLease(lease)
+				resetLeaseDeadline(lease)
 				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 				log.Info("[DHCPv4] rebind", "lease", lease)
 			} else {
@@ -207,6 +243,7 @@ func (c *DHCPv4Client) Start(ctx context.Context) error {
 					continue
 				}
 				c.storeLease(lease)
+				resetLeaseDeadline(lease)
 				t1Timeout, t2Timeout = getLeaseTimeouts(lease)
 			}
 			t1.Reset(t1Timeout)
@@ -273,7 +310,11 @@ RequestLoop:
 				if c.backoffAttempts > 0 && backoff.Attempt() > float64(c.backoffAttempts)-1 {
 					errMsg := fmt.Errorf("failed to get an IPv4 address after %d attempt(s), giving up, error: %s", c.backoffAttempts, err.Error())
 					log.Error(fmt.Sprintf("[DHCPv4] %s", errMsg.Error()))
-					c.errorChan <- errMsg
+					select {
+					case c.errorChan <- errMsg:
+					case <-c.stopChan:
+					case <-ctx.Done():
+					}
 					return nil, errMsg
 				}
 				log.Error("[DHCPv4] request failed", "attempt", backoff.Attempt(), "err", err.Error(), "waiting", dur)
@@ -291,11 +332,14 @@ RequestLoop:
 	}
 
 	if c.ipChan != nil {
-		// Nothing closes ipChan, so never block on a consumer that already stopped.
+		// A delayed consumer must not keep an expired lease alive.
+		deliveryCtx, cancelDelivery := context.WithDeadline(ctx, lease.CreationTime.Add(lease.ACK.IPAddressLeaseTime(defaultDHCPRenew)))
+		defer cancelDelivery()
 		select {
 		case c.ipChan <- lease.ACK.YourIPAddr.String():
 		case <-c.stopChan:
-		case <-ctx.Done():
+		case <-deliveryCtx.Done():
+			return nil, fmt.Errorf("[DHCPv4] lease delivery ended: %w", deliveryCtx.Err())
 		}
 	}
 
@@ -303,8 +347,35 @@ RequestLoop:
 }
 
 func (c *DHCPv4Client) request(ctx context.Context, rebind bool) (*nclient4.Lease, error) {
-	dhclient, err := nclient4.New(c.iface.Name)
+	if c.iface == nil || c.iface.Index <= 0 || c.iface.Name == "" || len(c.iface.HardwareAddr) == 0 {
+		return nil, errors.New("refusing DHCPv4 request without original interface identity")
+	}
+	link, err := netlink.LinkByIndex(c.iface.Index)
 	if err != nil {
+		return nil, fmt.Errorf("inspect original DHCPv4 request interface: %w", err)
+	}
+	attrs := link.Attrs()
+	if attrs.Index != c.iface.Index || attrs.Name != c.iface.Name || !bytes.Equal(attrs.HardwareAddr, c.iface.HardwareAddr) {
+		return nil, fmt.Errorf("refusing DHCPv4 request on changed interface %q", c.iface.Name)
+	}
+	if c.interfaceAlias == nil {
+		// ponytail: capture once before DORA; an empty native alias is valid.
+		alias := attrs.Alias
+		c.interfaceAlias = &alias
+	}
+	if attrs.Alias != *c.interfaceAlias {
+		return nil, fmt.Errorf("refusing DHCPv4 request after interface owner changed on %q", c.iface.Name)
+	}
+
+	// ponytail: pin DORA/rebind to the original index, not a reopened name.
+	rawConn, err := packet.Listen(c.iface, packet.Datagram, unix.ETH_P_IP, nil)
+	if err != nil {
+		return nil, fmt.Errorf("open original DHCPv4 request interface: %w", err)
+	}
+	conn := nclient4.NewBroadcastUDPConn(rawConn, &net.UDPAddr{Port: nclient4.ClientPort})
+	dhclient, err := nclient4.NewWithConn(conn, c.iface.HardwareAddr)
+	if err != nil {
+		_ = conn.Close()
 		return nil, fmt.Errorf("create a client for iface %s failed, error: %w", c.iface.Name, err)
 	}
 
@@ -330,12 +401,45 @@ func (c *DHCPv4Client) request(ctx context.Context, rebind bool) (*nclient4.Leas
 		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(c.lease.ACK.YourIPAddr)))
 	}
 
-	return dhclient.Request(ctx, modifiers...)
+	lease, err := dhclient.Request(ctx, modifiers...)
+	if err != nil {
+		return nil, err
+	}
+	// ponytail: fresh DORA may change IP; rebinding must extend the bound IP.
+	if rebind && !lease.ACK.YourIPAddr.Equal(c.lease.ACK.YourIPAddr) {
+		return nil, fmt.Errorf("refusing DHCPv4 rebind ACK for changed address %s (current %s)", lease.ACK.YourIPAddr, c.lease.ACK.YourIPAddr)
+	}
+	return lease, nil
 }
 
 func (c *DHCPv4Client) release() error {
-	dhclient, err := nclient4.New(c.iface.Name)
+	if c.iface == nil || c.iface.Index <= 0 || c.iface.Name == "" || len(c.iface.HardwareAddr) == 0 || c.interfaceAlias == nil {
+		return fmt.Errorf("refusing DHCPv4 release without original interface identity")
+	}
+	iface, err := net.InterfaceByIndex(c.iface.Index)
 	if err != nil {
+		return fmt.Errorf("inspect original DHCPv4 release interface: %w", err)
+	}
+	if iface.Name != c.iface.Name || !bytes.Equal(iface.HardwareAddr, c.iface.HardwareAddr) {
+		return fmt.Errorf("refusing DHCPv4 release on changed interface %q", c.iface.Name)
+	}
+	link, err := netlink.LinkByIndex(c.iface.Index)
+	if err != nil {
+		return fmt.Errorf("inspect original DHCPv4 release owner: %w", err)
+	}
+	if link.Attrs().Alias != *c.interfaceAlias {
+		return fmt.Errorf("refusing DHCPv4 release after interface owner changed on %q", c.iface.Name)
+	}
+
+	// ponytail: bind the original index; never reopen a reused interface name.
+	rawConn, err := packet.Listen(iface, packet.Datagram, unix.ETH_P_IP, nil)
+	if err != nil {
+		return fmt.Errorf("open original DHCPv4 release interface: %w", err)
+	}
+	conn := nclient4.NewBroadcastUDPConn(rawConn, &net.UDPAddr{Port: nclient4.ClientPort})
+	dhclient, err := nclient4.NewWithConn(conn, iface.HardwareAddr)
+	if err != nil {
+		_ = conn.Close()
 		return fmt.Errorf("create release client failed, error: %w, iface: %s, server ip: %v", err, c.iface.Name, c.lease.ACK.ServerIPAddr)
 	}
 	defer dhclient.Close()
@@ -350,15 +454,39 @@ func (c *DHCPv4Client) release() error {
 }
 
 func (c *DHCPv4Client) renew(ctx context.Context) (*nclient4.Lease, error) {
-	// renew needs a unicast client. This is due to some servers (like dnsmasq) require the exact request coming from the vip interface
-	dhclient, err := nclient4.New(c.iface.Name,
-		nclient4.WithUnicast(&net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort}))
+	if c.iface == nil || c.iface.Index <= 0 || c.iface.Name == "" || len(c.iface.HardwareAddr) == 0 || c.interfaceAlias == nil {
+		return nil, errors.New("refusing DHCPv4 renewal without original interface identity")
+	}
+	link, err := netlink.LinkByIndex(c.iface.Index)
 	if err != nil {
+		return nil, fmt.Errorf("inspect original DHCPv4 renewal interface: %w", err)
+	}
+	attrs := link.Attrs()
+	if attrs.Name != c.iface.Name || !bytes.Equal(attrs.HardwareAddr, c.iface.HardwareAddr) || attrs.Alias != *c.interfaceAlias {
+		return nil, fmt.Errorf("refusing DHCPv4 renewal on changed interface %q", c.iface.Name)
+	}
+
+	// Keep the lease source address required by servers such as dnsmasq.
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: c.lease.ACK.YourIPAddr, Port: nclient4.ClientPort})
+	if err != nil {
+		return nil, fmt.Errorf("open original DHCPv4 renewal socket: %w", err)
+	}
+	dhclient, err := nclient4.NewWithConn(&dhcpv4RenewalConn{UDPConn: conn, interfaceIndex: attrs.Index}, attrs.HardwareAddr)
+	if err != nil {
+		_ = conn.Close()
 		return nil, fmt.Errorf("create renew client failed, error: %w, server ip: %v", err, c.lease.ACK.ServerIPAddr)
 	}
 	defer dhclient.Close()
 
-	return dhclient.Renew(ctx, c.lease, c.requestOptions()...)
+	renewed, err := dhclient.Renew(ctx, c.lease, c.requestOptions()...)
+	if err != nil {
+		return nil, err
+	}
+	// ponytail: another address's ACK cannot extend this bound lease.
+	if !renewed.ACK.YourIPAddr.Equal(c.lease.ACK.YourIPAddr) {
+		return nil, fmt.Errorf("refusing DHCPv4 renewal ACK for changed address %s (current %s)", renewed.ACK.YourIPAddr, c.lease.ACK.YourIPAddr)
+	}
+	return renewed, nil
 }
 
 // requestOptions returns the options that identify the client in a
@@ -378,4 +506,14 @@ func (c *DHCPv4Client) requestOptions() []dhcpv4.Modifier {
 		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptClassIdentifier(c.vendorClass)))
 	}
 	return modifiers
+}
+
+type dhcpv4RenewalConn struct {
+	*net.UDPConn
+	interfaceIndex int
+}
+
+func (c *dhcpv4RenewalConn) WriteTo(packet []byte, peer net.Addr) (int, error) {
+	// ponytail: pin renewal writes by kernel index; keep ordinary UDP reads.
+	return ipv4.NewPacketConn(c.UDPConn).WriteTo(packet, &ipv4.ControlMessage{IfIndex: c.interfaceIndex}, peer)
 }

@@ -281,7 +281,7 @@ func (p *Processor) prepareServiceInstance(ctx context.Context, svcCtx *servicec
 // configureService configures a tracked instance. It acquires the Service lock
 // for svc.UID and verifies inst is still current; callers must not hold the lock.
 func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext.Context, inst *instance.Instance,
-	svc *v1.Service, wg *sync.WaitGroup) error {
+	svc *v1.Service, wg *sync.WaitGroup) (configureErr error) {
 	p.serviceLock.Lock(svc.UID)
 	defer func() {
 		if err := p.serviceLock.Unlock(svc.UID); err != nil {
@@ -301,6 +301,42 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 	current := p.findServiceInstance(svc)
 	if current != inst {
 		return fmt.Errorf("service instance no longer active for %s/%s", svc.Namespace, svc.Name)
+	}
+
+	if done := inst.DHCPv4Done(); done != nil {
+		select {
+		case <-done:
+			svcCtx.Cancel()
+			return fmt.Errorf("DHCPv4 client has stopped for %s/%s", svc.Namespace, svc.Name)
+		default:
+		}
+		operationCtx, cancelDHCPService := context.WithCancel(ctx)
+		ctx = operationCtx
+		inst.DHCPServiceCancel = cancelDHCPService
+		defer func() {
+			if configureErr != nil {
+				cancelDHCPService()
+			}
+		}()
+		wg.Go(func() {
+			defer cancelDHCPService()
+			select {
+			case <-operationCtx.Done():
+				return
+			case <-svcCtx.Ctx.Done():
+				return
+			case <-done:
+			}
+			if operationCtx.Err() != nil || svcCtx.Ctx.Err() != nil {
+				return
+			}
+			// Withdraw locally and interrupt API I/O before waiting for the Service lock.
+			cancelDHCPService()
+			svcCtx.Cancel()
+			if err := p.deleteServiceInstance(context.WithoutCancel(operationCtx), inst); err != nil {
+				log.Error("cleaning up stopped DHCPv4 Service", "uid", inst.UID(), "err", err)
+			}
+		})
 	}
 
 	// is not a global leader election mode
@@ -364,6 +400,9 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 		if err := p.updateStatus(ctx, inst); err != nil {
 			log.Error("[service] updating status", "namespace", inst.ServiceSnapshot.Namespace, "name", inst.ServiceSnapshot.Name, "err", err)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	egressService := serviceSnapshotForEgress(inst, svc)
@@ -499,8 +538,26 @@ func (p *Processor) updateDHCPAddress(ctx context.Context, svc *v1.Service, inst
 		}
 	}()
 
-	if p.findServiceInstance(svc) != inst {
+	if inst == nil || p.findServiceInstance(svc) != inst ||
+		index < 0 || index >= len(inst.VIPConfigs) || inst.VIPConfigs[index] == nil {
 		return false
+	}
+
+	if !ipv6 && inst.IsDHCPv4 {
+		next := net.ParseIP(ip)
+		if next == nil || next.To4() == nil || next.IsUnspecified() {
+			return false
+		}
+		// Accepted lease bookkeeping also runs before a local datapath is constructed.
+		if ctx.Err() == nil && index < len(inst.Clusters) && inst.Clusters[index] != nil &&
+			len(inst.Clusters[index].Network) == 1 && inst.Clusters[index].Network[0] != nil {
+			previous := net.ParseIP(inst.Clusters[index].Network[0].IP())
+			if previous != nil && previous.To4() != nil && !previous.IsUnspecified() && !previous.Equal(next) {
+				// ponytail: retire local workers; canonical replacement still owns full cleanup.
+				// Keep the old Network identity and DHCP/reporting context alive before API I/O.
+				inst.Clusters[index].StopAndWait()
+			}
+		}
 	}
 
 	log.Debug("IP changed", "ip", ip)
@@ -614,6 +671,9 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 // deleteCurrentService removes the supplied tracked instance. The caller must
 // hold the Service lock for serviceInstance.UID().
 func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
+	if serviceInstance.DHCPServiceCancel != nil {
+		serviceInstance.DHCPServiceCancel()
+	}
 	if serviceInstance.LabelAdded {
 		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
