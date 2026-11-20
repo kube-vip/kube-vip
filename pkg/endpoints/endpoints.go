@@ -52,14 +52,18 @@ type ServiceLocker interface {
 
 func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, bgpServer *bgp.Server,
 	findServiceInstance serviceInstanceFinder, tunnelMgr wireguard.ServiceTunnelManager, routeMgr *route.Manager,
-	serviceLocks ServiceLocker) *Processor {
+	serviceLocks ServiceLocker, clients ...kubernetes.Interface) *Processor {
+	worker := newEndpointWorker(config, provider, bgpServer, tunnelMgr, routeMgr)
+	if bgpWorker, ok := worker.(*BGP); ok && len(clients) > 0 {
+		bgpWorker.client = clients[0]
+	}
 	return &Processor{
 		config:              config,
 		provider:            provider,
 		bgpServer:           bgpServer,
 		findServiceInstance: findServiceInstance,
 		serviceLocks:        serviceLocks,
-		worker:              newEndpointWorker(config, provider, bgpServer, tunnelMgr, routeMgr),
+		worker:              worker,
 	}
 }
 
@@ -354,6 +358,9 @@ func (p *Processor) serviceInstance(service *v1.Service) *instance.Instance {
 
 func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {
 	if service == nil || service.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+		return false
+	}
+	if service.Annotations[kubevip.BGPForwardingNode] == "true" {
 		return false
 	}
 

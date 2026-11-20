@@ -32,6 +32,11 @@ func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
 	if !shouldAllowReconcileWithoutEndpoints(clusterOptIn) {
 		t.Fatal("cluster service with opt-in annotation should be allowed")
 	}
+	forwardingNode := clusterOptIn.DeepCopy()
+	forwardingNode.Annotations[kubevip.BGPForwardingNode] = "true"
+	if shouldAllowReconcileWithoutEndpoints(forwardingNode) {
+		t.Fatal("forwarding-node advertisements always require endpoints")
+	}
 
 	localOptIn := &v1.Service{
 		Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal},

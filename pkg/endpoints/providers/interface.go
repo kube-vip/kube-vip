@@ -32,6 +32,13 @@ type Provider interface {
 	ResolvePort(servicePort v1.ServicePort) int32
 }
 
+// EndpointNodeProvider exposes usable endpoint addresses grouped by their node.
+// Endpoints without a NodeName are deliberately excluded: Pod hostnames are not
+// necessarily Kubernetes node names.
+type EndpointNodeProvider interface {
+	GetEndpointNodes() map[string][]string
+}
+
 // ResolvePortWithLookup is a helper that resolves a service port using a lookup function
 // for named ports. This consolidates the common resolution logic.
 func ResolvePortWithLookup(servicePort v1.ServicePort, lookupNamedPort func(string) int32) int32 {

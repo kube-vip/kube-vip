@@ -10,6 +10,9 @@ const (
 	// The host that has the VIP
 	VipHost = "kube-vip.io/vipHost"
 
+	// BGPForwardingNode advertises a ready endpoint's node as the VIP next hop.
+	BGPForwardingNode = "kube-vip.io/bgp-forwarding-node"
+
 	// Enable Egress on a service
 	Egress = "kube-vip.io/egress"
 
