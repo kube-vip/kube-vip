@@ -145,6 +145,8 @@ const (
 	controlPlaneHealthCheckFailureThreshold = "control_plane_health_check_failure_threshold"
 	// controlPlaneHealthCheckCAPath defines the path to a CA certificate for control-plane health check TLS verification
 	controlPlaneHealthCheckCAPath = "control_plane_health_check_ca_path"
+	// controlPlaneHealthCheckGateVIP adds the VIP only while the control-plane health check passes
+	controlPlaneHealthCheckGateVIP = "control_plane_health_check_gate_vip"
 
 	// zebraEnable defines if Zebra integraton should be enabled
 	zebraEnable = "zebra_enable"

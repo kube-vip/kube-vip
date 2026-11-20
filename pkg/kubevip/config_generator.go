@@ -724,6 +724,12 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: c.ControlPlaneHealthCheck.CAPath,
 			})
 		}
+		if c.ControlPlaneHealthCheck.GateVIP {
+			healthCheckVars = append(healthCheckVars, corev1.EnvVar{
+				Name:  controlPlaneHealthCheckGateVIP,
+				Value: "true",
+			})
+		}
 		newEnvironment = append(newEnvironment, healthCheckVars...)
 	}
 
