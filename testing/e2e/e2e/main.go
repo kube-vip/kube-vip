@@ -43,7 +43,7 @@ func main() {
 		if ip.To4() == nil {
 			network = "tcp6"
 			address = fmt.Sprintf("[%s]", address)
-			port = ":12346" // use a different port for IPv6 incase the IPv4 port is left connected
+			port = ":12346" // use a different port for IPv6 in case the IPv4 port is left connected
 			log.Info("connecting with IPv6")
 		}
 		for {
