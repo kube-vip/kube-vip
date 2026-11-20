@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/cloudflare/ipvs v0.12.0
-	github.com/containernetworking/plugins v1.9.1
+	github.com/containernetworking/plugins v1.10.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/florianl/go-conntrack v0.7.0
 	github.com/google/go-cmp v0.7.0
@@ -15,7 +15,7 @@ require (
 	github.com/insomniacslk/dhcp v0.0.0-20260719225207-c76316d4aa82
 	github.com/jpillora/backoff v1.0.0
 	github.com/mdlayher/ndp v1.1.0
-	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/osrg/gobgp/v4 v4.10.0
 	github.com/pkg/errors v0.9.1
@@ -48,7 +48,7 @@ require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -102,9 +102,9 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/genetlink v1.3.2 // indirect
-	github.com/mdlayher/netlink v1.8.0 // indirect
+	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/packet v1.1.2 // indirect
-	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/mdlayher/socket v0.6.1 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
