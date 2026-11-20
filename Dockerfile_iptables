@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.23 AS dev
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24 as dev
 RUN apk add --no-cache git ca-certificates make
 RUN adduser -D appuser
 COPY . /src/
