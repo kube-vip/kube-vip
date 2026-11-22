@@ -11,7 +11,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/nftables v0.3.0
 	github.com/gookit/slog v0.7.1
-	github.com/huin/goupnp v1.3.0
+	github.com/huin/goupnp v1.3.1
 	github.com/insomniacslk/dhcp v0.0.0-20260719225207-c76316d4aa82
 	github.com/jpillora/backoff v1.1.0
 	github.com/mdlayher/ndp v1.1.0
