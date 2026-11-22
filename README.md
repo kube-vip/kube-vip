@@ -92,7 +92,7 @@ WantedBy=multi-user.target
 ### Verifying release artifacts
 
 Container images and release binaries are signed keylessly with
-[cosign](https://docs.sigstore.dev/cosign/overview/) using the GitHub Actions
+[cosign](https://docs.sigstore.dev/cosign/signing/overview/) using the GitHub Actions
 OIDC identity. Release images and binaries also have a signed SLSA build
 provenance attestation available through the GitHub attestation API, and each
 image has a signed CycloneDX SBOM attestation in the registry.
