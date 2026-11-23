@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
@@ -19,7 +20,7 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 	"sigs.k8s.io/kind/pkg/cmd"
-	load "sigs.k8s.io/kind/pkg/cmd/kind/load/docker-image"
+	load "sigs.k8s.io/kind/pkg/cmd/kind/load/image-archive"
 	"sigs.k8s.io/kind/pkg/exec"
 	kindlog "sigs.k8s.io/kind/pkg/log"
 )
@@ -55,9 +56,25 @@ func NodeIPv4(node nodes.Node) string {
 }
 
 func LoadDockerImageToKind(logger kindlog.Logger, imagePath, clusterName string) error {
+	dir, err := os.MkdirTemp("", "kube-vip-image-")
+	if err != nil {
+		return errors.Wrap(err, "failed to create image archive directory")
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			logger.Warnf("failed to remove image archive directory %q: %v", dir, err)
+		}
+	}()
+	archivePath := filepath.Join(dir, "image.tar")
+	// Docker's containerd store may reference platforms that were never pulled.
+	if err := exec.Command("docker", "image", "save", "--platform", "linux/"+runtime.GOARCH,
+		"--output", archivePath, imagePath).Run(); err != nil {
+		return PrintCommandOutputIfErr(errors.Wrap(err, "failed to save image archive"))
+	}
+
 	loadImageCmd := load.NewCommand(logger, cmd.StandardIOStreams())
-	loadImageCmd.SetArgs([]string{"--name", clusterName, imagePath})
-	return loadImageCmd.Execute()
+	loadImageCmd.SetArgs([]string{"--name", clusterName, archivePath})
+	return PrintCommandOutputIfErr(loadImageCmd.Execute())
 }
 
 func RunInNode(node nodes.Node, command string, args ...string) {
@@ -144,15 +161,9 @@ func ClientConfigFromKubeconfig(kc string) (*rest.Config, error) {
 }
 
 func PrintCommandOutputIfErr(err error) error {
-	tErr := err
-	for tErr != nil {
-		runErrP := &exec.RunError{}
-		runErr := &runErrP
-		if errors.As(tErr, runErr) {
-			klog.Errorf("Command failed %s:\n%s", (*runErr).Command, string((*runErr).Output))
-			break
-		}
+	var runErr *exec.RunError
+	if errors.As(err, &runErr) {
+		klog.Errorf("Command failed %s:\n%s", runErr.Command, string(runErr.Output))
 	}
-
-	return tErr
+	return err
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	googlenftables "github.com/google/nftables"
+	"github.com/google/nftables/expr"
 )
 
 func TestEgressTableName(t *testing.T) {
@@ -106,4 +107,124 @@ func TestShouldDeleteSNATChain(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildSNATRules(t *testing.T) {
+	tests := []struct {
+		name             string
+		destinationPorts string
+		allowedCIDRs     []string
+		ipv6             bool
+		tableName        string
+		wantTableName    string
+		wantRules        int
+		wantPortSets     bool
+	}{
+		{
+			name:      "no filters",
+			wantRules: 1,
+		},
+		{
+			name:         "multiple allowed CIDRs without destination ports",
+			allowedCIDRs: []string{"198.51.100.0/24", "203.0.113.0/24"},
+			wantRules:    2,
+		},
+		{
+			name:             "multiple protocols without allowed CIDRs",
+			destinationPorts: "tcp:5060,udp:5060",
+			wantRules:        2,
+			wantPortSets:     true,
+		},
+		{
+			name:             "multiple allowed CIDRs with a destination port",
+			destinationPorts: "tcp:5060",
+			allowedCIDRs:     []string{"198.51.100.0/24", "203.0.113.0/24"},
+			wantRules:        2,
+			wantPortSets:     true,
+		},
+		{
+			name:             "IPv6 custom table with multiple CIDRs and protocols",
+			destinationPorts: "tcp:5060,udp:5060,sctp:5060",
+			allowedCIDRs:     []string{"2001:db8:1::/64", "2001:db8:2::/64"},
+			ipv6:             true,
+			tableName:        "kube_vip_test",
+			wantTableName:    "kube_vip_test_v6",
+			wantRules:        6,
+			wantPortSets:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			podIP, vipIP := "10.244.0.10", "192.0.2.10"
+			if tt.ipv6 {
+				podIP, vipIP = "fd00::10", "2001:db8::10"
+			}
+
+			conn, err := googlenftables.New()
+			if err != nil {
+				t.Fatalf("failed to create nftables connection: %v", err)
+			}
+			rules, err := buildSNATRules(
+				conn,
+				podIP,
+				vipIP,
+				"service-uid",
+				tt.destinationPorts,
+				nil,
+				tt.allowedCIDRs,
+				tt.ipv6,
+				tt.tableName,
+			)
+			if err != nil {
+				t.Fatalf("buildSNATRules() returned an error: %v", err)
+			}
+			if len(rules) != tt.wantRules {
+				t.Fatalf("buildSNATRules() returned %d rules, want %d", len(rules), tt.wantRules)
+			}
+
+			setIDs := make(map[uint32]struct{}, len(rules))
+			for i, rule := range rules {
+				if tt.wantTableName != "" && rule.Table.Name != tt.wantTableName {
+					t.Errorf("rule %d uses table %q, want %q", i, rule.Table.Name, tt.wantTableName)
+				}
+
+				portSetID, hasPortSet := destinationPortSetID(t, rule)
+				if hasPortSet != tt.wantPortSets {
+					t.Errorf("rule %d destination-port set presence = %t, want %t", i, hasPortSet, tt.wantPortSets)
+				}
+				if !hasPortSet {
+					continue
+				}
+				if portSetID == 0 {
+					t.Fatalf("rule %d has a destination-port set with ID 0", i)
+				}
+				if _, exists := setIDs[portSetID]; exists {
+					t.Fatalf("destination-port set ID %d is reused by multiple rules", portSetID)
+				}
+				setIDs[portSetID] = struct{}{}
+			}
+		})
+	}
+}
+
+func destinationPortSetID(t *testing.T, rule *googlenftables.Rule) (uint32, bool) {
+	t.Helper()
+
+	for i, expression := range rule.Exprs {
+		payload, ok := expression.(*expr.Payload)
+		if !ok || payload.Base != expr.PayloadBaseTransportHeader || payload.Offset != 2 || payload.Len != 2 {
+			continue
+		}
+		if i+1 >= len(rule.Exprs) {
+			t.Fatal("destination-port payload is not followed by a lookup expression")
+		}
+		lookup, ok := rule.Exprs[i+1].(*expr.Lookup)
+		if !ok {
+			t.Fatal("destination-port payload is not followed by a lookup expression")
+		}
+		return lookup.SetID, true
+	}
+
+	return 0, false
 }

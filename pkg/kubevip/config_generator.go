@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kube-vip/kube-vip/pkg/debouncer"
@@ -209,10 +210,28 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			},
 		},
 	}
+	if c.Logging != 0 {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogLevel,
+			Value: strconv.FormatInt(int64(c.Logging), 10),
+		})
+	}
 	if c.InstanceName != "" {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{
 			Name:  instanceName,
 			Value: c.InstanceName,
+		})
+	}
+	if c.LogFormat != "" && c.LogFormat != "text" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogFormat,
+			Value: c.LogFormat,
+		})
+	}
+	if c.LogTimestampFormat != "" && c.LogTimestampFormat != "rfc3339" {
+		newEnvironment = append(newEnvironment, corev1.EnvVar{
+			Name:  vipLogTimestampFormat,
+			Value: c.LogTimestampFormat,
 		})
 	}
 
@@ -351,6 +370,19 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 			}
 			newEnvironment = append(newEnvironment, svcElection...)
 		}
+		if c.PerServiceElectionOnDemand {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  perServiceElectionOnDemand,
+				Value: strconv.FormatBool(c.PerServiceElectionOnDemand),
+			})
+		}
+		// The nftables egress implementation is the default, so it only needs writing when it has been turned off
+		if !c.EgressWithNftables {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  egressWithNftables,
+				Value: strconv.FormatBool(c.EgressWithNftables),
+			})
+		}
 		if c.LoadBalancerClassOnly {
 			lbClassOnlyVar := []corev1.EnvVar{
 				{
@@ -359,6 +391,20 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				},
 			}
 			newEnvironment = append(newEnvironment, lbClassOnlyVar...)
+		}
+		// An empty class name is meaningful (it matches Services without a class), so only the default is left out
+		if c.LoadBalancerClassName != LBClassName {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  lbClassName,
+				Value: c.LoadBalancerClassName,
+			})
+		}
+		// Legacy class handling is enabled by default, so it only needs writing when it has been turned off
+		if !c.LoadBalancerClassLegacyHandling {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  lbClassLegacyHandling,
+				Value: strconv.FormatBool(c.LoadBalancerClassLegacyHandling),
+			})
 		}
 		if c.EnableServiceSecurity {
 			EnableServiceSecurityVar := []corev1.EnvVar{
@@ -473,6 +519,30 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: strconv.FormatBool(c.EnableRoutingTable),
 			},
 		}
+		if c.RoutingTableID > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingTableID,
+				Value: fmt.Sprintf("%d", c.RoutingTableID),
+			})
+		}
+		if c.RoutingTableType > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingTableType,
+				Value: fmt.Sprintf("%d", c.RoutingTableType),
+			})
+		}
+		if c.RoutingProtocol > 0 {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipRoutingProtocol,
+				Value: fmt.Sprintf("%d", c.RoutingProtocol),
+			})
+		}
+		if c.CleanRoutingTable {
+			routingtable = append(routingtable, corev1.EnvVar{
+				Name:  vipCleanRoutingTable,
+				Value: strconv.FormatBool(c.CleanRoutingTable),
+			})
+		}
 		newEnvironment = append(newEnvironment, routingtable...)
 	}
 	// If BGP
@@ -533,6 +603,74 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: c.BGPConfig.SourceIP,
 			},
 			)
+		}
+
+		// Detect if the peer is more than one hop away
+		if c.BGPPeerConfig.MultiHop {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpMultiHop,
+				Value: strconv.FormatBool(c.BGPPeerConfig.MultiHop),
+			})
+		}
+
+		// BGP timers for all peers
+		if c.BGPConfig.HoldTime > 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpHoldTime,
+				Value: strconv.FormatUint(c.BGPConfig.HoldTime, 10),
+			})
+		}
+		if c.BGPConfig.KeepaliveInterval > 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpKeepaliveInterval,
+				Value: strconv.FormatUint(c.BGPConfig.KeepaliveInterval, 10),
+			})
+		}
+
+		// Zebra integration
+		if c.BGPConfig.Zebra.Enabled {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  zebraEnable,
+				Value: strconv.FormatBool(c.BGPConfig.Zebra.Enabled),
+			})
+			if c.BGPConfig.Zebra.URL != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraURL,
+					Value: c.BGPConfig.Zebra.URL,
+				})
+			}
+			if c.BGPConfig.Zebra.Version > 0 {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraVersion,
+					Value: strconv.FormatUint(uint64(c.BGPConfig.Zebra.Version), 10),
+				})
+			}
+			if c.BGPConfig.Zebra.SoftwareName != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  zebraSoftwareName,
+					Value: c.BGPConfig.Zebra.SoftwareName,
+				})
+			}
+		}
+
+		// BGP Monitoring Protocol stations
+		if len(c.BGPConfig.BMP.Servers) != 0 {
+			bgpConfig = append(bgpConfig, corev1.EnvVar{
+				Name:  bgpBMPServers,
+				Value: strings.Join(c.BGPConfig.BMP.Servers, ","),
+			})
+			if c.BGPConfig.BMP.Policy != "" {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  bgpBMPPolicy,
+					Value: c.BGPConfig.BMP.Policy,
+				})
+			}
+			if c.BGPConfig.BMP.StatisticsTimeout > 0 {
+				bgpConfig = append(bgpConfig, corev1.EnvVar{
+					Name:  bgpBMPStatisticsTimeout,
+					Value: strconv.FormatUint(uint64(c.BGPConfig.BMP.StatisticsTimeout), 10),
+				})
+			}
 		}
 
 		var peers string
@@ -640,6 +778,19 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 		},
 	}
 	newEnvironment = append(newEnvironment, prometheus...)
+
+	if c.EnablePprof {
+		newEnvironment = append(newEnvironment,
+			corev1.EnvVar{
+				Name:  enablePprof,
+				Value: strconv.FormatBool(c.EnablePprof),
+			},
+			corev1.EnvVar{
+				Name:  pprofServer,
+				Value: c.PprofHTTPServer,
+			},
+		)
+	}
 
 	if c.EnableEndpoints {
 		newEnvironment = append(newEnvironment, corev1.EnvVar{

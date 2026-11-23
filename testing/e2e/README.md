@@ -1,10 +1,12 @@
 # Running End To End Tests
 Prerequisites:
 * Tests must be run on a Linux OS
-* Docker installed with IPv6 enabled [how to enable IPv6](https://docs.docker.com/config/daemon/ipv6/)
+* Docker 28+ (API 1.48+) installed with IPv6 enabled [how to enable IPv6](https://docs.docker.com/config/daemon/ipv6/)
   * You will need to restart your Docker engine after updating the config
 * Target kube-vip Docker image exists locally. Either build the image locally
   with `make dockerx86Local` or `docker pull` the image from a registry.
+  Images are exported for the test runner's Linux platform before loading into kind, so
+  Docker's containerd image store does not export references to unpulled platforms.
 
 Run the tests from the repo root:
 ```

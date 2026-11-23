@@ -13,7 +13,7 @@ import (
 
 // The UPNP library is structured a bit funny. To create a forward on a gateway and know
 // the external IP of that gateway we need two different instances of the UPNP client
-// WANIPv6FirewallControlClient can be empty if the gatway doesn't support the WANIPv6FirewallControl service
+// WANIPv6FirewallControlClient can be empty if the gateway doesn't support the WANIPv6FirewallControl service
 type Gateway struct {
 	ConnectionClient             ConnectionClient
 	WANIPv6FirewallControlClient *internetgateway2.WANIPv6FirewallControl1

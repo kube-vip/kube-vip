@@ -35,13 +35,15 @@ func (ep *Endpointslices) CreateRetryWatcher(ctx context.Context, clientSet *kub
 	service *v1.Service) (*watchtools.RetryWatcher, error) {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/service-name": service.Name}}
 
-	opts := metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
-	}
+	labelSelectorString := labels.Set(labelSelector.MatchLabels).String()
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(ctx, opts)
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, retryWatcherInitialResourceVersion, &cache.ListWatch{
+		WatchFuncWithContext: func(watchCtx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			if opts.ResourceVersion == retryWatcherInitialResourceVersion {
+				opts.ResourceVersion = ""
+			}
+			opts.LabelSelector = labelSelectorString
+			return clientSet.DiscoveryV1().EndpointSlices(service.Namespace).Watch(watchCtx, opts)
 		},
 	})
 	if err != nil {
@@ -75,22 +77,39 @@ func (ep *Endpointslices) DeleteObject(endpoints runtime.Object) error {
 	return nil
 }
 
-// isServing reports whether an endpoint should receive traffic. Per the
-// EndpointConditions godoc a nil Serving defers to Ready, and a nil Ready is an
-// unknown state that consumers should interpret as ready.
-func isServing(conditions discoveryv1.EndpointConditions) bool {
+// isUsable reports whether an endpoint should receive traffic: it is either
+// serving or, unless its Pod is terminating, ready.
+//
+// Serving keeps a terminating Pod that still passes its readiness probe usable.
+// Once such a Pod stops serving it is dropped, so its route goes away while the
+// Pod deals with the last traffic already sent to it.
+//
+// Ready covers Services with publishNotReadyAddresses, where the EndpointSlice
+// controller marks every endpoint ready, terminating or not, while Serving keeps
+// tracking the Pod's readiness. Workloads that have to reach their peers through
+// the Service before they become ready depend on those endpoints.
+//
+// Per the EndpointConditions godoc a nil Serving defers to Ready, a nil Ready is
+// an unknown state that consumers should interpret as ready, and a nil
+// Terminating should be interpreted as false.
+func isUsable(conditions discoveryv1.EndpointConditions) bool {
 	serving := conditions.Serving
 	if serving == nil {
 		serving = conditions.Ready
 	}
-	return serving == nil || *serving
+	if serving == nil || *serving {
+		return true
+	}
+	ready := conditions.Ready != nil && *conditions.Ready
+	terminating := conditions.Terminating != nil && *conditions.Terminating
+	return ready && !terminating
 }
 
 func (ep *Endpointslices) GetAllEndpoints() ([]string, error) {
 	result := []string{}
 	for _, eps := range ep.slices {
 		for _, e := range eps.Endpoints {
-			if !isServing(e.Conditions) {
+			if !isUsable(e.Conditions) {
 				continue
 			}
 			result = append(result, e.Addresses...)
@@ -103,7 +122,7 @@ func (ep *Endpointslices) GetLocalEndpoints(id string, _ *kubevip.Config) ([]str
 	var localEndpoints []string
 	for _, eps := range ep.slices {
 		for _, endpoint := range eps.Endpoints {
-			if !isServing(endpoint.Conditions) {
+			if !isUsable(endpoint.Conditions) {
 				continue
 			}
 			for _, address := range endpoint.Addresses {
@@ -163,6 +182,19 @@ func (ep *Endpointslices) UpdateServiceAnnotation(ctx context.Context, endpoint,
 
 func (ep *Endpointslices) GetLabel() string {
 	return ep.label
+}
+
+func (ep *Endpointslices) GetEndpointNodes() map[string][]string {
+	nodes := make(map[string][]string)
+	for _, slice := range ep.slices {
+		for _, endpoint := range slice.Endpoints {
+			if !isUsable(endpoint.Conditions) || endpoint.NodeName == nil || *endpoint.NodeName == "" {
+				continue
+			}
+			nodes[*endpoint.NodeName] = append(nodes[*endpoint.NodeName], endpoint.Addresses...)
+		}
+	}
+	return nodes
 }
 
 func (ep *Endpointslices) ResolvePort(servicePort v1.ServicePort) int32 {

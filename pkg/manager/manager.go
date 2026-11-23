@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -52,7 +53,12 @@ type Manager struct {
 	// This channel is used to catch an OS signal and trigger a shutdown
 	signalChan chan os.Signal
 
-	sigint sync.Once
+	sigint       sync.Once
+	killChan     chan struct{}
+	killChanOnce sync.Once
+	dumpWG       sync.WaitGroup
+	dumping      atomic.Bool
+	dump         func(context.Context)
 
 	svcProcessor *services.Processor
 
@@ -80,7 +86,8 @@ type Manager struct {
 	leaseMgr *lease.Manager
 
 	// Will handle routes
-	routeMgr *route.Manager
+	routeMgr   *route.Manager
+	modeWorker func() worker.Worker
 }
 
 // New will create a new managing object
@@ -250,8 +257,11 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 	leaseMgr := lease.NewManager()
 	routeMgr := route.NewManager()
 
-	svcProcessor := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
+	svcProcessor, err := services.NewServicesProcessor(config, bgpServer, clientset, rwClientSet,
 		intfMgr, arpMgr, nodeLabelManager, electionMgr, leaseMgr, routeMgr)
+	if err != nil {
+		return nil, fmt.Errorf("creating services processor: %w", err)
+	}
 
 	return &Manager{
 		clientSet:        clientset,
@@ -280,17 +290,24 @@ func (sm *Manager) Start(ctx context.Context) error {
 		if sm.config.HealthCheckPort < 1024 {
 			return fmt.Errorf("healthcheck port is using a port that is less than 1024 [%d]", sm.config.HealthCheckPort)
 		}
-		http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-			fmt.Fprintf(w, "OK")
+		server := newHealthServer(sm.config.HealthCheckPort)
+		// Stop the server when Start returns, not only on parent cancellation:
+		// a lost leadership ends the mode without cancelling ctx, and a server
+		// left running would block wg.Wait and keep /healthz answering OK.
+		healthCtx, stopHealth := context.WithCancel(ctx)
+		defer stopHealth()
+		wg.Go(func() {
+			err := server.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("healthcheck", "unable to start", err)
+			}
 		})
 		wg.Go(func() {
-			server := &http.Server{
-				Addr:              fmt.Sprintf(":%d", sm.config.HealthCheckPort),
-				ReadHeaderTimeout: 3 * time.Second,
-			}
-			err := server.ListenAndServe()
-			if err != nil {
-				log.Error("healthcheck", "unable to start", err)
+			<-healthCtx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				log.Error("healthcheck", "unable to shut down", err)
 			}
 		})
 	}
@@ -328,6 +345,20 @@ func (sm *Manager) Start(ctx context.Context) error {
 	return sm.startMode(ctx)
 }
 
+// newHealthServer builds the healthcheck server with unique mux.
+func newHealthServer(port int) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "OK")
+	})
+
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+}
+
 // Start will begin the Manager, which will start services and watch the configmap
 func (sm *Manager) startMode(ctx context.Context) error {
 	var cpCluster *cluster.Cluster
@@ -336,16 +367,19 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	w := worker.New(sm.arpMgr, sm.intfMgr, sm.config, &sm.closing, sm.Kill,
 		sm.svcProcessor, &sm.mutex, sm.clientSet, sm.bgpServer, sm.electionMgr,
 		sm.leaseMgr, sm.routeMgr, sm.nodeLabelManager)
+	if sm.modeWorker != nil {
+		w = sm.modeWorker()
+	}
 
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	wg := sync.WaitGroup{}
 	modeCtx, cancel := context.WithCancel(ctx)
 	defer func() {
-
-		wg.Wait()
-		w.Cleanup()
 		cancel()
+		wg.Wait()
+		sm.svcProcessor.WaitForElectionCampaigns()
+		w.Cleanup()
 		log.Info("Shutting down Kube-Vip")
 	}()
 
@@ -371,6 +405,9 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	if sm.config.EnableControlPlane {
 		wg.Go(func() {
 			w.StartControlPlane(modeCtx, sm.electionMgr)
+			if modeCtx.Err() == nil {
+				sm.Kill()
+			}
 		})
 	}
 
@@ -409,20 +446,45 @@ func (sm *Manager) startMode(ctx context.Context) error {
 						log.Error("failed to reconcile services, restarting", "error", err)
 					}
 				}
+				select {
+				case <-modeCtx.Done():
+					return nil
+				case <-time.After(200 * time.Millisecond):
+				}
 			}
 		}
 	}
 
+	if sm.config.EnableControlPlane {
+		<-modeCtx.Done()
+	}
 	return nil
 }
 
 func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFunc, cpCluster *cluster.Cluster) {
+	defer sm.dumpWG.Wait()
 	for {
-		sig := <-sm.signalChan
+		var sig os.Signal
+		select {
+		case <-ctx.Done():
+			return
+		case <-sm.killChannel():
+			sig = syscall.SIGINT
+		case sig = <-sm.signalChan:
+		}
 		switch sig {
 		case syscall.SIGUSR1:
-			log.Info("Received SIGUSR1, dumping configuration")
-			sm.dumpConfiguration(ctx)
+			if sm.dumping.CompareAndSwap(false, true) {
+				log.Info("Received SIGUSR1, dumping configuration")
+				dump := sm.dump
+				if dump == nil {
+					dump = sm.dumpConfiguration
+				}
+				sm.dumpWG.Go(func() {
+					defer sm.dumping.Store(false)
+					dump(ctx)
+				})
+			}
 		case syscall.SIGINT, syscall.SIGTERM:
 			sm.closing.Store(true)
 			log.Info("Received kube-vip termination, signaling shutdown")
@@ -438,8 +500,15 @@ func (sm *Manager) waitForShutdown(ctx context.Context, cancel context.CancelFun
 
 func (sm *Manager) Kill() {
 	sm.sigint.Do(func() {
-		sm.signalChan <- syscall.SIGINT
+		close(sm.killChannel())
 	})
+}
+
+func (sm *Manager) killChannel() chan struct{} {
+	sm.killChanOnce.Do(func() {
+		sm.killChan = make(chan struct{})
+	})
+	return sm.killChan
 }
 
 // normalizeNodeName ensures the local machine hostname conforms to

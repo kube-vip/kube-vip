@@ -4,6 +4,10 @@ package kubevip
 type Config struct {
 	// Logging, settings
 	Logging int32 `yaml:"logging"`
+	// LogFormat selects text (the default) or JSON log output.
+	LogFormat string `yaml:"logFormat"`
+	// LogTimestampFormat selects RFC3339 (the default) or Unix milliseconds in JSON logs.
+	LogTimestampFormat string `yaml:"logTimestampFormat"`
 
 	// EnableARP, will use ARP to advertise the VIP address
 	EnableARP bool `yaml:"enableARP"`
@@ -136,7 +140,7 @@ type Config struct {
 	// Routing Table Type, what sort of route should be added to the routing table
 	RoutingTableType int `yaml:"routingTableType"`
 
-	// Routing Protocol, value that will be used as protocol when creating rutes
+	// Routing Protocol, value that will be used as protocol when creating routes
 	RoutingProtocol int `yaml:"routingProtocol"`
 
 	// Clean routing table of redundant routes on start
@@ -160,6 +164,15 @@ type Config struct {
 	// The hostport used to expose Prometheus metrics over an HTTP server
 	PrometheusHTTPServer string `yaml:"prometheusHTTPServer,omitempty"`
 
+	// EnablePprof exposes the net/http/pprof profiling endpoints (debug only).
+	// They are unauthenticated, so this is off by default.
+	EnablePprof bool `yaml:"enablePprof,omitempty"`
+
+	// The hostport used to expose the pprof endpoints, separate from the
+	// metrics server so profiling can stay on loopback while metrics remain
+	// scrapable. Only used when EnablePprof is set.
+	PprofHTTPServer string `yaml:"pprofHTTPServer,omitempty"`
+
 	// Egress configuration
 
 	// EgressPodCidr, this contains the pod cidr range to ignore Egress
@@ -181,7 +194,7 @@ type Config struct {
 	K8sConfigFile string `yaml:"k8sConfigFile"`
 
 	// DNSMode, this will set the mode DSN lookup will be performed (first, ipv4, ipv6, dual)
-	DNSMode string `yaml:"dnsDualStackMode"`
+	DNSMode string `json:"dnsDualStackMode" yaml:"dnsDualStackMode"`
 
 	// IsDualStack reports if service is DualStack.
 	IsDualStack bool `yaml:"-"`
@@ -191,7 +204,7 @@ type Config struct {
 
 	// DNSMode, this will set the mode DHCP lookup will be performed for DDNS (ipv4, ipv6, dual). By default will be the same as DNSMode.
 	// If DNSMode is 'first', IPv4 will be used.
-	DHCPMode string `yaml:"dhcpDualStackMode"`
+	DHCPMode string `json:"dhcpDualStackMode" yaml:"dhcpDualStackMode"`
 
 	// DisableServiceUpdates, if true, kube-vip will only advertise service, but it will not update service's Status.LoadBalancer.Ingress slice
 	DisableServiceUpdates bool `yaml:"disableServiceUpdates"`

@@ -49,6 +49,8 @@ type Instance struct {
 	DHCPv6Client        vip.DHCPClient
 	macvlanName         string
 	dhcpBroadcast       bool
+	dhcpVendorClass     string
+	dhcpEnterpriseNum   uint32
 	dhcpInterfaceOwned  atomic.Bool
 
 	// Service use Vlan
@@ -143,6 +145,10 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 	intfMgr *networkinterface.Manager, arpMgr *arp.Manager, routeMgr *route.Manager,
 	nodeLabelMgr node.Labeler, wg *sync.WaitGroup, instanceAddresses, instanceHostnames []string) error {
 	var newVips []*kubevip.Config
+	// The VIP's datapath is programmed by whoever activates it. With
+	// per-service election, on demand included, that is only the election
+	// winner, which must then advertise the route itself.
+	servicesElection := kubevip.UsesServiceElection(config, svc)
 	var link netlink.Link
 	var err error
 
@@ -150,19 +156,25 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		// Detect if we're using a specific interface for services
 		var svcInterface string
 
-		svcInterface = svc.Annotations[kubevip.ServiceVlan]
-		if svcInterface != "" {
-			parent, tag, err := utils.ParseVLANInterface(svcInterface)
-			if err != nil {
-				log.Error("failed to validate VLAN", "err", err)
-			}
-
-			if err := instance.addVLAN(parent, tag); err != nil {
-				log.Error("failed to create VLAN", "err", err)
-			}
+		if config.EnableWireguard {
+			// Tunnel ownership controls the real interface and VIP. The Service
+			// network must also exist before acquisition and after release.
+			svcInterface = "lo"
 		} else {
-			// If no vlan defined use specific interface from annotation
-			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			svcInterface = svc.Annotations[kubevip.ServiceVlan]
+			if svcInterface != "" {
+				parent, tag, err := utils.ParseVLANInterface(svcInterface)
+				if err != nil {
+					log.Error("failed to validate VLAN", "err", err)
+				}
+
+				if err := instance.addVLAN(parent, tag); err != nil {
+					log.Error("failed to create VLAN", "err", err)
+				}
+			} else {
+				// If no vlan defined use specific interface from annotation
+				svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			}
 		}
 
 		if svcInterface == kubevip.Auto {
@@ -259,6 +271,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			Interface:              svcInterface,
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
+			EnableWireguard:        config.EnableWireguard,
 			EnableBGP:              config.EnableBGP,
 			BGPAttachIPToInterface: config.BGPAttachIPToInterface,
 			VIPSubnet:              subnet,
@@ -273,7 +286,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DHCPMode:               config.DHCPMode,
 			DHCPBackoffAttempts:    config.DHCPBackoffAttempts,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: servicesElection,
 			// cleanupVIPs reads this from the per-VIP config, so Service VIPs need it too.
 			PreserveVIPOnLeadershipLoss: config.PreserveVIPOnLeadershipLoss,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
@@ -287,19 +300,25 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		// Detect if we're using a specific interface for services
 		var svcInterface string
 
-		svcInterface = svc.Annotations[kubevip.ServiceVlan]
-		if svcInterface != "" {
-			parent, tag, err := utils.ParseVLANInterface(svcInterface)
-			if err != nil {
-				log.Error("failed to validate VLAN", "err", err)
-			}
-
-			if err := instance.addVLAN(parent, tag); err != nil {
-				log.Error("failed to create VLAN", "err", err)
-			}
+		if config.EnableWireguard {
+			// Tunnel ownership controls the real interface and VIP. The Service
+			// network must also exist before acquisition and after release.
+			svcInterface = "lo"
 		} else {
-			// If no vlan defined use specific interface from annotation
-			svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			svcInterface = svc.Annotations[kubevip.ServiceVlan]
+			if svcInterface != "" {
+				parent, tag, err := utils.ParseVLANInterface(svcInterface)
+				if err != nil {
+					log.Error("failed to validate VLAN", "err", err)
+				}
+
+				if err := instance.addVLAN(parent, tag); err != nil {
+					log.Error("failed to create VLAN", "err", err)
+				}
+			} else {
+				// If no vlan defined use specific interface from annotation
+				svcInterface = svc.Annotations[kubevip.ServiceInterface]
+			}
 		}
 
 		// If it is still blank then use the
@@ -327,6 +346,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			Interface:              svcInterface,
 			SingleNode:             true,
 			EnableARP:              config.EnableARP,
+			EnableWireguard:        config.EnableWireguard,
 			EnableBGP:              config.EnableBGP,
 			BGPAttachIPToInterface: config.BGPAttachIPToInterface,
 			VIPSubnet:              config.VIPSubnet,
@@ -340,7 +360,7 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 			DNSMode:                config.DNSMode,
 			DHCPMode:               config.DHCPMode,
 			DisableServiceUpdates:  config.DisableServiceUpdates,
-			EnableServicesElection: config.EnableServicesElection,
+			EnableServicesElection: servicesElection,
 			KubernetesLeaderElection: kubevip.KubernetesLeaderElection{
 				EnableLeaderElection: config.EnableLeaderElection,
 			},
@@ -367,6 +387,22 @@ func (instance *Instance) initialize(ctx context.Context, svc *v1.Service, confi
 		instance.DHCPHostname = svc.Annotations[kubevip.LoadbalancerHostname]
 		instance.macvlanName = svc.Annotations[kubevip.MacvlanName]
 		instance.dhcpBroadcast = svc.Annotations[kubevip.DHCPBroadcast] == "true"
+		instance.dhcpVendorClass = svc.Annotations[kubevip.DHCPVendorClass]
+		// DHCP option lengths are encoded in a single byte
+		if len(instance.dhcpVendorClass) > 255 {
+			return fmt.Errorf("annotation %q cannot be longer than 255 bytes", kubevip.DHCPVendorClass)
+		}
+		if enterpriseNumber := svc.Annotations[kubevip.DHCPVendorClassEnterpriseNumber]; enterpriseNumber != "" {
+			if instance.dhcpVendorClass == "" {
+				return fmt.Errorf("annotation %q requires annotation %q", kubevip.DHCPVendorClassEnterpriseNumber, kubevip.DHCPVendorClass)
+			}
+			// IANA reserves enterprise number 0, so it also marks the number as unset
+			number, err := strconv.ParseUint(enterpriseNumber, 10, 32)
+			if err != nil || number == 0 {
+				return fmt.Errorf("annotation %q must be an enterprise number between 1 and 4294967295, got %q", kubevip.DHCPVendorClassEnterpriseNumber, enterpriseNumber)
+			}
+			instance.dhcpEnterpriseNum = uint32(number)
+		}
 	}
 
 	configPorts := make([]kubevip.Port, 0)
@@ -757,7 +793,8 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 			initRebootFlag = true
 		}
 
-		client = vip.NewDHCPv4Client(iface, initRebootFlag, instance.DHCPInterfaceIPv4, backoffAttempts, instance.dhcpBroadcast)
+		client = vip.NewDHCPv4Client(iface, initRebootFlag, instance.DHCPInterfaceIPv4, backoffAttempts, instance.dhcpBroadcast).
+			WithVendorClass(instance.dhcpVendorClass)
 
 		// Add the client so that we can call it to stop function
 		instance.DHCPv4Client = client
@@ -769,10 +806,19 @@ func (instance *Instance) startDHCP(ctx context.Context, index int, backoffAttem
 			initRebootFlag = true
 		}
 
-		client, err = vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
+		dhcpv6Client, err := vip.NewDHCPv6Client(iface, parent, initRebootFlag, instance.DHCPInterfaceIPv6, backoffAttempts)
 		if err != nil {
 			return fmt.Errorf("unable to create client: %w", err)
 		}
+
+		if instance.dhcpVendorClass != "" {
+			if instance.dhcpEnterpriseNum == 0 {
+				log.Warn("[DHCP] no enterprise number set for the vendor class, ignoring it for DHCPv6", "interface", interfaceName, "annotation", kubevip.DHCPVendorClassEnterpriseNumber)
+			} else {
+				dhcpv6Client.WithVendorClass(instance.dhcpEnterpriseNum, instance.dhcpVendorClass)
+			}
+		}
+		client = dhcpv6Client
 
 		// Add the client so that we can call it to stop function
 		instance.DHCPv6Client = client

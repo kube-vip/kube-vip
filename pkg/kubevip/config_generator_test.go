@@ -1,11 +1,14 @@
 package kubevip
 
 import (
+	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	applyRbacV1 "k8s.io/client-go/applyconfigurations/rbac/v1"
 )
 
@@ -94,6 +97,41 @@ func TestParseEnvironmentBGPAttachIPToInterface(t *testing.T) {
 	}
 }
 
+func TestParseEnvironmentBMP(t *testing.T) {
+	t.Setenv(bgpBMPServers, " 192.0.2.20 ,,[2001:db8::20]:5000")
+	t.Setenv(bgpBMPPolicy, BMPPolicyAll)
+	t.Setenv(bgpBMPStatisticsTimeout, "60")
+
+	config := &Config{}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	want := BMPConfig{Servers: []string{"192.0.2.20", "[2001:db8::20]:5000"}, Policy: BMPPolicyAll, StatisticsTimeout: 60}
+	if !reflect.DeepEqual(config.BGPConfig.BMP, want) {
+		t.Fatalf("BMP config = %+v, want %+v", config.BGPConfig.BMP, want)
+	}
+}
+
+func TestParseEnvironmentBMPEmptyServersClearFile(t *testing.T) {
+	t.Setenv(bgpBMPServers, "")
+
+	config := &Config{BGPConfig: BGPConfig{BMP: BMPConfig{Servers: []string{"192.0.2.20"}}}}
+	if err := ParseEnvironment(config); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+	if len(config.BGPConfig.BMP.Servers) != 0 {
+		t.Fatalf("BMP servers = %v, want them cleared by the empty environment variable", config.BGPConfig.BMP.Servers)
+	}
+}
+
+func TestParseEnvironmentBMPStatisticsTimeoutOutOfRange(t *testing.T) {
+	t.Setenv(bgpBMPStatisticsTimeout, "65536")
+
+	if err := ParseEnvironment(&Config{}); err == nil || !strings.Contains(err.Error(), bgpBMPStatisticsTimeout) {
+		t.Fatalf("ParseEnvironment() error = %v, want an error naming %s", err, bgpBMPStatisticsTimeout)
+	}
+}
+
 func TestGeneratePodSpecBGPAttachIPToInterface(t *testing.T) {
 	pod, err := generatePodSpec(&Config{
 		EnableBGP:              true,
@@ -147,6 +185,51 @@ func TestGeneratePodSpecInstanceName(t *testing.T) {
 	}
 }
 
+func TestGeneratePodSpecPprof(t *testing.T) {
+	tests := []struct {
+		name        string
+		enablePprof bool
+		addr        string
+		wantEnv     map[string]string
+	}{
+		{
+			name:        "enabled emits both variables",
+			enablePprof: true,
+			addr:        metrics.DefaultPprofHTTPServer,
+			wantEnv:     map[string]string{enablePprof: "true", pprofServer: metrics.DefaultPprofHTTPServer},
+		},
+		{
+			name:        "disabled emits neither",
+			enablePprof: false,
+			addr:        metrics.DefaultPprofHTTPServer,
+			wantEnv:     map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&Config{
+				EnablePprof:     tt.enablePprof,
+				PprofHTTPServer: tt.addr,
+			}, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if env.Name == enablePprof || env.Name == pprofServer {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("pprof pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
 func TestParseEnvironmentConfigFile(t *testing.T) {
 	// Save original environment
 	originalConfigFile := os.Getenv("config_file")
@@ -192,6 +275,417 @@ func TestParseEnvironmentConfigFile(t *testing.T) {
 
 			if config.ConfigFile != tt.expectedConfig {
 				t.Errorf("ConfigFile = %v, expected %v", config.ConfigFile, tt.expectedConfig)
+			}
+		})
+	}
+}
+
+func TestGeneratePodSpecRoutingTable(t *testing.T) {
+	routingTableEnv := []string{vipRoutingTable, vipRoutingTableID, vipRoutingTableType, vipRoutingProtocol, vipCleanRoutingTable}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "table mode emits its settings",
+			config: Config{
+				EnableRoutingTable: true,
+				RoutingTableID:     100,
+				RoutingTableType:   2,
+				RoutingProtocol:    250,
+				CleanRoutingTable:  true,
+			},
+			wantEnv: map[string]string{
+				vipRoutingTable:      "true",
+				vipRoutingTableID:    "100",
+				vipRoutingTableType:  "2",
+				vipRoutingProtocol:   "250",
+				vipCleanRoutingTable: "true",
+			},
+		},
+		{
+			name:    "table mode without settings emits only the mode",
+			config:  Config{EnableRoutingTable: true},
+			wantEnv: map[string]string{vipRoutingTable: "true"},
+		},
+		{
+			name: "table mode with the flag defaults",
+			config: Config{
+				EnableRoutingTable: true,
+				RoutingTableID:     198,
+				RoutingTableType:   1,
+				RoutingProtocol:    248,
+			},
+			wantEnv: map[string]string{
+				vipRoutingTable:     "true",
+				vipRoutingTableID:   "198",
+				vipRoutingTableType: "1",
+				vipRoutingProtocol:  "248",
+			},
+		},
+		{
+			name: "settings without table mode emit nothing",
+			config: Config{
+				RoutingTableID:    100,
+				RoutingTableType:  2,
+				RoutingProtocol:   250,
+				CleanRoutingTable: true,
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(routingTableEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("routing table pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestGeneratePodSpecBGPSettings(t *testing.T) {
+	bgpSettingsEnv := []string{bgpMultiHop, bgpHoldTime, bgpKeepaliveInterval, zebraEnable, zebraURL, zebraVersion, zebraSoftwareName,
+		bgpBMPServers, bgpBMPPolicy, bgpBMPStatisticsTimeout}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "BGP mode emits multihop, timer and Zebra settings",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					HoldTime:          9,
+					KeepaliveInterval: 3,
+					Zebra: ZebraConfig{
+						Enabled:      true,
+						URL:          "unix:/run/frr/zserv.api",
+						Version:      6,
+						SoftwareName: "frr10.1",
+					},
+				},
+				BGPPeerConfig: BGPPeer{Address: "192.0.2.1", AS: 65001, MultiHop: true},
+			},
+			wantEnv: map[string]string{
+				bgpMultiHop:          "true",
+				bgpHoldTime:          "9",
+				bgpKeepaliveInterval: "3",
+				zebraEnable:          "true",
+				zebraURL:             "unix:/run/frr/zserv.api",
+				zebraVersion:         "6",
+				zebraSoftwareName:    "frr10.1",
+			},
+		},
+		{
+			name: "BGP mode emits BMP settings",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					BMP: BMPConfig{
+						Servers:           []string{"192.0.2.20", "[2001:db8::20]:5000"},
+						Policy:            BMPPolicyAll,
+						StatisticsTimeout: 60,
+					},
+				},
+			},
+			wantEnv: map[string]string{
+				bgpBMPServers:           "192.0.2.20,[2001:db8::20]:5000",
+				bgpBMPPolicy:            BMPPolicyAll,
+				bgpBMPStatisticsTimeout: "60",
+			},
+		},
+		{
+			name: "BMP policy and statistics timeout are left out without BMP servers",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					BMP: BMPConfig{Policy: BMPPolicyLocalRIB, StatisticsTimeout: 60},
+				},
+			},
+			wantEnv: map[string]string{},
+		},
+		{
+			name:    "BGP mode without settings emits none of them",
+			config:  Config{EnableBGP: true},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "Zebra connection settings are left out while Zebra is disabled",
+			config: Config{
+				EnableBGP: true,
+				BGPConfig: BGPConfig{
+					Zebra: ZebraConfig{
+						URL:          "unix:/var/run/frr/zserv.api",
+						Version:      6,
+						SoftwareName: "frr8.3",
+					},
+				},
+			},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "settings without BGP mode emit nothing",
+			config: Config{
+				BGPConfig: BGPConfig{
+					HoldTime:          9,
+					KeepaliveInterval: 3,
+					Zebra:             ZebraConfig{Enabled: true, URL: "unix:/run/frr/zserv.api"},
+				},
+				BGPPeerConfig: BGPPeer{MultiHop: true},
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(bgpSettingsEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("BGP pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestGeneratedBGPSettingsRoundTrip(t *testing.T) {
+	config := Config{
+		EnableBGP: true,
+		BGPConfig: BGPConfig{
+			AS:                65000,
+			HoldTime:          9,
+			KeepaliveInterval: 3,
+			Zebra: ZebraConfig{
+				Enabled:      true,
+				URL:          "unix:/run/frr/zserv.api",
+				Version:      6,
+				SoftwareName: "frr10.1",
+			},
+			BMP: BMPConfig{
+				Servers:           []string{"192.0.2.20", "[2001:db8::20]:5000"},
+				Policy:            BMPPolicyPostPolicy,
+				StatisticsTimeout: 3600,
+			},
+		},
+		BGPPeerConfig: BGPPeer{Address: "192.0.2.1", AS: 65001, MultiHop: true},
+	}
+
+	pod, err := generatePodSpec(&config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+	if err != nil {
+		t.Fatalf("generatePodSpec() error = %v", err)
+	}
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.ValueFrom == nil {
+			t.Setenv(env.Name, env.Value)
+		}
+	}
+
+	got := &Config{}
+	if err := ParseEnvironment(got); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+
+	if len(got.BGPConfig.Peers) != 1 || !got.BGPConfig.Peers[0].MultiHop {
+		t.Fatalf("BGP peers = %+v, want a single multihop peer", got.BGPConfig.Peers)
+	}
+	if got.BGPConfig.HoldTime != config.BGPConfig.HoldTime || got.BGPConfig.KeepaliveInterval != config.BGPConfig.KeepaliveInterval {
+		t.Fatalf("BGP timers = hold %d keepalive %d, want hold %d keepalive %d",
+			got.BGPConfig.HoldTime, got.BGPConfig.KeepaliveInterval, config.BGPConfig.HoldTime, config.BGPConfig.KeepaliveInterval)
+	}
+	if got.BGPConfig.Zebra != config.BGPConfig.Zebra {
+		t.Fatalf("Zebra config = %+v, want %+v", got.BGPConfig.Zebra, config.BGPConfig.Zebra)
+	}
+	if !reflect.DeepEqual(got.BGPConfig.BMP, config.BGPConfig.BMP) {
+		t.Fatalf("BMP config = %+v, want %+v", got.BGPConfig.BMP, config.BGPConfig.BMP)
+	}
+}
+
+func TestGeneratePodSpecLoadBalancerClass(t *testing.T) {
+	lbClassEnv := []string{lbClassName, lbClassLegacyHandling}
+
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name: "default class and legacy handling emit nothing",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           LBClassName,
+				LoadBalancerClassLegacyHandling: true,
+			},
+			wantEnv: map[string]string{},
+		},
+		{
+			name: "custom class name and disabled legacy handling are emitted",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+				LoadBalancerClassLegacyHandling: false,
+			},
+			wantEnv: map[string]string{
+				lbClassName:           "kube-vip.io/kube-vip-class-b",
+				lbClassLegacyHandling: "false",
+			},
+		},
+		{
+			name: "empty class name is emitted",
+			config: Config{
+				EnableServices:                  true,
+				LoadBalancerClassName:           "",
+				LoadBalancerClassLegacyHandling: true,
+			},
+			wantEnv: map[string]string{
+				lbClassName: "",
+			},
+		},
+		{
+			name: "class settings without services emit nothing",
+			config: Config{
+				LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+				LoadBalancerClassLegacyHandling: false,
+			},
+			wantEnv: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if slices.Contains(lbClassEnv, env.Name) {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("load balancer class pod environment = %v, want %v", got, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestGeneratedLoadBalancerClassRoundTrip(t *testing.T) {
+	config := Config{
+		EnableServices:                  true,
+		LoadBalancerClassName:           "kube-vip.io/kube-vip-class-b",
+		LoadBalancerClassLegacyHandling: false,
+	}
+
+	pod, err := generatePodSpec(&config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+	if err != nil {
+		t.Fatalf("generatePodSpec() error = %v", err)
+	}
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.ValueFrom == nil {
+			t.Setenv(env.Name, env.Value)
+		}
+	}
+
+	// Start from the flag defaults the pod would otherwise run with
+	got := &Config{LoadBalancerClassName: LBClassName, LoadBalancerClassLegacyHandling: true}
+	if err := ParseEnvironment(got); err != nil {
+		t.Fatalf("ParseEnvironment() error = %v", err)
+	}
+
+	if got.LoadBalancerClassName != config.LoadBalancerClassName {
+		t.Fatalf("LoadBalancerClassName = %q, want %q", got.LoadBalancerClassName, config.LoadBalancerClassName)
+	}
+	if got.LoadBalancerClassLegacyHandling != config.LoadBalancerClassLegacyHandling {
+		t.Fatalf("LoadBalancerClassLegacyHandling = %t, want %t", got.LoadBalancerClassLegacyHandling, config.LoadBalancerClassLegacyHandling)
+	}
+}
+
+func TestGeneratePodSpecWritesManagerFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantEnv map[string]string
+	}{
+		{
+			name:    "defaults emit none",
+			config:  Config{EnableServices: true, EgressWithNftables: true},
+			wantEnv: map[string]string{},
+		},
+		{
+			name:    "log level",
+			config:  Config{Logging: 5, EgressWithNftables: true},
+			wantEnv: map[string]string{vipLogLevel: "5"},
+		},
+		{
+			name:    "per-service election on demand",
+			config:  Config{EnableServices: true, PerServiceElectionOnDemand: true, EgressWithNftables: true},
+			wantEnv: map[string]string{perServiceElectionOnDemand: "true"},
+		},
+		{
+			name:    "iptables egress",
+			config:  Config{EnableServices: true, EgressWithNftables: false},
+			wantEnv: map[string]string{egressWithNftables: "false"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod, err := generatePodSpec(&tt.config, "ghcr.io/kube-vip/kube-vip", "v0.0.0", true)
+			if err != nil {
+				t.Fatalf("generatePodSpec() error = %v", err)
+			}
+
+			got := map[string]string{}
+			for _, env := range pod.Spec.Containers[0].Env {
+				if env.Name == vipLogLevel || env.Name == perServiceElectionOnDemand || env.Name == egressWithNftables {
+					got[env.Name] = env.Value
+				}
+			}
+
+			if !maps.Equal(got, tt.wantEnv) {
+				t.Fatalf("pod environment = %v, want %v", got, tt.wantEnv)
+			}
+
+			for name, value := range got {
+				t.Setenv(name, value)
+			}
+			parsed := Config{EgressWithNftables: true}
+			if err := ParseEnvironment(&parsed); err != nil {
+				t.Fatalf("ParseEnvironment() error = %v", err)
+			}
+			if parsed.Logging != tt.config.Logging || parsed.PerServiceElectionOnDemand != tt.config.PerServiceElectionOnDemand || parsed.EgressWithNftables != tt.config.EgressWithNftables {
+				t.Fatalf("manager config from the manifest = {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}, want {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}",
+					parsed.Logging, parsed.PerServiceElectionOnDemand, parsed.EgressWithNftables,
+					tt.config.Logging, tt.config.PerServiceElectionOnDemand, tt.config.EgressWithNftables)
 			}
 		})
 	}

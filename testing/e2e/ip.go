@@ -152,11 +152,11 @@ func CheckIPAddressPresence(ip string, container string, expected bool) bool {
 	cmd.Stdout = cmdOut
 	cmd.Stderr = cmdErr
 	if err := cmd.Run(); err != nil {
-		By(fmt.Sprintf("contianer %q interfaces error: %s", container, cmdErr.String()))
+		By(fmt.Sprintf("container %q interfaces error: %s", container, cmdErr.String()))
 		return false
 	}
 
-	By(fmt.Sprintf("contianer %q interfaces:\n %s", container, cmdOut.String()))
+	By(fmt.Sprintf("container %q interfaces:\n %s", container, cmdOut.String()))
 
 	return strings.Contains(cmdOut.String(), ip) == expected
 }

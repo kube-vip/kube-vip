@@ -96,7 +96,11 @@ func (c *Common) GlobalLeader(ctx context.Context, leaseName string) {
 		})
 	}
 
-	c.runGlobalElection(servicesCtx, c, leaseName, c.config, c.electionMgr)
+	var vipProvider lease.VIPProvider
+	if c.svcProcessor != nil {
+		vipProvider = c.svcProcessor.OwnedServiceVIPs
+	}
+	c.runGlobalElectionWithVIPProvider(servicesCtx, c, leaseName, c.config, c.electionMgr, vipProvider)
 }
 
 func (c *Common) ServicesNoLeader(ctx context.Context) error {
@@ -116,7 +120,7 @@ func (c *Common) ServicesNoLeader(ctx context.Context) error {
 	}
 
 	log.Info("beginning watching services without leader election")
-	err := c.svcProcessor.ServicesWatcher(servicesCtx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
+	err := c.svcProcessor.ServicesWatcher(servicesCtx, c.svcProcessor.SyncServices, false)
 	if err != nil {
 		return fmt.Errorf("error while watching services: %w", err)
 	}
@@ -128,7 +132,7 @@ func (c *Common) Cleanup() {
 }
 
 func (c *Common) OnStartedLeading(ctx context.Context) {
-	err := c.svcProcessor.ServicesWatcher(ctx, services.NewCallback(c.svcProcessor.SyncServices, false), false)
+	err := c.svcProcessor.ServicesWatcher(ctx, c.svcProcessor.SyncServices, false)
 	if err != nil {
 		log.Error("service watcher", "err", err)
 		c.killFunc()
@@ -155,7 +159,12 @@ func (c *Common) OnNewLeader(identity string) {
 }
 
 func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leaseName string,
-	config *kubevip.Config, electionManager *election.Manager) {
+	config *kubevip.Config, electionManager *election.Manager, vips []string) {
+	c.runGlobalElectionWithVIPProvider(ctx, a, leaseName, config, electionManager, lease.StaticVIPProvider(vips))
+}
+
+func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a election.Actions, leaseName string,
+	config *kubevip.Config, electionManager *election.Manager, vipProvider lease.VIPProvider) {
 
 	log.Debug("starting global election")
 	ns, leaseName := lease.NamespaceName(leaseName, config)
@@ -163,99 +172,74 @@ func (c *Common) runGlobalElection(ctx context.Context, a election.Actions, leas
 	leaseID := lease.NewID(config.LeaderElectionType, ns, leaseName)
 	objectName := lease.ObjectName(leaseID, "svcs0")
 
-	// objLease, isNew, isSharedLease := c.leaseMgr.Add(leaseID, objectName)
+	objLease, _ := c.leaseMgr.Acquire(context.Background(), leaseID, objectName, vipProvider)
+	defer c.leaseMgr.Delete(leaseID, objectName, objLease)
+	electionCtx, cancelElection := objLease.NewElectionContext(ctx)
+	defer cancelElection()
 
-	objLease := c.leaseMgr.Add(ctx, leaseID)
-	isNew := objLease.Add(objectName)
-
-	// this service was already processed so we do not need to do anything
-	if !isNew {
-		log.Debug("this election was already done, waiting for it to finish", "lease", c.config.ServicesLeaseName)
-		// Wait for either the service context or lease context to be done
-		select {
-		case <-ctx.Done():
-			// Service was deleted
-			c.leaseMgr.Delete(leaseID, objectName, objLease)
-		case <-objLease.Ctx.Done():
-			// Leader election ended (leadership lost or context cancelled)
+	var electionSession *lease.ElectionSession
+	for {
+		participation := objLease.JoinElection()
+		if participation.RunsCampaign() {
+			electionSession = participation.Session
+			break
 		}
-		return
-	}
-
-	objLease.Lock()
-
-	defer func() {
-		objLease.Unlock()
-	}()
-
-	if objLease.Elected.Load() {
-		objLease.Unlock()
 		log.Debug("this election was already done, shared lease", "lease", leaseID.Name())
+		if !participation.Session.WaitForLeader(electionCtx) {
+			if electionCtx.Err() != nil {
+				return
+			}
+			continue
+		}
 
-		// wait for leader election to start or context to be done
-		select {
-		case <-objLease.Started:
-		case <-objLease.Ctx.Done():
-			// Lease was cancelled (e.g., leader election ended), return immediately
-			// This allows the restart loop to create a fresh lease
-			log.Debug("lease context cancelled before leader election started", "lease", leaseID.Name())
+		leaderCtx, cancelLeader := context.WithCancel(electionCtx)
+		wg := sync.WaitGroup{}
+		wg.Go(func() {
+			a.OnStartedLeading(leaderCtx)
+		})
+		participation.Session.WaitForEnd(electionCtx)
+		cancelLeader()
+		wg.Wait()
+		if electionCtx.Err() != nil {
 			return
 		}
-
-		a.OnStartedLeading(objLease.Ctx)
-
-		log.Debug("waiting for lease to finish", "lease", leaseID.Name())
-		// wait for leaderelection to be finished
-		<-objLease.Ctx.Done()
-
-		// we can do cleanup here
 		a.OnStoppedLeading()
 
 		log.Error("lost leadership, restarting kube-vip", "lease", leaseID.Name())
 		c.killFunc()
-
 		return
 	}
-
-	// For new leases (not shared), ensure cleanup when the leader election ends
-	// This is critical for the restartable service watcher to be able to restart
-	// the leader election after leadership loss
-	defer func() {
-		// Delete the lease from the manager so subsequent calls can create a fresh lease
-		// This handles the case where leader election ends due to:
-		// 1. Leadership loss (e.g., network timeout)
-		// 2. Context cancellation
-		// 3. Any other reason RunOrDie returns
-		c.leaseMgr.Delete(leaseID, objectName, objLease)
-	}()
-
 	wg := sync.WaitGroup{}
+	defer electionSession.Stopped()
 	defer wg.Wait()
 
 	run := &election.RunConfig{
 		Config:           config,
 		LeaseID:          leaseID,
 		LeaseAnnotations: map[string]string{},
+		VIPsProvider:     objLease.OwnedVIPs,
 		Mgr:              electionManager,
 		OnStartedLeading: func(ctx context.Context) {
+			if !electionSession.Started() {
+				return
+			}
 			wg.Go(func() {
-				objLease.Elected.Store(true)
-				objLease.Unlock()
-				close(objLease.Started)
 				a.OnStartedLeading(ctx)
 				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
 				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
 			})
 		},
 		OnStoppedLeading: func() {
-			objLease.Elected.Store(false)
+			if !electionSession.IsCurrent() {
+				return
+			}
 			a.OnStoppedLeading()
 			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
 		},
 		OnNewLeader: a.OnNewLeader,
 	}
 
-	if err := election.RunOrDie(ctx, run, config); err != nil {
+	if err := election.RunOrDie(electionCtx, run, config); err != nil {
 		log.Error("leaderelection failed", "err", err, "id", config.NodeName, "name", leaseID.Name())
 	}
 }

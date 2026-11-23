@@ -23,6 +23,7 @@ const defaultDHCPRenew = time.Hour
 type DHCPv4Client struct {
 	iface           *net.Interface
 	ddnsHostName    string
+	vendorClass     string
 	lease           *nclient4.Lease
 	initRebootFlag  bool
 	requestedIP     net.IP
@@ -63,6 +64,13 @@ func NewDHCPv4Client(iface *net.Interface, initRebootFlag bool, requestedIP stri
 
 func (c *DHCPv4Client) WithHostName(hostname string) DHCPClient {
 	c.ddnsHostName = hostname
+	return c
+}
+
+// WithVendorClass sets the vendor class identifier (DHCP option 60) that the
+// client sends when it requests, renews and rebinds its lease.
+func (c *DHCPv4Client) WithVendorClass(vendorClass string) *DHCPv4Client {
+	c.vendorClass = vendorClass
 	return c
 }
 
@@ -308,12 +316,7 @@ func (c *DHCPv4Client) request(ctx context.Context, rebind bool) (*nclient4.Leas
 		modifiers = append(modifiers, func(d *dhcpv4.DHCPv4) { d.SetBroadcast() })
 	}
 
-	if c.ddnsHostName != "" {
-		modifiers = append(modifiers,
-			dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)),
-			dhcpv4.WithOption(dhcpv4.OptClientIdentifier([]byte(c.ddnsHostName))),
-		)
-	}
+	modifiers = append(modifiers, c.requestOptions()...)
 
 	// if initRebootFlag is set, this means we have an IP already set on c.requestedIP that should be used
 	if c.initRebootFlag {
@@ -355,5 +358,24 @@ func (c *DHCPv4Client) renew(ctx context.Context) (*nclient4.Lease, error) {
 	}
 	defer dhclient.Close()
 
-	return dhclient.Renew(ctx, c.lease)
+	return dhclient.Renew(ctx, c.lease, c.requestOptions()...)
+}
+
+// requestOptions returns the options that identify the client in a
+// DHCPDISCOVER or DHCPREQUEST. They are sent again when the lease is renewed or
+// rebound: RFC 2131 requires a client to keep using the client identifier it
+// started with, and servers that pick the address pool by vendor class
+// evaluate the class on every DHCPREQUEST.
+func (c *DHCPv4Client) requestOptions() []dhcpv4.Modifier {
+	var modifiers []dhcpv4.Modifier
+	if c.ddnsHostName != "" {
+		modifiers = append(modifiers,
+			dhcpv4.WithOption(dhcpv4.OptHostName(c.ddnsHostName)),
+			dhcpv4.WithOption(dhcpv4.OptClientIdentifier([]byte(c.ddnsHostName))),
+		)
+	}
+	if c.vendorClass != "" {
+		modifiers = append(modifiers, dhcpv4.WithOption(dhcpv4.OptClassIdentifier(c.vendorClass)))
+	}
+	return modifiers
 }

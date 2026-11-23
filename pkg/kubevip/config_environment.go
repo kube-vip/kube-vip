@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kube-vip/kube-vip/pkg/detector"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -321,6 +322,9 @@ func ParseEnvironment(c *Config) error {
 			return err
 		}
 		c.ArpBroadcastRate = i64
+	} else if c.ArpBroadcastRate == 0 {
+		// default to three seconds
+		c.ArpBroadcastRate = 3000
 	}
 
 	// Determine if VIP should be preserved on leadership loss
@@ -422,6 +426,12 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(dhcpMode)
 	if env != "" {
 		c.DHCPMode = env
+	} else if c.DHCPMode == "" {
+		if c.DNSMode != "first" {
+			c.DHCPMode = c.DNSMode
+		} else {
+			c.DHCPMode = strings.ToLower(utils.IPv4Family)
+		}
 	}
 
 	// DHCP backoff attempts
@@ -655,6 +665,25 @@ func ParseEnvironment(c *Config) error {
 		c.BGPConfig.Zebra.SoftwareName = env
 	}
 
+	// BGP Monitoring Protocol stations, an explicitly empty value clears lower-priority sources
+	if env, ok := os.LookupEnv(bgpBMPServers); ok {
+		c.BGPConfig.BMP.Servers = nil
+		for server := range strings.SplitSeq(env, ",") {
+			if server = strings.TrimSpace(server); server != "" {
+				c.BGPConfig.BMP.Servers = append(c.BGPConfig.BMP.Servers, server)
+			}
+		}
+	}
+
+	env = os.Getenv(bgpBMPStatisticsTimeout)
+	if env != "" {
+		u64, err := strconv.ParseUint(env, 10, 16)
+		if err != nil {
+			return fmt.Errorf("parsing env var %s (value: %s): %w", bgpBMPStatisticsTimeout, env, err)
+		}
+		c.BGPConfig.BMP.StatisticsTimeout = uint16(u64)
+	}
+
 	// Enable the load-balancer
 	env = os.Getenv(lbEnable)
 	if env != "" {
@@ -704,6 +733,21 @@ func ParseEnvironment(c *Config) error {
 	env = os.Getenv(prometheusServer)
 	if env != "" {
 		c.PrometheusHTTPServer = env
+	}
+
+	// Find pprof configuration.
+	env = os.Getenv(enablePprof)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnablePprof = b
+	}
+
+	env = os.Getenv(pprofServer)
+	if env != "" {
+		c.PprofHTTPServer = env
 	}
 
 	// Set Egress configuration(s)
@@ -820,7 +864,9 @@ func ParseEnvironment(c *Config) error {
 
 	// Explicitly empty string variables clear lower-priority file values.
 	stringEnvironment := map[string]*string{
-		vipInterface: &c.Interface, vipServicesInterface: &c.ServicesInterface,
+		vipLogFormat:          &c.LogFormat,
+		vipLogTimestampFormat: &c.LogTimestampFormat,
+		vipInterface:          &c.Interface, vipServicesInterface: &c.ServicesInterface,
 		vipLeaseName: &c.LeaseName, nodeName: &c.NodeName, vipAddress: &c.VIP, address: &c.Address,
 		cpNamespace: &c.Namespace, kubernetesAddr: &c.KubernetesAddr, svcNamespace: &c.ServiceNamespace,
 		svcLeaseName: &c.ServicesLeaseName, lbClassName: &c.LoadBalancerClassName, vipSubnet: &c.VIPSubnet,
@@ -836,7 +882,7 @@ func ParseEnvironment(c *Config) error {
 		prometheusServer: &c.PrometheusHTTPServer, egressPodCidr: &c.EgressPodCidr,
 		egressServiceCidr: &c.EgressServiceCidr, k8sConfigFile: &c.K8sConfigFile,
 		mirrorDestInterface: &c.MirrorDestInterface, iptablesBackend: &c.IptablesBackend,
-		configFile: &c.ConfigFile, debounceTime: &c.DebounceTime,
+		configFile: &c.ConfigFile, debounceTime: &c.DebounceTime, bgpBMPPolicy: &c.BGPConfig.BMP.Policy,
 	}
 	for name, destination := range stringEnvironment {
 		if value, ok := os.LookupEnv(name); ok {
@@ -888,8 +934,16 @@ func MergeConfigFromFile(config *Config, configFilePath string) error {
 	}
 
 	// Runtime BGP consumes BGPConfig.Peers. BGPPeerConfig is retained for CLI
-	// and environment compatibility and normalized when supplied by a file.
-	if config.BGPPeerConfig.Address != "" {
+	// and environment compatibility and normalized only when supplied by the
+	// file; a peer from flags (e.g. --peerAddress with the default --peerAS)
+	// must survive untouched.
+	var filePeer struct {
+		BGPPeerConfig *BGPPeer `yaml:"bgpPeerConfig"`
+	}
+	if err := yaml.Unmarshal(data, &filePeer); err != nil {
+		return fmt.Errorf("failed to parse bgpPeerConfig in config file %s: %w", configFilePath, err)
+	}
+	if filePeer.BGPPeerConfig != nil && config.BGPPeerConfig.Address != "" {
 		config.BGPConfig.Peers = append(config.BGPConfig.Peers, config.BGPPeerConfig)
 		config.BGPPeerConfig = BGPPeer{}
 	}

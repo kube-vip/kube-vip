@@ -33,13 +33,15 @@ func NewEndpoints() Provider {
 
 func (ep *Endpoints) CreateRetryWatcher(ctx context.Context, clientSet *kubernetes.Clientset,
 	service *v1.Service) (*watchtools.RetryWatcher, error) {
-	opts := metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", service.Name).String(),
-	}
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", service.Name).String()
 
-	rw, err := watchtools.NewRetryWatcherWithContext(ctx, "1", &cache.ListWatch{
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return clientSet.CoreV1().Endpoints(service.Namespace).Watch(ctx, opts)
+	rw, err := watchtools.NewRetryWatcherWithContext(ctx, retryWatcherInitialResourceVersion, &cache.ListWatch{
+		WatchFuncWithContext: func(watchCtx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			if opts.ResourceVersion == retryWatcherInitialResourceVersion {
+				opts.ResourceVersion = ""
+			}
+			opts.FieldSelector = fieldSelector
+			return clientSet.CoreV1().Endpoints(service.Namespace).Watch(watchCtx, opts)
 		},
 	})
 
@@ -142,6 +144,21 @@ func (ep *Endpoints) UpdateServiceAnnotation(ctx context.Context, endpoint strin
 
 func (ep *Endpoints) GetLabel() string {
 	return ep.label
+}
+
+func (ep *Endpoints) GetEndpointNodes() map[string][]string {
+	nodes := make(map[string][]string)
+	if ep.endpoints == nil {
+		return nodes
+	}
+	for _, subset := range ep.endpoints.Subsets {
+		for _, address := range subset.Addresses {
+			if address.NodeName != nil && *address.NodeName != "" {
+				nodes[*address.NodeName] = append(nodes[*address.NodeName], address.IP)
+			}
+		}
+	}
+	return nodes
 }
 
 func (ep *Endpoints) ResolvePort(servicePort v1.ServicePort) int32 {

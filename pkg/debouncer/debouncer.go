@@ -143,7 +143,7 @@ func (d *debouncer) Start(ctx context.Context) error {
 					}
 
 					wg.Go(func() {
-						// start deboucing events for this object
+						// start debouncing events for this object
 						workerObject.start(debouncerCtx, d.debounceTime)
 						// if debouncer for the object ended - e.g. object was deleted - clean the map of objects
 						workerNs.del(workerName, workerObject)

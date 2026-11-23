@@ -3,6 +3,7 @@ package bgp
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -22,10 +23,15 @@ type BGPManager interface {
 
 // Server manages a server object
 type Server struct {
-	s       *gobgp.BgpServer
-	c       *kubevip.BGPConfig
-	mtx     sync.Mutex
-	tracker map[string]map[string]bool
+	s        *gobgp.BgpServer
+	c        *kubevip.BGPConfig
+	mtx      sync.Mutex
+	tracker  map[string]map[string]bool
+	nextHops map[string]string
+
+	// bmpServers are the BGP Monitoring Protocol stations the server reports to
+	bmpServers []netip.AddrPort
+	bmpPolicy  api.AddBmpRequest_MonitoringPolicy
 }
 
 // NewBGPServer takes a configuration and returns a running BGP server instance
@@ -41,14 +47,22 @@ func NewBGPServer(c kubevip.BGPConfig, logLevel log.Level) (b *Server, err error
 	if len(c.Peers) == 0 {
 		return nil, fmt.Errorf("you need to provide at least one peer")
 	}
+
+	bmpServers, bmpPolicy, err := c.BMP.Parse()
+	if err != nil {
+		return nil, err
+	}
+
 	bgpLogger := log.Default()
 	lvl := &log.LevelVar{}
 	lvl.Set(logLevel)
 
 	b = &Server{
-		s:       gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
-		c:       &c,
-		tracker: make(map[string]map[string]bool),
+		s:          gobgp.NewBgpServer(gobgp.LoggerOption(bgpLogger, lvl)),
+		c:          &c,
+		tracker:    make(map[string]map[string]bool),
+		bmpServers: bmpServers,
+		bmpPolicy:  bmpPolicy,
 	}
 	return
 }
@@ -65,6 +79,20 @@ func (b *Server) Start(ctx context.Context, peerStateChangeCallback func(*apiuti
 		},
 	}); err != nil {
 		return
+	}
+
+	// Connect the BMP stations before the peers, so they are told about every
+	// session from the moment it is established.
+	for _, server := range b.bmpServers {
+		if err = b.s.AddBmp(ctx, &api.AddBmpRequest{
+			Address:           server.Addr().String(),
+			Port:              uint32(server.Port()),
+			Policy:            b.bmpPolicy,
+			StatisticsTimeout: int32(b.c.BMP.StatisticsTimeout),
+		}); err != nil {
+			return fmt.Errorf("adding BMP server %s: %w", server, err)
+		}
+		log.Info("[BGP] reporting to BMP server", "server", server.String(), "policy", b.bmpPolicy.String())
 	}
 
 	if err = b.s.WatchEvent(ctx, gobgp.WatchEventMessageCallbacks{

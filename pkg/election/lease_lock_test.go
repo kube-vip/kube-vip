@@ -9,9 +9,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
+
+func newAnnotatedLeaseLock(lock resourcelock.Interface, leases coordinationv1client.LeaseInterface,
+	annotations map[string]string) resourcelock.Interface {
+	return newAnnotatedLeaseLockWithProvider(lock, leases, "lease", func() (map[string]string, error) {
+		return annotations, nil
+	})
+}
 
 func TestAnnotatedLeaseLockPersistsAnnotationsOnCreateAndUpdate(t *testing.T) {
 	client := fake.NewSimpleClientset()
@@ -28,7 +36,7 @@ func TestAnnotatedLeaseLockPersistsAnnotationsOnCreateAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithLeaseVIPs() error = %v", err)
 	}
-	lock := newAnnotatedLeaseLock(base, leaseClient, "lease", annotations)
+	lock := newAnnotatedLeaseLock(base, leaseClient, annotations)
 	record := resourcelock.LeaderElectionRecord{HolderIdentity: "node-a"}
 	if err := lock.Create(context.Background(), record); err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -54,6 +62,43 @@ func TestAnnotatedLeaseLockPersistsAnnotationsOnCreateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestAnnotatedLeaseLockRefreshesAnnotationsFromProvider(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	leaseClient := client.CoordinationV1().Leases("default")
+	base := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{Name: "lease", Namespace: "default"},
+		Client:    client.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: "node-a",
+		},
+	}
+	vips := []string{"192.0.2.10"}
+	lock := newAnnotatedLeaseLockWithProvider(base, leaseClient, "lease", func() (map[string]string, error) {
+		return kubevip.WithLeaseVIPs(nil, "release_a", 248, vips)
+	})
+	record := resourcelock.LeaderElectionRecord{HolderIdentity: "node-a"}
+	if err := lock.Create(context.Background(), record); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	vips = []string{"192.0.2.10", "192.0.2.20"}
+	if err := lock.Update(context.Background(), record); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	resource, err := leaseClient.Get(context.Background(), "lease", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get Lease: %v", err)
+	}
+	value, err := kubevip.ParseLeaseVIPs(resource.Annotations[kubevip.LeaseVIPs])
+	if err != nil {
+		t.Fatalf("ParseLeaseVIPs() error = %v", err)
+	}
+	if len(value.VIPs) != 2 || value.VIPs[0].Value != "192.0.2.10" || value.VIPs[1].Value != "192.0.2.20" {
+		t.Fatalf("Lease VIPs = %v, want refreshed provider values", value.VIPs)
+	}
+}
+
 // A failed annotation write must not be reported to the leader elector: the lease itself
 // was already written, and an error makes the elector stand down while it still holds it.
 func TestAnnotatedLeaseLockAnnotationFailureDoesNotSurfaceToElector(t *testing.T) {
@@ -73,7 +118,7 @@ func TestAnnotatedLeaseLockAnnotationFailureDoesNotSurfaceToElector(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	lock := newAnnotatedLeaseLock(base, failing.CoordinationV1().Leases("default"), "lease", annotations)
+	lock := newAnnotatedLeaseLock(base, failing.CoordinationV1().Leases("default"), annotations)
 	record := resourcelock.LeaderElectionRecord{HolderIdentity: "node-a"}
 
 	if err := lock.Create(context.Background(), record); err != nil {
@@ -105,7 +150,7 @@ func TestAnnotatedLeaseLockFollowerDoesNotOverwriteAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creator := newAnnotatedLeaseLock(ownerBase, leaseClient, "lease", active)
+	creator := newAnnotatedLeaseLock(ownerBase, leaseClient, active)
 	if err := creator.Create(context.Background(), resourcelock.LeaderElectionRecord{HolderIdentity: "node-a"}); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -114,7 +159,7 @@ func TestAnnotatedLeaseLockFollowerDoesNotOverwriteAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observer := newAnnotatedLeaseLock(followerBase, leaseClient, "lease", follower)
+	observer := newAnnotatedLeaseLock(followerBase, leaseClient, follower)
 	if _, _, err := observer.Get(context.Background()); err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -144,7 +189,7 @@ func TestAnnotatedLeaseLockReleaseDoesNotOverwriteSuccessorMetadata(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		return newAnnotatedLeaseLock(base, leaseClient, "lease", annotations)
+		return newAnnotatedLeaseLock(base, leaseClient, annotations)
 	}
 
 	first := newLock("node-a", "release_a", 248, "192.0.2.10")

@@ -32,6 +32,10 @@ const (
 
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
+	// vipLogFormat selects the log output format: text or json.
+	vipLogFormat = "vip_logformat"
+	// vipLogTimestampFormat selects the JSON timestamp encoding: rfc3339 or unix-ms.
+	vipLogTimestampFormat = "vip_logtimestampformat"
 
 	// instanceName identifies this kube-vip deployment when naming host-global resources
 	instanceName = "instance_name"
@@ -155,6 +159,13 @@ const (
 	// zebraSoftwareName specifies Software Name for Zebra
 	zebraSoftwareName = "zebra_software_name"
 
+	// bgpBMPServers defines the comma-separated BGP Monitoring Protocol stations
+	bgpBMPServers = "bgp_bmp_servers"
+	// bgpBMPPolicy defines the BMP route monitoring policy
+	bgpBMPPolicy = "bgp_bmp_policy"
+	// bgpBMPStatisticsTimeout defines the interval in seconds between BMP Statistics Reports
+	bgpBMPStatisticsTimeout = "bgp_bmp_statistics_timeout"
+
 	// mpbgpNexthop defines MPBGP mode
 	mpbgpNexthop = "mpbgp_nexthop"
 	// mpbgpIPv4 defines fixed IPv4 to be used with MPBGP
@@ -238,6 +249,12 @@ const (
 
 	// prometheusServer defines the address prometheus listens on
 	prometheusServer = "prometheus_server"
+
+	// enablePprof enables the pprof profiling endpoints
+	enablePprof = "enable_pprof"
+
+	// pprofServer defines the address the pprof endpoints listen on
+	pprofServer = "pprof_server"
 
 	// vipConfigMap defines the configmap that kube-vip will watch for service definitions
 	// vipConfigMap = "vip_configmap"

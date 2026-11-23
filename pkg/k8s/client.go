@@ -87,7 +87,7 @@ func findAddressFromRemoteCert(address string) ([]net.IP, error) {
 	// Grab the certificactes
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) > 1 {
-		return nil, fmt.Errorf("[k8s client] not designed to recive multiple certs from API server")
+		return nil, fmt.Errorf("[k8s client] not designed to receive multiple certs from API server")
 	}
 
 	return certs[0].IPAddresses, nil

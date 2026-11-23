@@ -61,8 +61,6 @@ func TestServeStopsOnContextCancellation(t *testing.T) {
 
 	_, stop := startServer(t, ln)
 
-	// stop blocks until serve returns, and serve waits on its serving
-	// goroutine, so a clean return means nothing was left running.
 	if err := stop(); err != nil {
 		t.Fatalf("serve returned an error on shutdown: %v", err)
 	}
@@ -81,12 +79,9 @@ func TestServeWithAlreadyCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	// Shutdown can win the race against the serving goroutine here. That is
-	// safe: a server already told to shut down makes Serve return
-	// ErrServerClosed straight away, so nothing blocks.
 	done := make(chan error, 1)
 	go func() {
-		done <- serve(ctx, ln)
+		done <- serve(ctx, ln, newMetricsMux(), "test")
 	}()
 
 	select {
@@ -115,11 +110,10 @@ func TestServeReturnsErrorWhenAddressUnavailable(t *testing.T) {
 func TestRegisterPrometheusMetricsIsIdempotent(t *testing.T) {
 	RegisterPrometheusMetrics()
 
-	// Registering a collector that is already registered is an error,
-	// RegisterPrometheusMetrics should be guarded with sync.Once.
-	mustNotPanic(t, "repeated RegisterPrometheusMetrics call", RegisterPrometheusMetrics)
+	// Registering a collector that is already registered should cause panic.
+	discardPanic(t, "repeated RegisterPrometheusMetrics call", RegisterPrometheusMetrics)
 
-	// Confirm the collectors were really registered.
+	// Confirm the collectors were actually registered.
 	err := prometheus.DefaultRegisterer.Register(ActiveServices)
 
 	var alreadyRegistered prometheus.AlreadyRegisteredError
@@ -140,15 +134,21 @@ func newTestListener(t *testing.T) net.Listener {
 	return ln
 }
 
-// startServer runs serve on ln and returns the base URL along with a stop
-// function that cancels the context and reports what serve returned.
+// startServer runs serve on ln with the metrics handler and returns the base URL
+// along with a stop function that cancels the context and reports what serve returned.
 func startServer(t *testing.T, ln net.Listener) (string, func() error) {
+	t.Helper()
+
+	return startServerWithHandler(t, ln, newMetricsMux())
+}
+
+func startServerWithHandler(t *testing.T, ln net.Listener, handler http.Handler) (string, func() error) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- serve(ctx, ln)
+		serveErr <- serve(ctx, ln, handler, "test")
 	}()
 
 	var (
@@ -198,9 +198,7 @@ func get(t *testing.T, url string) (string, int) {
 	return string(body), resp.StatusCode
 }
 
-// mustNotPanic reports a panic in fn as a test failure describing what
-// panicked, rather than letting it take down the test binary.
-func mustNotPanic(t *testing.T, what string, fn func()) {
+func discardPanic(t *testing.T, what string, fn func()) {
 	t.Helper()
 
 	defer func() {

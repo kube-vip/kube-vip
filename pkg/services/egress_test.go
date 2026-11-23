@@ -45,3 +45,24 @@ func Test_getSameFamilyCidr(t *testing.T) {
 		})
 	}
 }
+
+func Test_detectAPIServerEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "annotation unset", value: "", want: false},
+		{name: "true", value: "true", want: true},
+		{name: "True", value: "True", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "False", value: "False", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectAPIServerEnabled(tt.value); got != tt.want {
+				t.Errorf("detectAPIServerEnabled(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}

@@ -20,6 +20,130 @@ The idea behind `kube-vip` is a small self-contained Highly-Available option for
 
 For upgrading an existing install in place (static Pod or DaemonSet), see the [upgrade guide](https://kube-vip.io/docs/upgrade/).
 
+### BGP forwarding-node advertisements
+
+Set the Service annotation `kube-vip.io/bgp-forwarding-node: "true"` to have
+every kube-vip BGP speaker advertise the Service VIP with a ready endpoint's
+**node InternalIP** as its next hop, rather than the advertising speaker itself.
+This works with both `externalTrafficPolicy: Local` and `Cluster`; use `Local`
+to keep traffic on the selected endpoint node and preserve client source IPs.
+The destination node still needs kube-proxy or an equivalent Service datapath
+to deliver VIP traffic to the endpoint.
+
+Speakers choose the first eligible node in sorted node-name order, independently
+for each VIP address family. EndpointSlice and legacy Endpoints watches both
+support this mode. Endpoints without a node name are excluded. When endpoints
+change, kube-vip replaces the next hop; when none remain, it withdraws the route.
+The endpointless-Service opt-in does not override this withdrawal behavior.
+
+This mode requires BGP with Service and global leader election disabled, and
+cannot be combined with MP-BGP next-hop rewriting. The Kubernetes credentials
+must permit `get` on Nodes. Each selected node must expose an InternalIP in the
+VIP's address family, and that IP must be reachable from the upstream router.
+Configure the router to accept third-party next hops without rewriting them.
+Services sharing a VIP must agree on its next hop; conflicting next hops are
+rejected rather than silently replacing another Service's route.
+
+### Running kube-vip as a binary
+
+[GitHub releases](https://github.com/kube-vip/kube-vip/releases) have
+statically linked Linux binaries attached for `amd64`, `arm64`, `arm` (ARMv7),
+`ppc64le` and `s390x`, named `kube-vip-linux-<arch>`, along with a
+`kube-vip-checksums.txt` file holding their SHA-256 checksums. They let
+kube-vip run directly on a host, for example as a systemd service next to
+control plane components that are themselves deployed as binaries.
+
+```shell
+VERSION=vX.Y.Z # the release to install
+ARCH=amd64
+curl -fsSLO "https://github.com/kube-vip/kube-vip/releases/download/${VERSION}/kube-vip-linux-${ARCH}"
+curl -fsSLO "https://github.com/kube-vip/kube-vip/releases/download/${VERSION}/kube-vip-checksums.txt"
+sha256sum --check --ignore-missing kube-vip-checksums.txt
+sudo install -m 0755 "kube-vip-linux-${ARCH}" /usr/local/bin/kube-vip
+```
+
+The binary accepts the same flags and environment variables as the container
+image. Run it as root (or with `CAP_NET_ADMIN` and `CAP_NET_RAW`) so it can
+manage addresses and send ARP. It reads `/etc/kubernetes/admin.conf` by
+default, and `--autodetectcp` makes it reach the API server running on the same
+host instead of the VIP it is about to bring up. To use a different kubeconfig,
+set `--k8sConfigPath` and put the local API server address in the
+`kubernetes_addr` environment variable. A minimal control plane VIP in ARP mode
+as a systemd unit:
+
+```ini
+[Unit]
+Description=kube-vip
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/kube-vip manager --interface eth0 --address 192.168.0.40 \
+    --controlplane --arp --leaderElection --autodetectcp
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`make release-binaries` builds the same set of binaries locally into `dist/`.
+
+### Verifying release artifacts
+
+Container images and release binaries are signed keylessly with
+[cosign](https://docs.sigstore.dev/cosign/signing/overview/) using the GitHub Actions
+OIDC identity. Release images and binaries also have a signed SLSA build
+provenance attestation available through the GitHub attestation API, and each
+image has a signed CycloneDX SBOM attestation in the registry.
+
+Signatures and SBOM attestations are attached in both the current Sigstore
+bundle format and the legacy cosign format, so cosign v3 (recommended) and
+cosign v2 can verify the same artifacts.
+
+For images published by a release (`ghcr.io/kube-vip/kube-vip:<version>`,
+`plndr/kube-vip:<version>`, and the corresponding `kube-vip-iptables` images):
+
+```shell
+VERSION=vX.Y.Z # the release to verify
+
+cosign verify "ghcr.io/kube-vip/kube-vip:${VERSION}" \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation --type cyclonedx "ghcr.io/kube-vip/kube-vip:${VERSION}" \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+gh attestation verify "oci://ghcr.io/kube-vip/kube-vip:${VERSION}" --repo kube-vip/kube-vip
+```
+
+The same cosign commands work with the Docker Hub names (`plndr/kube-vip`,
+`plndr/kube-vip-iptables`).
+
+Nightly images built from `main` are signed by `.github/workflows/main.yaml`;
+use the same commands with the `main` tag and this identity:
+
+```shell
+cosign verify ghcr.io/kube-vip/kube-vip:main \
+  --certificate-identity https://github.com/kube-vip/kube-vip/.github/workflows/main.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Release binaries are covered by `kube-vip-checksums.txt`. Verify the checksums
+signature before trusting the hashes, then check the provenance of an
+individual binary:
+
+```shell
+cosign verify-blob kube-vip-checksums.txt \
+  --bundle kube-vip-checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/kube-vip/kube-vip/\.github/workflows/release-binaries\.yaml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum --check --ignore-missing kube-vip-checksums.txt
+
+gh attestation verify kube-vip-linux-amd64 --repo kube-vip/kube-vip
+```
+
 ### Runtime configuration files
 
 The `manager` and `service` commands accept strict YAML or JSON configuration
@@ -77,6 +201,63 @@ All of these would require a separate level of configuration and in some infrast
 
 ## Troubleshooting and Feedback
 
+### Log format
+
+kube-vip writes text logs by default. To use JSON with `manager` or `service`,
+set `vip_logformat` in the container's environment:
+
+```yaml
+env:
+  - name: vip_logformat
+    value: "json"
+```
+
+You can also pass `--logFormat=json` or set `logFormat: json` in a runtime
+configuration file. The usual configuration precedence applies: explicit flags
+override environment variables, which override the file. Use `text` or an empty
+value to select text output; other format names are rejected.
+
+Each JSON log entry is written to stderr on a single line, with `time`, `level`
+and `msg` followed by any attributes supplied by the logging call. For example:
+
+```json
+{"time":"2026-10-30T12:00:00Z","level":"INFO","msg":"kube-vip.io","version":"...","build":"..."}
+```
+
+Timestamps use RFC3339 strings, including fractional seconds when present. If
+you need milliseconds since the Unix epoch instead, add this to the same `env`
+section:
+
+```yaml
+  - name: vip_logtimestampformat
+    value: "unix-ms"
+```
+
+The equivalent flag is `--logTimestampFormat=unix-ms`, or you can set
+`logTimestampFormat: unix-ms` in the configuration file. This writes `time` as
+an integer JSON number. Set the option to `rfc3339`, or leave it empty, to use
+the default format. Other timestamp formats are rejected. This option only
+affects top-level time-valued `time` fields in JSON logs; time attributes with
+other names or inside groups keep their original representation.
+
+Log verbosity is still controlled by `--log` or `vip_loglevel`: `-4` for debug,
+`0` for info, `4` for warnings and `8` for errors. In JSON mode, Go's standard
+`log` calls are assigned INFO because they carry no severity information.
+Kubernetes library logs from `klog`, including `client-go`, use the same JSON
+handler. The klog adapter also maps legacy `klog.Warning*` calls to INFO, so
+both kinds of messages are filtered out at WARN or ERROR thresholds. Existing
+klog verbosity settings and text-mode logging are unchanged.
+
+When generating a Pod or DaemonSet manifest, the JSON and Unix-millisecond
+options are carried into the container's environment. Default manifests stay
+the same.
+
+Logging is configured after the runtime configuration has been loaded, so
+errors reading that configuration can still appear as text. Manifest YAML,
+`version` output and the SIGUSR1 diagnostic dump keep their existing formats.
+Panic/fatal stack traces and independent library loggers other than klog also
+keep their existing output.
+
 ### SELinux and IPVS kernel modules
 
 When using IPVS load balancing on nodes with SELinux enforcing, kube-vip may be
@@ -103,6 +284,78 @@ ip_vs_rr
 
 Preloading only the required modules is preferred to enabling the SELinux
 `domain_kernel_load_modules` boolean for containers.
+
+### Metrics and profiling
+
+kube-vip runs two independent observability HTTP servers. Metrics are on by
+default and profiling is off.
+
+#### Metrics endpoint
+
+Metrics are exposed on `:2112` by default, configurable with
+`--prometheusHTTPServer` or `prometheus_server`. An empty value disables the
+server.
+
+Exposed metrics cover service reconciliation events and errors, leader election
+transitions, BGP session state and build info (version, build, node).
+
+#### BGP Monitoring Protocol (BMP)
+
+In BGP mode kube-vip can report its BGP sessions and routes to one or more
+[BMP (RFC 7854)](https://www.rfc-editor.org/rfc/rfc7854) stations, such as
+[pmacct](https://www.pmacct.net/) or [OpenBMP](https://www.openbmp.org/). kube-vip
+connects to each station, retries with a backoff while it is unreachable, and
+sends Peer Up and Peer Down notifications for every BGP session.
+
+- `bgp_bmp_servers` / `--bgpBmpServers` / `bgpConfig.bmp.servers`: comma-separated
+  stations, each written as `<IPv4 address>[:<port>]` or `[<IPv6 address>][:<port>]`.
+  The port defaults to `11019`.
+- `bgp_bmp_policy` / `--bgpBmpPolicy` / `bgpConfig.bmp.policy`: the routes sent in
+  Route Monitoring messages (default `local-rib`)
+  - `local-rib`: the best routes in kube-vip's RIB ([RFC 9069](https://www.rfc-editor.org/rfc/rfc9069)),
+    including the control plane and Service VIP routes kube-vip advertises
+  - `pre-policy` / `post-policy`: the routes received from each peer, before or
+    after import policy
+  - `all`: all of the above
+- `bgp_bmp_statistics_timeout` / `--bgpBmpStatisticsTimeout` / `bgpConfig.bmp.statisticsTimeout`:
+  the interval in seconds between Statistics Reports for each established session,
+  between `15` and `65535`. The default `0` sends none.
+
+```yaml
+# Kubernetes manifest
+containers:
+  - name: kube-vip
+    env:
+      - name: bgp_enable
+        value: "true"
+      - name: bgp_bmp_servers
+        value: "192.168.0.10,[fd00::10]:5000"
+      - name: bgp_bmp_statistics_timeout
+        value: "60"
+```
+
+kube-vip refuses to start when a station is not an IP address, is listed twice,
+or when the policy or statistics interval is invalid.
+
+#### pprof endpoints (debug only)
+
+Profiling can be enabled with `--enablePprof` CLI flag or `enable_pprof` env variable, and listens on
+`127.0.0.1:6060` by default. The address can be configured with `--pprofHTTPServer` or
+`pprof_server`.
+
+```yaml
+# Kubernetes manifest
+containers:
+  - name: kube-vip
+    env:
+      - name: enable_pprof
+        value: "true"
+      - name: pprof_server
+        value: "127.0.0.1:1234"
+```
+
+Profiles available under `/debug/pprof/`: `profile` (CPU), `heap`, `allocs`,
+`goroutine`, `threadcreate`, `trace`, `cmdline` and `symbol`. 
 
 ### Gateway API `LoadBalancer` services with no endpoints
 
@@ -136,7 +389,7 @@ Thanks for taking the time to join our community and start contributing! We welc
 
 :warning: This project has issue compiling on MacOS, please compile it on linux distribution
 
-Additionally it is now relatively easy and quick to develop with [skaffold](https://skaffold.dev/), and the `skaffold.yaml` exists within the root folder of the gir repository.
+Additionally it is now relatively easy and quick to develop with [skaffold](https://skaffold.dev/), and the `skaffold.yaml` exists within the root folder of the git repository.
 
 ### Set up a kind development environment
 

@@ -1079,7 +1079,7 @@ func (configurator *network) removeNftablesRuleToLimitTrafficPorts(c *nfinternal
 
 	log.Debug("remove nftables port rules", "vip", vip, "ports", configurator.ports)
 	if err := deleteNFTPortRule(c, comment); err != nil {
-		return fmt.Errorf("faield to remove port rule: %w", err)
+		return fmt.Errorf("failed to remove port rule: %w", err)
 	}
 
 	return nil
