@@ -52,10 +52,13 @@ func CleanupService(ctx context.Context, config *kubevip.Config, bgpServer *bgp.
 
 	sharedVIPs := sharedServiceVIPs(config, serviceInstance, remaining)
 	for _, serviceCluster := range serviceInstance.Clusters {
-		preserve := make([]string, 0, len(serviceCluster.Network))
-		for _, network := range serviceCluster.Network {
-			if _, shared := sharedVIPs[network.IP()]; shared {
-				preserve = append(preserve, network.IP())
+		var preserve []string
+		if len(sharedVIPs) > 0 {
+			for _, network := range serviceCluster.Network {
+				attachment := serviceVIPAttachment{address: network.IP(), interfaceName: network.Interface()}
+				if _, shared := sharedVIPs[attachment]; shared {
+					preserve = append(preserve, attachment.address)
+				}
 			}
 		}
 		if len(preserve) != 0 {
@@ -95,15 +98,33 @@ func StartService(ctx context.Context, service *v1.Service, serviceInstance *ins
 	return nil
 }
 
-func sharedServiceVIPs(config *kubevip.Config, serviceInstance *instance.Instance, remaining []*instance.Instance) map[string]struct{} {
-	shared := make(map[string]struct{})
-	if serviceInstance.ServiceSnapshot == nil ||
-		serviceInstance.ServiceSnapshot.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
+type serviceVIPAttachment struct {
+	address       string
+	interfaceName string
+}
+
+func serviceVIPAttachments(serviceInstance *instance.Instance) []serviceVIPAttachment {
+	var attachments []serviceVIPAttachment
+	for _, serviceCluster := range serviceInstance.Clusters {
+		for _, network := range serviceCluster.Network {
+			attachments = append(attachments, serviceVIPAttachment{address: network.IP(), interfaceName: network.Interface()})
+		}
+	}
+	return attachments
+}
+
+func sharedServiceVIPs(config *kubevip.Config, serviceInstance *instance.Instance, remaining []*instance.Instance) map[serviceVIPAttachment]struct{} {
+	shared := make(map[serviceVIPAttachment]struct{})
+	serviceInfo, ok := serviceInstance.CleanupInfo()
+	if len(remaining) == 0 || !ok || serviceInfo.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
 		return shared
 	}
-	serviceNamespace, serviceLeaseName := lease.ServiceName(serviceInstance.ServiceSnapshot)
+	serviceNamespace, serviceLeaseName := lease.ServiceNameFor(serviceInfo.Namespace, serviceInfo.Name, serviceInfo.Lease)
 	serviceLease := lease.NewID(config.LeaderElectionType, serviceNamespace, serviceLeaseName).NamespacedName()
-	addresses := serviceInstance.Addresses()
+	attachments := make(map[serviceVIPAttachment]struct{})
+	for _, attachment := range serviceVIPAttachments(serviceInstance) {
+		attachments[attachment] = struct{}{}
+	}
 	for _, candidate := range remaining {
 		candidateInfo, ok := candidate.CleanupInfo()
 		if !ok || candidateInfo.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
@@ -114,11 +135,9 @@ func sharedServiceVIPs(config *kubevip.Config, serviceInstance *instance.Instanc
 		if config.EnableServicesElection && candidateLease != serviceLease {
 			continue
 		}
-		for _, address := range candidate.Addresses() {
-			for _, serviceAddress := range addresses {
-				if address == serviceAddress {
-					shared[address] = struct{}{}
-				}
+		for _, attachment := range serviceVIPAttachments(candidate) {
+			if _, overlaps := attachments[attachment]; overlaps {
+				shared[attachment] = struct{}{}
 			}
 		}
 	}

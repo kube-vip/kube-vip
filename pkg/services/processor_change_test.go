@@ -2,13 +2,21 @@ package services
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 func TestServiceSnapshotChangedBGPForwardingNode(t *testing.T) {
@@ -40,6 +48,162 @@ func TestServiceSnapshotChangedEndpointlessOptIn(t *testing.T) {
 	stillOptedIn.Annotations[kubevip.AllowReconcileWithoutEndpoints] = "TRUE"
 	if serviceSnapshotChanged(optedIn, stillOptedIn) {
 		t.Fatal("unchanged endpointless opt-in must not restart the watcher")
+	}
+}
+
+func TestServiceInterfaceChanged(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		oldInterface, newInterface string
+		oldVLAN, newVLAN           string
+		config                     kubevip.Config
+		changed                    bool
+	}{
+		{name: "interface added", newInterface: "eth1", changed: true},
+		{name: "interface removed", oldInterface: "eth1", changed: true},
+		{name: "interface unchanged", oldInterface: "eth1", newInterface: "eth1"},
+		{name: "explicit Service default added", newInterface: "eth1", config: kubevip.Config{Interface: "eth0", ServicesInterface: "eth1"}},
+		{name: "explicit primary default removed", oldInterface: "eth0", config: kubevip.Config{Interface: "eth0"}},
+		{name: "override differs from Service default", newInterface: "eth0", config: kubevip.Config{Interface: "eth0", ServicesInterface: "eth1"}, changed: true},
+		{name: "VLAN changed", oldVLAN: "eth0.42", newVLAN: "eth0.43", changed: true},
+		{name: "VLAN removed", oldVLAN: "eth0.42", newInterface: "eth1", changed: true},
+		{name: "VLAN takes precedence", oldInterface: "eth1", newInterface: "eth2", oldVLAN: "eth0.42", newVLAN: "eth0.42"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			original := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				kubevip.ServiceInterface: test.oldInterface,
+				kubevip.ServiceVlan:      test.oldVLAN,
+			}}}
+			updated := original.DeepCopy()
+			updated.Annotations[kubevip.ServiceInterface] = test.newInterface
+			updated.Annotations[kubevip.ServiceVlan] = test.newVLAN
+			processor := &Processor{config: &test.config}
+			if got := processor.serviceInterfaceChanged(original, updated); got != test.changed {
+				t.Fatalf("serviceInterfaceChanged() = %t, want %t", got, test.changed)
+			}
+		})
+	}
+}
+
+func TestReconcileServiceInterfaceUpdate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = http.NewResponseController(w).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("create Kubernetes client: %v", err)
+	}
+
+	for _, test := range []struct {
+		name              string
+		instancePresent   bool
+		snapshotRefreshed bool
+		teardownFails     bool
+		wireGuard         bool
+		vlan              string
+	}{
+		{name: "active Service", instancePresent: true},
+		{name: "active Service with refreshed snapshot", instancePresent: true, snapshotRefreshed: true},
+		{name: "retries after teardown failure", instancePresent: true, teardownFails: true},
+		{name: "watching on standby"},
+		{name: "WireGuard ignores interface edit", instancePresent: true, wireGuard: true},
+		{name: "WireGuard ignores VLAN edit", instancePresent: true, wireGuard: true, vlan: "eth1.42"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			original := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default", UID: "service-uid", Annotations: map[string]string{
+					kubevip.ServiceInterface: "eth0",
+				}},
+				Spec: v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.10"},
+			}
+			if test.snapshotRefreshed {
+				delete(original.Annotations, kubevip.ServiceInterface)
+			}
+			updated := original.DeepCopy()
+			if test.vlan != "" {
+				updated.Annotations[kubevip.ServiceVlan] = test.vlan
+			} else {
+				updated.Annotations[kubevip.ServiceInterface] = "eth1"
+			}
+
+			labeler := &testLabeler{}
+			processor := &Processor{
+				config:           &kubevip.Config{EnableWireguard: test.wireGuard, DebounceTime: "0s"},
+				serviceLock:      newTestServiceLocks(),
+				lbClassFilter:    lbClassFilter,
+				rwClientSet:      client,
+				nodeLabelManager: labeler,
+				instanceFactory: serviceInstanceFactoryFunc(func(_ context.Context, svc *v1.Service, _ *sync.WaitGroup) (*instance.Instance, error) {
+					return &instance.Instance{ServiceUID: svc.UID, ServiceSnapshot: svc.DeepCopy()}, nil
+				}),
+			}
+			initializeTestElectionCoordinators(processor)
+			oldInstance := &instance.Instance{ServiceUID: original.UID, ServiceSnapshot: original}
+			if test.snapshotRefreshed {
+				oldInstance.ServiceSnapshot = updated.DeepCopy()
+			}
+			if test.instancePresent {
+				processor.ServiceInstances = []*instance.Instance{oldInstance}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			var wg sync.WaitGroup
+			defer func() {
+				cancel()
+				wg.Wait()
+			}()
+			oldContext := servicecontext.New(ctx)
+			oldContext.StartWatching()
+			oldContext.SetWatchedService(original)
+			processor.svcMap.Store(original.UID, oldContext)
+			wg.Go(func() {
+				<-oldContext.Ctx.Done()
+				oldContext.StopWatching()
+			})
+
+			callback := func(*servicecontext.Context, *v1.Service, *sync.WaitGroup) error { return nil }
+			cancelWatcher := func(err error) { t.Errorf("endpoint watcher failed: %v", err) }
+			event := watch.Event{Type: watch.Modified, Object: updated}
+			if test.teardownFails {
+				removeErr := errors.New("node label update failed")
+				labeler.removeErr = removeErr
+				oldInstance.LabelAdded = true
+				if err := processor.Reconcile(ctx, event, callback, false, &wg, cancelWatcher); !errors.Is(err, removeErr) {
+					t.Fatalf("Reconcile() error = %v, want %v", err, removeErr)
+				}
+				current, err := processor.getServiceContext(updated.UID)
+				if err != nil || current != oldContext || processor.findServiceInstance(updated) != oldInstance {
+					t.Fatal("failed teardown replaced the original Service context or instance")
+				}
+				labeler.removeErr = nil
+			}
+			if err := processor.Reconcile(ctx, event, callback, false, &wg, cancelWatcher); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if test.teardownFails && oldInstance.LabelAdded {
+				t.Fatal("successful label removal left the original instance marked as labeled")
+			}
+			current, err := processor.getServiceContext(updated.UID)
+			if err != nil || current == nil || current.Ctx.Err() != nil {
+				t.Fatalf("expected a live Service context, got %v, error %v", current, err)
+			}
+			currentInstance := processor.findServiceInstance(updated)
+			if test.wireGuard {
+				if current != oldContext || currentInstance != oldInstance {
+					t.Fatal("interface annotation edit replaced the WireGuard Service instance or watcher")
+				}
+				return
+			}
+			if oldContext.Ctx.Err() == nil || current == oldContext {
+				t.Fatal("Service interface edit left the original watcher running")
+			}
+			if currentInstance == nil || currentInstance == oldInstance || currentInstance.ServiceSnapshot.Annotations[kubevip.ServiceInterface] != "eth1" {
+				t.Fatal("expected a replacement Service instance with interface eth1")
+			}
+		})
 	}
 }
 
@@ -83,6 +247,7 @@ func TestValidateBGPForwardingNode(t *testing.T) {
 // against that copy, otherwise the node keeps treating a Local service as Cluster and keeps
 // campaigning for the lease without a local endpoint.
 func TestChangedSinceWatched(t *testing.T) {
+	processor := &Processor{config: &kubevip.Config{}}
 	policy := v1.IPFamilyPolicySingleStack
 	cluster := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default", UID: "service-uid"},
@@ -150,7 +315,7 @@ func TestChangedSinceWatched(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := changedSinceWatched(test.instance, test.svcCtx, test.svc); got != test.want {
+			if got := processor.changedSinceWatched(test.instance, test.svcCtx, test.svc); got != test.want {
 				t.Fatalf("changedSinceWatched() = %v, want %v", got, test.want)
 			}
 		})
@@ -162,6 +327,7 @@ func TestChangedSinceWatched(t *testing.T) {
 // matches finds the instance the other one started, so the change must be
 // detected or the election never starts (or never stops) until kube-vip restarts.
 func TestChangedSinceWatchedForcePerServiceElection(t *testing.T) {
+	processor := &Processor{config: &kubevip.Config{}}
 	regular := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default", UID: "service-uid"},
 		Spec: v1.ServiceSpec{
@@ -189,12 +355,12 @@ func TestChangedSinceWatchedForcePerServiceElection(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := changedSinceWatched(&instance.Instance{ServiceSnapshot: test.watched}, nil, test.svc); got != test.want {
+			if got := processor.changedSinceWatched(&instance.Instance{ServiceSnapshot: test.watched}, nil, test.svc); got != test.want {
 				t.Fatalf("changedSinceWatched() with instance = %v, want %v", got, test.want)
 			}
 			svcCtx := servicecontext.New(context.Background())
 			svcCtx.SetWatchedService(test.watched)
-			if got := changedSinceWatched(nil, svcCtx, test.svc); got != test.want {
+			if got := processor.changedSinceWatched(nil, svcCtx, test.svc); got != test.want {
 				t.Fatalf("changedSinceWatched() with watched Service = %v, want %v", got, test.want)
 			}
 		})

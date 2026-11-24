@@ -445,15 +445,15 @@ func TestReconcileAndDeleteRejectTypedNilService(t *testing.T) {
 	}
 }
 
-func TestServiceChangedHandlesNilIPFamilyPolicy(t *testing.T) {
+func TestServiceSnapshotChangedHandlesNilIPFamilyPolicy(t *testing.T) {
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "service"}}
-	instance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
-	if serviceChanged(instance, service) {
+	original := service.DeepCopy()
+	if serviceSnapshotChanged(original, service) {
 		t.Fatal("identical Services with nil IP family policies were considered changed")
 	}
 	policy := v1.IPFamilyPolicySingleStack
 	service.Spec.IPFamilyPolicy = &policy
-	if !serviceChanged(instance, service) {
+	if !serviceSnapshotChanged(original, service) {
 		t.Fatal("Service IP family policy change was not detected")
 	}
 }

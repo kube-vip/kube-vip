@@ -1,6 +1,7 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -218,38 +219,28 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 			return fmt.Errorf("failed to get service context: %w", err)
 		}
 		if event.Type == watch.Modified {
-			shouldGarbageCollect = changedSinceWatched(svcInstance, svcCtx, svc)
+			shouldGarbageCollect = p.changedSinceWatched(svcInstance, svcCtx, svc)
 		}
 		return nil
 	}(); err != nil {
 		return err
 	}
 
-	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
-	if event.Type == watch.Modified {
-		if shouldGarbageCollect {
-			// This service has been modified, but it was also active.
-			if svcCtx != nil {
-				log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
-				oldService := svc
-				if svcInstance != nil && svcInstance.ServiceSnapshot != nil {
-					oldService = svcInstance.ServiceSnapshot
-				}
-				//Set it to inactive
-				svcCtx.Cancel()
+	if shouldGarbageCollect && svcCtx != nil {
+		log.Warn("(svcs) The load balancer has changed, cancelling original load balancer")
+		oldService := cmp.Or(svcCtx.WatchedService(), svc)
+		svcCtx.Cancel()
 
-				if err := p.deleteService(ctx, svc.UID, nil); err != nil {
-					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
-					log.Error("(svc) unable to remove", "service", svc.UID)
-				}
-				p.electionCoordinators.DetachForContext(svcCtx, oldService)
-				// Reset the the svcCtx when it was garbage collected
-				// As the next function will create a new context when nil
-				svcCtx = nil
-				svcInstance = nil
-				p.updateActiveServicesMetric()
-			}
+		teardownErr := p.deleteService(ctx, svc.UID, svcCtx)
+		p.electionCoordinators.DetachForContext(svcCtx, oldService)
+		if teardownErr != nil {
+			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
+			return fmt.Errorf("retire service %s/%s for reconfiguration: %w", svc.Namespace, svc.Name, teardownErr)
 		}
+
+		svcCtx = nil
+		svcInstance = nil
+		p.updateActiveServicesMetric()
 	}
 	ips, hostnames := instance.FetchServiceAddresses(svc)
 	log.Debug("(svcs) has been added/modified with addresses", "service name", svc.Name, "ips", ips, "hostnames", hostnames)
@@ -897,22 +888,34 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 // acting on. When an instance is no longer tracked after a lost election, the
 // watchers still use the Service stored on the context.
 // The caller must hold the Service lock when i is non-nil.
-func changedSinceWatched(i *instance.Instance, svcCtx *servicecontext.Context, svc *v1.Service) bool {
-	if i != nil {
-		return serviceChanged(i, svc)
-	}
+func (p *Processor) changedSinceWatched(i *instance.Instance, svcCtx *servicecontext.Context, svc *v1.Service) bool {
+	var watched *v1.Service
 	if svcCtx != nil {
-		if watched := svcCtx.WatchedService(); watched != nil {
-			return serviceSnapshotChanged(watched, svc)
-		}
+		watched = svcCtx.WatchedService()
 	}
-	return false
+	previous := watched
+	if i != nil {
+		previous = i.ServiceSnapshot
+	}
+	if previous == nil {
+		return false
+	}
+
+	// The watcher retains the attachment inputs when an endpoint refresh updates
+	// the instance snapshot independently of Service reconciliation.
+	return serviceSnapshotChanged(previous, svc) || p.serviceInterfaceChanged(cmp.Or(watched, previous), svc)
 }
 
-// serviceChanged compares a tracked instance to the current Service. The caller
-// must hold the Service lock for i.UID().
-func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
-	return serviceSnapshotChanged(i.ServiceSnapshot, svc)
+func (p *Processor) serviceInterfaceChanged(original, svc *v1.Service) bool {
+	// WireGuard selects its own interface. For other modes, the VLAN takes precedence.
+	if p.config.EnableWireguard {
+		return false
+	}
+	previousVLAN, currentVLAN := original.Annotations[kubevip.ServiceVlan], svc.Annotations[kubevip.ServiceVlan]
+	defaultInterface := p.serviceInterface()
+	previousInterface := cmp.Or(original.Annotations[kubevip.ServiceInterface], defaultInterface)
+	currentInterface := cmp.Or(svc.Annotations[kubevip.ServiceInterface], defaultInterface)
+	return previousVLAN != currentVLAN || (currentVLAN == "" && previousInterface != currentInterface)
 }
 
 func serviceSnapshotChanged(original, svc *v1.Service) bool {

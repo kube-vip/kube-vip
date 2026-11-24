@@ -619,6 +619,7 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)
 		}
+		serviceInstance.LabelAdded = false
 	}
 
 	p.serviceCleanupMu.Lock()
