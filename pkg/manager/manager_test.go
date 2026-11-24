@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/manager/worker"
 	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/kube-vip/kube-vip/pkg/services"
+	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -269,5 +271,98 @@ func TestStartStopsHealthServerWhenModeExits(t *testing.T) {
 	}
 	if ctx.Err() != nil {
 		t.Fatal("Start relied on parent cancellation to stop the health server")
+	}
+}
+
+type shutdownTestUPNPGateway struct {
+	upnp.ConnectionClient
+	externalAddress func(context.Context) (string, error)
+}
+
+func (g shutdownTestUPNPGateway) GetExternalIPAddressCtx(ctx context.Context) (string, error) {
+	return g.externalAddress(ctx)
+}
+
+func TestStartStopsUPNPWhenModeExits(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		configureErr      error
+		terminateOnLookup bool
+	}{
+		{name: "termination during refresh"},
+		{name: "termination during gateway lookup", terminateOnLookup: true},
+		{name: "mode configuration failure", configureErr: errors.New("mode setup failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &kubevip.Config{EnableARP: true, EnableControlPlane: true, EnableUPNP: true}
+			processor, err := services.NewServicesProcessor(config, nil, nil, nil, nil, nil, noop.NewManager(), nil, lease.NewManager(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signals := make(chan os.Signal, 1)
+			refreshHoldingLock := make(chan struct{})
+			serviceLock := services.NewServiceLock()
+			const serviceUID = "service-using-upnp"
+			lookupStarted := false
+			manager := &Manager{
+				config:           config,
+				signalChan:       signals,
+				svcProcessor:     processor,
+				nodeLabelManager: noop.NewManager(),
+				discoverUPNP: func(context.Context) []upnp.ConnectionClient {
+					return []upnp.ConnectionClient{shutdownTestUPNPGateway{
+						externalAddress: func(ctx context.Context) (string, error) {
+							lookupStarted = true
+							if tc.terminateOnLookup {
+								signals <- syscall.SIGTERM
+								<-ctx.Done()
+								return "", ctx.Err()
+							}
+							return "192.0.2.1", nil
+						},
+					}}
+				},
+				refreshUPNP: func(ctx context.Context) {
+					serviceLock.Lock(serviceUID)
+					defer func() { _ = serviceLock.Unlock(serviceUID) }()
+					close(refreshHoldingLock)
+					<-ctx.Done()
+				},
+				modeWorker: func() worker.Worker {
+					return &shutdownTestWorker{
+						configure: func(context.Context, *sync.WaitGroup) error { return tc.configureErr },
+						start: func(ctx context.Context) {
+							select {
+							case <-refreshHoldingLock:
+							case <-ctx.Done():
+								return
+							}
+							signals <- syscall.SIGTERM
+							<-ctx.Done()
+							// Service teardown needs the lock held by the in-flight refresh.
+							serviceLock.Lock(serviceUID)
+							_ = serviceLock.Unlock(serviceUID)
+						},
+					}
+				},
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- manager.Start(ctx) }()
+
+			select {
+			case err := <-done:
+				if !errors.Is(err, tc.configureErr) {
+					t.Fatalf("Start returned %v, want %v", err, tc.configureErr)
+				}
+				if tc.configureErr == nil && !lookupStarted {
+					t.Fatal("Start skipped the UPnP gateway lookup")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("UPnP worker did not stop when kube-vip shut down")
+			}
+		})
 	}
 }

@@ -86,8 +86,11 @@ type Manager struct {
 	leaseMgr *lease.Manager
 
 	// Will handle routes
-	routeMgr   *route.Manager
-	modeWorker func() worker.Worker
+	routeMgr *route.Manager
+
+	modeWorker   func() worker.Worker
+	discoverUPNP func(context.Context) []upnp.ConnectionClient
+	refreshUPNP  func(context.Context)
 }
 
 // New will create a new managing object
@@ -277,6 +280,9 @@ func New(ctx context.Context, configMap string, config *kubevip.Config) (*Manage
 		electionMgr:      electionMgr,
 		leaseMgr:         leaseMgr,
 		routeMgr:         routeMgr,
+
+		discoverUPNP: upnp.GetConnectionClients,
+		refreshUPNP:  svcProcessor.RefreshUPNPForwards,
 	}, nil
 }
 
@@ -318,29 +324,6 @@ func (sm *Manager) Start(ctx context.Context) error {
 			log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
 		}
 	}()
-
-	if sm.config.EnableARP || sm.config.EnableWireguard {
-		if sm.config.EnableUPNP {
-			clients := upnp.GetConnectionClients(ctx)
-			if len(clients) == 0 {
-				log.Error("Error Enabling UPNP. No Clients found")
-				// Set the struct to false so nothing should use it in future
-				sm.config.EnableUPNP = false
-			} else {
-				for _, c := range clients {
-					ip, err := c.GetExternalIPAddress()
-					if err != nil {
-						log.Error("unable to find IGD2 Gateway address", "err", err)
-					}
-					log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
-				}
-			}
-			// TODO: It would be nice to run the UPNP refresh only on the leader.
-			wg.Go(func() {
-				sm.svcProcessor.RefreshUPNPForwards(ctx)
-			})
-		}
-	}
 
 	return sm.startMode(ctx)
 }
@@ -401,6 +384,34 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	wg.Go(func() {
 		sm.waitForShutdown(modeCtx, cancel, cpCluster)
 	})
+
+	if sm.config.EnableUPNP && (sm.config.EnableARP || sm.config.EnableWireguard) {
+		clients := sm.discoverUPNP(modeCtx)
+		if modeCtx.Err() != nil {
+			return nil
+		}
+		if len(clients) == 0 {
+			log.Error("Error Enabling UPNP. No Clients found")
+			sm.mutex.Lock()
+			sm.config.EnableUPNP = false
+			sm.mutex.Unlock()
+		} else {
+			for _, c := range clients {
+				ip, err := upnp.GetExternalIPAddress(modeCtx, c)
+				if modeCtx.Err() != nil {
+					return nil
+				}
+				if err != nil {
+					log.Error("unable to find IGD2 Gateway address", "err", err)
+				}
+				log.Info("Found UPNP IGD2 Gateway address", "ip", ip)
+			}
+			// Refresh can hold a Service lock that the mode's workers need for teardown.
+			wg.Go(func() {
+				sm.refreshUPNP(modeCtx)
+			})
+		}
+	}
 
 	if sm.config.EnableControlPlane {
 		wg.Go(func() {
