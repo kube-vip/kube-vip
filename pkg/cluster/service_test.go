@@ -411,6 +411,30 @@ func TestBGPHealthCheckLoop_GateVIPRemovesStaleVIPOnFirstFailure(t *testing.T) {
 		"stale VIP should be removed on the first failed check")
 }
 
+func TestBGPHealthCheckLoop_GateVIPKeepsVIPWhenShutdownInterruptsCheck(t *testing.T) {
+	t.Parallel()
+	// The server never answers, so the check is still in flight when we cancel.
+	checking := make(chan struct{}, 1)
+	healthcheck := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		checking <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(healthcheck.Close)
+
+	cfg := newBGPConfig(healthcheck.URL, "")
+	cfg.ControlPlaneHealthCheck.GateVIP = true
+	// Left on the interface by a previous run. A failed check would remove it.
+	network := &mockNetwork{ip: "10.0.0.1", cidr: testCIDR, present: true}
+	cancelContext, vipServiceDone := startVipServiceWithNetwork(t, cfg, newMockBGPRouteManager(), network)
+
+	<-checking
+	cancelContext()
+	<-vipServiceDone
+	if !network.isPresent() {
+		t.Fatal("shutdown should keep the VIP")
+	}
+}
+
 func TestRoutingTableHealthCheck_AddsVIPWhenHealthy(t *testing.T) {
 	t.Parallel()
 	healthcheck := newTestHealthServer(t, http.StatusOK)

@@ -5,6 +5,8 @@ import (
 	"math"
 	"net/url"
 	"strings"
+
+	"github.com/kube-vip/kube-vip/pkg/utils"
 )
 
 const (
@@ -127,6 +129,20 @@ func (c *Config) validateHealthCheckGateVIP() error {
 	// With leader election, the election already decides who holds the VIP.
 	if !c.EnableBGP || c.EnableLeaderElection || hc.Address == "" {
 		return fmt.Errorf("control_plane_health_check_gate_vip requires bgp_enable and control_plane_health_check_address, without vip_leaderelection")
+	}
+	// Only IP VIPs are supported. When the VIP is a DNS name, kube-vip resolves it
+	// every few seconds and adds the resolved IP to the interface each time (see
+	// vip.IPUpdater), regardless of the health check. The health check would remove
+	// the VIP and the next resolve would add it back. Supporting DNS names needs
+	// that loop to follow the health check too.
+	address := c.VIP
+	if c.Address != "" {
+		address = c.Address
+	}
+	for _, addr := range strings.Split(address, ",") {
+		if addr = strings.TrimSpace(addr); addr != "" && !utils.IsIP(addr) {
+			return fmt.Errorf("control_plane_health_check_gate_vip requires the VIP to be an IP address, got %q", addr)
+		}
 	}
 	return nil
 }

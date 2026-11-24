@@ -368,7 +368,14 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 				// The VIP must be in place before the route attracts traffic to it.
 				if c.ControlPlaneHealthCheck.GateVIP {
 					var added bool
-					added, err = network.AddIP(true, false)
+					// Call AddIP with precheck=false so it always adds the VIP and sets up
+					// its firewall rules (nftables or iptables), even when the VIP is
+					// already on the interface. With precheck=true, AddIP returns early if
+					// the VIP is already there. If a previous attempt added the VIP but
+					// failed to set up the firewall rules, the retry would skip them and we
+					// would announce the route without them. Both steps are idempotent, so
+					// repeating them is safe.
+					added, err = network.AddIP(false, false)
 					if added {
 						log.Info("BGP health check: added VIP", "address", network.IP())
 					}
@@ -382,7 +389,11 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 					routeAnnounced = true
 				}
 			}
-		} else {
+		} else if ctx.Err() == nil {
+			// If the context was cancelled, the check failed because it was interrupted
+			// and we don't know whether the API server is healthy, so we skip the failure
+			// threshold check. This handles shutdown, where we don't want to remove the
+			// VIP. The ctx.Done() case below withdraws the route.
 			consecutiveFailures++
 			if healthErr != nil {
 				log.Warn("BGP health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures, "err", healthErr)

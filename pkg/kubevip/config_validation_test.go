@@ -71,6 +71,32 @@ func TestValidate_HealthCheckGateVIP(t *testing.T) {
 			config:  gated("https://localhost:6443/livez", true, true),
 			wantErr: unsupported,
 		},
+		{
+			name: "IP VIPs",
+			config: &Config{
+				EnableBGP:               true,
+				Address:                 "192.0.2.10, 2001:db8::10",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+		},
+		{
+			name: "hostname VIP",
+			config: &Config{
+				EnableBGP:               true,
+				VIP:                     "cp.example.com",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+			wantErr: `control_plane_health_check_gate_vip requires the VIP to be an IP address, got "cp.example.com"`,
+		},
+		{
+			name: "hostname in address list",
+			config: &Config{
+				EnableBGP:               true,
+				Address:                 "192.0.2.10,cp.example.com",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+			wantErr: `control_plane_health_check_gate_vip requires the VIP to be an IP address, got "cp.example.com"`,
+		},
 	}
 
 	for _, tt := range tests {

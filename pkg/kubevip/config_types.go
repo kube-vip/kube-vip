@@ -297,8 +297,9 @@ type HealthCheck struct {
 	// ClientKeyPath is the PEM-encoded private key paired with ClientCertPath.
 	ClientKeyPath string `yaml:"clientKeyPath"`
 	// GateVIP adds the VIP to the interface only while the health check passes, instead of at
-	// startup. Only supported with BGP and without leader election. Address must reach the local
-	// control plane without going through the VIP (for example https://localhost:6443/livez).
+	// startup. Only supported with BGP, an IP address VIP and without leader election. Address
+	// must reach the local control plane without going through the VIP (for example
+	// https://localhost:6443/livez).
 	GateVIP bool `yaml:"gateVIP"`
 }
 
