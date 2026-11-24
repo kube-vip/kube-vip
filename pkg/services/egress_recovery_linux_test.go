@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -40,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -50,23 +53,7 @@ import (
 // and nftables in separate node namespaces. Only the API server and node labels
 // are substituted; this does not exercise a CNI or send application traffic.
 func TestRecoverEgressAfterEndpointLoss(t *testing.T) {
-	if os.Getenv("KUBE_VIP_EGRESS_RECOVERY_CHILD") == "" {
-		// Cluster shutdown also uses background goroutines. Isolate the whole
-		// process so their default namespace cannot be the host's namespace.
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		//nolint:gosec // Re-executes this test binary with fixed arguments, not an externally supplied command.
-		command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRecoverEgressAfterEndpointLoss$", "-test.v", "-test.timeout=55s")
-		command.Env = append(os.Environ(), "KUBE_VIP_EGRESS_RECOVERY_CHILD=1")
-		command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET}
-		output, err := command.CombinedOutput()
-		if err != nil {
-			if !requireNetworkNamespaces && (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) {
-				t.Skipf("network namespaces unavailable: %v", err)
-			}
-			t.Fatalf("isolated recovery test: %v\n%s", err, output)
-		}
-		t.Logf("%s", output)
+	if runIsolatedEgressTest(t) {
 		return
 	}
 	for _, test := range []struct {
@@ -156,6 +143,283 @@ func TestRecoverEgressAfterEndpointLoss(t *testing.T) {
 	}
 }
 
+func TestRecoverEgressAfterSNATFailure(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		legacy bool
+		update bool
+		stop   string
+	}{
+		{name: "EndpointSlices"},
+		{name: "legacy Endpoints", legacy: true},
+		{name: "endpoint reconfiguration", update: true},
+		{name: "newer Service endpoint", stop: "endpoint"},
+		{name: "endpoint not yet persisted", stop: "local"},
+		{name: "endpoint reverts", update: true, stop: "revert"},
+		{name: "leadership loss", stop: "leader"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if runIsolatedEgressTest(t) {
+				return
+			}
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "egress", Namespace: "default", UID: "egress-recovery",
+					Annotations: map[string]string{
+						kubevip.Egress: "true", kubevip.ActiveEndpoint: "10.0.0.1", kubevip.EgressDestinationPorts: "tcp:5060",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.10",
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+				},
+			}
+			client := newEgressRecoveryClient(t, service)
+			namespace, err := netns.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := newEgressRecoveryNodeInNamespace(t, "node-a", client, service, true, namespace)
+			if test.legacy {
+				config := node.processor.config
+				config.EnableEndpoints = true
+				node.endpoints = endpoints.NewEndpointProcessor(config, providers.NewEndpoints(), nil,
+					node.processor.findServiceInstance, nil, node.processor.routeMgr, node.processor.serviceLock)
+			}
+			node.reconcile(t, service, true)
+			if test.update {
+				node.start(t, service)
+				node.waitForDatapath(t, service, true)
+				if err := nftables.DeleteSNATFromAllTables(string(service.UID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unblockSNAT := blockEgressSNATChain(t, service)
+			desired := service.DeepCopy()
+			if test.update {
+				desired.Annotations[kubevip.ActiveEndpoint] = "10.0.0.2"
+				node.reconcileEndpoint(t, service, "10.0.0.2")
+			} else {
+				node.start(t, service)
+			}
+			node.waitForDatapathState(t, desired, true, false)
+			assertRecoveryLeaseHolder(t, client, service, "node-a")
+
+			switch test.stop {
+			case "endpoint":
+				// Change the API object before the endpoint watcher reports it.
+				api := client.CoreV1().Services(service.Namespace)
+				latest, err := api.Get(t.Context(), service.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				latest.Annotations[kubevip.ActiveEndpoint] = "10.0.0.2"
+				if _, err := api.Update(t.Context(), latest, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				unblockSNAT()
+				node.waitForEgressRetryToStop(t, service)
+				node.waitForDatapathState(t, service, true, false)
+				node.reconcileEndpoint(t, service, "10.0.0.2")
+				node.waitForDatapath(t, latest, true)
+			case "local":
+				// Model a watcher that selected a different endpoint while
+				// writing the annotation to the API was temporarily failing.
+				node.ctx.SetEgressEndpoint("10.0.0.2")
+				unblockSNAT()
+				node.waitForEgressRetryToStop(t, service)
+				node.waitForDatapathState(t, service, true, false)
+			case "revert":
+				unblockSNAT()
+				node.reconcile(t, service, true)
+				node.waitForDatapath(t, service, true)
+				node.waitForDatapathState(t, desired, true, false)
+			case "leader":
+				// Force a new live lease holder while the endpoint stays ready.
+				leases := client.CoordinationV1().Leases(service.Namespace)
+				active, err := leases.Get(t.Context(), "kubevip-"+service.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				newHolder, duration := "node-b", int32(60)
+				active.Spec.HolderIdentity = &newHolder
+				active.Spec.LeaseDurationSeconds = &duration
+				active.Spec.RenewTime = &metav1.MicroTime{Time: time.Now()}
+				if _, err := leases.Update(t.Context(), active, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				node.waitForDatapath(t, service, false)
+				unblockSNAT()
+				node.waitForEgressRetryToStop(t, service)
+				node.waitForDatapath(t, service, false)
+				assertRecoveryLeaseHolder(t, client, service, newHolder)
+			default:
+				unblockSNAT()
+				// No Service or endpoint changes occur after removing the fault.
+				node.waitForDatapath(t, desired, true)
+				assertRecoveryLeaseHolder(t, client, service, "node-a")
+				assertRecoveredSNATTraffic(t, desired)
+				restored, err := client.CoreV1().Services(service.Namespace).Get(t.Context(), service.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if restored.Annotations[kubevip.EgressNftablesTable] != "kube_vip_recovery" {
+					t.Fatal("recovery did not publish the nftables table annotation")
+				}
+			}
+		})
+	}
+}
+
+func TestRecoverEgressFailedFamilyOnly(t *testing.T) {
+	if runIsolatedEgressTest(t) {
+		return
+	}
+	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "egress", Namespace: "default", UID: "egress-recovery",
+		Annotations: map[string]string{
+			kubevip.ActiveEndpoint:           "10.0.0.1",
+			kubevip.ActiveEndpointIPv6:       "fd00:10::1",
+			kubevip.LoadbalancerIPAnnotation: "192.0.2.10,2001:db8::10",
+		},
+	}}
+	p := &Processor{config: &kubevip.Config{
+		InstanceName: "recovery", EgressWithNftables: true,
+		EgressPodCidr: "10.0.0.0/16,fd00:10::/64", EgressServiceCidr: "10.96.0.0/12,fd00:20::/64",
+	}}
+	unblockSNAT := blockEgressSNATChain(t, svc)
+	failed, configured, err := p.programServiceEgress(t.Context(), svc, egressAllFamilies)
+	if err == nil || failed != egressIPv4 || !configured {
+		t.Fatalf("initial programming = families %d, configured %t, error %v", failed, configured, err)
+	}
+	conn := &kernelnft.Conn{}
+	chain := nftables.GetSNatChainForTable(true, string(svc.UID), "kube_vip_recovery")
+	ipv6Rules, err := conn.GetRules(chain.Table, chain)
+	if err != nil || len(ipv6Rules) != 1 {
+		t.Fatalf("healthy family has %d rules, error %v", len(ipv6Rules), err)
+	}
+
+	unblockSNAT()
+	failed, configured, err = p.programServiceEgress(t.Context(), svc, failed)
+	if err != nil || failed != 0 || !configured {
+		t.Fatalf("retry = families %d, configured %t, error %v", failed, configured, err)
+	}
+	after, err := conn.GetRules(chain.Table, chain)
+	if err != nil || len(after) != 1 || after[0].Handle != ipv6Rules[0].Handle {
+		t.Fatalf("retry changed the healthy family: %v (%v)", after, err)
+	}
+}
+
+// Use a fresh TCP connection so conntrack cannot reuse an existing translation.
+func assertRecoveredSNATTraffic(t *testing.T, service *v1.Service) {
+	t.Helper()
+	endpoint, vip := service.Annotations[kubevip.ActiveEndpoint], service.Spec.LoadBalancerIP
+	const peer = "198.51.100.10"
+	loopback, err := netlink.LinkByName("lo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := netlink.LinkSetUp(loopback); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{endpoint, peer, vip} {
+		addr, err := netlink.ParseAddr(ip + "/32")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := netlink.AddrAdd(loopback, addr); err != nil && !errors.Is(err, syscall.EEXIST) {
+			t.Fatal(err)
+		}
+	}
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP(peer), Port: 5060})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := listener.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	dialer := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(endpoint)}, Timeout: 3 * time.Second}
+	client, err := dialer.DialContext(t.Context(), "tcp4", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	conn, err := listener.AcceptTCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	got, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil || got != vip {
+		t.Fatalf("TCP peer saw source %q, want %q (error %v)", got, vip, err)
+	}
+}
+
+func (n *egressRecoveryNode) waitForEgressRetryToStop(t *testing.T, service *v1.Service) {
+	t.Helper()
+	if err := wait.PollUntilContextTimeout(t.Context(), 10*time.Millisecond, 5*time.Second, true, func(context.Context) (bool, error) {
+		p := n.processor
+		p.serviceLock.Lock(service.UID)
+		value, ok := p.serviceEgress.Load(service.UID)
+		stopped := !ok || value.(*serviceEgressState).retry == nil
+		return stopped, p.serviceLock.Unlock(service.UID)
+	}); err != nil {
+		t.Fatalf("wait for pending egress retry: %v", err)
+	}
+}
+
+// A jump to the Service's chain makes nftables reject deleting that chain with
+// EBUSY. Removing the jump allows the ordinary rule setup to succeed.
+func blockEgressSNATChain(t *testing.T, service *v1.Service) func() {
+	t.Helper()
+	want := nftables.GetSNatChainForTable(false, string(service.UID), "kube_vip_recovery")
+	conn := &kernelnft.Conn{}
+	table := conn.AddTable(want.Table)
+	conn.AddChain(&kernelnft.Chain{Name: want.Name, Table: table})
+	blocker := conn.AddChain(&kernelnft.Chain{Name: "test_block_snat_cleanup", Table: table})
+	conn.AddRule(&kernelnft.Rule{Table: table, Chain: blocker,
+		Exprs: []expr.Any{&expr.Verdict{Kind: expr.VerdictJump, Chain: want.Name}}})
+	if err := conn.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		conn.DelChain(blocker)
+		if err := conn.Flush(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Run each test that exercises background netlink operations in its own process
+// namespace. Keeping the test name exact also isolates the state of each subtest.
+func runIsolatedEgressTest(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("KUBE_VIP_EGRESS_RECOVERY_CHILD") != "" {
+		return false
+	}
+	pattern := strings.Split(t.Name(), "/")
+	for i := range pattern {
+		pattern[i] = "^" + regexp.QuoteMeta(pattern[i]) + "$"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	//nolint:gosec // Re-executes this test binary using only its own test name.
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run="+strings.Join(pattern, "/"), "-test.v", "-test.timeout=55s")
+	command.Env = append(os.Environ(), "KUBE_VIP_EGRESS_RECOVERY_CHILD=1")
+	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		if !requireNetworkNamespaces && (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) {
+			t.Skipf("network namespaces unavailable: %v", err)
+		}
+		t.Fatalf("isolated recovery test: %v\n%s", err, output)
+	}
+	t.Logf("%s", output)
+	return true
+}
+
 type egressRecoveryNode struct {
 	processor *Processor
 	endpoints *endpoints.Processor
@@ -186,6 +450,12 @@ func newEgressRecoveryNode(t *testing.T, name string, client *kubernetes.Clients
 		}
 		t.Skipf("network namespaces unavailable: %v", createErr)
 	}
+	return newEgressRecoveryNodeInNamespace(t, name, client, service, serviceElection, namespace)
+}
+
+func newEgressRecoveryNodeInNamespace(t *testing.T, name string, client *kubernetes.Clientset, service *v1.Service,
+	serviceElection bool, namespace netns.NsHandle) *egressRecoveryNode {
+	t.Helper()
 	t.Cleanup(func() { _ = namespace.Close() })
 	if err := inEgressRecoveryNamespace(namespace, func() error {
 		link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "kvrecover0"}}
@@ -250,15 +520,34 @@ func (n *egressRecoveryNode) start(t *testing.T, service *v1.Service) {
 
 func (n *egressRecoveryNode) reconcile(t *testing.T, service *v1.Service, present bool) {
 	t.Helper()
+	endpoint := ""
+	if present {
+		endpoint = "10.0.0.1"
+	}
+	n.reconcileEndpoint(t, service, endpoint)
+}
+
+func (n *egressRecoveryNode) reconcileEndpoint(t *testing.T, service *v1.Service, endpoint string) {
+	t.Helper()
 	slice := &discoveryv1.EndpointSlice{
 		ObjectMeta:  metav1.ObjectMeta{Name: "egress-slice", Namespace: service.Namespace},
 		AddressType: discoveryv1.AddressTypeIPv4,
 	}
-	if present {
-		slice.Endpoints = []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}, NodeName: &n.processor.config.NodeName}}
+	if endpoint != "" {
+		slice.Endpoints = []discoveryv1.Endpoint{{Addresses: []string{endpoint}, NodeName: &n.processor.config.NodeName}}
+	}
+	event := watch.Event{Type: watch.Modified, Object: slice}
+	if n.processor.config.EnableEndpoints {
+		//nolint:staticcheck // Deliberately exercise the legacy Endpoints provider.
+		legacy := &v1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: service.Name, Namespace: service.Namespace}}
+		if endpoint != "" {
+			//nolint:staticcheck // Deliberately exercise the legacy Endpoints provider.
+			legacy.Subsets = []v1.EndpointSubset{{Addresses: []v1.EndpointAddress{{IP: endpoint, NodeName: &n.processor.config.NodeName}}}}
+		}
+		event.Object = legacy
 	}
 	err := inEgressRecoveryNamespace(n.namespace, func() error {
-		_, err := n.endpoints.Reconcile(n.ctx, watch.Event{Type: watch.Modified, Object: slice}, &n.lastKnown,
+		_, err := n.endpoints.Reconcile(n.ctx, event, &n.lastKnown,
 			service, n.processor.config.NodeName, &n.wg, n.processor.clientSet,
 			func(ctx context.Context, updated *v1.Service, inst *instance.Instance) error {
 				return n.processor.updateEgressConfiguration(ctx, n.ctx, updated, inst)
@@ -271,6 +560,11 @@ func (n *egressRecoveryNode) reconcile(t *testing.T, service *v1.Service, presen
 }
 
 func (n *egressRecoveryNode) waitForDatapath(t *testing.T, service *v1.Service, present bool) {
+	t.Helper()
+	n.waitForDatapathState(t, service, present, present)
+}
+
+func (n *egressRecoveryNode) waitForDatapathState(t *testing.T, service *v1.Service, wantRoute, wantSNAT bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var routeFound, snatFound, instanceFound bool
@@ -317,7 +611,7 @@ func (n *egressRecoveryNode) waitForDatapath(t *testing.T, service *v1.Service, 
 								return err
 							}
 							for _, element := range elements {
-								source = source || bytes.Equal(element.Key, net.ParseIP("10.0.0.1").To4())
+								source = source || bytes.Equal(element.Key, net.ParseIP(service.Annotations[kubevip.ActiveEndpoint]).To4())
 							}
 						case *expr.Immediate:
 							target = target || bytes.Equal(e.Data, net.ParseIP("192.0.2.10").To4())
@@ -334,13 +628,13 @@ func (n *egressRecoveryNode) waitForDatapath(t *testing.T, service *v1.Service, 
 		if err != nil || unlockErr != nil {
 			t.Fatal(errors.Join(err, unlockErr))
 		}
-		wantInstance := present || !n.processor.config.EnableServicesElection
-		if routeFound == present && snatFound == present && instanceFound == wantInstance {
+		wantInstance := wantRoute || !n.processor.config.EnableServicesElection
+		if routeFound == wantRoute && snatFound == wantSNAT && instanceFound == wantInstance {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s: route=%t SNAT=%t instance=%t, want present=%t", n.processor.config.NodeName,
-				routeFound, snatFound, instanceFound, present)
+			t.Fatalf("%s: route=%t SNAT=%t instance=%t, want route=%t SNAT=%t instance=%t", n.processor.config.NodeName,
+				routeFound, snatFound, instanceFound, wantRoute, wantSNAT, wantInstance)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

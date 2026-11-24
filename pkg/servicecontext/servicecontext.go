@@ -20,6 +20,8 @@ type Context struct {
 	readinessGeneration uint64
 	readinessOperations int
 	readinessChanged    *sync.Cond
+	egressEndpoint      string
+	egressEndpointKnown bool
 	// watchedService is the Service the service and endpoint watchers were
 	// started with. It remains available after an instance is removed from the
 	// manager when this node loses the Service election.
@@ -82,6 +84,21 @@ func (ctx *Context) IsReady() bool {
 	ctx.stateMutex.Lock()
 	defer ctx.stateMutex.Unlock()
 	return ctx.ready
+}
+
+// SetEgressEndpoint records the endpoint selected by the local watcher before
+// the Service annotation is written to the API.
+func (ctx *Context) SetEgressEndpoint(endpoint string) {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	ctx.egressEndpoint = endpoint
+	ctx.egressEndpointKnown = true
+}
+
+func (ctx *Context) EgressEndpoint() (string, bool) {
+	ctx.stateMutex.Lock()
+	defer ctx.stateMutex.Unlock()
+	return ctx.egressEndpoint, ctx.egressEndpointKnown
 }
 
 // ReadinessGenerationCurrent reports whether generation is the current usable

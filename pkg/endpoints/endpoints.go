@@ -158,6 +158,9 @@ func (p *Processor) reconcileEndpointState(svcCtx *servicecontext.Context, event
 		// endpoint before cleanup resets lastKnownGoodEndpoint.
 		annotationEndpoint = ""
 	}
+	if service.Annotations[kubevip.Egress] == "true" {
+		svcCtx.SetEgressEndpoint(annotationEndpoint)
+	}
 	result.updatedService, result.annotationsChanged = p.updateAnnotations(service, result.instance, &annotationEndpoint, clientSet)
 	return result, nil
 }

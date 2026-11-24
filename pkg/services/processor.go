@@ -68,6 +68,7 @@ type Processor struct {
 	serviceLock          *ServiceLock
 	electionCoordinators *serviceelection.Manager
 	electionLoops        sync.Map
+	serviceEgress        sync.Map
 
 	bgpServer *bgp.Server
 

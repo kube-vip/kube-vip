@@ -527,6 +527,9 @@ func (p *Processor) updateEgressNftablesTableAnnotation(ctx context.Context, ser
 		if err != nil {
 			return err
 		}
+		if currentService.UID != service.UID || currentService.DeletionTimestamp != nil {
+			return nil
+		}
 		if currentService.Annotations[kubevip.EgressNftablesTable] == tableName {
 			return nil
 		}
