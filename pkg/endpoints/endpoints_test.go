@@ -21,7 +21,7 @@ import (
 )
 
 func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
-	if shouldAllowReconcileWithoutEndpoints(nil) {
+	if AllowsReconcileWithoutEndpoints(nil) {
 		t.Fatal("nil service should not be allowed")
 	}
 
@@ -29,12 +29,12 @@ func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
 		Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster},
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{kubevip.AllowReconcileWithoutEndpoints: "true"}},
 	}
-	if !shouldAllowReconcileWithoutEndpoints(clusterOptIn) {
+	if !AllowsReconcileWithoutEndpoints(clusterOptIn) {
 		t.Fatal("cluster service with opt-in annotation should be allowed")
 	}
 	forwardingNode := clusterOptIn.DeepCopy()
 	forwardingNode.Annotations[kubevip.BGPForwardingNode] = "true"
-	if shouldAllowReconcileWithoutEndpoints(forwardingNode) {
+	if AllowsReconcileWithoutEndpoints(forwardingNode) {
 		t.Fatal("forwarding-node advertisements always require endpoints")
 	}
 
@@ -42,7 +42,7 @@ func TestShouldAllowReconcileWithoutEndpoints(t *testing.T) {
 		Spec:       v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal},
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{kubevip.AllowReconcileWithoutEndpoints: "true"}},
 	}
-	if shouldAllowReconcileWithoutEndpoints(localOptIn) {
+	if AllowsReconcileWithoutEndpoints(localOptIn) {
 		t.Fatal("local service should not be allowed")
 	}
 }

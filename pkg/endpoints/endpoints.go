@@ -141,7 +141,7 @@ func (p *Processor) reconcileEndpointState(svcCtx *servicecontext.Context, event
 			result.skip = skip
 			return result, err
 		}
-	} else if shouldAllowReconcileWithoutEndpoints(service) {
+	} else if AllowsReconcileWithoutEndpoints(service) {
 		// Explicit opt-in for controllers that create LoadBalancer services without endpoints.
 		if skip, err := p.makeServiceReady(svcCtx, service, result.instance, wg, "endpointless"); err != nil {
 			result.skip = skip
@@ -356,7 +356,8 @@ func (p *Processor) serviceInstance(service *v1.Service) *instance.Instance {
 	return p.findServiceInstance(service)
 }
 
-func shouldAllowReconcileWithoutEndpoints(service *v1.Service) bool {
+// AllowsReconcileWithoutEndpoints reports whether a Service opted in to reconciliation without backends.
+func AllowsReconcileWithoutEndpoints(service *v1.Service) bool {
 	if service == nil || service.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
 		return false
 	}
