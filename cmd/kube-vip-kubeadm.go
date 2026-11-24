@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	log "log/slog"
 
@@ -14,7 +15,7 @@ import (
 // It is designed to operate "light" and take minimal input to start
 
 func init() {
-	kubeKubeadmJoin.Flags().StringVar(&kubeConfigPath, "config", "/etc/kubernetes/admin.conf", "The path of a Kubernetes configuration file")
+	kubeKubeadmJoin.Flags().StringVar(&kubeConfigPath, "config", "/etc/kubernetes/admin.conf", "Host kubeconfig path for the generated Pod (overrides --k8sConfigPath)")
 
 	kubeKubeadm.AddCommand(kubeKubeadmInit)
 	kubeKubeadm.AddCommand(kubeKubeadmJoin)
@@ -99,7 +100,7 @@ var kubeKubeadmJoin = &cobra.Command{
 	Short: "kube-vip join",
 	Long: `The 'join' subcommand generates a Kubernetes Pod manifest for additional control-plane nodes joining an existing cluster via 'kubeadm join'.
 
-It functions identically to the 'init' subcommand, but is intended for secondary control-plane nodes. It validates that the kubeconfig file (specified by --config, defaulting to /etc/kubernetes/admin.conf) exists on the node to ensure the node can authenticate with the cluster.
+The command checks that the kubeconfig file exists on the joining node and uses that file in the generated Pod manifest. An explicit --config takes precedence over --k8sConfigPath and the k8s_config_file environment variable. The default path is /etc/kubernetes/admin.conf.
 
 Required flags for this command:
   --interface   : The network interface to bind the VIP to.
@@ -109,51 +110,57 @@ Example:
   kube-vip kubeadm join --interface eth0 --vip 192.168.1.100
 
 The output YAML should be saved to the kubeadm manifests directory on the joining node.`,
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
+		config := initConfig
+		config.LoadBalancers = append(config.LoadBalancers, initLoadBalancer)
+		if err := kubevip.ParseEnvironment(&config); err != nil {
+			return fmt.Errorf("parsing environment: %w", err)
+		}
+		if err := config.Validate(); err != nil {
+			return fmt.Errorf("validating configuration: %w", err)
+		}
 
-		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
-		err := kubevip.ParseEnvironment(&initConfig)
+		if config.Interface == "" {
+			return fmt.Errorf("no interface is specified for kube-vip to bind to")
+		}
+
+		if config.VIP == "" && config.Address == "" {
+			return fmt.Errorf("no address is specified for kube-vip to expose services on")
+		}
+
+		if cmd.Flags().Changed("config") {
+			config.K8sConfigFile = kubeConfigPath
+		}
+		if config.K8sConfigFile == "" {
+			return fmt.Errorf("kubeconfig path is empty")
+		}
+		hostPath, err := filepath.Abs(config.K8sConfigFile)
 		if err != nil {
-			log.Error("parsing environment", "err", err)
-			return
+			return fmt.Errorf("resolving kubeconfig path %q: %w", config.K8sConfigFile, err)
 		}
-		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+		file, err := os.Stat(hostPath)
+		if err != nil {
+			return fmt.Errorf("checking kubeconfig %q: %w", hostPath, err)
 		}
-
-		// TODO - check for certain things VIP/interfaces
-		if initConfig.Interface == "" {
-			_ = cmd.Help()
-			log.Error("No interface is specified for kube-vip to bind to")
-			return
+		if !file.Mode().IsRegular() {
+			return fmt.Errorf("kubeconfig %q must be a regular file", hostPath)
 		}
-
-		if initConfig.VIP == "" && initConfig.Address == "" {
-			_ = cmd.Help()
-			log.Error("No address is specified for kube-vip to expose services on")
-			return
-		}
-
-		if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
-			log.Error("kubeConfig not found", "Path", kubeConfigPath)
-			return
-		}
+		config.K8sConfigFile = hostPath
 
 		// Ensure there is an address to generate the CIDR from
-		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
-			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
+		if config.VIPSubnet == "" && config.Address != "" {
+			config.VIPSubnet, err = GenerateCidrRange(config.Address, config.DNSMode)
 			if err != nil {
-				log.Error("generating VIPSubnet", "err", err)
-				return
+				return fmt.Errorf("generating VIPSubnet: %w", err)
 			}
 		}
 
-		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
+		manifest, err := kubevip.GeneratePodManifestFromConfig(&config, image, Release.Version, inCluster)
 		if err != nil {
-			log.Error("unable to create manifest", "err", err)
-			return
+			return fmt.Errorf("unable to create manifest: %w", err)
 		}
-		fmt.Println(cfg) // output manifest to stdout
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), manifest)
+		return err
 	},
 }
