@@ -63,41 +63,37 @@ The manifest is generated based on the current configuration flags set on the ro
 
 Example:
   kube-vip manifest pod --interface eth0 --vip 10.0.0.100 --controlplane | kubectl apply -f -`,
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
 		var err error
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
-			log.Error("parsing environment", "err", err)
-			return
+			return fmt.Errorf("parsing environment: %w", err)
 		}
 		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+			return fmt.Errorf("validating configuration: %w", err)
 		}
 
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
-			_ = cmd.Help()
-			log.Error("no address is specified for kube-vip to expose services on")
-			return
+			return fmt.Errorf("no address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
-				log.Error("config parse", "err", err)
-				return
+				return fmt.Errorf("generating CIDR: %w", err)
 			}
 		}
 
 		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
 		if err != nil {
-			log.Error("unable to create manifest", "err", err)
-			return
+			return fmt.Errorf("unable to create manifest: %w", err)
 		}
-		fmt.Println(cfg) // output manifest to stdout
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), cfg)
+		return err
 	},
 }
 
@@ -115,40 +111,36 @@ All other standard kube-vip flags (--interface, --vip, --enableARP, --enableBGP,
 
 Example:
   kube-vip manifest daemonset --interface eth0 --vip 192.168.1.100 --controlplane --taint | kubectl apply -f -`,
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
 		var err error
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
 		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
-			log.Error("parsing environment", "err", err)
-			return
+			return fmt.Errorf("parsing environment: %w", err)
 		}
 		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+			return fmt.Errorf("validating configuration: %w", err)
 		}
 		// The control plane has a requirement for a VIP being specified
 		if initConfig.EnableControlPlane && (initConfig.VIP == "" && initConfig.Address == "" && !initConfig.DDNS) {
-			_ = cmd.Help()
-			log.Error("no address is specified for kube-vip to expose services on")
-			return
+			return fmt.Errorf("no address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
-				log.Error("config parse", "err", err)
-				return
+				return fmt.Errorf("generating CIDR: %w", err)
 			}
 		}
 
 		cfg, err := kubevip.GenerateDaemonsetManifestFromConfig(&initConfig, image, Release.Version, inCluster, taint)
 		if err != nil {
-			log.Error("unable to create manifest", "err", err)
-			return
+			return fmt.Errorf("unable to create manifest: %w", err)
 		}
-		fmt.Println(cfg) // output manifest to stdout
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), cfg)
+		return err
 	},
 }
 
