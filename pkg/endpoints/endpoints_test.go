@@ -12,6 +12,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	"github.com/kube-vip/kube-vip/pkg/vip"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -481,14 +482,44 @@ func TestReconcileIPv6EgressWithoutIPv6EndpointsClearsReadiness(t *testing.T) {
 	}
 }
 
+type sharedVIPTestNetwork struct {
+	vip.Network
+	ip, interfaceName string
+}
+
+func (network sharedVIPTestNetwork) IP() string        { return network.ip }
+func (network sharedVIPTestNetwork) Interface() string { return network.interfaceName }
+
+func sharedVIPTestInstance(service *v1.Service, interfaceName string, addresses ...string) *instance.Instance {
+	serviceCluster := &cluster.Cluster{}
+	for _, address := range addresses {
+		serviceCluster.Network = append(serviceCluster.Network, sharedVIPTestNetwork{ip: address, interfaceName: interfaceName})
+	}
+	return &instance.Instance{ServiceSnapshot: service, Clusters: []*cluster.Cluster{serviceCluster}}
+}
+
+func TestSharedServiceVIPRequiresMatchingInterface(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "first", Namespace: "default", Annotations: map[string]string{kubevip.ServiceLease: "shared"},
+	}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10", ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}}
+	candidate := service.DeepCopy()
+	candidate.Name = "second"
+	first := sharedVIPTestInstance(service, "eth0", "192.0.2.10")
+	second := sharedVIPTestInstance(candidate, "eth1", "192.0.2.10")
+	config := &kubevip.Config{EnableServicesElection: true, EnableBGP: true, BGPAttachIPToInterface: true}
+	if len(sharedServiceVIPs(config, first, []*instance.Instance{second})) != 0 {
+		t.Fatal("Service on eth1 preserved the old VIP attachment on eth0")
+	}
+}
+
 func TestSharedServiceVIPRequiresClusterPolicyAndElectionLease(t *testing.T) {
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		Name: "first", Namespace: "default", Annotations: map[string]string{kubevip.ServiceLease: "shared"},
 	}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10", ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}}
 	candidate := service.DeepCopy()
 	candidate.Name = "second"
-	first := &instance.Instance{ServiceSnapshot: service}
-	second := &instance.Instance{ServiceSnapshot: candidate}
+	first := sharedVIPTestInstance(service, "eth0", "192.0.2.10")
+	second := sharedVIPTestInstance(candidate, "eth0", "192.0.2.10")
 
 	if len(sharedServiceVIPs(&kubevip.Config{EnableServicesElection: true}, first, []*instance.Instance{second})) == 0 {
 		t.Fatal("shared lease Services with Cluster traffic policy did not share their VIP")
@@ -507,21 +538,21 @@ func TestSharedServiceVIPRequiresClusterPolicyAndElectionLease(t *testing.T) {
 	}
 }
 
-func TestSharedServiceVIPsReturnsOnlyOverlappingAddresses(t *testing.T) {
+func TestSharedServiceVIPsReturnsOnlyOverlappingAttachments(t *testing.T) {
 	first := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		Name: "first", Namespace: "default", Annotations: map[string]string{kubevip.ServiceLease: "shared"},
 	}, Spec: v1.ServiceSpec{LoadBalancerIP: "192.0.2.10", ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}}
 	second := first.DeepCopy()
 	second.Name = "second"
 	second.Spec.LoadBalancerIP = "192.0.2.11"
-	firstInstance := &instance.Instance{ServiceSnapshot: first, ServiceAddresses: []string{"192.0.2.10", "2001:db8::10"}}
-	secondInstance := &instance.Instance{ServiceSnapshot: second, ServiceAddresses: []string{"192.0.2.10", "2001:db8::11"}}
+	firstInstance := sharedVIPTestInstance(first, "eth0", "192.0.2.10", "2001:db8::10")
+	secondInstance := sharedVIPTestInstance(second, "eth0", "192.0.2.10", "2001:db8::11")
 
 	shared := sharedServiceVIPs(&kubevip.Config{EnableServicesElection: true}, firstInstance, []*instance.Instance{secondInstance})
 	if len(shared) != 1 {
 		t.Fatalf("shared VIPs = %v, want exactly one", shared)
 	}
-	if _, found := shared["192.0.2.10"]; !found {
+	if _, found := shared[serviceVIPAttachment{address: "192.0.2.10", interfaceName: "eth0"}]; !found {
 		t.Fatalf("shared VIPs = %v, missing overlapping IPv4 address", shared)
 	}
 }
