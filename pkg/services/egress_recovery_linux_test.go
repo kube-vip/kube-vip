@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -311,6 +312,99 @@ func TestRecoverEgressFailedFamilyOnly(t *testing.T) {
 }
 
 // Use a fresh TCP connection so conntrack cannot reuse an existing translation.
+func TestRecoverEgressWhileActiveEndpointAnnotationFails(t *testing.T) {
+	for _, provider := range []string{"EndpointSlices", "Endpoints"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			if runIsolatedEgressTest(t) {
+				return
+			}
+			service := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "egress", Namespace: "default", UID: "egress-recovery",
+					Annotations: map[string]string{kubevip.Egress: "true", kubevip.EgressDestinationPorts: "tcp:5060"},
+				},
+				Spec: v1.ServiceSpec{
+					Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.10",
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+				},
+			}
+			var failActiveEndpointWrites atomic.Bool
+			var rejectUntil atomic.Pointer[time.Time]
+			var rejected atomic.Int32
+			client := newEgressRecoveryClientWithServiceUpdate(t, service, func(updated *v1.Service) bool {
+				if !failActiveEndpointWrites.Load() || updated.Annotations[kubevip.ActiveEndpoint] == "" {
+					return false
+				}
+				now := time.Now()
+				if rejectUntil.Load() == nil {
+					until := now.Add(30 * time.Second)
+					rejectUntil.CompareAndSwap(nil, &until)
+				}
+				if now.Before(*rejectUntil.Load()) {
+					rejected.Add(1)
+					return true
+				}
+				return false
+			})
+			namespace, err := netns.Get()
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := newEgressRecoveryNodeInNamespace(t, "node-a", client, service, true, namespace)
+			node.datapath.readCurrentService = true
+			if provider == "Endpoints" {
+				node.processor.config.EnableEndpoints = true
+				node.endpoints = endpoints.NewEndpointProcessor(node.processor.config, providers.NewEndpoints(), nil,
+					node.processor.findServiceInstance, nil, node.processor.routeMgr, node.processor.serviceLock)
+			}
+			node.reconcile(t, service, true)
+			node.start(t, service)
+			want := serviceWithEgressEndpoint(service, kubevip.ActiveEndpoint, "10.0.0.1")
+			node.waitForDatapath(t, want, true)
+			assertRecoveryLeaseHolder(t, client, service, "node-a")
+
+			setRecoveryLeaseHolder(t, client, service, "node-b")
+			node.waitForDatapath(t, want, false)
+			api := client.CoreV1().Services(service.Namespace)
+			current, err := api.Get(t.Context(), service.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			delete(current.Annotations, kubevip.ActiveEndpoint)
+			if _, err := api.Update(t.Context(), current, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			// Allow lease reads and renewals throughout the outage. The selected
+			// endpoint remains Ready and the watcher receives no further events.
+			failActiveEndpointWrites.Store(true)
+			setRecoveryLeaseHolder(t, client, service, "")
+			node.waitForDatapath(t, want, true)
+			assertRecoveryLeaseHolder(t, client, service, "node-a")
+			assertRecoveredSNATTraffic(t, want)
+			current, err = api.Get(t.Context(), service.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recoverAt := rejectUntil.Load()
+			if recoverAt == nil || !time.Now().Before(*recoverAt) || current.Annotations[kubevip.ActiveEndpoint] != "" || rejected.Load() == 0 {
+				t.Fatalf("expected working SNAT while active-endpoint writes failed, annotation=%q, failed writes=%d",
+					current.Annotations[kubevip.ActiveEndpoint], rejected.Load())
+			}
+			ctx, cancel := context.WithDeadline(t.Context(), recoverAt.Add(30*time.Second))
+			defer cancel()
+			if err := wait.PollUntilContextCancel(ctx, 50*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+				latest, err := api.Get(ctx, service.Name, metav1.GetOptions{})
+				return err == nil && latest.Annotations[kubevip.ActiveEndpoint] == want.Annotations[kubevip.ActiveEndpoint], err
+			}); err != nil {
+				t.Fatalf("active-endpoint was not republished after the API recovered: %v", err)
+			}
+			node.waitForEgressRetryToStop(t, service)
+			node.waitForDatapath(t, want, true)
+		})
+	}
+}
+
 func assertRecoveredSNATTraffic(t *testing.T, service *v1.Service) {
 	t.Helper()
 	endpoint, vip := service.Annotations[kubevip.ActiveEndpoint], service.Spec.LoadBalancerIP
@@ -403,10 +497,10 @@ func runIsolatedEgressTest(t *testing.T) bool {
 	for i := range pattern {
 		pattern[i] = "^" + regexp.QuoteMeta(pattern[i]) + "$"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	//nolint:gosec // Re-executes this test binary using only its own test name.
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run="+strings.Join(pattern, "/"), "-test.v", "-test.timeout=55s")
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run="+strings.Join(pattern, "/"), "-test.v", "-test.timeout=70s")
 	command.Env = append(os.Environ(), "KUBE_VIP_EGRESS_RECOVERY_CHILD=1")
 	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET}
 	output, err := command.CombinedOutput()
@@ -423,6 +517,7 @@ func runIsolatedEgressTest(t *testing.T) bool {
 type egressRecoveryNode struct {
 	processor *Processor
 	endpoints *endpoints.Processor
+	datapath  *egressRecoveryDatapath
 	ctx       *servicecontext.Context
 	namespace netns.NsHandle
 	lastKnown string
@@ -484,14 +579,17 @@ func newEgressRecoveryNodeInNamespace(t *testing.T, name string, client *kuberne
 		t.Fatal(err)
 	}
 	adapter := &electionAdapter{processor: processor}
+	datapath := &egressRecoveryDatapath{electionAdapter: adapter, namespace: namespace}
 	processor.electionCoordinators, err = serviceelection.NewManager(&serviceelection.Dependencies{
 		Config: config, Leases: processor.leaseMgr, ElectionManager: electionManager,
-		State: adapter, Datapath: &egressRecoveryDatapath{electionAdapter: adapter, namespace: namespace}, Runner: adapter, Scheduler: adapter,
+		State: adapter, Datapath: datapath, Runner: adapter, Scheduler: adapter,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := &egressRecoveryNode{processor: processor, ctx: publishTestServiceContext(processor, service), namespace: namespace}
+	node := &egressRecoveryNode{
+		processor: processor, ctx: publishTestServiceContext(processor, service), namespace: namespace, datapath: datapath,
+	}
 	node.endpoints = endpoints.NewEndpointProcessor(config, providers.NewEndpointslices(), nil,
 		processor.findServiceInstance, nil, processor.routeMgr, processor.serviceLock)
 	t.Cleanup(func() {
@@ -642,10 +740,19 @@ func (n *egressRecoveryNode) waitForDatapathState(t *testing.T, service *v1.Serv
 
 type egressRecoveryDatapath struct {
 	*electionAdapter
-	namespace netns.NsHandle
+	namespace          netns.NsHandle
+	readCurrentService bool
 }
 
 func (d *egressRecoveryDatapath) Activate(ctx context.Context, service *v1.Service, svcCtx *servicecontext.Context, wg *sync.WaitGroup) error {
+	if d.readCurrentService {
+		// Simulate the updated Service snapshot without an endpoint event.
+		current, err := d.processor.clientSet.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		service = current
+	}
 	return inEgressRecoveryNamespace(d.namespace, func() error { return d.electionAdapter.Activate(ctx, service, svcCtx, wg) })
 }
 
@@ -680,9 +787,31 @@ func assertRecoveryLeaseHolder(t *testing.T, client *kubernetes.Clientset, servi
 	}
 }
 
+func setRecoveryLeaseHolder(t *testing.T, client *kubernetes.Clientset, service *v1.Service, holder string) {
+	t.Helper()
+	namespace, name := lease.ServiceName(service)
+	api := client.CoordinationV1().Leases(namespace)
+	old, err := api.Get(t.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duration := int32(60)
+	old.Spec.HolderIdentity = &holder
+	old.Spec.LeaseDurationSeconds = &duration
+	old.Spec.RenewTime = &metav1.MicroTime{Time: time.Now()}
+	if _, err := api.Update(t.Context(), old, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A small JSON REST transport shared by both real client-go electors. Writes
 // use resourceVersion checks, including the lock's out-of-band annotation update.
 func newEgressRecoveryClient(t *testing.T, service *v1.Service) *kubernetes.Clientset {
+	t.Helper()
+	return newEgressRecoveryClientWithServiceUpdate(t, service, nil)
+}
+
+func newEgressRecoveryClientWithServiceUpdate(t *testing.T, service *v1.Service, reject func(*v1.Service) bool) *kubernetes.Clientset {
 	t.Helper()
 	var mu sync.Mutex
 	version := 1
@@ -725,9 +854,14 @@ func newEgressRecoveryClient(t *testing.T, service *v1.Service) *kubernetes.Clie
 					}
 				}
 				if status == http.StatusOK {
-					version++
-					metadata.SetResourceVersion(strconv.Itoa(version))
-					objects[path], object = updated.DeepCopyObject(), updated
+					if update, ok := updated.(*v1.Service); ok && reject != nil && reject(update) {
+						status = http.StatusInternalServerError
+						object = &metav1.Status{Status: "Failure", Reason: metav1.StatusReasonInternalError, Code: int32(status)}
+					} else {
+						version++
+						metadata.SetResourceVersion(strconv.Itoa(version))
+						objects[path], object = updated.DeepCopyObject(), updated
+					}
 				}
 			}
 			if object == nil {

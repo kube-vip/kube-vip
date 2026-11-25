@@ -520,7 +520,7 @@ func appendUnique(values []string, additions ...string) []string {
 	return values
 }
 
-func (p *Processor) updateEgressNftablesTableAnnotation(ctx context.Context, service *corev1.Service) error {
+func (p *Processor) publishEgressAnnotations(ctx context.Context, service *corev1.Service, endpointKey string) error {
 	tableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		currentService, err := p.clientSet.CoreV1().Services(service.Namespace).Get(ctx, service.Name, metav1.GetOptions{})
@@ -530,20 +530,34 @@ func (p *Processor) updateEgressNftablesTableAnnotation(ctx context.Context, ser
 		if currentService.UID != service.UID || currentService.DeletionTimestamp != nil {
 			return nil
 		}
-		if currentService.Annotations[kubevip.EgressNftablesTable] == tableName {
+		if currentService.Annotations[kubevip.Egress] != "true" {
 			return nil
 		}
-
+		endpoint := service.Annotations[endpointKey]
+		currentEndpoint := currentService.Annotations[endpointKey]
+		if endpointKey != "" && currentEndpoint != "" && currentEndpoint != endpoint {
+			return nil
+		}
+		setEndpoint := endpointKey != "" && endpoint != "" && currentEndpoint == ""
+		setTable := currentService.Annotations[kubevip.EgressNftablesTable] != tableName
+		if !setEndpoint && !setTable {
+			return nil
+		}
 		serviceCopy := currentService.DeepCopy()
 		if serviceCopy.Annotations == nil {
 			serviceCopy.Annotations = make(map[string]string)
 		}
-		serviceCopy.Annotations[kubevip.EgressNftablesTable] = tableName
+		if setEndpoint {
+			serviceCopy.Annotations[endpointKey] = endpoint
+		}
+		if setTable {
+			serviceCopy.Annotations[kubevip.EgressNftablesTable] = tableName
+		}
 		_, err = p.clientSet.CoreV1().Services(service.Namespace).Update(ctx, serviceCopy, metav1.UpdateOptions{})
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("updating nftables table annotation on Service %s/%s: %w", service.Namespace, service.Name, err)
+		return fmt.Errorf("publishing egress annotations on Service %s/%s: %w", service.Namespace, service.Name, err)
 	}
 	return nil
 }

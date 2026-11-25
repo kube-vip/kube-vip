@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	log "log/slog"
+	"net"
 	"slices"
 	"sync"
 	"time"
@@ -38,15 +39,62 @@ type serviceEgressState struct {
 }
 
 type egressRetry struct {
-	desired      *v1.Service
-	readiness    servicecontext.ReadinessGeneration
-	cancel       context.CancelFunc
-	families     egressFamilies
-	publishTable bool
+	desired          *v1.Service
+	readiness        servicecontext.ReadinessGeneration
+	cancel           context.CancelFunc
+	families         egressFamilies
+	publishTable     bool
+	annotateEndpoint string
 }
 
 func (p *Processor) usesInternalEgress(svc *v1.Service) bool {
 	return svc.Annotations[kubevip.EgressInternal] != "" || p.config.EgressWithNftables
+}
+
+func (p *Processor) egressEndpointAnnotation(svc *v1.Service) string {
+	if !p.config.EnableEndpoints && svc.Annotations[kubevip.EgressIPv6] == "true" {
+		return kubevip.ActiveEndpointIPv6
+	}
+	return kubevip.ActiveEndpoint
+}
+
+// missingLocalEgressAnnotation identifies an elected Local Service whose
+// datapath can use the ready endpoint selected by its own endpoint watcher.
+func (p *Processor) missingLocalEgressAnnotation(svc *v1.Service) string {
+	if !p.usesInternalEgress(svc) || !kubevip.UsesServiceElection(p.config, svc) ||
+		svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyLocal ||
+		(p.config.EnableEndpoints && svc.Annotations[kubevip.EgressIPv6] == "true") {
+		return ""
+	}
+	key := p.egressEndpointAnnotation(svc)
+	if svc.Annotations[key] != "" {
+		return ""
+	}
+	addresses, _ := instance.FetchServiceAddresses(svc)
+	for _, address := range addresses {
+		if utils.IsIPv6(address) == (key == kubevip.ActiveEndpointIPv6) {
+			return key
+		}
+	}
+	return ""
+}
+
+func serviceWithEgressEndpoint(svc *v1.Service, key, endpoint string) *v1.Service {
+	copy := svc.DeepCopy()
+	if copy.Annotations == nil {
+		copy.Annotations = make(map[string]string)
+	}
+	copy.Annotations[key] = endpoint
+	return copy
+}
+
+func localEgressEndpoint(svcCtx *servicecontext.Context, key string) (string, error) {
+	endpoint, _ := svcCtx.EgressEndpoint()
+	ip := net.ParseIP(endpoint)
+	if ip == nil || (ip.To4() == nil) != (key == kubevip.ActiveEndpointIPv6) {
+		return "", fmt.Errorf("no ready local endpoint for %s", key)
+	}
+	return endpoint, nil
 }
 
 // programServiceEgress rebuilds only the requested families. A failed nftables
@@ -125,11 +173,35 @@ func (s *serviceEgressState) cancelRetry() {
 func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicecontext.Context,
 	inst *instance.Instance, svc *v1.Service, update bool) error {
 	readiness := svcCtx.CurrentReadiness()
-	failed, configured, err := p.programServiceEgress(ctx, svc, egressAllFamilies)
+	state := p.egressState(inst)
+	var failed egressFamilies
+	var configured bool
+	var err error
+	var annotateEndpoint string
+	if state != nil && svcCtx.ReadinessGenerationCurrent(readiness) {
+		endpoint, known := svcCtx.EgressEndpoint()
+		if !known || endpoint != "" {
+			annotateEndpoint = p.missingLocalEgressAnnotation(svc)
+		}
+	}
+	if annotateEndpoint != "" {
+		var endpoint string
+		endpoint, err = localEgressEndpoint(svcCtx, annotateEndpoint)
+		if err == nil {
+			svc = serviceWithEgressEndpoint(svc, annotateEndpoint, endpoint)
+		}
+	}
+	if err == nil {
+		failed, configured, err = p.programServiceEgress(ctx, svc, egressAllFamilies)
+	} else {
+		failed = egressAllFamilies
+	}
 	publishTable := configured && p.usesInternalEgress(svc)
+	if configured && annotateEndpoint != "" {
+		inst.ServiceSnapshot = svc
+	}
 	if err == nil && publishTable {
-		err = p.updateEgressNftablesTableAnnotation(ctx, svc)
-		publishTable = err != nil
+		err = p.publishEgressAnnotations(ctx, svc, annotateEndpoint)
 	}
 	if err == nil {
 		if update {
@@ -138,7 +210,6 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 		return nil
 	}
 
-	state := p.egressState(inst)
 	if state == nil || !p.usesInternalEgress(svc) || ctx.Err() != nil || !svcCtx.ReadinessGenerationCurrent(readiness) {
 		return err
 	}
@@ -147,12 +218,19 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 		// The retry tracks what is still missing in the kernel.
 		inst.ServiceSnapshot = svc
 	}
-	log.Warn("scheduling egress configuration retry", "service", svc.Name, "namespace", svc.Namespace, "error", err)
+	p.scheduleEgressRetry(svcCtx, state, &egressRetry{
+		desired: svc, readiness: readiness, families: failed,
+		publishTable: publishTable, annotateEndpoint: annotateEndpoint,
+	}, err)
+	return nil
+}
+
+// scheduleEgressRetry requires the Service lock. Its caller has established
+// that this activation still owns the pending work.
+func (p *Processor) scheduleEgressRetry(svcCtx *servicecontext.Context, state *serviceEgressState, retry *egressRetry, cause error) {
+	svc := retry.desired
 	retryCtx, cancel := context.WithCancel(state.ctx)
-	retry := &egressRetry{
-		desired: svc, readiness: readiness, cancel: cancel,
-		families: failed, publishTable: publishTable,
-	}
+	retry.cancel = cancel
 	state.retry = retry
 	state.wg.Go(func() {
 		defer cancel()
@@ -166,8 +244,12 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 			}
 		}()
 		delay := wait.Backoff{Duration: time.Second, Factor: 2, Jitter: 0.1, Cap: 30 * time.Second, Steps: 6}
+		err := cause
 		for {
-			timer := time.NewTimer(min(delay.Step(), 30*time.Second))
+			next := min(delay.Step(), 30*time.Second)
+			log.Warn("egress reconciliation incomplete; retrying", "service", svc.Name, "namespace", svc.Namespace,
+				"error", err, "retry_in", next)
+			timer := time.NewTimer(next)
 			select {
 			case <-retryCtx.Done():
 				timer.Stop()
@@ -180,14 +262,12 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 				return
 			case <-timer.C:
 			}
-			err := p.retryServiceEgress(retryCtx, svcCtx, state, retry)
+			err = p.retryServiceEgress(retryCtx, svcCtx, state, retry)
 			if err == nil {
 				return
 			}
-			log.Warn("egress configuration retry failed", "service", svc.Name, "namespace", svc.Namespace, "error", err)
 		}
 	})
-	return nil
 }
 
 func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *servicecontext.Context,
@@ -205,12 +285,12 @@ func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *serviceconte
 		p.findServiceInstance(desired) != state.instance || !svcCtx.ReadinessGenerationCurrent(retry.readiness) {
 		return nil
 	}
-	endpointKey := kubevip.ActiveEndpoint
-	if !p.config.EnableEndpoints && desired.Annotations[kubevip.EgressIPv6] == "true" {
-		endpointKey = kubevip.ActiveEndpointIPv6
-	}
-	if endpoint, known := svcCtx.EgressEndpoint(); known && endpoint != desired.Annotations[endpointKey] {
-		return nil
+	endpointKey := p.egressEndpointAnnotation(desired)
+	if endpoint, known := svcCtx.EgressEndpoint(); known {
+		original := desired.Annotations[endpointKey]
+		if endpoint == "" || (retry.annotateEndpoint == "" || original != "") && endpoint != original {
+			return nil
+		}
 	}
 
 	svc, err := p.clientSet.CoreV1().Services(desired.Namespace).Get(ctx, desired.Name, metav1.GetOptions{})
@@ -219,6 +299,17 @@ func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *serviceconte
 	}
 	if err != nil {
 		return fmt.Errorf("read current Service: %w", err)
+	}
+	if retry.annotateEndpoint != "" {
+		endpoint, err := localEgressEndpoint(svcCtx, endpointKey)
+		if err != nil {
+			return err
+		}
+		if fromAPI := svc.Annotations[endpointKey]; fromAPI != "" && fromAPI != endpoint {
+			return nil
+		}
+		desired = serviceWithEgressEndpoint(desired, endpointKey, endpoint)
+		svc = serviceWithEgressEndpoint(svc, endpointKey, endpoint)
 	}
 	if !sameEgressWork(desired, svc) {
 		return nil
@@ -232,11 +323,15 @@ func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *serviceconte
 	failed, configured, err := p.programServiceEgress(ctx, svc, retry.families)
 	retry.families = failed
 	retry.publishTable = retry.publishTable || configured
+	if configured && retry.annotateEndpoint != "" {
+		state.instance.ServiceSnapshot = svc
+		retry.desired = desired
+	}
 	if err != nil {
 		return err
 	}
 	if retry.publishTable {
-		if err := p.updateEgressNftablesTableAnnotation(ctx, svc); err != nil {
+		if err := p.publishEgressAnnotations(ctx, svc, retry.annotateEndpoint); err != nil {
 			return err
 		}
 	}
@@ -246,6 +341,7 @@ func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *serviceconte
 
 func sameEgressWork(desired, current *v1.Service) bool {
 	if desired.UID != current.UID || current.DeletionTimestamp != nil || desired.Spec.Type != current.Spec.Type ||
+		desired.Spec.ExternalTrafficPolicy != current.Spec.ExternalTrafficPolicy ||
 		!ptr.Equal(desired.Spec.LoadBalancerClass, current.Spec.LoadBalancerClass) {
 		return false
 	}
