@@ -456,12 +456,12 @@ func TestRecoverEgressAfterRuleRemoval(t *testing.T) {
 	expected := map[string]int{"192.0.2.10": 2}
 	if err := wait.PollUntilContextTimeout(t.Context(), 20*time.Millisecond, 5*time.Second, true,
 		func(context.Context) (bool, error) {
+			// Read the rules between reconciliations, as the verifier itself
+			// does. Programming a family can temporarily remove its chain.
+			p := node.processor
+			p.serviceLock.Lock(service.UID)
 			ok, err := nftables.HasSNATRules(false, string(service.UID), "kube_vip_recovery", expected)
-			if errors.Is(err, syscall.ENOENT) {
-				// A retry may be replacing the chain while the probe is reading it.
-				return false, nil
-			}
-			return ok, err
+			return ok, errors.Join(err, p.serviceLock.Unlock(service.UID))
 		}); err != nil {
 		t.Fatalf("wait for SNAT rule to be restored: %v", err)
 	}
