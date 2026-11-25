@@ -9,7 +9,6 @@ import (
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -81,16 +80,12 @@ func (m *Manager) Labels(ctx context.Context, prefix string) (map[string]string,
 	return labels, nil
 }
 
-// CleanUpLabels purges the node labels
-func (m *Manager) CleanUpLabels(timeout time.Duration) error {
-	log.Debug("cleaning up labels for node", "node", m.nodeName, "timeout", timeout)
+// CleanUpLabels removes the given label keys from the node
+func (m *Manager) CleanUpLabels(ctx context.Context, keys []string) error {
+	log.Debug("cleaning up labels for node", "node", m.nodeName, "keys", keys)
 	if m.clientSet == nil {
 		return errors.New("kubernetes client is not initialized")
 	}
-
-	// create new context for labels cleanup (independent)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 
 	// get the node
 	node, err := m.clientSet.CoreV1().Nodes().Get(ctx, m.nodeName, metav1.GetOptions{})
@@ -100,7 +95,7 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 
 	// collect all labels with the prefix to remove
 	labels := map[string]string{}
-	for _, k := range kubevip.GetKeysForCleanup() {
+	for _, k := range keys {
 		if _, ok := node.Labels[k]; ok {
 			labels[k] = ""
 		}

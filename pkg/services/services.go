@@ -649,6 +649,10 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	}
 
 	if serviceInstance.LabelAdded && serviceInstance.ServiceSnapshot != nil && p.nodeLabelManager != nil {
+		if p.shuttingDown.Load() {
+			log.Debug("leaving node label to shutdown cleanup", "uid", serviceInstance.UID())
+			return nil
+		}
 		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot)
 		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
 			return fmt.Errorf("error removing label from node: %w", err)

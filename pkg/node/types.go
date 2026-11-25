@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"time"
 
 	log "log/slog"
 
@@ -35,8 +34,8 @@ type LabelReader interface {
 }
 
 type LabelCleaner interface {
-	// CleanUpLabels removes all labels from the node
-	CleanUpLabels(timeout time.Duration) error
+	// CleanUpLabels removes the given label keys from the node
+	CleanUpLabels(ctx context.Context, keys []string) error
 }
 
 // NewManager creates a new Label Manager for the given node

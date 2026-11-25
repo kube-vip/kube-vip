@@ -90,6 +90,10 @@ type Processor struct {
 	TunnelMgr wireguard.ServiceTunnelManager
 
 	routeMgr *route.Manager
+
+	// shuttingDown makes Service teardown leave node labels to the manager's
+	// final cleanup, so exiting never waits on the API per Service.
+	shuttingDown atomic.Bool
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -812,6 +816,15 @@ func (p *Processor) Stop() {
 		if err := p.serviceLock.Unlock(uid); err != nil {
 			log.Error("failed to release service lock", "uid", uid, "err", err)
 		}
+	}
+}
+
+// BeginShutdown marks the processor as exiting. Service teardown then still
+// releases the datapath but skips node label removal; the caller removes the
+// labels in one bounded batch after all Services have stopped.
+func (p *Processor) BeginShutdown() {
+	if p != nil {
+		p.shuttingDown.Store(true)
 	}
 }
 

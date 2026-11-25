@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -15,10 +17,13 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/manager/worker"
+	"github.com/kube-vip/kube-vip/pkg/node/labeler"
 	"github.com/kube-vip/kube-vip/pkg/node/noop"
 	"github.com/kube-vip/kube-vip/pkg/services"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 func TestWaitForShutdownReturnsWhenContextIsCancelled(t *testing.T) {
@@ -364,5 +369,41 @@ func TestStartStopsUPNPWhenModeExits(t *testing.T) {
 				t.Fatal("UPnP worker did not stop when kube-vip shut down")
 			}
 		})
+	}
+}
+func TestCleanupNodeLabelsIsBoundedWhenAPIHangs(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		select {
+		case <-request.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	clientSet, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &kubevip.Config{
+		NodeName: "node-a", EnableControlPlane: true, EnableServices: true, EnableNodeLabeling: true,
+	}
+	nodeLabels := labeler.NewManager(config.NodeName, clientSet)
+	processor, err := services.NewServicesProcessor(config, nil, clientSet, clientSet, nil, nil, nodeLabels, nil, lease.NewManager(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{config: config, svcProcessor: processor, nodeLabelManager: nodeLabels}
+
+	done := make(chan struct{})
+	go func() {
+		manager.cleanupNodeLabels()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(nodeLabelShutdownTimeout + 2*time.Second):
+		t.Fatal("node label cleanup did not respect its shutdown budget while the API hung")
 	}
 }

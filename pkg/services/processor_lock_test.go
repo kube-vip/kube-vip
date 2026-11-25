@@ -980,6 +980,38 @@ func TestDeleteServiceRemovesLabelOutsideCleanupLock(t *testing.T) {
 	}
 }
 
+func TestDeleteServiceSkipsLabelRemovalDuringShutdown(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "service-a", Name: "service-a", Namespace: "default"}}
+	labeler := &blockingLabeler{removing: make(chan struct{}), release: make(chan struct{})}
+	defer close(labeler.release)
+	processor := &Processor{
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{
+			{ServiceUID: service.UID, ServiceSnapshot: service, LabelAdded: true},
+		},
+		nodeLabelManager: labeler,
+	}
+	initializeTestElectionCoordinators(processor)
+	processor.BeginShutdown()
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- processor.deleteService(context.Background(), service.UID, nil) }()
+	select {
+	case err := <-deleted:
+		if err != nil {
+			t.Fatalf("deleteService() error = %v", err)
+		}
+	case <-labeler.removing:
+		t.Fatal("deleteService() waited on node label removal during shutdown")
+	case <-time.After(time.Second):
+		t.Fatal("deleteService() blocked during shutdown")
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("shutdown teardown kept the Service instance tracked")
+	}
+}
+
 func TestDeleteServiceInstanceDoesNotDeleteReplacement(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{

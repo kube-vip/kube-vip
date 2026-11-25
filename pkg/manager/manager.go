@@ -319,13 +319,7 @@ func (sm *Manager) Start(ctx context.Context) error {
 	}
 
 	// on exit, clean up the node labels
-	defer func() {
-		if sm.nodeLabelManager != nil {
-			if err := sm.nodeLabelManager.CleanUpLabels(10 * time.Second); err != nil {
-				log.Error("CleanUpNodeLabels", "unable to cleanup node labels", err)
-			}
-		}
-	}()
+	defer sm.cleanupNodeLabels()
 
 	return sm.startMode(ctx)
 }
@@ -359,16 +353,19 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	// use a Go context so we can tell the leaderelection code when we
 	// want to step down
 	wg := sync.WaitGroup{}
-	modeCtx, cancel := context.WithCancel(ctx)
+	modeCtx, cancelMode := context.WithCancel(ctx)
+	// Service teardown must not wait on node label API calls once kube-vip
+	// exits, so the processor learns about the shutdown before cancellation.
+	cancel := func() {
+		sm.svcProcessor.BeginShutdown()
+		cancelMode()
+	}
+	stopShutdownHook := context.AfterFunc(modeCtx, sm.svcProcessor.BeginShutdown)
+	defer stopShutdownHook()
 	defer func() {
 		cancel()
 		wg.Wait()
-		if sm.svcProcessor != nil {
-			sm.svcProcessor.WaitForElectionCampaigns()
-			if sm.config != nil && sm.config.EnableServices {
-				sm.removeStaleServiceNodeLabels()
-			}
-		}
+		sm.svcProcessor.WaitForElectionCampaigns()
 		w.Cleanup()
 		log.Info("Shutting down Kube-Vip")
 	}()
@@ -483,11 +480,26 @@ func (sm *Manager) startMode(ctx context.Context) error {
 	return nil
 }
 
-func (sm *Manager) removeStaleServiceNodeLabels() {
-	labelCtx, cancelLabels := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelLabels()
-	if err := sm.svcProcessor.RemoveStaleNodeLabels(labelCtx, sm.nodeLabelManager); err != nil {
-		log.Error("unable to remove service node labels", "err", err)
+// nodeLabelShutdownTimeout bounds all node label API calls on exit, so an
+// unreachable API server cannot hold up kube-vip shutdown.
+const nodeLabelShutdownTimeout = 5 * time.Second
+
+// cleanupNodeLabels removes the labels of this instance in one bounded pass
+// after all Services and the control plane have stopped.
+func (sm *Manager) cleanupNodeLabels() {
+	if sm.nodeLabelManager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nodeLabelShutdownTimeout)
+	defer cancel()
+
+	if err := sm.nodeLabelManager.CleanUpLabels(ctx, kubevip.GetKeysForCleanup()); err != nil {
+		log.Error("unable to clean up node labels", "err", err)
+	}
+	if sm.config.EnableServices {
+		if err := sm.svcProcessor.RemoveStaleNodeLabels(ctx, sm.nodeLabelManager); err != nil {
+			log.Error("unable to remove service node labels", "err", err)
+		}
 	}
 }
 
