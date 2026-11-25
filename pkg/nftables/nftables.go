@@ -60,9 +60,15 @@ func ApplySNAT(podIP, vipIP, service, destinationPorts string, ignoreCIDR []stri
 
 // ApplySNATWithTable applies an egress SNAT rule in the configured table.
 func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCIDR []string, allowCIDR []string, IPv6 bool, tableName string) error {
+	_, err := AddSNATRules(podIP, vipIP, service, destinationPorts, ignoreCIDR, allowCIDR, IPv6, tableName)
+	return err
+}
+
+// AddSNATRules applies SNAT and returns the number of rules committed for the VIP.
+func AddSNATRules(podIP, vipIP, service, destinationPorts string, ignoreCIDR, allowCIDR []string, IPv6 bool, tableName string) (int, error) {
 	conn, err := nftables.New()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	resolvedTableName := egressTableName(tableName, IPv6)
@@ -78,12 +84,12 @@ func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCI
 	conn.AddChain(GetSNatChainForTable(IPv6, service, tableName))
 	err = conn.Flush()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	rules, err := buildSNATRules(conn, podIP, vipIP, service, destinationPorts, ignoreCIDR, allowCIDR, IPv6, tableName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, rule := range rules {
 		slog.Debug("[egress]", "table", rule.Table.Name, "chain", rule.Chain.Name, "expr", rule.Exprs)
@@ -92,10 +98,10 @@ func ApplySNATWithTable(podIP, vipIP, service, destinationPorts string, ignoreCI
 
 	err = conn.Flush() // Commit the rule to nftables
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	return conn.CloseLasting() // Close out any remaining netlink communication
+	return len(rules), conn.CloseLasting()
 }
 
 // buildSNATRules queues the sets required by the SNAT rules and returns the

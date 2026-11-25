@@ -290,8 +290,8 @@ func TestRecoverEgressFailedFamilyOnly(t *testing.T) {
 	}}
 	unblockSNAT := blockEgressSNATChain(t, svc)
 	failed, configured, err := p.programServiceEgress(t.Context(), svc, egressAllFamilies)
-	if err == nil || failed != egressIPv4 || !configured {
-		t.Fatalf("initial programming = families %d, configured %t, error %v", failed, configured, err)
+	if err == nil || failed != egressIPv4 || len(configured) == 0 {
+		t.Fatalf("initial programming = families %d, configured %v, error %v", failed, configured, err)
 	}
 	conn := &kernelnft.Conn{}
 	chain := nftables.GetSNatChainForTable(true, string(svc.UID), "kube_vip_recovery")
@@ -302,8 +302,8 @@ func TestRecoverEgressFailedFamilyOnly(t *testing.T) {
 
 	unblockSNAT()
 	failed, configured, err = p.programServiceEgress(t.Context(), svc, failed)
-	if err != nil || failed != 0 || !configured {
-		t.Fatalf("retry = families %d, configured %t, error %v", failed, configured, err)
+	if err != nil || failed != 0 || len(configured) == 0 {
+		t.Fatalf("retry = families %d, configured %v, error %v", failed, configured, err)
 	}
 	after, err := conn.GetRules(chain.Table, chain)
 	if err != nil || len(after) != 1 || after[0].Handle != ipv6Rules[0].Handle {
@@ -311,7 +311,6 @@ func TestRecoverEgressFailedFamilyOnly(t *testing.T) {
 	}
 }
 
-// Use a fresh TCP connection so conntrack cannot reuse an existing translation.
 func TestRecoverEgressWhileActiveEndpointAnnotationFails(t *testing.T) {
 	for _, provider := range []string{"EndpointSlices", "Endpoints"} {
 		t.Run(provider, func(t *testing.T) {
@@ -405,6 +404,94 @@ func TestRecoverEgressWhileActiveEndpointAnnotationFails(t *testing.T) {
 	}
 }
 
+func TestRecoverEgressAfterRuleRemoval(t *testing.T) {
+	if runIsolatedEgressTest(t) {
+		return
+	}
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "egress", Namespace: "default", UID: "egress-recovery",
+			Annotations: map[string]string{
+				kubevip.Egress: "true", kubevip.ActiveEndpoint: "10.0.0.1",
+				kubevip.EgressDestinationPorts: "tcp:5060",
+				kubevip.EgressAllowedNetworks:  "198.51.100.0/24,203.0.113.0/24",
+			},
+		},
+		Spec: v1.ServiceSpec{
+			Type: v1.ServiceTypeLoadBalancer, LoadBalancerIP: "192.0.2.10",
+			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+		},
+	}
+	client := newEgressRecoveryClient(t, service)
+	namespace, err := netns.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := newEgressRecoveryNodeInNamespace(t, "node-a", client, service, true, namespace)
+	const checkInterval = 100 * time.Millisecond
+	node.processor.egressVerificationInterval = checkInterval
+	node.reconcile(t, service, true)
+	node.start(t, service)
+	node.waitForDatapath(t, service, true)
+	assertRecoveryLeaseHolder(t, client, service, "node-a")
+
+	conn := &kernelnft.Conn{}
+	want := nftables.GetSNatChainForTable(false, string(service.UID), "kube_vip_recovery")
+	before, err := conn.GetRules(want.Table, want)
+	if err != nil || len(before) != 2 {
+		t.Fatalf("expected two installed SNAT rules, got %d (error %v)", len(before), err)
+	}
+	time.Sleep(3 * checkInterval)
+	intact, err := conn.GetRules(want.Table, want)
+	if err != nil || len(intact) != len(before) || intact[0].Handle != before[0].Handle || intact[1].Handle != before[1].Handle {
+		t.Fatalf("healthy SNAT rules changed during verification (error %v)", err)
+	}
+
+	if err := conn.DelRule(intact[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]int{"192.0.2.10": 2}
+	if err := wait.PollUntilContextTimeout(t.Context(), 20*time.Millisecond, 5*time.Second, true,
+		func(context.Context) (bool, error) {
+			ok, err := nftables.HasSNATRules(false, string(service.UID), "kube_vip_recovery", expected)
+			if errors.Is(err, syscall.ENOENT) {
+				// A retry may be replacing the chain while the probe is reading it.
+				return false, nil
+			}
+			return ok, err
+		}); err != nil {
+		t.Fatalf("wait for SNAT rule to be restored: %v", err)
+	}
+	node.waitForEgressRetryToStop(t, service)
+	assertRecoveredSNATTraffic(t, service)
+
+	// Keep a second repair pending while the leader loses ownership.
+	if err := nftables.DeleteSNATFromTable(false, string(service.UID), "kube_vip_recovery"); err != nil {
+		t.Fatal(err)
+	}
+	unblockSNAT := blockEgressSNATChain(t, service)
+	if err := wait.PollUntilContextTimeout(t.Context(), 10*time.Millisecond, 3*time.Second, true, func(context.Context) (bool, error) {
+		p := node.processor
+		p.serviceLock.Lock(service.UID)
+		value, ok := p.serviceEgress.Load(service.UID)
+		pending := ok && value.(*serviceEgressState).retry != nil
+		return pending, p.serviceLock.Unlock(service.UID)
+	}); err != nil {
+		t.Fatalf("wait for the next SNAT repair to be queued: %v", err)
+	}
+	setRecoveryLeaseHolder(t, client, service, "node-b")
+	node.waitForDatapath(t, service, false)
+	unblockSNAT()
+	node.waitForEgressRetryToStop(t, service)
+	time.Sleep(2 * time.Second)
+	node.waitForDatapath(t, service, false)
+	assertRecoveryLeaseHolder(t, client, service, "node-b")
+}
+
+// Use a fresh TCP connection so conntrack cannot reuse an existing translation.
 func assertRecoveredSNATTraffic(t *testing.T, service *v1.Service) {
 	t.Helper()
 	endpoint, vip := service.Annotations[kubevip.ActiveEndpoint], service.Spec.LoadBalancerIP

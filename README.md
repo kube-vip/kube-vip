@@ -178,6 +178,12 @@ Kube-Vip was originally created to provide a HA solution for the Kubernetes cont
 - Egress! Kube-vip will utilise a service loadbalancer as both the ingress and **egress** for a pod. 
 - ... manifest generation, vendor API integrations and many more...
 
+For Services using native nftables egress and per-Service leader election, kube-vip
+retries transient SNAT failures while the VIP stays advertised. With
+`externalTrafficPolicy: Local`, the leader can use the ready endpoint seen by its
+watcher while publishing the active endpoint annotation is failing. The leader also
+checks the programmed SNAT rules about once a minute and repairs missing rules.
+
 ## Why?
 
 The purpose of `kube-vip` is to simplify the building of HA Kubernetes clusters, which at this time can involve a few components and configurations that all need to be managed. This was blogged about in detail by [thebsdbox](https://twitter.com/thebsdbox/) here -> [https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing](https://thebsdbox.co.uk/2020/01/02/Designing-Building-HA-bare-metal-Kubernetes-cluster/#Networking-load-balancing).

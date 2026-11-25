@@ -170,10 +170,8 @@ func detectAPIServerEnabled(value string) bool {
 	return value != "" && !strings.EqualFold(value, "false")
 }
 
-func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string, applied *bool) error {
-	if applied != nil {
-		*applied = false
-	}
+func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string, applied *int) error {
+	*applied = 0
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -295,16 +293,14 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 
 		currentTableName := nftables.EgressTableBaseNameForInstance(p.config.InstanceName)
 		// Apply the SNAT rules
-		err := nftables.ApplySNATWithTable(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP), currentTableName)
+		rules, err := nftables.AddSNATRules(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP), currentTableName)
 		if err != nil {
 			return fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
 		if err := nftables.DeleteSNATFromOtherTables(utils.IsIPv6(vipIP), serviceUUID, currentTableName); err != nil {
 			return fmt.Errorf("cleaning stale nftables egress chains: %w", err)
 		}
-		if applied != nil {
-			*applied = true
-		}
+		*applied = rules
 		return nil
 	}
 

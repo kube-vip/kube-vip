@@ -385,8 +385,10 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 	}
 
 	if egressService.Annotations[kubevip.Egress] == "true" {
+		var state *serviceEgressState
 		if p.usesInternalEgress(egressService) {
-			p.serviceEgress.Store(inst.UID(), &serviceEgressState{instance: inst, ctx: ctx, wg: wg})
+			state = &serviceEgressState{instance: inst, ctx: ctx, wg: wg}
+			p.serviceEgress.Store(inst.UID(), state)
 		}
 		if len(serviceIPs) > 0 {
 			checkKernel, warning := p.iptablesCheck, "[service] configuring egress"
@@ -398,6 +400,9 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 			}
 			if err := p.reconcileServiceEgress(ctx, svcCtx, inst, egressService, false); err != nil {
 				log.Warn("configuring egress", "service", svc.Name, "namespace", svc.Namespace, "error", err)
+			}
+			if state != nil && kubevip.UsesServiceElection(p.config, egressService) {
+				p.startEgressVerification(state, svcCtx)
 			}
 		}
 	}
@@ -551,6 +556,9 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
 	if state := p.egressState(serviceInstance); state != nil {
 		state.cancelRetry()
+		if state.cancelVerification != nil {
+			state.cancelVerification()
+		}
 		p.serviceEgress.Delete(serviceInstance.UID())
 	}
 	if serviceInstance.LabelAdded {

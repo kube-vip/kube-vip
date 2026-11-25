@@ -32,10 +32,13 @@ const (
 // serviceEgressState is owned by one activation. Its retry is accessed only
 // while holding the Service lock.
 type serviceEgressState struct {
-	instance *instance.Instance
-	ctx      context.Context
-	wg       *sync.WaitGroup
-	retry    *egressRetry
+	instance           *instance.Instance
+	ctx                context.Context
+	wg                 *sync.WaitGroup
+	retry              *egressRetry
+	desired            *v1.Service
+	rules              map[string]int
+	cancelVerification context.CancelFunc
 }
 
 type egressRetry struct {
@@ -99,9 +102,9 @@ func localEgressEndpoint(svcCtx *servicecontext.Context, key string) (string, er
 
 // programServiceEgress rebuilds only the requested families. A failed nftables
 // family must be rebuilt as a group because its VIPs share a chain.
-func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, families egressFamilies) (egressFamilies, bool, error) {
+func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, families egressFamilies) (egressFamilies, map[string]int, error) {
 	if families == 0 {
-		return 0, false, nil
+		return 0, nil, nil
 	}
 	serviceIPs, _ := instance.FetchServiceAddresses(svc)
 	ipv4Endpoint := svc.Annotations[kubevip.ActiveEndpoint]
@@ -111,11 +114,12 @@ func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, f
 		ipv6Endpoint = ipv4Endpoint
 	}
 	if ipv6Only && p.config.EnableEndpoints || !ipv6Only && ipv4Endpoint == "" {
-		return 0, false, nil
+		return 0, nil, nil
 	}
 
 	var failed egressFamilies
-	var configured, preparedIPv4, preparedIPv6 bool
+	var programmed map[string]int
+	var preparedIPv4, preparedIPv6 bool
 	var errs []error
 	useNftables := p.usesInternalEgress(svc)
 	for _, serviceIP := range serviceIPs {
@@ -128,7 +132,7 @@ func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, f
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return failed, configured, err
+			return failed, programmed, err
 		}
 		if useNftables && !*prepared {
 			*prepared = true
@@ -139,14 +143,36 @@ func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, f
 				continue
 			}
 		}
-		var applied bool
+		var applied int
 		if err := p.configureEgress(ctx, serviceIP, endpoint, svc.Namespace, string(svc.UID), svc.Annotations, &applied); err != nil {
 			failed |= family
 			errs = append(errs, fmt.Errorf("program SNAT for %s: %w", serviceIP, err))
 		}
-		configured = configured || applied
+		if applied > 0 {
+			if programmed == nil {
+				programmed = make(map[string]int)
+			}
+			programmed[net.ParseIP(serviceIP).String()] += applied
+		}
 	}
-	return failed, configured, errors.Join(errs...)
+	return failed, programmed, errors.Join(errs...)
+}
+
+func (s *serviceEgressState) recordRules(svc *v1.Service, families egressFamilies, programmed map[string]int) {
+	s.desired = svc
+	for vip := range s.rules {
+		if families&egressFamily(vip) != 0 {
+			delete(s.rules, vip)
+		}
+	}
+	if len(programmed) != 0 {
+		if s.rules == nil {
+			s.rules = make(map[string]int)
+		}
+		for vip, count := range programmed {
+			s.rules[vip] = count
+		}
+	}
 }
 
 func (p *Processor) egressState(inst *instance.Instance) *serviceEgressState {
@@ -175,7 +201,7 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 	readiness := svcCtx.CurrentReadiness()
 	state := p.egressState(inst)
 	var failed egressFamilies
-	var configured bool
+	var programmed map[string]int
 	var err error
 	var annotateEndpoint string
 	if state != nil && svcCtx.ReadinessGenerationCurrent(readiness) {
@@ -192,10 +218,14 @@ func (p *Processor) reconcileServiceEgress(ctx context.Context, svcCtx *servicec
 		}
 	}
 	if err == nil {
-		failed, configured, err = p.programServiceEgress(ctx, svc, egressAllFamilies)
+		failed, programmed, err = p.programServiceEgress(ctx, svc, egressAllFamilies)
 	} else {
 		failed = egressAllFamilies
 	}
+	if state != nil {
+		state.recordRules(svc, egressAllFamilies, programmed)
+	}
+	configured := len(programmed) != 0
 	publishTable := configured && p.usesInternalEgress(svc)
 	if configured && annotateEndpoint != "" {
 		inst.ServiceSnapshot = svc
@@ -320,7 +350,9 @@ func (p *Processor) retryServiceEgress(ctx context.Context, svcCtx *serviceconte
 	}
 	defer reservation.Release()
 
-	failed, configured, err := p.programServiceEgress(ctx, svc, retry.families)
+	failed, programmed, err := p.programServiceEgress(ctx, svc, retry.families)
+	state.recordRules(svc, retry.families, programmed)
+	configured := len(programmed) != 0
 	retry.families = failed
 	retry.publishTable = retry.publishTable || configured
 	if configured && retry.annotateEndpoint != "" {

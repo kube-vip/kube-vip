@@ -70,6 +70,8 @@ type Processor struct {
 	electionLoops        sync.Map
 	serviceEgress        sync.Map
 
+	egressVerificationInterval time.Duration
+
 	bgpServer *bgp.Server
 
 	clientSet   *kubernetes.Clientset
@@ -110,6 +112,8 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 
 	processor := &Processor{
+		egressVerificationInterval: defaultEgressVerificationInterval,
+
 		config:           config,
 		lbClassFilter:    lbClassFilterFunc,
 		ServiceInstances: []*instance.Instance{},
