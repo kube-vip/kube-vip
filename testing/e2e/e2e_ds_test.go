@@ -17,6 +17,7 @@ import (
 	"github.com/osrg/gobgp/v4/pkg/config/oc"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -644,13 +645,23 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 		return nil
 	}, "40s").Should(Succeed())
 
+	pod := pods.Items[0]
 	removeKubeVipDS(ctx, client)
 
-	// check if kube-vip pod gets deleted within 10s
+	// Kubernetes can keep the Pod object after kube-vip exits.
 	Eventually(func() error {
-		_, err := client.CoreV1().Pods("kube-system").Get(ctx, pods.Items[0].Name, metav1.GetOptions{})
-		return err
-	}, "10s", "200ms").ShouldNot(Succeed())
+		current, err := client.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current.Status.Phase == corev1.PodSucceeded || current.Status.Phase == corev1.PodFailed {
+			return nil
+		}
+		return fmt.Errorf("kube-vip pod %s/%s has not terminated (phase %s)", pod.Namespace, pod.Name, current.Status.Phase)
+	}, "30s", "200ms").Should(Succeed())
 
 	if cpEnable && manifestValues.Mode == ModeARP {
 		for _, addr := range cpVips {
@@ -673,6 +684,13 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 			time.Sleep(time.Second)
 		}
 	}
+
+	// The next spec reuses this DaemonSet name in the same cluster.
+	By(withTimestamp("waiting for the kube-vip DaemonSet to be deleted"))
+	Eventually(func() error {
+		_, err := client.AppsV1().DaemonSets(pod.Namespace).Get(ctx, "kube-vip", metav1.GetOptions{})
+		return err
+	}, "60s", "200ms").Should(MatchError(apierrors.IsNotFound, "the kube-vip DaemonSet no longer exists"))
 }
 
 func testEndpoints(ctx context.Context, manifestValues *e2e.KubevipManifestValues,
