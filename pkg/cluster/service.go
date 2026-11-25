@@ -27,7 +27,6 @@ import (
 )
 
 func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, em *election.Manager, bgpServer bgp.BGPManager, killFunc func()) error {
-
 	var err error
 
 	var wg sync.WaitGroup
@@ -66,7 +65,9 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			})
 		}
 
-		if !c.EnableRoutingTable {
+		// With GateVIP, the BGP health check loop adds the VIP once the check passes.
+		// Validation only allows it with BGP, a health check address and no leader election.
+		if !c.EnableRoutingTable && !c.ControlPlaneHealthCheck.GateVIP {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			if _, err = network.AddIP(false, false); err != nil {
 				log.Error("failed to add IP", "address", network.IP(), "error", err)
@@ -77,7 +78,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 			if c.ControlPlaneHealthCheck.Address != "" {
 				// The health check loop owns route advertisement/withdrawal when configured.
 				wg.Go(func() {
-					cluster.bgpHealthCheckLoop(ctx, c, bgpServer, network.CIDR())
+					cluster.bgpHealthCheckLoop(ctx, c, bgpServer, network)
 				})
 			} else {
 				// Lets advertise the VIP over BGP, the host needs to be passed using CIDR notation.
@@ -326,8 +327,12 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 	return nil
 }
 
-func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer bgp.BGPManager, vipCIDR string) {
+// bgpHealthCheckLoop announces the VIP route while the control plane is healthy.
+// With ControlPlaneHealthCheck.GateVIP it also adds the VIP before announcing and
+// removes it once the route is withdrawn. On shutdown it withdraws the route but keeps the VIP.
+func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Config, bgpServer bgp.BGPManager, network vip.Network) {
 	period := time.Duration(c.ControlPlaneHealthCheck.PeriodSeconds) * time.Second
+	vipCIDR := network.CIDR()
 
 	consecutiveFailures := 0
 	routeAnnounced := false
@@ -340,6 +345,7 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		"period", period,
 		"timeout", cluster.healthCheckHTTPClient.Timeout,
 		"threshold", c.ControlPlaneHealthCheck.FailureThreshold,
+		"gateVIP", c.ControlPlaneHealthCheck.GateVIP,
 	)
 
 	b, err := backend.New(&backend.Config{
@@ -358,13 +364,36 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 			consecutiveFailures = 0
 			if !routeAnnounced {
 				log.Info("BGP health check passed, announcing route", "cidr", vipCIDR)
-				if err := bgpServer.AddHost(ctx, vipCIDR, c.NodeName); err != nil {
+				var err error
+				// The VIP must be in place before the route attracts traffic to it.
+				if c.ControlPlaneHealthCheck.GateVIP {
+					var added bool
+					// Call AddIP with precheck=false so it always adds the VIP and sets up
+					// its firewall rules (nftables or iptables), even when the VIP is
+					// already on the interface. With precheck=true, AddIP returns early if
+					// the VIP is already there. If a previous attempt added the VIP but
+					// failed to set up the firewall rules, the retry would skip them and we
+					// would announce the route without them. Both steps are idempotent, so
+					// repeating them is safe.
+					added, err = network.AddIP(false, false)
+					if added {
+						log.Info("BGP health check: added VIP", "address", network.IP())
+					}
+				}
+				if err == nil {
+					err = bgpServer.AddHost(ctx, vipCIDR, c.NodeName)
+				}
+				if err != nil {
 					log.Error("BGP health check: failed to announce route", "cidr", vipCIDR, "err", err)
 				} else {
 					routeAnnounced = true
 				}
 			}
-		} else {
+		} else if ctx.Err() == nil {
+			// If the context was cancelled, the check failed because it was interrupted
+			// and we don't know whether the API server is healthy, so we skip the failure
+			// threshold check. This handles shutdown, where we don't want to remove the
+			// VIP. The ctx.Done() case below withdraws the route.
 			consecutiveFailures++
 			if healthErr != nil {
 				log.Warn("BGP health check failed", "address", c.ControlPlaneHealthCheck.Address, "consecutive", consecutiveFailures, "err", healthErr)
@@ -375,6 +404,18 @@ func (cluster *Cluster) bgpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 					log.Error("BGP health check: failed to withdraw route", "cidr", vipCIDR, "err", err)
 				} else {
 					routeAnnounced = false
+				}
+			}
+			// If the route is not announced, this is either because we just
+			// reached the consecutive failure threshold and we just removed the
+			// route or because this is the first check after starting the
+			// program. On either case, if the healthcheck failed, we want to
+			// remove the VIP. DeleteIP is idempotent.
+			if c.ControlPlaneHealthCheck.GateVIP && !routeAnnounced {
+				if deleted, err := network.DeleteIP(); err != nil {
+					log.Error("BGP health check: failed to remove VIP", "address", network.IP(), "err", err)
+				} else if deleted {
+					log.Info("BGP health check: removed VIP", "address", network.IP())
 				}
 			}
 		}

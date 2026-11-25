@@ -149,6 +149,8 @@ const (
 	controlPlaneHealthCheckClientCertPath = "control_plane_health_check_client_cert_path"
 	// controlPlaneHealthCheckClientKeyPath defines the path to the matching client key for control-plane health checks
 	controlPlaneHealthCheckClientKeyPath = "control_plane_health_check_client_key_path"
+	// controlPlaneHealthCheckGateVIP adds the VIP only while the control-plane health check passes
+	controlPlaneHealthCheckGateVIP = "control_plane_health_check_gate_vip"
 
 	// zebraEnable defines if Zebra integraton should be enabled
 	zebraEnable = "zebra_enable"

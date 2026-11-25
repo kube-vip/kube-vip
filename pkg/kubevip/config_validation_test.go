@@ -34,6 +34,84 @@ func TestValidate_HealthCheckAddress(t *testing.T) {
 	}
 }
 
+func TestValidate_HealthCheckGateVIP(t *testing.T) {
+	gated := func(address string, bgp, leaderElection bool) *Config {
+		return &Config{
+			EnableBGP:               bgp,
+			EnableLeaderElection:    leaderElection,
+			ControlPlaneHealthCheck: HealthCheck{Address: address, GateVIP: true},
+		}
+	}
+	const unsupported = "control_plane_health_check_gate_vip requires bgp_enable and control_plane_health_check_address, without vip_leaderelection"
+	tests := []struct {
+		name    string
+		config  *Config
+		wantErr string
+	}{
+		{
+			name:   "disabled",
+			config: &Config{ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez"}},
+		},
+		{
+			name:   "bgp without leader election",
+			config: gated("https://localhost:6443/livez", true, false),
+		},
+		{
+			name:    "without address",
+			config:  gated("", true, false),
+			wantErr: unsupported,
+		},
+		{
+			name:    "without bgp",
+			config:  gated("https://localhost:6443/livez", false, false),
+			wantErr: unsupported,
+		},
+		{
+			name:    "with leader election",
+			config:  gated("https://localhost:6443/livez", true, true),
+			wantErr: unsupported,
+		},
+		{
+			name: "IP VIPs",
+			config: &Config{
+				EnableBGP:               true,
+				Address:                 "192.0.2.10, 2001:db8::10",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+		},
+		{
+			name: "hostname VIP",
+			config: &Config{
+				EnableBGP:               true,
+				VIP:                     "cp.example.com",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+			wantErr: `control_plane_health_check_gate_vip requires the VIP to be an IP address, got "cp.example.com"`,
+		},
+		{
+			name: "hostname in address list",
+			config: &Config{
+				EnableBGP:               true,
+				Address:                 "192.0.2.10,cp.example.com",
+				ControlPlaneHealthCheck: HealthCheck{Address: "https://localhost:6443/livez", GateVIP: true},
+			},
+			wantErr: `control_plane_health_check_gate_vip requires the VIP to be an IP address, got "cp.example.com"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotErr := ""
+			if err := tt.config.Validate(); err != nil {
+				gotErr = err.Error()
+			}
+			if gotErr != tt.wantErr {
+				t.Errorf("Validate() error = %q, want %q", gotErr, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidate_Pprof(t *testing.T) {
 	tests := []struct {
 		name        string
