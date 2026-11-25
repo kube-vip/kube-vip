@@ -191,6 +191,8 @@ func init() {
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.InstanceName, "instanceName", "", "Unique name for this kube-vip instance (currently used to isolate nftables egress tables)")
 
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "Use nftables-based egress implementation")
+	kubeVipCmd.PersistentFlags().Uint32Var(&initConfig.EgressVerificationInterval, "egressVerificationInterval",
+		kubevip.DefaultEgressVerificationInterval, "Interval in seconds between native egress SNAT rule checks (0 uses the default)")
 
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.PerServiceElectionOnDemand, "perServiceElectionOnDemand", false, "Allow kube-vip to use per-service election for annotated services")
 

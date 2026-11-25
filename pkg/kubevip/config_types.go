@@ -187,6 +187,10 @@ type Config struct {
 	// EgressWithNftables, this will use the iptables-nftables OVER iptables
 	EgressWithNftables bool `yaml:"egressWithNftables"`
 
+	// EgressVerificationInterval is the interval in seconds between native SNAT rule checks.
+	// Zero uses DefaultEgressVerificationInterval.
+	EgressVerificationInterval uint32 `yaml:"egressVerificationInterval,omitempty"`
+
 	// ServicesLeaseName, this will set the lease name for services leader in arp mode
 	ServicesLeaseName string `yaml:"servicesLeaseName"`
 

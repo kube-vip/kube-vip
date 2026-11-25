@@ -779,6 +779,15 @@ func ParseEnvironment(c *Config) error {
 		c.EgressWithNftables = b
 	}
 
+	env = os.Getenv(egressVerificationInterval)
+	if env != "" {
+		seconds, err := strconv.ParseUint(env, 10, 32)
+		if err != nil {
+			return fmt.Errorf("%s must be an interval in seconds: %w", egressVerificationInterval, err)
+		}
+		c.EgressVerificationInterval = uint32(seconds)
+	}
+
 	env = os.Getenv(perServiceElectionOnDemand)
 	if env != "" {
 		b, err := strconv.ParseBool(env)

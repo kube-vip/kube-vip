@@ -655,6 +655,11 @@ func TestGeneratePodSpecWritesManagerFlags(t *testing.T) {
 			config:  Config{EnableServices: true, EgressWithNftables: false},
 			wantEnv: map[string]string{egressWithNftables: "false"},
 		},
+		{
+			name:    "egress verification interval",
+			config:  Config{EnableServices: true, EgressWithNftables: true, EgressVerificationInterval: 30},
+			wantEnv: map[string]string{egressVerificationInterval: "30"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -666,7 +671,7 @@ func TestGeneratePodSpecWritesManagerFlags(t *testing.T) {
 
 			got := map[string]string{}
 			for _, env := range pod.Spec.Containers[0].Env {
-				if env.Name == vipLogLevel || env.Name == perServiceElectionOnDemand || env.Name == egressWithNftables {
+				if env.Name == vipLogLevel || env.Name == perServiceElectionOnDemand || env.Name == egressWithNftables || env.Name == egressVerificationInterval {
 					got[env.Name] = env.Value
 				}
 			}
@@ -681,6 +686,9 @@ func TestGeneratePodSpecWritesManagerFlags(t *testing.T) {
 			parsed := Config{EgressWithNftables: true}
 			if err := ParseEnvironment(&parsed); err != nil {
 				t.Fatalf("ParseEnvironment() error = %v", err)
+			}
+			if parsed.EgressVerificationInterval != tt.config.EgressVerificationInterval {
+				t.Fatalf("egress verification interval = %d, want %d", parsed.EgressVerificationInterval, tt.config.EgressVerificationInterval)
 			}
 			if parsed.Logging != tt.config.Logging || parsed.PerServiceElectionOnDemand != tt.config.PerServiceElectionOnDemand || parsed.EgressWithNftables != tt.config.EgressWithNftables {
 				t.Fatalf("manager config from the manifest = {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}, want {Logging:%d PerServiceElectionOnDemand:%t EgressWithNftables:%t}",

@@ -70,6 +70,9 @@ const (
 	// egressWithNftables - enables using nftables over iptables
 	egressWithNftables = "egress_withnftables"
 
+	// egressVerificationInterval sets the interval in seconds between native SNAT rule checks.
+	egressVerificationInterval = "egress_verification_interval"
+
 	// perServiceElectionOnDemand - enables kube-vip to use per-service election for annotated services
 	perServiceElectionOnDemand = "per_service_election_on_demand"
 
