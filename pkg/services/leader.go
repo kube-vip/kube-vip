@@ -7,6 +7,7 @@ import (
 
 	log "log/slog"
 
+	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
@@ -55,6 +56,9 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	loops := metrics.ServiceElectionLoops.WithLabelValues(service.Namespace, service.Name)
 	loops.Inc()
 	defer loops.Dec()
+	if endpoints.AllowsReconcileWithoutEndpoints(service) {
+		svcCtx.SignalReadiness()
+	}
 	p.electionCoordinators.Watch(svcCtx, service)
 	return nil
 }

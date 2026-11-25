@@ -15,6 +15,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/cluster"
 	"github.com/kube-vip/kube-vip/pkg/election"
+	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
@@ -924,6 +925,8 @@ func serviceSnapshotChanged(original, svc *v1.Service) bool {
 		!reflect.DeepEqual(originalServiceHostnames, svcHostnames) ||
 		// ExternalTrafficPolicy changed
 		svc.Spec.ExternalTrafficPolicy != original.Spec.ExternalTrafficPolicy ||
+		// Endpointless reconciliation changes whether election waits for endpoints.
+		endpoints.AllowsReconcileWithoutEndpoints(svc) != endpoints.AllowsReconcileWithoutEndpoints(original) ||
 		// BGP forwarding mode changes require a fresh endpoint watcher.
 		svc.Annotations[kubevip.BGPForwardingNode] != original.Annotations[kubevip.BGPForwardingNode] ||
 		// IP stack configuration changed

@@ -26,6 +26,23 @@ func TestServiceSnapshotChangedBGPForwardingNode(t *testing.T) {
 	}
 }
 
+func TestServiceSnapshotChangedEndpointlessOptIn(t *testing.T) {
+	original := &v1.Service{Spec: v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}}
+	optedIn := original.DeepCopy()
+	optedIn.Annotations = map[string]string{kubevip.AllowReconcileWithoutEndpoints: "true"}
+	if !serviceSnapshotChanged(original, optedIn) {
+		t.Fatal("enabling endpointless reconciliation must restart the watcher")
+	}
+	if !serviceSnapshotChanged(optedIn, original) {
+		t.Fatal("disabling endpointless reconciliation must restart the watcher")
+	}
+	stillOptedIn := optedIn.DeepCopy()
+	stillOptedIn.Annotations[kubevip.AllowReconcileWithoutEndpoints] = "TRUE"
+	if serviceSnapshotChanged(optedIn, stillOptedIn) {
+		t.Fatal("unchanged endpointless opt-in must not restart the watcher")
+	}
+}
+
 func TestValidateBGPForwardingNode(t *testing.T) {
 	for _, test := range []struct {
 		name   string
