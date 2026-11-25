@@ -82,6 +82,12 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 				cluster.OnStartedLeading(leaderCtx, c, em, bgpServer, killFunc)
 			})
 
+			if c.EnableARP && c.EnableControlPlane && c.ControlPlaneHealthCheck.Address != "" {
+				leaderWG.Go(func() {
+					cluster.arpHealthCheckLoop(leaderCtx, c, cancelElection)
+				})
+			}
+
 			log.Debug("cluster waiting for shared election to finish", "lease", leaseName)
 			participation.Session.WaitForEnd(electionCtx)
 			cancelLeader()
@@ -164,7 +170,6 @@ func (cluster *Cluster) arpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		if ctx.Err() != nil {
 			return
 		}
-		// An invalid probe address counts toward the same failure threshold.
 		healthy, err := false, probeErr
 		if err == nil {
 			healthy, err = probe.Check(ctx)

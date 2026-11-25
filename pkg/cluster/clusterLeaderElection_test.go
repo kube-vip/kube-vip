@@ -1,4 +1,3 @@
-
 package cluster
 
 import (
@@ -47,7 +46,7 @@ func TestARPHealthCheckLoop_RelinquishesAfterThreshold(t *testing.T) {
 
 	select {
 	case <-relinquished:
-		if got := checks.Load(); got != int32(len(statuses)) {
+		if got := int(checks.Load()); got != len(statuses) {
 			t.Fatalf("health checks before relinquishing = %d, want %d", got, len(statuses))
 		}
 	case <-time.After(5 * time.Second):
