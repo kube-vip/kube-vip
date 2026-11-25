@@ -143,10 +143,11 @@ func (p *Processor) programServiceEgress(ctx context.Context, svc *v1.Service, f
 				continue
 			}
 		}
-		var applied int
-		if err := p.configureEgress(ctx, serviceIP, endpoint, svc.Namespace, string(svc.UID), svc.Annotations, &applied); err != nil {
+		applied, err := p.configureEgress(ctx, serviceIP, endpoint, svc.Namespace, string(svc.UID), svc.Annotations)
+		if err != nil {
 			failed |= family
 			errs = append(errs, fmt.Errorf("program SNAT for %s: %w", serviceIP, err))
+			continue
 		}
 		if applied > 0 {
 			if programmed == nil {

@@ -170,8 +170,8 @@ func detectAPIServerEnabled(value string) bool {
 	return value != "" && !strings.EqualFold(value, "false")
 }
 
-func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string, applied *int) error {
-	*applied = 0
+// configureEgress returns the number of native nftables SNAT rules after successful setup.
+func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace, serviceUUID string, annotations map[string]string) (int, error) {
 	var podCidr, serviceCidr string
 	var autoServiceCIDR, autoPodCIDR string
 	var discoverErr error
@@ -220,7 +220,7 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	if podCidr == "" {
 		// There's no default IPv6 pod CIDR, therefore we silently back off if CIDR s not specified.
 		if !utils.IsIPv4(podIP) {
-			return fmt.Errorf("error with the CIDR [%s]", podIP)
+			return 0, fmt.Errorf("error with the CIDR [%s]", podIP)
 		}
 		//
 		podCidr = defaultPodCIDR
@@ -245,7 +245,7 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	if serviceCidr == "" {
 		// There's no default IPv6 service CIDR, therefore we silently back off if CIDR s not specified.
 		if !utils.IsIPv4(vipIP) {
-			return nil
+			return 0, nil
 		}
 		serviceCidr = defaultServiceCIDR
 	}
@@ -255,17 +255,17 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 	// checking if all addresses are of the same IP family
 	if utils.IsIPv4(podIP) != utils.IsIPv4CIDR(podCidr) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "podCIDR", podCidr)
-		return nil
+		return 0, nil
 	}
 
 	if utils.IsIPv4(vipIP) != utils.IsIPv4CIDR(serviceCidr) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "serviceCIDR", serviceCidr)
-		return nil
+		return 0, nil
 	}
 
 	if utils.IsIPv4(vipIP) != utils.IsIPv4(podIP) {
 		log.Error("[Egress] family is not matching. Backing off...", "pod", podIP, "vipIP", vipIP)
-		return nil
+		return 0, nil
 	}
 
 	// Use the internal egress implementation
@@ -295,13 +295,12 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		// Apply the SNAT rules
 		rules, err := nftables.AddSNATRules(podIP, vipIP, serviceUUID, destinationPorts, ignoreCIDRs, allowCIDRs, utils.IsIPv6(vipIP), currentTableName)
 		if err != nil {
-			return fmt.Errorf("error performing netlink nftables [%s]", err)
+			return 0, fmt.Errorf("error performing netlink nftables [%s]", err)
 		}
 		if err := nftables.DeleteSNATFromOtherTables(utils.IsIPv6(vipIP), serviceUUID, currentTableName); err != nil {
-			return fmt.Errorf("cleaning stale nftables egress chains: %w", err)
+			return 0, fmt.Errorf("cleaning stale nftables egress chains: %w", err)
 		}
-		*applied = rules
-		return nil
+		return rules, nil
 	}
 
 	protocol := iptables.ProtocolIPv4
@@ -311,31 +310,31 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 
 	i, err := vip.CreateIptablesClient(p.config.EgressWithNftables, namespace, protocol)
 	if err != nil {
-		return fmt.Errorf("error Creating iptables client [%s]", err)
+		return 0, fmt.Errorf("error Creating iptables client [%s]", err)
 	}
 
 	// Check if the kube-vip mangle chain exists, if not create it
 	exists, err := i.CheckMangleChain(vip.MangleChainName)
 	if err != nil {
-		return fmt.Errorf("error checking for existence of mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		return 0, fmt.Errorf("error checking for existence of mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
 	if !exists {
 		err = i.CreateMangleChain(vip.MangleChainName)
 		if err != nil {
-			return fmt.Errorf("error creating mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			return 0, fmt.Errorf("error creating mangle chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
 	for _, cidr := range podCidrs {
 		err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, cidr)
 		if err != nil {
-			return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			return 0, fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
 
 	err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, serviceCidr)
 	if err != nil {
-		return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		return 0, fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
 	if deniedNetworks != "" {
@@ -343,7 +342,7 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		for x := range networks {
 			err = i.AppendReturnRulesForDestinationSubnet(vip.MangleChainName, networks[x])
 			if err != nil {
-				return fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+				return 0, fmt.Errorf("error adding rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 			}
 		}
 	}
@@ -358,18 +357,18 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 		for x := range networks {
 			err = i.AppendReturnRulesForMarkingForNetwork(vip.MangleChainName, podIP+mask, networks[x])
 			if err != nil {
-				return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+				return 0, fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 			}
 		}
 	} else {
 		err = i.AppendReturnRulesForMarking(vip.MangleChainName, podIP+mask)
 		if err != nil {
-			return fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
+			return 0, fmt.Errorf("error adding marking rules to mangle chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
 	err = i.InsertMangeTableIntoPrerouting(vip.MangleChainName)
 	if err != nil {
-		return fmt.Errorf("error adding prerouting mangle chain [%s], error [%s]", vip.MangleChainName, err)
+		return 0, fmt.Errorf("error adding prerouting mangle chain [%s], error [%s]", vip.MangleChainName, err)
 	}
 
 	if destinationPorts != "" {
@@ -391,23 +390,23 @@ func (p *Processor) configureEgress(ctx context.Context, vipIP, podIP, namespace
 
 			err = i.InsertSourceNatForDestinationPort(vipIP, podIP, port, proto)
 			if err != nil {
-				return fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
+				return 0, fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
 			}
 		}
 	} else {
 		err = i.InsertSourceNat(vipIP, podIP)
 		if err != nil {
-			return fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
+			return 0, fmt.Errorf("error adding snat rules to nat chain [%s], error [%s]", vip.MangleChainName, err)
 		}
 	}
 	//_ = i.DumpChain(vip.MangleChainName)
 
 	err = vip.DeleteExistingSessions(podIP, false, destinationPorts, "")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return 0, nil
 }
 
 func (p *Processor) prepareEgressNftablesTable(serviceUID string, ipv6 bool) error {
