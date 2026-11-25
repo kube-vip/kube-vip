@@ -13,6 +13,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/node/labeler"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -119,6 +120,121 @@ func TestRemoveStaleNodeLabels(t *testing.T) {
 		"service-provided.kube-vip.io~1demoted.default",
 		"service-provided.kube-vip.io~1follower.default",
 		"service-provided.kube-vip.io~1stopped.default",
+	}
+	if !slices.Equal(removed, want) {
+		t.Fatalf("removed labels = %v, want %v", removed, want)
+	}
+}
+
+func TestRecoverNodeLabels(t *testing.T) {
+	const nodeName = "node-a"
+	const prefix = kubevip.ServiceProvided + "/"
+	ourClass := "kube-vip"
+	otherClass := "other"
+	newLB := func(name string, class *string) *v1.Service {
+		return &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
+			Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerClass: class},
+		}
+	}
+	services := map[string]*v1.Service{
+		"mine": newLB("mine", &ourClass), "theirs": newLB("theirs", &ourClass), "foreign": newLB("foreign", &otherClass),
+	}
+	leaseHolders := map[string]string{
+		"default/kubevip-mine":      nodeName,
+		"default/kubevip-theirs":    "node-b",
+		"kube-system/plndr-cp-lock": "node-b",
+	}
+	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Labels: map[string]string{
+		prefix + "mine.default":        "192.0.2.1",
+		prefix + "theirs.default":      "192.0.2.2",
+		prefix + "deleted.default":     "192.0.2.3",
+		prefix + "foreign.default":     "192.0.2.4",
+		prefix + "outside.kube-system": "192.0.2.5",
+		kubevip.HasIP:                  "192.0.2.6",
+		"kubernetes.io/hostname":       nodeName,
+	}}}
+
+	var mu sync.Mutex
+	var patches [][]string
+	notFound := &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
+		Status: metav1.StatusFailure, Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		var body any = notFound
+		serviceName, isService := strings.CutPrefix(request.URL.Path, "/api/v1/namespaces/default/services/")
+		leaseKey, isLease := strings.CutPrefix(request.URL.Path, "/apis/coordination.k8s.io/v1/namespaces/")
+		leaseKey = strings.Replace(leaseKey, "/leases/", "/", 1)
+		switch {
+		case request.URL.Path == "/api/v1/nodes/"+nodeName && request.Method == http.MethodPatch:
+			var patch []struct{ Op, Path string }
+			if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
+				t.Errorf("decode node patch: %v", err)
+			}
+			var removed []string
+			for _, op := range patch {
+				if op.Op == "remove" {
+					removed = append(removed, strings.TrimPrefix(op.Path, "/metadata/labels/"))
+				}
+			}
+			mu.Lock()
+			patches = append(patches, removed)
+			mu.Unlock()
+			body = node
+		case request.URL.Path == "/api/v1/nodes/"+nodeName:
+			body = node
+		case isService && services[serviceName] != nil:
+			body = services[serviceName]
+		case isLease && leaseHolders[leaseKey] != "":
+			holder := leaseHolders[leaseKey]
+			namespace, name, _ := strings.Cut(leaseKey, "/")
+			body = &coordinationv1.Lease{
+				TypeMeta:   metav1.TypeMeta{Kind: "Lease", APIVersion: "coordination.k8s.io/v1"},
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
+			}
+		case isService || isLease:
+			writer.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if err := json.NewEncoder(writer).Encode(body); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	clientSet, err := kubernetes.NewForConfig(&rest.Config{
+		Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"},
+	})
+	if err != nil {
+		t.Fatalf("create Kubernetes client: %v", err)
+	}
+	processor := &Processor{
+		config: &kubevip.Config{
+			NodeName: nodeName, EnableNodeLabeling: true, EnableServices: true, EnableServicesElection: true,
+			EnableControlPlane: true, EnableLeaderElection: true, LeaseName: "kube-system/plndr-cp-lock",
+			ServiceNamespace: "default", LoadBalancerClassName: ourClass,
+		},
+		lbClassFilter: lbClassFilter,
+		serviceLock:   newTestServiceLocks(),
+		clientSet:     clientSet,
+	}
+
+	if err := processor.RecoverNodeLabels(context.Background(), labeler.NewManager(nodeName, clientSet)); err != nil {
+		t.Fatalf("RecoverNodeLabels() error = %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("node patches = %d, want a single batched patch", len(patches))
+	}
+	removed := patches[0]
+	slices.Sort(removed)
+	want := []string{
+		"kube-vip.io~1has-ip",
+		"service-provided.kube-vip.io~1deleted.default",
+		"service-provided.kube-vip.io~1theirs.default",
 	}
 	if !slices.Equal(removed, want) {
 		t.Fatalf("removed labels = %v, want %v", removed, want)

@@ -416,6 +416,7 @@ func (sm *Manager) startMode(ctx context.Context) error {
 			})
 		}
 	}
+	sm.recoverNodeLabels(modeCtx)
 
 	if sm.config.EnableControlPlane {
 		wg.Go(func() {
@@ -478,6 +479,23 @@ func (sm *Manager) startMode(ctx context.Context) error {
 		<-modeCtx.Done()
 	}
 	return nil
+}
+
+// nodeLabelRecoveryTimeout bounds the startup check of node labels left by an
+// earlier kube-vip process, so an unreachable API server only delays startup.
+const nodeLabelRecoveryTimeout = 10 * time.Second
+
+// recoverNodeLabels removes node labels this node no longer owns. It runs
+// before the control plane and Services start adding their own labels.
+func (sm *Manager) recoverNodeLabels(ctx context.Context) {
+	if sm.nodeLabelManager == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, nodeLabelRecoveryTimeout)
+	defer cancel()
+	if err := sm.svcProcessor.RecoverNodeLabels(ctx, sm.nodeLabelManager); err != nil {
+		log.Warn("unable to recover node labels", "err", err)
+	}
 }
 
 // nodeLabelShutdownTimeout bounds all node label API calls on exit, so an
