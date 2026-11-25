@@ -182,7 +182,11 @@ For Services using native nftables egress and per-Service leader election, kube-
 retries transient SNAT failures while the VIP stays advertised. With
 `externalTrafficPolicy: Local`, the leader can use the ready endpoint seen by its
 watcher while publishing the active endpoint annotation is failing. The leader also
-checks the programmed SNAT rules about once a minute and repairs missing rules.
+checks the programmed SNAT rules about once a minute by default and repairs missing
+rules. To change the interval, set `--egressVerificationInterval=30`, the
+`egress_verification_interval` environment variable, or `egressVerificationInterval`
+in the config file. The interval is in seconds. A value of `0` uses the default
+of 60 seconds.
 
 ## Why?
 

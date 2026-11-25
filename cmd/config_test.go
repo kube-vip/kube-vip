@@ -88,6 +88,47 @@ func TestRuntimeCommandAbsentEnvironmentPreservesFile(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandEgressVerificationInterval(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		file    string
+		env     string
+		flags   []string
+		want    uint32
+		wantErr bool
+	}{
+		{name: "default", want: 60},
+		{name: "file", file: "egressVerificationInterval: 90\n", want: 90},
+		{name: "environment over file", file: "egressVerificationInterval: 90\n", env: "45", want: 45},
+		{name: "flag over environment and file", file: "egressVerificationInterval: 90\n", env: "45",
+			flags: []string{"--egressVerificationInterval=30"}, want: 30},
+		{name: "reset to default", file: "egressVerificationInterval: 90\n", flags: []string{"--egressVerificationInterval=0"}},
+		{name: "negative environment", env: "-5", wantErr: true},
+		{name: "overflowing environment", env: "4294967296", wantErr: true},
+		{name: "negative flag", flags: []string{"--egressVerificationInterval=-5"}, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("egress_verification_interval", tt.env)
+			configPath := ""
+			if tt.file != "" {
+				configPath = writeRuntimeConfig(t, tt.file)
+			}
+			t.Setenv("config_file", configPath)
+			cmd := newRuntimeConfigTestCommand("manager")
+			err := cmd.ParseFlags(tt.flags)
+			if err == nil {
+				err = loadRuntimeConfig(cmd)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("configuration error = %v, want error %t", err, tt.wantErr)
+			}
+			if err == nil && initConfig.EgressVerificationInterval != tt.want {
+				t.Fatalf("egress verification interval = %d, want %d", initConfig.EgressVerificationInterval, tt.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeCommandDerivesDHCPFromFileDNSMode(t *testing.T) {
 	t.Setenv("dhcp_mode", "")
 	os.Unsetenv("dhcp_mode")
@@ -172,6 +213,7 @@ func newRuntimeConfigTestCommand(name string) *cobra.Command {
 	cmd.Flags().BoolVar(&initConfig.LoadBalancerClassLegacyHandling, "lbClassNameLegacyHandling", true, "")
 	cmd.Flags().StringVar(&initConfig.LoadBalancerClassName, "lbClassName", kubevip.LBClassName, "")
 	cmd.Flags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "")
+	cmd.Flags().Uint32Var(&initConfig.EgressVerificationInterval, "egressVerificationInterval", kubevip.DefaultEgressVerificationInterval, "")
 	cmd.Flags().StringVar(&initConfig.ConfigFile, "config-file", "", "")
 	cmd.Flags().StringVar(&initConfig.BGPPeerConfig.Address, "peerAddress", "", "")
 	cmd.Flags().Uint32Var(&initConfig.BGPPeerConfig.AS, "peerAS", 65000, "")

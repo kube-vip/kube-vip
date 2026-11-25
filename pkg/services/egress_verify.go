@@ -7,13 +7,12 @@ import (
 	log "log/slog"
 	"time"
 
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/nftables"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/utils"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
-
-const defaultEgressVerificationInterval = time.Minute
 
 func egressFamily(address string) egressFamilies {
 	if utils.IsIPv6(address) {
@@ -28,7 +27,11 @@ func (p *Processor) startEgressVerification(state *serviceEgressState, svcCtx *s
 	ctx, cancel := context.WithCancel(state.ctx)
 	state.cancelVerification = cancel
 	readiness := svcCtx.CurrentReadiness()
-	interval := p.egressVerificationInterval
+	seconds := p.config.EgressVerificationInterval
+	if seconds == 0 {
+		seconds = kubevip.DefaultEgressVerificationInterval
+	}
+	interval := time.Duration(seconds) * time.Second
 	state.wg.Go(func() {
 		defer cancel()
 		timer := time.NewTimer(wait.Jitter(interval, .1))

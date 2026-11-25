@@ -383,6 +383,12 @@ func generatePodSpec(c *Config, image, imageVersion string, inCluster bool) (*co
 				Value: strconv.FormatBool(c.EgressWithNftables),
 			})
 		}
+		if c.EgressVerificationInterval != 0 && c.EgressVerificationInterval != DefaultEgressVerificationInterval {
+			newEnvironment = append(newEnvironment, corev1.EnvVar{
+				Name:  egressVerificationInterval,
+				Value: strconv.FormatUint(uint64(c.EgressVerificationInterval), 10),
+			})
+		}
 		if c.LoadBalancerClassOnly {
 			lbClassOnlyVar := []corev1.EnvVar{
 				{

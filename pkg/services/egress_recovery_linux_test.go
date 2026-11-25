@@ -428,8 +428,8 @@ func TestRecoverEgressAfterRuleRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := newEgressRecoveryNodeInNamespace(t, "node-a", client, service, true, namespace)
-	const checkInterval = 100 * time.Millisecond
-	node.processor.egressVerificationInterval = checkInterval
+	const checkIntervalSeconds = 1
+	node.processor.config.EgressVerificationInterval = checkIntervalSeconds
 	node.reconcile(t, service, true)
 	node.start(t, service)
 	node.waitForDatapath(t, service, true)
@@ -441,7 +441,7 @@ func TestRecoverEgressAfterRuleRemoval(t *testing.T) {
 	if err != nil || len(before) != 2 {
 		t.Fatalf("expected two installed SNAT rules, got %d (error %v)", len(before), err)
 	}
-	time.Sleep(3 * checkInterval)
+	time.Sleep(3 * checkIntervalSeconds * time.Second)
 	intact, err := conn.GetRules(want.Table, want)
 	if err != nil || len(intact) != len(before) || intact[0].Handle != before[0].Handle || intact[1].Handle != before[1].Handle {
 		t.Fatalf("healthy SNAT rules changed during verification (error %v)", err)
