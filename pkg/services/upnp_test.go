@@ -89,7 +89,11 @@ func TestMapUPNPForwardsCancelsGatewayRequest(t *testing.T) {
 			defer close(release)
 			wantAction := `"` + internetgateway2.URN_WANIPConnection_1 + "#" + action + `"`
 			transport := upnpTestTransport(func(req *http.Request) (*http.Response, error) {
-				if slices.Contains(req.Header["SOAPACTION"], wantAction) {
+				// goupnp writes SOAPACTION directly without canonicalizing the header name.
+				for name, values := range req.Header {
+					if !strings.EqualFold(name, "SOAPAction") || !slices.Contains(values, wantAction) {
+						continue
+					}
 					select {
 					case started <- struct{}{}:
 					default:
