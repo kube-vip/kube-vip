@@ -151,9 +151,12 @@ func (p *Processor) Reconcile(ctx context.Context, event watch.Event, serviceFun
 		return p.deleteTrackedService(svc)
 	}
 
-	// Check if we ignore this service
+	// Opting out also retires any existing kube-vip ownership.
 	if svc.Annotations[kubevip.LoadbalancerIgnore] == "true" {
 		log.Info("ignore annotation for kube-vip", "service name", svc.Name)
+		if _, tracked := p.svcMap.Load(svc.UID); tracked || p.findServiceInstance(svc) != nil {
+			return p.deleteTrackedService(svc)
+		}
 		return nil
 	}
 
