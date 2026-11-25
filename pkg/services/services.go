@@ -890,19 +890,23 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 	// If upnp is enabled then update the gateway/router with the address
 	// TODO - check if this implementation for dualstack is correct
 
-	gateways := upnp.GetGatewayClients(ctx)
+	mapUPNPForwards(ctx, s, upnp.GetGatewayClients(ctx))
+}
 
+func mapUPNPForwards(ctx context.Context, s *instance.Instance, gateways []upnp.Gateway) {
 	// Determine desired UPNP TTL / "lease duration". Passed into the library as integer seconds from now, as the
 	// underlying XML API wants integer seconds.
 	leaseDurationSec := upnpLeaseDurationForServiceSec(s)
 
-	// Reset Gateway IPs to remove stale addresses
-	s.UPNPGatewayIPs = make([]string, 0)
+	gatewayIPs := make([]string, 0)
 
 	vips, _ := instance.FetchServiceAddresses(s.ServiceSnapshot)
 	for _, vip := range vips {
 		for _, port := range s.ServiceSnapshot.Spec.Ports {
 			for _, gw := range gateways {
+				if ctx.Err() != nil {
+					return
+				}
 
 				forwardSucessful := false
 				if gw.WANIPv6FirewallControlClient != nil {
@@ -921,9 +925,9 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				if !forwardSucessful {
 					log.Info("[UPNP] Adding map", "vip", vip, "port", port.Port, "service", s.ServiceSnapshot.Name, "leaseDurationSec", leaseDurationSec)
 
-					portMappingErr := gw.ConnectionClient.AddPortMapping("0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.ServiceSnapshot.Name, leaseDurationSec) //nolint  TODO
+					portMappingErr := upnp.AddPortMapping(ctx, gw.ConnectionClient, "0.0.0.0", uint16(port.Port), strings.ToUpper(string(port.Protocol)), uint16(port.Port), vip, true, s.ServiceSnapshot.Name, leaseDurationSec) //nolint TODO
 					if portMappingErr == nil {
-						ip, err := gw.ConnectionClient.GetExternalIPAddress()
+						ip, err := upnp.GetExternalIPAddress(ctx, gw.ConnectionClient)
 						if err != nil {
 							// Log the error but continue on the off chance the mapping was successful
 							log.Error("[UPNP] Unable to get external IP address from gateway", "service", s.ServiceSnapshot.Name, "port", port.Port, "err", err)
@@ -938,18 +942,20 @@ func (p *Processor) upnpMap(ctx context.Context, s *instance.Instance) {
 				}
 
 				if forwardSucessful {
-					ip, err := gw.ConnectionClient.GetExternalIPAddress()
+					ip, err := upnp.GetExternalIPAddress(ctx, gw.ConnectionClient)
 					if err == nil {
-						s.UPNPGatewayIPs = append(s.UPNPGatewayIPs, ip)
+						gatewayIPs = append(gatewayIPs, ip)
 					}
 				}
 			}
 		}
 	}
 
-	// Remove duplicate IPs
-	slices.Sort(s.UPNPGatewayIPs)
-	s.UPNPGatewayIPs = slices.Compact(s.UPNPGatewayIPs)
+	if ctx.Err() == nil {
+		// Replace stale gateway IPs after a completed refresh.
+		slices.Sort(gatewayIPs)
+		s.UPNPGatewayIPs = slices.Compact(gatewayIPs)
+	}
 }
 
 // updateStatus reads and updates tracked instance state. The caller must hold the
@@ -1104,6 +1110,9 @@ func (p *Processor) RefreshUPNPForwards(ctx context.Context) {
 
 			log.Info("[UPNP] Refreshing Instances", "number of instances", len(instances))
 			for _, serviceInstance := range instances {
+				if ctx.Err() != nil {
+					return
+				}
 				p.refreshUPNPForward(ctx, serviceInstance)
 			}
 		}
@@ -1122,11 +1131,29 @@ func (p *Processor) refreshUPNPForward(ctx context.Context, serviceInstance *ins
 	}()
 
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}}
-	if p.findServiceInstance(service) != serviceInstance {
+	if ctx.Err() != nil || p.findServiceInstance(service) != serviceInstance {
 		return
 	}
-	p.upnpMap(ctx, serviceInstance)
-	if err := p.updateStatus(ctx, serviceInstance); err != nil {
+	svcCtx, err := p.getServiceContext(uid)
+	if err != nil {
+		log.Warn("[UPNP] looking up Service context", "uid", uid, "err", err)
+		return
+	}
+	if svcCtx == nil || svcCtx.Ctx.Err() != nil {
+		return
+	}
+
+	// Service teardown cancels its context before waiting for this lock.
+	refreshCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopServiceCancellation := context.AfterFunc(svcCtx.Ctx, cancel)
+	defer stopServiceCancellation()
+
+	p.upnpMap(refreshCtx, serviceInstance)
+	if refreshCtx.Err() != nil {
+		return
+	}
+	if err := p.updateStatus(refreshCtx, serviceInstance); err != nil && refreshCtx.Err() == nil {
 		log.Warn("[UPNP] Error updating service", "ip", serviceInstance.ServiceSnapshot.Name, "err", err)
 	}
 }
