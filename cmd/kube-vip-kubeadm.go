@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	log "log/slog"
-
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/spf13/cobra"
 )
@@ -51,47 +49,40 @@ Example:
 
 The output YAML should be written to the kubeadm manifests directory, e.g.:
   kube-vip kubeadm init ... > /etc/kubernetes/manifests/kube-vip.yaml`,
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cmd.SilenceUsage = true
+		var err error
 
 		initConfig.LoadBalancers = append(initConfig.LoadBalancers, initLoadBalancer)
-		err := kubevip.ParseEnvironment(&initConfig)
-		if err != nil {
-			log.Error("parsing environment", "err", err)
-			return
+		if err := kubevip.ParseEnvironment(&initConfig); err != nil {
+			return fmt.Errorf("parsing environment: %w", err)
 		}
 		if err := initConfig.Validate(); err != nil {
-			log.Error("validating configuration", "err", err)
-			return
+			return fmt.Errorf("validating configuration: %w", err)
 		}
 
-		// TODO - check for certain things VIP/interfaces
 		if initConfig.Interface == "" {
-			_ = cmd.Help()
-			log.Error("No interface is specified for kube-vip to bind to")
-			return
+			return fmt.Errorf("no interface is specified for kube-vip to bind to")
 		}
 
 		if initConfig.VIP == "" && initConfig.Address == "" {
-			_ = cmd.Help()
-			log.Error("No address is specified for kube-vip to expose services on")
-			return
+			return fmt.Errorf("no address is specified for kube-vip to expose services on")
 		}
 
 		// Ensure there is an address to generate the CIDR from
 		if initConfig.VIPSubnet == "" && initConfig.Address != "" {
 			initConfig.VIPSubnet, err = GenerateCidrRange(initConfig.Address, initConfig.DNSMode)
 			if err != nil {
-				log.Error("generating VIPSubnet", "err", err)
-				return
+				return fmt.Errorf("generating VIPSubnet: %w", err)
 			}
 		}
 
 		cfg, err := kubevip.GeneratePodManifestFromConfig(&initConfig, image, Release.Version, inCluster)
 		if err != nil {
-			log.Error("unable to create manifest", "err", err)
-			return
+			return fmt.Errorf("unable to create manifest: %w", err)
 		}
-		fmt.Println(cfg) // output manifest to stdout
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), cfg)
+		return err
 	},
 }
 

@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,5 +97,40 @@ func TestKubeadmJoinRejectsInvalidConfiguration(t *testing.T) {
 				t.Fatalf("expected join failure with %q: err=%v stdout=%q stderr=%q", tt.diagnostic, err, stdout, stderr)
 			}
 		})
+	}
+}
+
+func TestKubeadmInitReturnsErrors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"invalid config", []string{"--interface=eth0", "--vip=192.0.2.100", "--logFormat=yaml"}, "expected text or json"},
+		{"missing interface", []string{"--vip=192.0.2.100"}, "no interface"},
+		{"missing address", []string{"--interface=eth0"}, "no address"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"kubeadm", "init"}, test.args...)
+			stdout, stderr, err := runLoggingProcess(t, "command", nil, args...)
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || stdout != "" || !strings.Contains(stderr, test.want) {
+				t.Fatalf("expected exit code 1 and %q on stderr: err=%v stdout=%q stderr=%q", test.want, err, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestKubeadmInitWritesManifest(t *testing.T) {
+	stdout, stderr, err := runLoggingProcess(t, "command", nil, "kubeadm", "init", "--interface=eth0", "--vip=192.0.2.100", "--controlplane")
+	if err != nil || stderr != "" {
+		t.Fatalf("init failed: err=%v stderr=%q", err, stderr)
+	}
+	var pod corev1.Pod
+	if err := yaml.Unmarshal([]byte(stdout), &pod); err != nil {
+		t.Fatalf("invalid Pod manifest: %v", err)
+	}
+	if pod.Kind != "Pod" || len(pod.Spec.Containers) != 1 {
+		t.Fatalf("unexpected Pod manifest: %+v", pod)
 	}
 }
