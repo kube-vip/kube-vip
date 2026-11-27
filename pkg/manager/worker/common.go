@@ -224,17 +224,14 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 				return
 			}
 			wg.Go(func() {
-				a.OnStartedLeading(ctx)
-				metrics.LeaderTransitionsTotal.WithLabelValues(leaseID.Name()).Inc()
-				metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(1)
+				onStartedLeading(ctx, a, config.NodeName, leaseID.Name())
 			})
 		},
 		OnStoppedLeading: func() {
 			if !electionSession.IsCurrent() {
 				return
 			}
-			a.OnStoppedLeading()
-			metrics.IsLeader.WithLabelValues(config.NodeName, leaseID.Name()).Set(0)
+			onStoppedLeading(a, config.NodeName, leaseID.Name())
 		},
 		OnNewLeader: a.OnNewLeader,
 	}
@@ -242,4 +239,17 @@ func (c *Common) runGlobalElectionWithVIPProvider(ctx context.Context, a electio
 	if err := election.RunOrDie(electionCtx, run, config); err != nil {
 		log.Error("leaderelection failed", "err", err, "id", config.NodeName, "name", leaseID.Name())
 	}
+}
+
+func onStartedLeading(ctx context.Context, actions election.Actions, nodeName, leaseName string) {
+	metrics.LeaderTransitionsTotal.WithLabelValues(leaseName).Inc()
+	metrics.IsLeader.WithLabelValues(nodeName, leaseName).Set(1)
+	actions.OnStartedLeading(ctx)
+}
+
+// onStoppedLeading clears the leader gauge before the potentially blocking
+// cleanup so two nodes never report kube_vip_is_leader=1 at the same time.
+func onStoppedLeading(actions election.Actions, nodeName, leaseName string) {
+	metrics.IsLeader.WithLabelValues(nodeName, leaseName).Set(0)
+	actions.OnStoppedLeading()
 }
