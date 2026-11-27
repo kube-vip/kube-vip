@@ -1311,16 +1311,6 @@ func DeleteDNATRule(wgIf string, IPv6 bool, service string) error {
 		return nil
 	}
 
-	// Delete the named DNAT map
-	dnatMapName := fmt.Sprintf("dnat_%s", service)
-	dnatMap, err := conn.GetSetByName(table, dnatMapName)
-	if err == nil && dnatMap != nil {
-		conn.DelSet(dnatMap)
-	}
-	if dnatPortsMap, err := conn.GetSetByName(table, dnatMapName+"_ports"); err == nil && dnatPortsMap != nil {
-		conn.DelSet(dnatPortsMap)
-	}
-
 	// Find and delete the DNAT rule by matching UserData
 	dnatChainName, _, _, _, _ := getTunnelChainNames(wgIf)
 	dnatChain, err := conn.ListChain(table, dnatChainName)
@@ -1336,8 +1326,21 @@ func DeleteDNATRule(wgIf string, IPv6 bool, service string) error {
 			}
 		}
 	}
+	delDNATMaps(conn, table, service)
 
 	return conn.Flush()
+}
+
+// delDNATMaps queues deletion of the per-service DNAT address and port maps
+// created by ApplyDNAT. Queue it after the rules referencing the maps: the
+// kernel rejects deleting a map that is still in use.
+func delDNATMaps(conn *nftables.Conn, table *nftables.Table, service string) {
+	dnatMapName := fmt.Sprintf("dnat_%s", service)
+	for _, name := range []string{dnatMapName, dnatMapName + "_ports"} {
+		if set, err := conn.GetSetByName(table, name); err == nil && set != nil {
+			conn.DelSet(set)
+		}
+	}
 }
 
 // DeleteIngressChains removes DNAT rules and maps for a service from all tunnels.
@@ -1352,13 +1355,6 @@ func DeleteIngressChains(IPv6 bool, service string) error {
 
 	if _, err := FilterTable(conn, table.Name, IPv6); err != nil {
 		return nil // Table doesn't exist
-	}
-
-	// Delete the named DNAT map for this service
-	dnatMapName := fmt.Sprintf("dnat_%s", service)
-	dnatMap, err := conn.GetSetByName(table, dnatMapName)
-	if err == nil && dnatMap != nil {
-		conn.DelSet(dnatMap)
 	}
 
 	// Search all chains starting with "kvip_dnat_" for rules with this service's UserData
@@ -1394,6 +1390,7 @@ func DeleteIngressChains(IPv6 bool, service string) error {
 			conn.DelChain(ch)
 		}
 	}
+	delDNATMaps(conn, table, service)
 
 	return conn.Flush()
 }
