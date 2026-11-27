@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/netip"
 
+	"github.com/kube-vip/kube-vip/pkg/metrics"
+	"github.com/kube-vip/kube-vip/pkg/utils"
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
 )
 
@@ -60,23 +62,33 @@ func (b *Server) updateHost(ctx context.Context, route Route) error {
 	if !exists || b.nextHops[addr] != route.NextHop {
 		ip, _, err := net.ParseCIDR(addr)
 		if err != nil {
+			metrics.BGPRouteOperationsTotal.WithLabelValues("add", "error").Inc()
 			return err
 		}
 
 		p := b.getPathWithNextHop(ip, route.NextHop)
 		if p == nil {
+			metrics.BGPRouteOperationsTotal.WithLabelValues("add", "error").Inc()
 			return fmt.Errorf("failed to get path for %v", ip)
 		}
 
 		if _, err := b.s.AddPath(apiutil.AddPathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
+			metrics.BGPRouteOperationsTotal.WithLabelValues("add", "error").Inc()
 			return err
 		}
 		if b.nextHops == nil {
 			b.nextHops = make(map[string]string)
 		}
 		b.nextHops[addr] = route.NextHop
+		if !exists {
+			family := utils.IPv4Family
+			if ip.To4() == nil {
+				family = utils.IPv6Family
+			}
+			metrics.BGPRoutesAdvertised.WithLabelValues(family).Inc()
+		}
 		log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects)+1, "object", object)
 	}
 
@@ -86,6 +98,7 @@ func (b *Server) updateHost(ctx context.Context, route Route) error {
 	}
 	objects[object] = true
 
+	metrics.BGPRouteOperationsTotal.WithLabelValues("add", "ok").Inc()
 	return nil
 }
 
@@ -97,11 +110,13 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 	objects, exists := b.tracker[addr]
 	if !exists {
 		log.Debug("[BGP] deleting host - nothing to delete", "addr", addr, "object", object)
+		metrics.BGPRouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 		return nil
 	}
 
 	ip, _, err := net.ParseCIDR(addr)
 	if err != nil {
+		metrics.BGPRouteOperationsTotal.WithLabelValues("delete", "error").Inc()
 		return err
 	}
 
@@ -111,21 +126,40 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 	if len(objects) == 1 {
 		p := b.getPathWithNextHop(ip, b.nextHops[addr])
 		if p == nil {
+			metrics.BGPRouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 			return nil
 		}
 
 		if err := b.s.DeletePath(apiutil.DeletePathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
+			metrics.BGPRouteOperationsTotal.WithLabelValues("delete", "error").Inc()
 			return err
 		}
+		family := utils.IPv4Family
+		if ip.To4() == nil {
+			family = utils.IPv6Family
+		}
+		metrics.BGPRoutesAdvertised.WithLabelValues(family).Dec()
 		delete(b.tracker, addr)
 		delete(b.nextHops, addr)
+		familyStillAdvertised := false
+		for trackedAddress := range b.tracker {
+			trackedIP, _, err := net.ParseCIDR(trackedAddress)
+			if err == nil && (trackedIP.To4() == nil) == (ip.To4() == nil) {
+				familyStillAdvertised = true
+				break
+			}
+		}
+		if !familyStillAdvertised {
+			metrics.BGPRoutesAdvertised.DeleteLabelValues(family)
+		}
 		log.Debug("[BGP] deleted host", "addr", addr, "cnt", len(objects), "object", object)
 	} else {
 		delete(objects, object)
 		log.Debug("[BGP] deleting from tracker only", "addr", addr, "object", object)
 	}
 
+	metrics.BGPRouteOperationsTotal.WithLabelValues("delete", "ok").Inc()
 	return nil
 }

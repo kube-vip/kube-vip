@@ -24,6 +24,7 @@ import (
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
+	"github.com/kube-vip/kube-vip/pkg/metrics"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	"github.com/kube-vip/kube-vip/pkg/upnp"
 	"github.com/kube-vip/kube-vip/pkg/utils"
@@ -633,6 +634,8 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	}
 
 	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
+	metrics.UPNPMappings.Sub(float64(serviceInstance.UPNPMappingCount))
+	serviceInstance.UPNPMappingCount = 0
 
 	return nil
 }
@@ -898,6 +901,8 @@ func mapUPNPForwards(ctx context.Context, s *instance.Instance, gateways []upnp.
 	// underlying XML API wants integer seconds.
 	leaseDurationSec := upnpLeaseDurationForServiceSec(s)
 
+	previousMappings := s.UPNPMappingCount
+	successfulMappings := 0
 	gatewayIPs := make([]string, 0)
 
 	vips, _ := instance.FetchServiceAddresses(s.ServiceSnapshot)
@@ -942,6 +947,7 @@ func mapUPNPForwards(ctx context.Context, s *instance.Instance, gateways []upnp.
 				}
 
 				if forwardSucessful {
+					successfulMappings++
 					ip, err := upnp.GetExternalIPAddress(ctx, gw.ConnectionClient)
 					if err == nil {
 						gatewayIPs = append(gatewayIPs, ip)
@@ -955,7 +961,13 @@ func mapUPNPForwards(ctx context.Context, s *instance.Instance, gateways []upnp.
 		// Replace stale gateway IPs after a completed refresh.
 		slices.Sort(gatewayIPs)
 		s.UPNPGatewayIPs = slices.Compact(gatewayIPs)
+		setUPNPMappingSnapshot(s, previousMappings, successfulMappings)
 	}
+}
+
+func setUPNPMappingSnapshot(s *instance.Instance, previous, current int) {
+	s.UPNPMappingCount = current
+	metrics.UPNPMappings.Add(float64(current - previous))
 }
 
 // updateStatus reads and updates tracked instance state. The caller must hold the

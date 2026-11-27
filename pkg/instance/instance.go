@@ -59,7 +59,8 @@ type Instance struct {
 	vlanOwned     atomic.Bool
 
 	// External Gateway IP the service is forwarded from
-	UPNPGatewayIPs []string
+	UPNPGatewayIPs   []string
+	UPNPMappingCount int
 
 	// Kubernetes service mapping
 	ServiceUID       types.UID
