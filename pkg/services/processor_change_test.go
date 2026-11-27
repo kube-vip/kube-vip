@@ -3,12 +3,16 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 )
 
 func TestServiceSnapshotChangedBGPForwardingNode(t *testing.T) {
@@ -74,6 +78,37 @@ func TestValidateBGPForwardingNode(t *testing.T) {
 				t.Fatalf("existing Services must not be affected: %v", err)
 			}
 		})
+	}
+}
+
+func TestServiceSnapshotNewerUsesGenerationOnlyForSameUID(t *testing.T) {
+	watched := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-new"}}
+	if !serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 11, ResourceVersion: "opaque-old"}}) {
+		t.Fatal("expected delayed generation to be rejected")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-a", Generation: 12, ResourceVersion: "opaque-other"}}) {
+		t.Fatal("equal generation should remain admissible")
+	}
+	if serviceSnapshotNewer(watched, &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "uid-b", Generation: 99, ResourceVersion: "opaque-recreated"}}) {
+		t.Fatal("a recreated Service UID must remain admissible")
+	}
+}
+
+func TestWasForcedServiceUsesWatchedGeneration(t *testing.T) {
+	uid := types.UID("forced-uid")
+	ctx := servicecontext.New(context.Background())
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{
+		UID:         uid,
+		Annotations: map[string]string{kubevip.ForcePerServiceElection: "true"},
+	}})
+	p := &Processor{serviceLock: NewServiceLock()}
+	p.svcMap.Store(uid, ctx)
+	if !p.wasForcedService(uid) {
+		t.Fatal("expected watched forced service to be recognized")
+	}
+	ctx.SetWatchedService(&v1.Service{ObjectMeta: metav1.ObjectMeta{UID: uid}})
+	if p.wasForcedService(uid) {
+		t.Fatal("ordinary replacement must not be treated as forced ownership")
 	}
 }
 
@@ -198,5 +233,25 @@ func TestChangedSinceWatchedForcePerServiceElection(t *testing.T) {
 				t.Fatalf("changedSinceWatched() with watched Service = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestCurrentLeaseHolderIgnoresExpiredLease(t *testing.T) {
+	now := time.Now()
+	lease := func(renewed time.Time) *coordinationv1.Lease {
+		return &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       ptr.To("node-a"),
+			LeaseDurationSeconds: ptr.To(int32(15)),
+			RenewTime:            &metav1.MicroTime{Time: renewed},
+		}}
+	}
+	if got := currentLeaseHolder(lease(now), now); got != "node-a" {
+		t.Fatalf("current lease holder = %q, want node-a", got)
+	}
+	if got := currentLeaseHolder(lease(now.Add(-time.Minute)), now); got != "" {
+		t.Fatalf("expired lease holder = %q, want empty", got)
+	}
+	if got := currentLeaseHolder(&coordinationv1.Lease{}, now); got != "" {
+		t.Fatalf("lease without holder = %q, want empty", got)
 	}
 }
