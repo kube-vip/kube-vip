@@ -228,3 +228,31 @@ func destinationPortSetID(t *testing.T, rule *googlenftables.Rule) (uint32, bool
 
 	return 0, false
 }
+
+func TestMultiTargetDNATLookupsUseTargetIndex(t *testing.T) {
+	exprs := multiTargetDNATExprs("wg0", 6, 80, 3, "dnat_svc", false)
+
+	indexReg := uint32(0)
+	lookups := map[string]uint32{}
+	for _, e := range exprs {
+		switch e := e.(type) {
+		case *expr.Numgen:
+			indexReg = e.Register
+		case *expr.Lookup:
+			if indexReg == 0 || e.SourceRegister != indexReg {
+				t.Fatalf("lookup %q reads register %d, which no longer holds the numgen target index", e.SetName, e.SourceRegister)
+			}
+			lookups[e.SetName] = e.DestRegister
+			if e.DestRegister == indexReg {
+				indexReg = 0 // the target index is clobbered from here on
+			}
+		}
+	}
+
+	if got, ok := lookups["dnat_svc"]; !ok || got != 1 {
+		t.Fatalf("address lookup dest register = %d (found %t), want 1", got, ok)
+	}
+	if got, ok := lookups["dnat_svc_ports"]; !ok || got != 2 {
+		t.Fatalf("port lookup dest register = %d (found %t), want 2", got, ok)
+	}
+}
