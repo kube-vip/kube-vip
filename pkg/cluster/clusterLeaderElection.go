@@ -114,7 +114,10 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 				return
 			}
 			if c.EnableARP && c.EnableControlPlane && c.ControlPlaneHealthCheck.Address != "" {
-				wg.Go(func() {
+				leaderWG := sync.WaitGroup{}
+				defer leaderWG.Wait()
+
+				leaderWG.Go(func() {
 					cluster.arpHealthCheckLoop(ctx, c, cancelElection)
 				})
 			}
@@ -149,18 +152,25 @@ func (cluster *Cluster) arpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		return
 	}
 
+	probe, err := backend.New(&backend.Config{
+		Type:    backend.HTTP,
+		Address: c.ControlPlaneHealthCheck.Address,
+		Client:  cluster.healthCheckHTTPClient,
+	})
+	if err != nil {
+		log.Error("Failed to create ARP health check probe", "err", err)
+		if ctx.Err() == nil {
+			onFailure()
+		}
+		return
+	}
+
 	log.Info("Starting ARP health check",
 		"address", c.ControlPlaneHealthCheck.Address,
 		"period", period,
 		"timeout", cluster.healthCheckHTTPClient.Timeout,
 		"threshold", c.ControlPlaneHealthCheck.FailureThreshold,
 	)
-
-	probe, probeErr := backend.New(&backend.Config{
-		Type:    backend.HTTP,
-		Address: c.ControlPlaneHealthCheck.Address,
-		Client:  cluster.healthCheckHTTPClient,
-	})
 
 	consecutiveFailures := 0
 	ticker := time.NewTicker(period)
@@ -170,10 +180,7 @@ func (cluster *Cluster) arpHealthCheckLoop(ctx context.Context, c *kubevip.Confi
 		if ctx.Err() != nil {
 			return
 		}
-		healthy, err := false, probeErr
-		if err == nil {
-			healthy, err = probe.Check(ctx)
-		}
+		healthy, err := probe.Check(ctx)
 		if ctx.Err() != nil {
 			return
 		}
