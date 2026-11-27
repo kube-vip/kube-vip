@@ -292,6 +292,12 @@ func TestBGPHealthCheckLoop_StopsOnContextCancel(t *testing.T) {
 
 	cancelContext()
 
+	withdrawal := bgpManager.waitForWithdrawal(t)
+	assertCleanupContext(t, withdrawal)
+	if bgpManager.isAnnounced() {
+		t.Fatal("health-checked BGP route remained announced after context cancellation")
+	}
+
 	select {
 	case <-vipServiceDone:
 	case <-time.After(5 * time.Second):
@@ -739,10 +745,20 @@ type mockBGPRouteManager struct {
 	announced map[string]bool
 	addErr    error
 	delErr    error
+	withdrawn chan withdrawalCall
+}
+
+// withdrawalCall records the context state a successful DelHost received.
+type withdrawalCall struct {
+	contextErr  error
+	hasDeadline bool
 }
 
 func newMockBGPRouteManager() *mockBGPRouteManager {
-	return &mockBGPRouteManager{announced: make(map[string]bool)}
+	return &mockBGPRouteManager{
+		announced: make(map[string]bool),
+		withdrawn: make(chan withdrawalCall, 10),
+	}
 }
 
 func (m *mockBGPRouteManager) AddHost(_ context.Context, addr string, _ string) error {
@@ -755,14 +771,42 @@ func (m *mockBGPRouteManager) AddHost(_ context.Context, addr string, _ string) 
 	return nil
 }
 
-func (m *mockBGPRouteManager) DelHost(_ context.Context, addr string, _ string) error {
+func (m *mockBGPRouteManager) DelHost(ctx context.Context, addr string, _ string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.delErr != nil {
 		return m.delErr
 	}
 	delete(m.announced, addr)
+	_, hasDeadline := ctx.Deadline()
+	select {
+	case m.withdrawn <- withdrawalCall{contextErr: ctx.Err(), hasDeadline: hasDeadline}:
+	default:
+	}
 	return nil
+}
+
+func (m *mockBGPRouteManager) waitForWithdrawal(t *testing.T) withdrawalCall {
+	t.Helper()
+	select {
+	case call := <-m.withdrawn:
+		return call
+	case <-time.After(5 * time.Second):
+		t.Fatal("route was not withdrawn")
+		return withdrawalCall{}
+	}
+}
+
+// assertCleanupContext checks that a shutdown withdrawal used a live, bounded
+// cleanup context rather than the already-cancelled service context.
+func assertCleanupContext(t *testing.T, call withdrawalCall) {
+	t.Helper()
+	if call.contextErr != nil {
+		t.Fatalf("withdrawal received canceled context: %v", call.contextErr)
+	}
+	if !call.hasDeadline {
+		t.Fatal("withdrawal context has no cleanup deadline")
+	}
 }
 
 func (m *mockBGPRouteManager) isAnnounced() bool {

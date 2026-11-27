@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -33,6 +34,8 @@ func (h *httpBackend) Check(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("health check request failed: %w", err)
 	}
 
+	// Drain the body so the keep-alive connection can be reused by the next poll.
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, h.addr)

@@ -4,6 +4,7 @@ package vip
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime"
 	"strings"
@@ -289,5 +290,24 @@ func TestMonitorDefaultInterfaceReturnsErrorWhenTestLinkIsSetDown(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("monitor did not report the interface going down")
+	}
+}
+
+func TestMonitorDefaultInterfaceDoesNotRetryTerminalFailures(t *testing.T) {
+	attempts := 0
+	subscribe := func(context.Context) (chan netlink.RouteUpdate, chan netlink.LinkUpdate, error) {
+		attempts++
+		linkCh := make(chan netlink.LinkUpdate, 1)
+		linkCh <- netlink.LinkUpdate{Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Index: 1}}}
+		return make(chan netlink.RouteUpdate), linkCh, nil
+	}
+	lookup := func() (*net.Interface, error) { return &net.Interface{Index: 1, Name: "test0"}, nil }
+
+	err := monitorDefaultInterfaceWithRetry(context.Background(), &net.Interface{Index: 1, Name: "test0"}, subscribe, lookup, time.Millisecond)
+	if !errors.Is(err, errDefaultInterfaceDown) {
+		t.Fatalf("monitor error = %v, want errDefaultInterfaceDown", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("subscription attempts = %d, want 1", attempts)
 	}
 }
