@@ -416,7 +416,7 @@ func ClearIPTables(useNftables bool, namespace string, protocol iptables.Protoco
 		log.Info("[egress] Cleaning any dangling kube-vip egress rules")
 		cleanErr := i.CleanIPtables()
 		if cleanErr != nil {
-			return err
+			return cleanErr
 		}
 	}
 	return nil
