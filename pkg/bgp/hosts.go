@@ -57,34 +57,35 @@ func (b *Server) updateHost(ctx context.Context, route Route) error {
 		}
 	}
 
-	if !exists || b.nextHops[addr] != route.NextHop {
-		ip, _, err := net.ParseCIDR(addr)
-		if err != nil {
-			return err
-		}
-
-		p := b.getPathWithNextHop(ip, route.NextHop)
-		if p == nil {
-			return fmt.Errorf("failed to get path for %v", ip)
-		}
-
-		if _, err := b.s.AddPath(apiutil.AddPathRequest{
-			Paths: []*apiutil.Path{p},
-		}); err != nil {
-			return err
-		}
-		if b.nextHops == nil {
-			b.nextHops = make(map[string]string)
-		}
-		b.nextHops[addr] = route.NextHop
-		log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects)+1, "object", object)
+	ip, _, err := net.ParseCIDR(addr)
+	if err != nil {
+		return err
 	}
+
+	p := b.getPathWithNextHop(ip, route.NextHop)
+	if p == nil {
+		return fmt.Errorf("failed to get path for %v", ip)
+	}
+
+	// Reconcile the path even for tracked references: the BGP daemon may have
+	// restarted or lost the route while the local tracker remained populated.
+	// GoBGP does not re-send an UPDATE for an identical locally originated path.
+	if _, err := b.s.AddPath(apiutil.AddPathRequest{
+		Paths: []*apiutil.Path{p},
+	}); err != nil {
+		return err
+	}
+	if b.nextHops == nil {
+		b.nextHops = make(map[string]string)
+	}
+	b.nextHops[addr] = route.NextHop
 
 	if !exists {
 		objects = make(map[string]bool)
 		b.tracker[addr] = objects
 	}
 	objects[object] = true
+	log.Debug("[BGP] added host", "addr", addr, "cnt", len(objects), "object", object)
 
 	return nil
 }
@@ -117,6 +118,8 @@ func (b *Server) DelHost(ctx context.Context, addr string, object string) error 
 		if err := b.s.DeletePath(apiutil.DeletePathRequest{
 			Paths: []*apiutil.Path{p},
 		}); err != nil {
+			// Keep the reference: the path may still be installed, and a later
+			// DelHost must retry the withdrawal.
 			return err
 		}
 		delete(b.tracker, addr)
