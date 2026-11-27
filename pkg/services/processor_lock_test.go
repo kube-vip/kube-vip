@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/utils/keymutex"
 )
 
 type testLabeler struct {
@@ -544,6 +545,21 @@ func TestDeleteServiceForContextRejectsStaleServiceContext(t *testing.T) {
 	}
 }
 
+// notifyingKeyMutex reports attempts to lock key before blocking on it, so a
+// test can tell when a goroutine is waiting on a lock the test holds.
+type notifyingKeyMutex struct {
+	keymutex.KeyMutex
+	key      string
+	attempts chan<- string
+}
+
+func (m *notifyingKeyMutex) LockKey(key string) {
+	if key == m.key {
+		m.attempts <- key
+	}
+	m.KeyMutex.LockKey(key)
+}
+
 // TestDeleteSerializesWithConcurrentEndpointCleanup exercises the public Delete
 // path while an endpoint callback is already queued for the same Service UID.
 // Both paths must serialize their instance removal and leave no stale instance.
@@ -574,11 +590,11 @@ func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
 			}
 		}
 	}()
-	lockAttempts := make(chan types.UID, 2)
-	processor.serviceLock.beforeLock = func(attempted types.UID) {
-		if attempted == uid {
-			lockAttempts <- attempted
-		}
+	lockAttempts := make(chan string, 2)
+	processor.serviceLock.mutex = &notifyingKeyMutex{
+		KeyMutex: processor.serviceLock.mutex,
+		key:      string(uid),
+		attempts: lockAttempts,
 	}
 	endpointDone := make(chan error, 1)
 	deleteDone := make(chan error, 1)
