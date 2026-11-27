@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The binaries are built by the new `make release-binaries` target, which writes them to `dist/` and stamps them with the release tag
   - README documents downloading, verifying and running the binary as a systemd service
 - Add optional JSON logging for `manager` and `service`, including Kubernetes library logs, with a choice of RFC3339 or Unix-millisecond timestamps. Text logging remains the default.
+- Prometheus counters and gauges for VIP, ARP, NDP, route, and DNS dataplane
+  operations, including restart-safe DNS VIP ownership accounting.
+- Prometheus metrics for build information, service activity, reconciliation,
+  leader election, and watcher-loop liveness, with a metrics reference guide.
 - Configurable control-plane health check for BGP mode without leader election
   - Polls a configurable HTTP(S) endpoint (e.g. `https://localhost:6443/livez`) to verify the exposed service is healthy (usually the local kube-apiserver)
   - Withdraws the BGP route after a configurable number of consecutive failures, removing the unhealthy node from the ECMP set
