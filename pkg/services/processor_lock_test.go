@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/utils/keymutex"
 )
 
 type testLabeler struct {
@@ -541,6 +542,100 @@ func TestDeleteServiceForContextRejectsStaleServiceContext(t *testing.T) {
 	}
 	if got := processor.findServiceInstance(service); got != serviceInstance {
 		t.Fatal("stale Service context deleted the current instance")
+	}
+}
+
+// notifyingKeyMutex reports attempts to lock key before blocking on it, so a
+// test can tell when a goroutine is waiting on a lock the test holds.
+type notifyingKeyMutex struct {
+	keymutex.KeyMutex
+	key      string
+	attempts chan<- string
+}
+
+func (m *notifyingKeyMutex) LockKey(key string) {
+	if key == m.key {
+		m.attempts <- key
+	}
+	m.KeyMutex.LockKey(key)
+}
+
+// TestDeleteSerializesWithConcurrentEndpointCleanup exercises the public Delete
+// path while an endpoint callback is already queued for the same Service UID.
+// Both paths must serialize their instance removal and leave no stale instance.
+func TestDeleteSerializesWithConcurrentEndpointCleanup(t *testing.T) {
+	uid := types.UID("service-delete-race")
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "service-delete-race", Namespace: "default", UID: uid,
+	}}
+	svcCtx := servicecontext.New(context.Background())
+	processor := &Processor{
+		serviceLock:      newTestServiceLocks(),
+		config:           &kubevip.Config{},
+		leaseMgr:         lease.NewManager(),
+		ServiceInstances: []*instance.Instance{{ServiceUID: uid, ServiceSnapshot: service}},
+	}
+	initializeTestElectionCoordinators(processor)
+	processor.svcMap.Store(uid, svcCtx)
+
+	// Hold the UID lock while both deletion paths are admitted. This makes the
+	// overlap deterministic: both goroutines must contend for the same lock
+	// after the test releases it, rather than merely starting near each other.
+	processor.serviceLock.Lock(uid)
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			if err := processor.serviceLock.Unlock(uid); err != nil {
+				t.Errorf("unlock service UID during cleanup: %v", err)
+			}
+		}
+	}()
+	lockAttempts := make(chan string, 2)
+	processor.serviceLock.mutex = &notifyingKeyMutex{
+		KeyMutex: processor.serviceLock.mutex,
+		key:      string(uid),
+		attempts: lockAttempts,
+	}
+	endpointDone := make(chan error, 1)
+	deleteDone := make(chan error, 1)
+	go func() {
+		endpointDone <- processor.deleteServiceForContext(context.Background(), uid, svcCtx)
+	}()
+	go func() {
+		deleteDone <- processor.Delete(watch.Event{Type: watch.Deleted, Object: service}, false)
+	}()
+	waitForLockAttempt := func() {
+		select {
+		case <-lockAttempts:
+		case <-time.After(time.Second):
+			t.Fatal("deletion path did not attempt the held UID lock")
+		}
+	}
+	waitForLockAttempt()
+	waitForLockAttempt()
+	if err := processor.serviceLock.Unlock(uid); err != nil {
+		t.Fatalf("unlock service UID: %v", err)
+	}
+	lockReleased = true
+
+	select {
+	case err := <-endpointDone:
+		if err != nil {
+			t.Fatalf("endpoint cleanup returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("endpoint cleanup did not complete")
+	}
+	select {
+	case err := <-deleteDone:
+		if err != nil {
+			t.Fatalf("Delete returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Delete did not complete")
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("concurrent Delete left a stale Service instance")
 	}
 }
 
