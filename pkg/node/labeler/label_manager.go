@@ -3,7 +3,6 @@ package labeler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -110,31 +109,27 @@ func (m *Manager) CleanUpLabels(ctx context.Context, keys []string) error {
 	return m.patchNode(ctx, labelOperationRemove, labels)
 }
 
-// patchNode patches the node with the given labels
+// patchNode patches the node with the given labels. It sends a JSON merge
+// patch, so removing a label that is already gone is not an error and does not
+// fail the other labels of the same patch.
 func (m *Manager) patchNode(ctx context.Context, operation labelOperation, labels map[string]string) error {
 	if len(labels) == 0 {
 		return nil
 	}
-	type patchStringLabel struct {
-		Op    string `json:"op"`
-		Path  string `json:"path"`
-		Value string `json:"value"`
-	}
 
-	patchLabels := []patchStringLabel{}
-	// generate the patch
+	patchLabels := make(map[string]*string, len(labels))
 	for k, v := range labels {
-		patchLabels = append(patchLabels, patchStringLabel{
-			Op: string(operation),
-			// replace all slashes with ~1
-			Path:  fmt.Sprintf("/metadata/labels/%s", strings.ReplaceAll(k, "/", "~1")),
-			Value: v,
-		})
+		if operation == labelOperationRemove {
+			patchLabels[k] = nil
+			continue
+		}
+		patchLabels[k] = &v
 	}
+	patch := map[string]any{"metadata": map[string]any{"labels": patchLabels}}
 
-	patchData, err := json.Marshal(patchLabels)
+	patchData, err := json.Marshal(patch)
 	if err != nil {
-		log.Debug("node patch marshaling failed", "err", err, "labels", labels, "patch", patchLabels)
+		log.Debug("node patch marshaling failed", "err", err, "labels", labels)
 		return errors.Wrapf(err, "node patch marshaling failed for labels %v", labels)
 	}
 
@@ -149,7 +144,7 @@ func (m *Manager) patchNode(ctx context.Context, operation labelOperation, label
 	}
 
 	// patch node
-	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx, m.nodeName, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx, m.nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		log.Debug("node patching failed", "err", err, "patchData", patchData)
 		return errors.Wrapf(err, "node patching failed with patch %s", string(patchData))

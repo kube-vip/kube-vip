@@ -60,16 +60,8 @@ func TestRemoveStaleNodeLabels(t *testing.T) {
 		var body any
 		switch name, isService := strings.CutPrefix(request.URL.Path, "/api/v1/namespaces/default/services/"); {
 		case request.URL.Path == "/api/v1/nodes/node-a" && request.Method == http.MethodPatch:
-			var patch []struct{ Op, Path string }
-			if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
-				t.Errorf("decode node patch: %v", err)
-			}
 			mu.Lock()
-			for _, op := range patch {
-				if op.Op == "remove" {
-					removed = append(removed, strings.TrimPrefix(op.Path, "/metadata/labels/"))
-				}
-			}
+			removed = append(removed, removedNodeLabels(t, request)...)
 			mu.Unlock()
 			body = node
 		case request.URL.Path == "/api/v1/nodes/node-a":
@@ -116,10 +108,10 @@ func TestRemoveStaleNodeLabels(t *testing.T) {
 	}
 	slices.Sort(removed)
 	want := []string{
-		"service-provided.kube-vip.io~1deleted.default",
-		"service-provided.kube-vip.io~1demoted.default",
-		"service-provided.kube-vip.io~1follower.default",
-		"service-provided.kube-vip.io~1stopped.default",
+		kubevip.ServiceProvided + "/deleted.default",
+		kubevip.ServiceProvided + "/demoted.default",
+		kubevip.ServiceProvided + "/follower.default",
+		kubevip.ServiceProvided + "/stopped.default",
 	}
 	if !slices.Equal(removed, want) {
 		t.Fatalf("removed labels = %v, want %v", removed, want)
@@ -167,16 +159,7 @@ func TestRecoverNodeLabels(t *testing.T) {
 		leaseKey = strings.Replace(leaseKey, "/leases/", "/", 1)
 		switch {
 		case request.URL.Path == "/api/v1/nodes/"+nodeName && request.Method == http.MethodPatch:
-			var patch []struct{ Op, Path string }
-			if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
-				t.Errorf("decode node patch: %v", err)
-			}
-			var removed []string
-			for _, op := range patch {
-				if op.Op == "remove" {
-					removed = append(removed, strings.TrimPrefix(op.Path, "/metadata/labels/"))
-				}
-			}
+			removed := removedNodeLabels(t, request)
 			mu.Lock()
 			patches = append(patches, removed)
 			mu.Unlock()
@@ -232,11 +215,32 @@ func TestRecoverNodeLabels(t *testing.T) {
 	removed := patches[0]
 	slices.Sort(removed)
 	want := []string{
-		"kube-vip.io~1has-ip",
-		"service-provided.kube-vip.io~1deleted.default",
-		"service-provided.kube-vip.io~1theirs.default",
+		kubevip.HasIP,
+		kubevip.ServiceProvided + "/deleted.default",
+		kubevip.ServiceProvided + "/theirs.default",
 	}
 	if !slices.Equal(removed, want) {
 		t.Fatalf("removed labels = %v, want %v", removed, want)
 	}
+}
+
+// removedNodeLabels decodes a node label merge patch and returns the keys it
+// removes.
+func removedNodeLabels(t *testing.T, request *http.Request) []string {
+	t.Helper()
+	var patch struct {
+		Metadata struct {
+			Labels map[string]*string `json:"labels"`
+		} `json:"metadata"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
+		t.Errorf("decode node patch: %v", err)
+	}
+	var removed []string
+	for key, value := range patch.Metadata.Labels {
+		if value == nil {
+			removed = append(removed, key)
+		}
+	}
+	return removed
 }
