@@ -9,16 +9,20 @@ import (
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/node"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const nodeLabelReconcileInterval = 2 * time.Minute
+
+// nodeLabelPatchTimeout bounds a stale label removal patch. Services claiming
+// a label wait for that patch, so it must stay short.
+const nodeLabelPatchTimeout = 5 * time.Second
 
 // RunNodeLabelReconcile periodically removes stale service-provided labels from
 // this node until ctx ends.
@@ -52,6 +56,7 @@ func (p *Processor) RemoveStaleNodeLabels(ctx context.Context, nodeLabels node.L
 	if err != nil {
 		return err
 	}
+	p.dropClaimedNodeLabels(labels)
 	stale := map[string]string{}
 	var errs []error
 	for key, value := range labels {
@@ -68,39 +73,62 @@ func (p *Processor) RemoveStaleNodeLabels(ctx context.Context, nodeLabels node.L
 			stale[key] = value
 		}
 	}
-	if len(stale) > 0 {
-		for _, inst := range p.serviceInstances() {
-			if err := p.deleteActiveInstanceLabels(inst, stale); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-	if len(stale) > 0 {
-		if err := nodeLabels.RemoveLabelWithContext(ctx, stale); err != nil {
-			errs = append(errs, err)
-		}
+	if err := p.removeUnclaimedNodeLabels(ctx, nodeLabels, stale); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-func (p *Processor) deleteActiveInstanceLabels(inst *instance.Instance, stale map[string]string) (retErr error) {
-	if inst == nil {
+// claimNodeLabels records labels as provided by the Service instance uid.
+// The caller must hold the Service lock for uid.
+func (p *Processor) claimNodeLabels(uid types.UID, labels map[string]string) {
+	p.nodeLabelMu.Lock()
+	defer p.nodeLabelMu.Unlock()
+	if p.nodeLabelClaims == nil {
+		p.nodeLabelClaims = make(map[types.UID]map[string]string)
+	}
+	p.nodeLabelClaims[uid] = labels
+}
+
+// releaseNodeLabels drops the labels claimed by the Service instance uid. The
+// caller must hold the Service lock for uid.
+func (p *Processor) releaseNodeLabels(uid types.UID) {
+	p.nodeLabelMu.Lock()
+	defer p.nodeLabelMu.Unlock()
+	delete(p.nodeLabelClaims, uid)
+}
+
+func (p *Processor) dropClaimedNodeLabels(labels map[string]string) {
+	p.nodeLabelMu.Lock()
+	defer p.nodeLabelMu.Unlock()
+	p.dropClaimedNodeLabelsLocked(labels)
+}
+
+func (p *Processor) dropClaimedNodeLabelsLocked(labels map[string]string) {
+	for _, claimed := range p.nodeLabelClaims {
+		for key := range claimed {
+			delete(labels, key)
+		}
+	}
+}
+
+// removeUnclaimedNodeLabels removes the labels no Service of this process
+// claims. Claims are checked again while holding nodeLabelMu across the
+// patch, so a Service claiming its label meanwhile either keeps it or adds it
+// again once the patch is done.
+func (p *Processor) removeUnclaimedNodeLabels(ctx context.Context, nodeLabels node.LabelReader, labels map[string]string) error {
+	if len(labels) == 0 {
 		return nil
 	}
-	uid := inst.UID()
-	p.serviceLock.Lock(uid)
-	defer func() {
-		if err := p.serviceLock.Unlock(uid); err != nil {
-			log.Error("failed to release service lock", "uid", uid, "err", err)
-			retErr = errors.Join(retErr, err)
-		}
-	}()
-	if inst.AddCalled && inst.ServiceSnapshot != nil {
-		for key := range generateLabelsFromService(inst.ServiceSnapshot) {
-			delete(stale, key)
-		}
+	p.nodeLabelMu.Lock()
+	defer p.nodeLabelMu.Unlock()
+	p.dropClaimedNodeLabelsLocked(labels)
+	if len(labels) == 0 {
+		return nil
 	}
-	return nil
+	ctx, cancel := context.WithTimeout(ctx, nodeLabelPatchTimeout)
+	defer cancel()
+	return nodeLabels.RemoveLabelWithContext(ctx, labels)
 }
 
 func (p *Processor) isStaleServiceLabel(ctx context.Context, namespace, name string) (bool, error) {
@@ -114,26 +142,10 @@ func (p *Processor) isStaleServiceLabel(ctx context.Context, namespace, name str
 	if err != nil {
 		return false, err
 	}
-	if svc.Spec.Type == v1.ServiceTypeLoadBalancer && p.lbClassFilter != nil && p.lbClassFilter(svc, p.config) {
-		return false, nil
-	}
-	provided, err := p.providesService(svc)
-	if err != nil {
-		return false, err
-	}
-	return !provided, nil
-}
-
-func (p *Processor) providesService(svc *v1.Service) (provided bool, retErr error) {
-	p.serviceLock.Lock(svc.UID)
-	defer func() {
-		if err := p.serviceLock.Unlock(svc.UID); err != nil {
-			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
-			retErr = errors.Join(retErr, err)
-		}
-	}()
-	inst := p.findServiceInstance(svc)
-	return inst != nil && inst.AddCalled, nil
+	// Claimed labels were dropped before, so the label is stale unless it
+	// belongs to another kube-vip deployment.
+	foreign := svc.Spec.Type == v1.ServiceTypeLoadBalancer && p.lbClassFilter != nil && p.lbClassFilter(svc, p.config)
+	return !foreign, nil
 }
 
 // RecoverNodeLabels removes labels that an earlier kube-vip process left on
@@ -174,7 +186,7 @@ func (p *Processor) RecoverNodeLabels(ctx context.Context, nodeLabels node.Label
 	}
 	if len(stale) > 0 {
 		log.Info("removing node labels left by a previous kube-vip process", "labels", stale)
-		if err := nodeLabels.RemoveLabelWithContext(ctx, stale); err != nil {
+		if err := p.removeUnclaimedNodeLabels(ctx, nodeLabels, stale); err != nil {
 			errs = append(errs, err)
 		}
 	}

@@ -780,6 +780,9 @@ func TestAddServiceCleansUpAfterConfigurationFailure(t *testing.T) {
 	if got := processor.findServiceInstance(service); got != nil {
 		t.Fatal("configuration failure left a partial instance tracked")
 	}
+	if nodeLabelClaimed(processor, uid) {
+		t.Fatal("failed label addition kept its node label claim")
+	}
 }
 
 func TestAddServiceTreatsContextLossBeforeConfigurationAsNormalCompletion(t *testing.T) {

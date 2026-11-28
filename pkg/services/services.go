@@ -468,7 +468,11 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 	}
 
 	labels := generateLabelsFromService(svc)
+	// Claim the label before adding it, so a concurrent stale label sweep
+	// either keeps it or completes its removal before the label is added.
+	p.claimNodeLabels(inst.UID(), labels)
 	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
+		p.releaseNodeLabels(inst.UID())
 		return fmt.Errorf("error adding label to node: %w", err)
 	}
 	inst.LabelAdded = true
@@ -647,6 +651,7 @@ func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *i
 	if err != nil || !removed {
 		return err
 	}
+	p.releaseNodeLabels(serviceInstance.UID())
 
 	if serviceInstance.LabelAdded && serviceInstance.ServiceSnapshot != nil && p.nodeLabelManager != nil {
 		if p.shuttingDown.Load() {

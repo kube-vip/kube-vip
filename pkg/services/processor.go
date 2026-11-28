@@ -94,6 +94,13 @@ type Processor struct {
 	// shuttingDown makes Service teardown leave node labels to the manager's
 	// final cleanup, so exiting never waits on the API per Service.
 	shuttingDown atomic.Bool
+
+	// nodeLabelMu protects nodeLabelClaims and is held by the stale label
+	// sweeps across their removal patch. nodeLabelClaims holds the node labels
+	// of the Services this process provides, keyed by instance UID. Lock order:
+	// Service lock before nodeLabelMu.
+	nodeLabelMu     sync.Mutex
+	nodeLabelClaims map[types.UID]map[string]string
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -813,6 +820,7 @@ func (p *Processor) Stop() {
 			cluster.StopAndWait()
 		}
 		instance.AddCalled = false
+		p.releaseNodeLabels(uid)
 		if err := p.serviceLock.Unlock(uid); err != nil {
 			log.Error("failed to release service lock", "uid", uid, "err", err)
 		}
@@ -925,6 +933,7 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	}
 	if serviceInstance := p.findServiceInstance(svc); serviceInstance != nil {
 		serviceInstance.AddCalled = false
+		p.releaseNodeLabels(serviceInstance.UID())
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil
