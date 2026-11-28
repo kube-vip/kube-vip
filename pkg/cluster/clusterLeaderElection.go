@@ -85,7 +85,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			cancelLeader()
 			leaderWG.Wait()
 
-			cluster.OnStoppedLeading(c, bgpServer)
+			cluster.OnStoppedLeading(ctx, c, bgpServer)
 
 			return nil
 		}
@@ -111,7 +111,7 @@ func (cluster *Cluster) StartCluster(ctx context.Context, c *kubevip.Config,
 			if !electionSession.IsCurrent() {
 				return
 			}
-			cluster.OnStoppedLeading(c, bgpServer)
+			cluster.OnStoppedLeading(ctx, c, bgpServer)
 		},
 		OnNewLeader: func(identity string) {
 			cluster.OnNewLeader(identity, c)
@@ -150,19 +150,23 @@ func (cluster *Cluster) OnStartedLeading(ctx context.Context, c *kubevip.Config,
 	}
 }
 
-func (cluster *Cluster) OnStoppedLeading(c *kubevip.Config, bgpServer *bgp.Server) {
-	// we can do cleanup here
+// OnStoppedLeading releases the VIP before touching the node label, so an
+// unreachable API server cannot keep the VIP on this node. Once ctx is done
+// kube-vip is exiting and the manager removes the label in its final cleanup.
+func (cluster *Cluster) OnStoppedLeading(ctx context.Context, c *kubevip.Config, bgpServer *bgp.Server) {
 	log.Info("This node is becoming a follower within the cluster")
 
+	cluster.cleanupVIPs(c)
+
 	if cluster.labelAdded {
-		labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
-		if err := cluster.nodeLabelMgr.RemoveLabel(labels); err != nil {
-			log.Error("error removing label from node", "err", err)
+		if ctx.Err() == nil {
+			labels := generateLabelsFromConfig(c.Address, kubevip.HasIP)
+			if err := cluster.nodeLabelMgr.RemoveLabel(labels); err != nil {
+				log.Error("error removing label from node", "err", err)
+			}
 		}
 		cluster.labelAdded = false
 	}
-
-	cluster.cleanupVIPs(c)
 
 	log.Error("lost leadership, restarting kube-vip")
 }

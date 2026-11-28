@@ -467,8 +467,12 @@ func (p *Processor) configureService(ctx context.Context, svcCtx *servicecontext
 		}
 	}
 
-	labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
+	labels := generateLabelsFromService(svc)
+	// Claim the label before adding it, so a concurrent stale label sweep
+	// either keeps it or completes its removal before the label is added.
+	p.claimNodeLabels(inst.UID(), labels)
 	if err := p.nodeLabelManager.AddLabel(labels); err != nil {
+		p.releaseNodeLabels(inst.UID())
 		return fmt.Errorf("error adding label to node: %w", err)
 	}
 	inst.LabelAdded = true
@@ -611,29 +615,54 @@ func (p *Processor) deleteServiceInstance(ctx context.Context, expected *instanc
 	return p.deleteCurrentService(ctx, expected)
 }
 
-// deleteCurrentService removes the supplied tracked instance. The caller must
-// hold the Service lock for serviceInstance.UID().
-func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
-	if serviceInstance.LabelAdded {
-		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot, kubevip.ServiceProvided)
-		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
-			return fmt.Errorf("error removing label from node: %w", err)
-		}
+// releaseServiceDatapath detaches serviceInstance and stops its datapath. It
+// reports whether serviceInstance was still tracked.
+func (p *Processor) releaseServiceDatapath(ctx context.Context, serviceInstance *instance.Instance) (bool, error) {
+	if serviceInstance == nil {
+		return false, nil
 	}
-
 	p.serviceCleanupMu.Lock()
 	defer p.serviceCleanupMu.Unlock()
 	removed, updatedInstances := p.detachServiceInstance(serviceInstance.UID())
 	if removed != serviceInstance {
-		return nil
+		return false, nil
 	}
 	if err := endpoints.CleanupService(ctx, p.config, p.bgpServer, p.routeMgr, p.TunnelMgr, serviceInstance, updatedInstances); err != nil {
 		p.appendServiceInstance(serviceInstance)
-		return fmt.Errorf("cleanup service datapath: %w", err)
+		return false, fmt.Errorf("cleanup service datapath: %w", err)
 	}
 
-	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceInstance.ServiceSnapshot.Name, "remaining advertised services", len(updatedInstances))
+	serviceName := ""
+	if serviceInstance.ServiceSnapshot != nil {
+		serviceName = serviceInstance.ServiceSnapshot.Name
+	}
+	log.Info("Removed instance from manager", "uid", serviceInstance.UID(), "name", serviceName, "remaining advertised services", len(updatedInstances))
 
+	return true, nil
+}
+
+// deleteCurrentService removes the supplied tracked instance. The caller must
+// hold the Service lock for serviceInstance.UID().
+//
+// The node label is removed after the datapath, so an unreachable API server
+// cannot keep the VIP on this node.
+func (p *Processor) deleteCurrentService(ctx context.Context, serviceInstance *instance.Instance) error {
+	removed, err := p.releaseServiceDatapath(ctx, serviceInstance)
+	if err != nil || !removed {
+		return err
+	}
+	p.releaseNodeLabels(serviceInstance.UID())
+
+	if serviceInstance.LabelAdded && serviceInstance.ServiceSnapshot != nil && p.nodeLabelManager != nil {
+		if p.shuttingDown.Load() {
+			log.Debug("leaving node label to shutdown cleanup", "uid", serviceInstance.UID())
+			return nil
+		}
+		labels := generateLabelsFromService(serviceInstance.ServiceSnapshot)
+		if err := p.nodeLabelManager.RemoveLabel(labels); err != nil {
+			return fmt.Errorf("error removing label from node: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -1158,8 +1187,8 @@ func (p *Processor) refreshUPNPForward(ctx context.Context, serviceInstance *ins
 	}
 }
 
-// GenerateLabelFromService generates a label key and value for the given service
-func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]string {
+// generateLabelsFromService generates the service-provided node label for svc.
+func generateLabelsFromService(svc *v1.Service) map[string]string {
 	addresses, _ := instance.FetchServiceAddresses(svc)
 
 	sanitized := make([]string, len(addresses))
@@ -1168,6 +1197,6 @@ func generateLabelsFromService(svc *v1.Service, labelKey string) map[string]stri
 	}
 
 	return map[string]string{
-		fmt.Sprintf("%s/%s.%s", labelKey, svc.Name, svc.Namespace): strings.Join(sanitized, "_"),
+		fmt.Sprintf("%s/%s.%s", kubevip.ServiceProvided, svc.Name, svc.Namespace): strings.Join(sanitized, "_"),
 	}
 }

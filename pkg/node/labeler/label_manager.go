@@ -3,13 +3,11 @@ package labeler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
 	log "log/slog"
 
-	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,22 +43,48 @@ type Manager struct {
 // AddLabel a new label to the node
 func (m *Manager) AddLabel(labels map[string]string) error {
 	log.Debug("add labels to node", "node", m.nodeName)
-	return m.patchNode(labelOperationAdd, labels)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	return m.patchNode(ctx, labelOperationAdd, labels)
 }
 
 // RemoveLabel a label from the node
 func (m *Manager) RemoveLabel(labels map[string]string) error {
 	log.Debug("delete label from node")
-	return m.patchNode(labelOperationRemove, labels)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+	return m.RemoveLabelWithContext(ctx, labels)
 }
 
-// CleanUpLabels purges the node labels
-func (m *Manager) CleanUpLabels(timeout time.Duration) error {
-	log.Debug("cleaning up labels for node", "node", m.nodeName, "timeout", timeout)
+// RemoveLabelWithContext removes labels from the node using ctx.
+func (m *Manager) RemoveLabelWithContext(ctx context.Context, labels map[string]string) error {
+	return m.patchNode(ctx, labelOperationRemove, labels)
+}
 
-	// create new context for labels cleanup (independent)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+// Labels returns the node labels whose key starts with prefix
+func (m *Manager) Labels(ctx context.Context, prefix string) (map[string]string, error) {
+	if m.clientSet == nil {
+		return nil, errors.New("kubernetes client is not initialized")
+	}
+	node, err := m.clientSet.CoreV1().Nodes().Get(ctx, m.nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get node %s", m.nodeName)
+	}
+	labels := map[string]string{}
+	for key, value := range node.Labels {
+		if strings.HasPrefix(key, prefix) {
+			labels[key] = value
+		}
+	}
+	return labels, nil
+}
+
+// CleanUpLabels removes the given label keys from the node
+func (m *Manager) CleanUpLabels(ctx context.Context, keys []string) error {
+	log.Debug("cleaning up labels for node", "node", m.nodeName, "keys", keys)
+	if m.clientSet == nil {
+		return errors.New("kubernetes client is not initialized")
+	}
 
 	// get the node
 	node, err := m.clientSet.CoreV1().Nodes().Get(ctx, m.nodeName, metav1.GetOptions{})
@@ -70,7 +94,7 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 
 	// collect all labels with the prefix to remove
 	labels := map[string]string{}
-	for _, k := range kubevip.GetKeysForCleanup() {
+	for _, k := range keys {
 		if _, ok := node.Labels[k]; ok {
 			labels[k] = ""
 		}
@@ -82,34 +106,30 @@ func (m *Manager) CleanUpLabels(timeout time.Duration) error {
 	}
 
 	// patch the node with the labels to remove
-	return m.patchNode(labelOperationRemove, labels)
+	return m.patchNode(ctx, labelOperationRemove, labels)
 }
 
-// patchNode patches the node with the given labels
-func (m *Manager) patchNode(operation labelOperation, labels map[string]string) error {
-	type patchStringLabel struct {
-		Op    string `json:"op"`
-		Path  string `json:"path"`
-		Value string `json:"value"`
+// patchNode patches the node with the given labels. It sends a JSON merge
+// patch, so removing a label that is already gone is not an error and does not
+// fail the other labels of the same patch.
+func (m *Manager) patchNode(ctx context.Context, operation labelOperation, labels map[string]string) error {
+	if len(labels) == 0 {
+		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	patchLabels := []patchStringLabel{}
-	// generate the patch
+	patchLabels := make(map[string]*string, len(labels))
 	for k, v := range labels {
-		patchLabels = append(patchLabels, patchStringLabel{
-			Op: string(operation),
-			// replace all slashes with ~1
-			Path:  fmt.Sprintf("/metadata/labels/%s", strings.ReplaceAll(k, "/", "~1")),
-			Value: v,
-		})
+		if operation == labelOperationRemove {
+			patchLabels[k] = nil
+			continue
+		}
+		patchLabels[k] = &v
 	}
+	patch := map[string]any{"metadata": map[string]any{"labels": patchLabels}}
 
-	patchData, err := json.Marshal(patchLabels)
+	patchData, err := json.Marshal(patch)
 	if err != nil {
-		log.Debug("node patch marshaling failed", "err", err, "labels", labels, "patch", patchLabels)
+		log.Debug("node patch marshaling failed", "err", err, "labels", labels)
 		return errors.Wrapf(err, "node patch marshaling failed for labels %v", labels)
 	}
 
@@ -124,7 +144,7 @@ func (m *Manager) patchNode(operation labelOperation, labels map[string]string) 
 	}
 
 	// patch node
-	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx, m.nodeName, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	node, err := m.clientSet.CoreV1().Nodes().Patch(ctx, m.nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		log.Debug("node patching failed", "err", err, "patchData", patchData)
 		return errors.Wrapf(err, "node patching failed with patch %s", string(patchData))

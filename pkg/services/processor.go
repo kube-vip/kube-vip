@@ -90,6 +90,17 @@ type Processor struct {
 	TunnelMgr wireguard.ServiceTunnelManager
 
 	routeMgr *route.Manager
+
+	// shuttingDown makes Service teardown leave node labels to the manager's
+	// final cleanup, so exiting never waits on the API per Service.
+	shuttingDown atomic.Bool
+
+	// nodeLabelMu protects nodeLabelClaims and is held by the stale label
+	// sweeps across their removal patch. nodeLabelClaims holds the node labels
+	// of the Services this process provides, keyed by instance UID. Lock order:
+	// Service lock before nodeLabelMu.
+	nodeLabelMu     sync.Mutex
+	nodeLabelClaims map[types.UID]map[string]string
 }
 
 // labelManager is the interface for the node label manager to add/remove labels
@@ -459,13 +470,12 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 		return nil
 	}
 
-	services, err := p.clientSet.CoreV1().Services(p.config.ServiceNamespace).List(ctx, metav1.ListOptions{})
+	services, err := p.listServices(ctx)
 	if err != nil {
 		return fmt.Errorf("list Services for address recovery: %w", err)
 	}
 	desiredServiceVIPs := make(map[string]struct{})
-	for index := range services.Items {
-		service := &services.Items[index]
+	for _, service := range services {
 		if !p.serviceOwnsRecoverableVIP(service) {
 			continue
 		}
@@ -480,8 +490,7 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 			return err
 		}
 	}
-	for index := range services.Items {
-		service := &services.Items[index]
+	for _, service := range services {
 		if !p.serviceOwnsRecoverableVIP(service) {
 			continue
 		}
@@ -711,8 +720,15 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 		return err
 	}
 
-	if err := p.deleteService(cleanupCtx, svc.UID, svcCtx); err != nil {
-		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, err)
+	deleteErr := p.deleteService(cleanupCtx, svc.UID, svcCtx)
+	if deleteErr != nil {
+		tracked, lockErr := p.hasTrackedServiceInstance(svc)
+		if lockErr != nil {
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, errors.Join(deleteErr, lockErr))
+		}
+		if tracked {
+			return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deleteErr)
+		}
 	}
 	if svcCtx != nil {
 		p.svcMap.CompareAndDelete(svc.UID, svcCtx)
@@ -720,9 +736,23 @@ func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	// Drop the per-service election series so a recreated service starts clean.
 	metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 	p.updateActiveServicesMetric()
+	if deleteErr != nil {
+		return fmt.Errorf("delete service %s/%s: %w", svc.Namespace, svc.Name, deleteErr)
+	}
 	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
 
 	return nil
+}
+
+func (p *Processor) hasTrackedServiceInstance(svc *v1.Service) (tracked bool, retErr error) {
+	p.serviceLock.Lock(svc.UID)
+	defer func() {
+		if err := p.serviceLock.Unlock(svc.UID); err != nil {
+			log.Error("failed to release service lock", "uid", svc.UID, "err", err)
+			retErr = errors.Join(retErr, err)
+		}
+	}()
+	return p.findServiceInstance(svc) != nil, nil
 }
 
 // retireServiceContext preemptively cancels the published Service context before
@@ -788,15 +818,28 @@ func (p *Processor) Stop() {
 			cluster.StopAndWait()
 		}
 		instance.AddCalled = false
+		p.releaseNodeLabels(uid)
 		if err := p.serviceLock.Unlock(uid); err != nil {
 			log.Error("failed to release service lock", "uid", uid, "err", err)
 		}
 	}
 }
 
+// BeginShutdown marks the processor as exiting. Service teardown then still
+// releases the datapath but skips node label removal; the caller removes the
+// labels in one bounded batch after all Services have stopped.
+func (p *Processor) BeginShutdown() {
+	if p != nil {
+		p.shuttingDown.Store(true)
+	}
+}
+
 // WaitForElectionCampaigns blocks until all Service election campaigns have
 // stopped. Callers must first stop the watchers that can start new campaigns.
 func (p *Processor) WaitForElectionCampaigns() {
+	if p == nil || p.electionCoordinators == nil {
+		return
+	}
 	p.electionCoordinators.Wait()
 }
 
@@ -888,6 +931,7 @@ func (p *Processor) dropCancelledServiceContext(svc *v1.Service, svcCtx *service
 	}
 	if serviceInstance := p.findServiceInstance(svc); serviceInstance != nil {
 		serviceInstance.AddCalled = false
+		p.releaseNodeLabels(serviceInstance.UID())
 	}
 	p.svcMap.CompareAndDelete(svc.UID, svcCtx)
 	return nil

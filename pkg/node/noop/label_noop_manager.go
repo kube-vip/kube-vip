@@ -1,7 +1,7 @@
 package noop
 
 import (
-	"time"
+	"context"
 )
 
 // NewManager creates a new NoOp label manager
@@ -19,6 +19,14 @@ func (m *Manager) RemoveLabel(labels map[string]string) error {
 	return nil
 }
 
-func (m *Manager) CleanUpLabels(_ time.Duration) error {
+func (m *Manager) Labels(context.Context, string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (m *Manager) RemoveLabelWithContext(context.Context, map[string]string) error {
+	return nil
+}
+
+func (m *Manager) CleanUpLabels(context.Context, []string) error {
 	return nil
 }

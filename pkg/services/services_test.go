@@ -409,7 +409,7 @@ func TestGenerateLabelsFromService(t *testing.T) {
 				},
 			}
 
-			labels := generateLabelsFromService(svc, kubevip.ServiceProvided)
+			labels := generateLabelsFromService(svc)
 			key := kubevip.ServiceProvided + "/traefik.kube-system"
 			got, ok := labels[key]
 			if !ok || len(labels) != 1 {

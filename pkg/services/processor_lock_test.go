@@ -780,6 +780,9 @@ func TestAddServiceCleansUpAfterConfigurationFailure(t *testing.T) {
 	if got := processor.findServiceInstance(service); got != nil {
 		t.Fatal("configuration failure left a partial instance tracked")
 	}
+	if nodeLabelClaimed(processor, uid) {
+		t.Fatal("failed label addition kept its node label claim")
+	}
 }
 
 func TestAddServiceTreatsContextLossBeforeConfigurationAsNormalCompletion(t *testing.T) {
@@ -905,7 +908,7 @@ func TestStaleActivationCleanupPreservesReplacementInstance(t *testing.T) {
 	}
 }
 
-func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
+func TestDeleteServiceReleasesInstanceWhenLabelRemovalFails(t *testing.T) {
 	uid := types.UID("service-a")
 	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{
 		UID: uid, Name: "service-a", Namespace: "default",
@@ -922,8 +925,93 @@ func TestDeleteServiceKeepsInstanceWhenLabelRemovalFails(t *testing.T) {
 	if err := processor.deleteService(context.Background(), uid, nil); err == nil {
 		t.Fatal("deleteService() error = nil, want label removal error")
 	}
-	if got := processor.findServiceInstance(service); got != serviceInstance {
-		t.Fatal("failed deletion removed the Service instance, preventing cleanup retry")
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("failed label removal kept the released Service instance tracked")
+	}
+}
+
+type blockingLabeler struct {
+	removing chan struct{}
+	release  chan struct{}
+}
+
+func (l *blockingLabeler) AddLabel(map[string]string) error { return nil }
+
+func (l *blockingLabeler) RemoveLabel(map[string]string) error {
+	close(l.removing)
+	<-l.release
+	return errors.New("node patch timed out")
+}
+
+func TestDeleteServiceRemovesLabelOutsideCleanupLock(t *testing.T) {
+	serviceA := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "service-a", Name: "service-a", Namespace: "default"}}
+	serviceB := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "service-b", Name: "service-b", Namespace: "default"}}
+	labeler := &blockingLabeler{removing: make(chan struct{}), release: make(chan struct{})}
+	processor := &Processor{
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{
+			{ServiceUID: serviceA.UID, ServiceSnapshot: serviceA, LabelAdded: true},
+			{ServiceUID: serviceB.UID, ServiceSnapshot: serviceB},
+		},
+		nodeLabelManager: labeler,
+	}
+	initializeTestElectionCoordinators(processor)
+
+	deletedA := make(chan error, 1)
+	go func() { deletedA <- processor.deleteService(context.Background(), serviceA.UID, nil) }()
+	select {
+	case <-labeler.removing:
+	case <-time.After(time.Second):
+		t.Fatal("deleteService() did not remove the label of service-a")
+	}
+
+	deletedB := make(chan error, 1)
+	go func() { deletedB <- processor.deleteService(context.Background(), serviceB.UID, nil) }()
+	select {
+	case err := <-deletedB:
+		if err != nil {
+			t.Fatalf("deleteService(service-b) error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("hanging label removal of service-a blocked the release of service-b")
+	}
+
+	close(labeler.release)
+	if err := <-deletedA; err == nil {
+		t.Fatal("deleteService(service-a) error = nil, want label removal error")
+	}
+}
+
+func TestDeleteServiceSkipsLabelRemovalDuringShutdown(t *testing.T) {
+	service := &v1.Service{ObjectMeta: metav1.ObjectMeta{UID: "service-a", Name: "service-a", Namespace: "default"}}
+	labeler := &blockingLabeler{removing: make(chan struct{}), release: make(chan struct{})}
+	defer close(labeler.release)
+	processor := &Processor{
+		serviceLock: newTestServiceLocks(),
+		config:      &kubevip.Config{},
+		ServiceInstances: []*instance.Instance{
+			{ServiceUID: service.UID, ServiceSnapshot: service, LabelAdded: true},
+		},
+		nodeLabelManager: labeler,
+	}
+	initializeTestElectionCoordinators(processor)
+	processor.BeginShutdown()
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- processor.deleteService(context.Background(), service.UID, nil) }()
+	select {
+	case err := <-deleted:
+		if err != nil {
+			t.Fatalf("deleteService() error = %v", err)
+		}
+	case <-labeler.removing:
+		t.Fatal("deleteService() waited on node label removal during shutdown")
+	case <-time.After(time.Second):
+		t.Fatal("deleteService() blocked during shutdown")
+	}
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("shutdown teardown kept the Service instance tracked")
 	}
 }
 
@@ -1016,11 +1104,11 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	if err := processor.deleteTrackedService(service); err == nil {
 		t.Fatal("deleteTrackedService() error = nil, want cleanup failure")
 	}
-	if got := processor.findServiceInstance(service); got == nil {
-		t.Fatal("persistent cleanup failure removed the Service instance")
+	if got := processor.findServiceInstance(service); got != nil {
+		t.Fatal("failed label removal kept the released Service instance tracked")
 	}
-	if got, err := processor.getServiceContext(uid); err != nil || got != svcCtx {
-		t.Fatalf("failed cleanup did not retain its context for retry: got %v, err %v", got, err)
+	if got, err := processor.getServiceContext(uid); err != nil || got != nil {
+		t.Fatalf("released Service retained its context after label failure: got %v, err %v", got, err)
 	}
 	if processor.leaseMgr.Get(leaseID) != nil {
 		t.Fatal("failed cleanup left the retired lease available to a replacement")
@@ -1032,9 +1120,6 @@ func TestDeleteTrackedServiceReturnsPersistentCleanupFailure(t *testing.T) {
 	labeler.removeErr = nil
 	if err := processor.deleteTrackedService(service); err != nil {
 		t.Fatalf("deleteTrackedService() retry error = %v", err)
-	}
-	if got := processor.findServiceInstance(service); got != nil {
-		t.Fatal("retry did not remove the Service instance")
 	}
 }
 

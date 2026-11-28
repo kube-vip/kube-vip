@@ -1,7 +1,7 @@
 package node
 
 import (
-	"time"
+	"context"
 
 	log "log/slog"
 
@@ -14,6 +14,7 @@ import (
 // LabelManager is the interface for the node label manager
 type LabelManager interface {
 	Labeler
+	LabelReader
 	LabelCleaner
 }
 
@@ -25,9 +26,16 @@ type Labeler interface {
 	RemoveLabel(labels map[string]string) error
 }
 
+type LabelReader interface {
+	// Labels returns the node labels whose key starts with prefix
+	Labels(ctx context.Context, prefix string) (map[string]string, error)
+	// RemoveLabelWithContext removes the given labels from the node using ctx
+	RemoveLabelWithContext(ctx context.Context, labels map[string]string) error
+}
+
 type LabelCleaner interface {
-	// CleanUpLabels removes all labels from the node
-	CleanUpLabels(timeout time.Duration) error
+	// CleanUpLabels removes the given label keys from the node
+	CleanUpLabels(ctx context.Context, keys []string) error
 }
 
 // NewManager creates a new Label Manager for the given node
