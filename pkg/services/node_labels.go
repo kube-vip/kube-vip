@@ -82,9 +82,8 @@ func (p *Processor) RemoveStaleNodeLabels(ctx context.Context, nodeLabels node.L
 const loadBalancerServiceSelector = "spec.type=" + string(v1.ServiceTypeLoadBalancer)
 
 // listServices returns the LoadBalancer Services in the namespace scope of
-// this instance, so node labels are resolved with one request. API servers
-// before Kubernetes 1.31 reject the spec.type field selector and are listed
-// unfiltered; other Services are treated like missing ones anyway.
+// this instance. API servers before Kubernetes 1.31 reject the spec.type field
+// selector and are listed unfiltered; callers skip other Services anyway.
 func (p *Processor) listServices(ctx context.Context) (map[types.NamespacedName]*v1.Service, error) {
 	client := p.clientSet.CoreV1().Services(p.config.ServiceNamespace)
 	list, err := client.List(ctx, metav1.ListOptions{FieldSelector: loadBalancerServiceSelector})

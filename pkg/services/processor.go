@@ -470,13 +470,12 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 		return nil
 	}
 
-	services, err := p.clientSet.CoreV1().Services(p.config.ServiceNamespace).List(ctx, metav1.ListOptions{})
+	services, err := p.listServices(ctx)
 	if err != nil {
 		return fmt.Errorf("list Services for address recovery: %w", err)
 	}
 	desiredServiceVIPs := make(map[string]struct{})
-	for index := range services.Items {
-		service := &services.Items[index]
+	for _, service := range services {
 		if !p.serviceOwnsRecoverableVIP(service) {
 			continue
 		}
@@ -491,8 +490,7 @@ func (p *Processor) RecoverAddresses(ctx context.Context) error {
 			return err
 		}
 	}
-	for index := range services.Items {
-		service := &services.Items[index]
+	for _, service := range services {
 		if !p.serviceOwnsRecoverableVIP(service) {
 			continue
 		}
