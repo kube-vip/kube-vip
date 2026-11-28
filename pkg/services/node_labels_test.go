@@ -22,164 +22,65 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestRemoveStaleNodeLabels(t *testing.T) {
-	const prefix = kubevip.ServiceProvided + "/"
-	ourClass := "kube-vip"
-	otherClass := "other"
-	newLB := func(name string, class *string) *v1.Service {
-		return &v1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
-			Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerClass: class},
-		}
-	}
-	active := newLB("active", &ourClass)
-	stopped := newLB("stopped", &ourClass)
-	follower := newLB("follower", &ourClass)
-	foreign := newLB("foreign", &otherClass)
-	demoted := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "demoted", Namespace: "default", UID: "demoted"},
-		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeClusterIP},
-	}
-	services := map[string]*v1.Service{
-		"active": active, "stopped": stopped, "follower": follower, "foreign": foreign, "demoted": demoted,
-	}
-	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: map[string]string{
-		prefix + "active.default":        "192.0.2.1",
-		prefix + "stopped.default":       "192.0.2.2",
-		prefix + "follower.default":      "192.0.2.3",
-		prefix + "deleted.default":       "192.0.2.4",
-		prefix + "demoted.default":       "192.0.2.5",
-		prefix + "foreign.default":       "192.0.2.6",
-		prefix + "elsewhere.kube-system": "192.0.2.7",
-		kubevip.HasIP:                    "192.0.2.8",
-	}}}
+const testServiceLabelPrefix = kubevip.ServiceProvided + "/"
 
-	var mu sync.Mutex
-	var removed []string
+// nodeLabelTestAPI serves node "node-a" with labels, the Services of the
+// "default" namespace as a list, and Leases by name. Any other request,
+// including a per-Service GET, fails the test.
+type nodeLabelTestAPI struct {
+	labels   map[string]string
+	services []*v1.Service
+	leases   map[string]string // "<namespace>/<name>" to holder
+	onList   func()
+	onPatch  func()
+
+	mu      sync.Mutex
+	patches [][]string
+}
+
+func (api *nodeLabelTestAPI) serve(t *testing.T) *kubernetes.Clientset {
+	t.Helper()
+	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: api.labels}}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		var body any
-		switch name, isService := strings.CutPrefix(request.URL.Path, "/api/v1/namespaces/default/services/"); {
+		leaseKey, isLease := strings.CutPrefix(request.URL.Path, "/apis/coordination.k8s.io/v1/namespaces/")
+		switch {
 		case request.URL.Path == "/api/v1/nodes/node-a" && request.Method == http.MethodPatch:
-			mu.Lock()
-			removed = append(removed, removedNodeLabels(t, request)...)
-			mu.Unlock()
+			removed := removedNodeLabels(t, request)
+			if api.onPatch != nil {
+				api.onPatch()
+			}
+			api.mu.Lock()
+			api.patches = append(api.patches, removed)
+			api.mu.Unlock()
 			body = node
 		case request.URL.Path == "/api/v1/nodes/node-a":
 			body = node
-		case isService && services[name] != nil:
-			body = services[name]
-		case isService:
-			writer.WriteHeader(http.StatusNotFound)
-			body = &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
-				Status: metav1.StatusFailure, Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound}
-		default:
-			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
-			writer.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_ = json.NewEncoder(writer).Encode(body)
-	}))
-	defer server.Close()
-
-	clientSet, err := kubernetes.NewForConfig(&rest.Config{
-		Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"},
-	})
-	if err != nil {
-		t.Fatalf("create Kubernetes client: %v", err)
-	}
-
-	labelManager := labeler.NewManager("node-a", clientSet)
-	processor := &Processor{
-		config: &kubevip.Config{
-			EnableNodeLabeling: true, ServiceNamespace: "default", LoadBalancerClassName: ourClass,
-		},
-		lbClassFilter: lbClassFilter,
-		serviceLock:   newTestServiceLocks(),
-		clientSet:     clientSet,
-		ServiceInstances: []*instance.Instance{
-			{ServiceUID: active.UID, ServiceSnapshot: active, AddCalled: true, LabelAdded: true},
-			{ServiceUID: stopped.UID, ServiceSnapshot: stopped, LabelAdded: true},
-		},
-		nodeLabelManager: labelManager,
-	}
-	processor.claimNodeLabels(active.UID, generateLabelsFromService(active))
-
-	if err := processor.RemoveStaleNodeLabels(context.Background(), labelManager); err != nil {
-		t.Fatalf("RemoveStaleNodeLabels() error = %v", err)
-	}
-	slices.Sort(removed)
-	want := []string{
-		kubevip.ServiceProvided + "/deleted.default",
-		kubevip.ServiceProvided + "/demoted.default",
-		kubevip.ServiceProvided + "/follower.default",
-		kubevip.ServiceProvided + "/stopped.default",
-	}
-	if !slices.Equal(removed, want) {
-		t.Fatalf("removed labels = %v, want %v", removed, want)
-	}
-}
-
-func TestRecoverNodeLabels(t *testing.T) {
-	const nodeName = "node-a"
-	const prefix = kubevip.ServiceProvided + "/"
-	ourClass := "kube-vip"
-	otherClass := "other"
-	newLB := func(name string, class *string) *v1.Service {
-		return &v1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
-			Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerClass: class},
-		}
-	}
-	services := map[string]*v1.Service{
-		"mine": newLB("mine", &ourClass), "theirs": newLB("theirs", &ourClass), "foreign": newLB("foreign", &otherClass),
-	}
-	leaseHolders := map[string]string{
-		"default/kubevip-mine":      nodeName,
-		"default/kubevip-theirs":    "node-b",
-		"kube-system/plndr-cp-lock": "node-b",
-	}
-	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Labels: map[string]string{
-		prefix + "mine.default":        "192.0.2.1",
-		prefix + "theirs.default":      "192.0.2.2",
-		prefix + "deleted.default":     "192.0.2.3",
-		prefix + "foreign.default":     "192.0.2.4",
-		prefix + "outside.kube-system": "192.0.2.5",
-		kubevip.HasIP:                  "192.0.2.6",
-		"kubernetes.io/hostname":       nodeName,
-	}}}
-
-	var mu sync.Mutex
-	var patches [][]string
-	notFound := &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
-		Status: metav1.StatusFailure, Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound}
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		var body any = notFound
-		serviceName, isService := strings.CutPrefix(request.URL.Path, "/api/v1/namespaces/default/services/")
-		leaseKey, isLease := strings.CutPrefix(request.URL.Path, "/apis/coordination.k8s.io/v1/namespaces/")
-		leaseKey = strings.Replace(leaseKey, "/leases/", "/", 1)
-		switch {
-		case request.URL.Path == "/api/v1/nodes/"+nodeName && request.Method == http.MethodPatch:
-			removed := removedNodeLabels(t, request)
-			mu.Lock()
-			patches = append(patches, removed)
-			mu.Unlock()
-			body = node
-		case request.URL.Path == "/api/v1/nodes/"+nodeName:
-			body = node
-		case isService && services[serviceName] != nil:
-			body = services[serviceName]
-		case isLease && leaseHolders[leaseKey] != "":
-			holder := leaseHolders[leaseKey]
-			namespace, name, _ := strings.Cut(leaseKey, "/")
+		case request.URL.Path == "/api/v1/namespaces/default/services":
+			if api.onList != nil {
+				api.onList()
+			}
+			list := &v1.ServiceList{}
+			for _, service := range api.services {
+				list.Items = append(list.Items, *service)
+			}
+			body = list
+		case isLease:
+			key := strings.Replace(leaseKey, "/leases/", "/", 1)
+			holder, found := api.leases[key]
+			if !found {
+				writer.WriteHeader(http.StatusNotFound)
+				body = &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
+					Status: metav1.StatusFailure, Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound}
+				break
+			}
+			namespace, name, _ := strings.Cut(key, "/")
 			body = &coordinationv1.Lease{
 				TypeMeta:   metav1.TypeMeta{Kind: "Lease", APIVersion: "coordination.k8s.io/v1"},
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 				Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
 			}
-		case isService || isLease:
-			writer.WriteHeader(http.StatusNotFound)
 		default:
 			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
 			writer.WriteHeader(http.StatusInternalServerError)
@@ -189,7 +90,7 @@ func TestRecoverNodeLabels(t *testing.T) {
 			t.Errorf("encode response: %v", err)
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	clientSet, err := kubernetes.NewForConfig(&rest.Config{
 		Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"},
@@ -197,32 +98,121 @@ func TestRecoverNodeLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Kubernetes client: %v", err)
 	}
-	processor := &Processor{
-		config: &kubevip.Config{
-			NodeName: nodeName, EnableNodeLabeling: true, EnableServices: true, EnableServicesElection: true,
-			EnableControlPlane: true, EnableLeaderElection: true, LeaseName: "kube-system/plndr-cp-lock",
-			ServiceNamespace: "default", LoadBalancerClassName: ourClass,
-		},
-		lbClassFilter: lbClassFilter,
-		serviceLock:   newTestServiceLocks(),
-		clientSet:     clientSet,
-	}
+	return clientSet
+}
 
-	if err := processor.RecoverNodeLabels(context.Background(), labeler.NewManager(nodeName, clientSet)); err != nil {
+func (api *nodeLabelTestAPI) removalPatches() [][]string {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	patches := make([][]string, 0, len(api.patches))
+	for _, patch := range api.patches {
+		patch = slices.Clone(patch)
+		slices.Sort(patch)
+		patches = append(patches, patch)
+	}
+	return patches
+}
+
+// newNodeLabelTestProcessor returns a processor for the Services of the
+// "default" namespace with load balancer class "kube-vip", served by api.
+func newNodeLabelTestProcessor(t *testing.T, api *nodeLabelTestAPI) (*Processor, *labeler.Manager) {
+	t.Helper()
+	clientSet := api.serve(t)
+	labelManager := labeler.NewManager("node-a", clientSet)
+	return &Processor{
+		config: &kubevip.Config{
+			NodeName: "node-a", EnableNodeLabeling: true, ServiceNamespace: "default", LoadBalancerClassName: "kube-vip",
+		},
+		lbClassFilter:    lbClassFilter,
+		serviceLock:      newTestServiceLocks(),
+		clientSet:        clientSet,
+		nodeLabelManager: labelManager,
+	}, labelManager
+}
+
+func testLoadBalancer(name, class string) *v1.Service {
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
+		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerClass: &class},
+	}
+}
+
+func TestRemoveStaleNodeLabels(t *testing.T) {
+	active := testLoadBalancer("active", "kube-vip")
+	demoted := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "demoted", Namespace: "default", UID: "demoted"},
+		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeClusterIP},
+	}
+	services := []*v1.Service{
+		active, testLoadBalancer("stopped", "kube-vip"), testLoadBalancer("follower", "kube-vip"),
+		testLoadBalancer("foreign", "other"), demoted,
+	}
+	labels := map[string]string{
+		testServiceLabelPrefix + "active.default":        "192.0.2.1",
+		testServiceLabelPrefix + "stopped.default":       "192.0.2.2",
+		testServiceLabelPrefix + "follower.default":      "192.0.2.3",
+		testServiceLabelPrefix + "deleted.default":       "192.0.2.4",
+		testServiceLabelPrefix + "demoted.default":       "192.0.2.5",
+		testServiceLabelPrefix + "foreign.default":       "192.0.2.6",
+		testServiceLabelPrefix + "elsewhere.kube-system": "192.0.2.7",
+		kubevip.HasIP: "192.0.2.8",
+	}
+	wantRemoved := [][]string{{
+		testServiceLabelPrefix + "deleted.default",
+		testServiceLabelPrefix + "demoted.default",
+		testServiceLabelPrefix + "follower.default",
+		testServiceLabelPrefix + "stopped.default",
+	}}
+	api := &nodeLabelTestAPI{labels: labels, services: services}
+	processor, labelManager := newNodeLabelTestProcessor(t, api)
+	processor.claimNodeLabels(active.UID, generateLabelsFromService(active))
+
+	if err := processor.RemoveStaleNodeLabels(context.Background(), labelManager); err != nil {
+		t.Fatalf("RemoveStaleNodeLabels() error = %v", err)
+	}
+	if got := api.removalPatches(); !slices.EqualFunc(got, wantRemoved, slices.Equal[[]string]) {
+		t.Fatalf("removal patches = %v, want %v", got, wantRemoved)
+	}
+}
+
+func TestRecoverNodeLabels(t *testing.T) {
+	api := &nodeLabelTestAPI{
+		labels: map[string]string{
+			testServiceLabelPrefix + "mine.default":        "192.0.2.1",
+			testServiceLabelPrefix + "theirs.default":      "192.0.2.2",
+			testServiceLabelPrefix + "deleted.default":     "192.0.2.3",
+			testServiceLabelPrefix + "foreign.default":     "192.0.2.4",
+			testServiceLabelPrefix + "outside.kube-system": "192.0.2.5",
+			kubevip.HasIP:            "192.0.2.6",
+			"kubernetes.io/hostname": "node-a",
+		},
+		services: []*v1.Service{
+			testLoadBalancer("mine", "kube-vip"), testLoadBalancer("theirs", "kube-vip"),
+			testLoadBalancer("foreign", "other"),
+		},
+		leases: map[string]string{
+			"default/kubevip-mine":      "node-a",
+			"default/kubevip-theirs":    "node-b",
+			"kube-system/plndr-cp-lock": "node-b",
+		},
+	}
+	processor, labelManager := newNodeLabelTestProcessor(t, api)
+	processor.config.EnableServices = true
+	processor.config.EnableServicesElection = true
+	processor.config.EnableControlPlane = true
+	processor.config.EnableLeaderElection = true
+	processor.config.LeaseName = "kube-system/plndr-cp-lock"
+
+	if err := processor.RecoverNodeLabels(context.Background(), labelManager); err != nil {
 		t.Fatalf("RecoverNodeLabels() error = %v", err)
 	}
-	if len(patches) != 1 {
-		t.Fatalf("node patches = %d, want a single batched patch", len(patches))
-	}
-	removed := patches[0]
-	slices.Sort(removed)
-	want := []string{
+	want := [][]string{{
 		kubevip.HasIP,
-		kubevip.ServiceProvided + "/deleted.default",
-		kubevip.ServiceProvided + "/theirs.default",
-	}
-	if !slices.Equal(removed, want) {
-		t.Fatalf("removed labels = %v, want %v", removed, want)
+		testServiceLabelPrefix + "deleted.default",
+		testServiceLabelPrefix + "theirs.default",
+	}}
+	if got := api.removalPatches(); !slices.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Fatalf("removal patches = %v, want %v", got, want)
 	}
 }
 
@@ -247,114 +237,34 @@ func removedNodeLabels(t *testing.T, request *http.Request) []string {
 	return removed
 }
 
-// claimTestAPI serves the node and its Services for the stale label sweep and
-// lets a test act while a Service is looked up or the removal patch is sent.
-type claimTestAPI struct {
-	onLookup func(name string)
-	onPatch  func()
-
-	mu      sync.Mutex
-	patches [][]string
-}
-
-func (api *claimTestAPI) removalPatches() [][]string {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	return slices.Clone(api.patches)
-}
-
-func newClaimTestProcessor(t *testing.T, api *claimTestAPI, services map[string]*v1.Service,
-	labels map[string]string) (*Processor, *labeler.Manager) {
-	t.Helper()
-	node := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: labels}}
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		var body any = node
-		name, isService := strings.CutPrefix(request.URL.Path, "/api/v1/namespaces/default/services/")
-		switch {
-		case request.URL.Path == "/api/v1/nodes/node-a" && request.Method == http.MethodPatch:
-			removed := removedNodeLabels(t, request)
-			if api.onPatch != nil {
-				api.onPatch()
-			}
-			api.mu.Lock()
-			api.patches = append(api.patches, removed)
-			api.mu.Unlock()
-		case request.URL.Path == "/api/v1/nodes/node-a":
-		case isService:
-			if api.onLookup != nil {
-				api.onLookup(name)
-			}
-			if services[name] == nil {
-				writer.WriteHeader(http.StatusNotFound)
-				body = &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
-					Status: metav1.StatusFailure, Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound}
-			} else {
-				body = services[name]
-			}
-		default:
-			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
-			writer.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		if err := json.NewEncoder(writer).Encode(body); err != nil {
-			t.Errorf("encode response: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	clientSet, err := kubernetes.NewForConfig(&rest.Config{
-		Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json"},
-	})
-	if err != nil {
-		t.Fatalf("create Kubernetes client: %v", err)
-	}
-	labelManager := labeler.NewManager("node-a", clientSet)
-	return &Processor{
-		config: &kubevip.Config{
-			EnableNodeLabeling: true, ServiceNamespace: "default", LoadBalancerClassName: "kube-vip",
-		},
-		lbClassFilter:    lbClassFilter,
-		serviceLock:      newTestServiceLocks(),
-		clientSet:        clientSet,
-		nodeLabelManager: labelManager,
-	}, labelManager
-}
-
 func TestStaleNodeLabelSweepRespectsClaims(t *testing.T) {
-	const prefix = kubevip.ServiceProvided + "/"
-	class := "kube-vip"
-	activating := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "activating", Namespace: "default", UID: "activating"},
-		Spec:       v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer, LoadBalancerClass: &class},
-	}
-	services := map[string]*v1.Service{"activating": activating}
-	labels := map[string]string{
-		prefix + "activating.default": "192.0.2.1",
-		prefix + "deleted.default":    "192.0.2.2",
+	activating := testLoadBalancer("activating", "kube-vip")
+	newAPI := func() *nodeLabelTestAPI {
+		return &nodeLabelTestAPI{labels: map[string]string{
+			testServiceLabelPrefix + "activating.default": "192.0.2.1",
+			testServiceLabelPrefix + "deleted.default":    "192.0.2.2",
+		}, services: []*v1.Service{activating}}
 	}
 
 	t.Run("label claimed after the stale check is kept", func(t *testing.T) {
-		api := &claimTestAPI{}
-		processor, labelManager := newClaimTestProcessor(t, api, services, labels)
-		api.onLookup = func(name string) {
-			if name == activating.Name {
-				processor.claimNodeLabels(activating.UID, generateLabelsFromService(activating))
-			}
+		api := newAPI()
+		processor, labelManager := newNodeLabelTestProcessor(t, api)
+		api.onList = func() {
+			processor.claimNodeLabels(activating.UID, generateLabelsFromService(activating))
 		}
 
 		if err := processor.RemoveStaleNodeLabels(context.Background(), labelManager); err != nil {
 			t.Fatalf("RemoveStaleNodeLabels() error = %v", err)
 		}
-		want := [][]string{{prefix + "deleted.default"}}
+		want := [][]string{{testServiceLabelPrefix + "deleted.default"}}
 		if got := api.removalPatches(); !slices.EqualFunc(got, want, slices.Equal[[]string]) {
 			t.Fatalf("removal patches = %v, want %v", got, want)
 		}
 	})
 
 	t.Run("claim waits for an in-flight removal", func(t *testing.T) {
-		api := &claimTestAPI{}
-		processor, labelManager := newClaimTestProcessor(t, api, services, labels)
+		api := newAPI()
+		processor, labelManager := newNodeLabelTestProcessor(t, api)
 		patching := make(chan struct{})
 		release := make(chan struct{})
 		var releaseOnce sync.Once

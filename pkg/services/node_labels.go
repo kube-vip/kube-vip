@@ -57,26 +57,49 @@ func (p *Processor) RemoveStaleNodeLabels(ctx context.Context, nodeLabels node.L
 		return err
 	}
 	p.dropClaimedNodeLabels(labels)
+	if len(labels) == 0 {
+		return nil
+	}
+	services, err := p.listServices(ctx)
+	if err != nil {
+		return fmt.Errorf("list Services for stale node labels: %w", err)
+	}
 	stale := map[string]string{}
-	var errs []error
 	for key, value := range labels {
 		name, namespace, ok := strings.Cut(strings.TrimPrefix(key, prefix), ".")
 		if !ok || name == "" || namespace == "" {
 			continue
 		}
-		remove, err := p.isStaleServiceLabel(ctx, namespace, name)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("label %q: %w", key, err))
-			continue
-		}
-		if remove {
+		if p.isStaleServiceLabel(services, namespace, name) {
 			stale[key] = value
 		}
 	}
-	if err := p.removeUnclaimedNodeLabels(ctx, nodeLabels, stale); err != nil {
-		errs = append(errs, err)
+	return p.removeUnclaimedNodeLabels(ctx, nodeLabels, stale)
+}
+
+// loadBalancerServiceSelector limits Service lists to LoadBalancers, the only
+// Services that get node labels.
+const loadBalancerServiceSelector = "spec.type=" + string(v1.ServiceTypeLoadBalancer)
+
+// listServices returns the LoadBalancer Services in the namespace scope of
+// this instance, so node labels are resolved with one request. API servers
+// before Kubernetes 1.31 reject the spec.type field selector and are listed
+// unfiltered; other Services are treated like missing ones anyway.
+func (p *Processor) listServices(ctx context.Context) (map[types.NamespacedName]*v1.Service, error) {
+	client := p.clientSet.CoreV1().Services(p.config.ServiceNamespace)
+	list, err := client.List(ctx, metav1.ListOptions{FieldSelector: loadBalancerServiceSelector})
+	if apierrors.IsBadRequest(err) {
+		list, err = client.List(ctx, metav1.ListOptions{})
 	}
-	return errors.Join(errs...)
+	if err != nil {
+		return nil, err
+	}
+	services := make(map[types.NamespacedName]*v1.Service, len(list.Items))
+	for index := range list.Items {
+		svc := &list.Items[index]
+		services[types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}] = svc
+	}
+	return services, nil
 }
 
 // claimNodeLabels records labels as provided by the Service instance uid.
@@ -131,21 +154,18 @@ func (p *Processor) removeUnclaimedNodeLabels(ctx context.Context, nodeLabels no
 	return nodeLabels.RemoveLabelWithContext(ctx, labels)
 }
 
-func (p *Processor) isStaleServiceLabel(ctx context.Context, namespace, name string) (bool, error) {
+func (p *Processor) isStaleServiceLabel(services map[types.NamespacedName]*v1.Service, namespace, name string) bool {
 	if p.config.ServiceNamespace != v1.NamespaceAll && namespace != p.config.ServiceNamespace {
-		return false, nil
+		return false
 	}
-	svc, err := p.clientSet.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
+	svc := services[types.NamespacedName{Namespace: namespace, Name: name}]
+	if svc == nil {
+		return true
 	}
 	// Claimed labels were dropped before, so the label is stale unless it
 	// belongs to another kube-vip deployment.
 	foreign := svc.Spec.Type == v1.ServiceTypeLoadBalancer && p.lbClassFilter != nil && p.lbClassFilter(svc, p.config)
-	return !foreign, nil
+	return !foreign
 }
 
 // RecoverNodeLabels removes labels that an earlier kube-vip process left on
@@ -161,6 +181,12 @@ func (p *Processor) RecoverNodeLabels(ctx context.Context, nodeLabels node.Label
 	if err != nil {
 		return err
 	}
+	var services map[types.NamespacedName]*v1.Service
+	if p.config.EnableServices {
+		if services, err = p.listServices(ctx); err != nil {
+			return fmt.Errorf("list Services for node label recovery: %w", err)
+		}
+	}
 	prefix := kubevip.ServiceProvided + "/"
 	holders := make(map[string]string)
 	stale := map[string]string{}
@@ -170,7 +196,7 @@ func (p *Processor) RecoverNodeLabels(ctx context.Context, nodeLabels node.Label
 		var err error
 		switch {
 		case p.config.EnableServices && strings.HasPrefix(key, prefix):
-			retain, err = p.serviceLabelRetained(ctx, strings.TrimPrefix(key, prefix), holders)
+			retain, err = p.serviceLabelRetained(ctx, strings.TrimPrefix(key, prefix), services, holders)
 		case p.config.EnableControlPlane && key == kubevip.HasIP:
 			retain, err = p.controlPlaneLabelRetained(ctx, holders)
 		default:
@@ -194,9 +220,11 @@ func (p *Processor) RecoverNodeLabels(ctx context.Context, nodeLabels node.Label
 }
 
 // serviceLabelRetained reports whether the label of the Service named by
-// "<name>.<namespace>" still belongs to this node. Labels of Services outside
-// this instance's scope belong to another kube-vip deployment and are kept.
-func (p *Processor) serviceLabelRetained(ctx context.Context, serviceKey string, holders map[string]string) (bool, error) {
+// "<name>.<namespace>" still belongs to this node, looking the Service up in
+// services. Labels of Services outside this instance's scope belong to another
+// kube-vip deployment and are kept.
+func (p *Processor) serviceLabelRetained(ctx context.Context, serviceKey string, services map[types.NamespacedName]*v1.Service,
+	holders map[string]string) (bool, error) {
 	name, namespace, ok := strings.Cut(serviceKey, ".")
 	if !ok || name == "" || namespace == "" {
 		return true, nil
@@ -204,12 +232,9 @@ func (p *Processor) serviceLabelRetained(ctx context.Context, serviceKey string,
 	if p.config.ServiceNamespace != v1.NamespaceAll && namespace != p.config.ServiceNamespace {
 		return true, nil
 	}
-	svc, err := p.clientSet.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
+	svc := services[types.NamespacedName{Namespace: namespace, Name: name}]
+	if svc == nil {
 		return false, nil
-	}
-	if err != nil {
-		return false, err
 	}
 	classFilter := p.lbClassFilter
 	if classFilter == nil {
